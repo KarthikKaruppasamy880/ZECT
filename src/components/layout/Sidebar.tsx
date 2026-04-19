@@ -11,11 +11,11 @@ const navItems = [
 ];
 
 const stageItems = [
-  { href: "#", label: "Ask Mode", icon: "message-circle" },
-  { href: "#", label: "Plan Mode", icon: "map" },
-  { href: "#", label: "Build Phase", icon: "code" },
-  { href: "#", label: "Review", icon: "search" },
-  { href: "#", label: "Deployment", icon: "rocket" },
+  { href: "/stages/ask", label: "Ask Mode", icon: "message-circle" },
+  { href: "/stages/plan", label: "Plan Mode", icon: "map" },
+  { href: "/stages/build", label: "Build Phase", icon: "code" },
+  { href: "/stages/review", label: "Review", icon: "search" },
+  { href: "/stages/deploy", label: "Deployment", icon: "rocket" },
 ];
 
 function NavIcon({ name }: { name: string }) {
@@ -139,15 +139,23 @@ export default function Sidebar() {
         <div className="text-xs uppercase tracking-wider text-slate-500 font-medium px-3 pt-6 pb-2">
           Workflow Stages
         </div>
-        {stageItems.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-slate-400 cursor-default"
-          >
-            <NavIcon name={item.icon} />
-            {item.label}
-          </div>
-        ))}
+        {stageItems.map((item) => {
+          const isStageActive = pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
+                isStageActive
+                  ? "bg-slate-800 text-white font-medium"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-white"
+              }`}
+            >
+              <NavIcon name={item.icon} />
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
 
       <div className="p-4 border-t border-slate-800">

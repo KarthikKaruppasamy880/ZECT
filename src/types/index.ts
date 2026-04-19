@@ -97,3 +97,54 @@ export interface DocItem {
   description: string;
   lastUpdated: string;
 }
+
+// --- Multi-Repo Orchestration ---
+
+export type RepoRole = "frontend" | "backend" | "shared-lib" | "infra" | "docs" | "ml-pipeline";
+
+export type RepoSyncStatus = "synced" | "ahead" | "behind" | "diverged" | "conflict";
+
+export type DependencyType = "imports" | "api-consumer" | "shared-schema" | "deploy-depends" | "event-subscriber";
+
+export interface Repository {
+  id: string;
+  name: string;
+  fullName: string;
+  role: RepoRole;
+  language: string;
+  branch: string;
+  lastCommit: string;
+  lastCommitMessage: string;
+  lastCommitAuthor: string;
+  syncStatus: RepoSyncStatus;
+  ciStatus: "passing" | "failing" | "pending" | "none";
+  openPRs: number;
+  openIssues: number;
+  coverage: number;
+}
+
+export interface RepoDependency {
+  id: string;
+  sourceRepoId: string;
+  targetRepoId: string;
+  type: DependencyType;
+  description: string;
+  status: "healthy" | "warning" | "broken";
+}
+
+export interface OrchestrationEvent {
+  id: string;
+  timestamp: string;
+  type: "deploy" | "pr-merged" | "ci-fail" | "schema-change" | "breaking-change" | "sync";
+  repoId: string;
+  message: string;
+  impactedRepoIds: string[];
+  severity: "info" | "warning" | "critical";
+}
+
+export interface ProjectOrchestration {
+  projectId: string;
+  repositories: Repository[];
+  dependencies: RepoDependency[];
+  events: OrchestrationEvent[];
+}

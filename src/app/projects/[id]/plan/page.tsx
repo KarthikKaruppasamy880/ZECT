@@ -9,5 +9,13 @@ export default function PlanModePage() {
   const projectId = params.id as string;
   const stageData = getProjectStageData(projectId);
 
+  if (!stageData) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-slate-500">No stage data available for this project yet.</p>
+      </div>
+    );
+  }
+
   return <PlanModeView sections={stageData.planSections} />;
 }

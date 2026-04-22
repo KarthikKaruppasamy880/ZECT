@@ -292,6 +292,13 @@ const projectStageDataMap: Record<string, ProjectStageData> = {
   "proj-006": docIntelligenceStages,
 };
 
-export function getProjectStageData(projectId: string): ProjectStageData {
-  return projectStageDataMap[projectId] ?? policyAdminStages;
+export function getProjectStageData(projectId: string): ProjectStageData | undefined {
+  const data = projectStageDataMap[projectId];
+  if (!data) {
+    console.warn(
+      `[ZECT] No stage data found for project "${projectId}". ` +
+      `Add an entry to projectStageDataMap in project-stages.ts.`
+    );
+  }
+  return data;
 }

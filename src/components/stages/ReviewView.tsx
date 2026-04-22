@@ -75,6 +75,11 @@ export default function ReviewView({ findings }: ReviewViewProps) {
         <h3 className="text-lg font-semibold text-slate-900 mb-4">
           All Findings
         </h3>
+        {findings.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-slate-400 text-sm">No review findings yet. Code review has not started for this project.</div>
+          </div>
+        ) : (
         <div className="space-y-3">
           {findings.map((finding) => (
             <div
@@ -103,6 +108,7 @@ export default function ReviewView({ findings }: ReviewViewProps) {
             </div>
           ))}
         </div>
+        )}
       </Card>
     </div>
   );

@@ -1,8 +1,13 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import AskModeView from "@/components/stages/AskModeView";
-import { sampleRequirements } from "@/data/stage-details";
+import { getProjectStageData } from "@/data/project-stages";
 
 export default function AskModePage() {
-  return <AskModeView requirements={sampleRequirements} />;
+  const params = useParams();
+  const projectId = params.id as string;
+  const stageData = getProjectStageData(projectId);
+
+  return <AskModeView requirements={stageData.requirements} />;
 }

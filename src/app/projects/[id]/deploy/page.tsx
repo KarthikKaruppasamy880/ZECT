@@ -1,8 +1,13 @@
 "use client";
 
+import { useParams } from "next/navigation";
 import DeployReadinessView from "@/components/stages/DeployReadinessView";
-import { sampleDeployChecklist } from "@/data/stage-details";
+import { getProjectStageData } from "@/data/project-stages";
 
 export default function DeployReadinessPage() {
-  return <DeployReadinessView checklist={sampleDeployChecklist} />;
+  const params = useParams();
+  const projectId = params.id as string;
+  const stageData = getProjectStageData(projectId);
+
+  return <DeployReadinessView checklist={stageData.deployChecklist} />;
 }

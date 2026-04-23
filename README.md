@@ -1,179 +1,184 @@
 # ZECT — Engineering Delivery Control Tower
 
-An internal AI-governed engineering productivity platform for Zinnia that standardizes how teams plan, code, review, and deploy software. Built using the [Zinnia Engineering Foundation (ZEF)](https://github.com/KarthikKaruppasamy880/ZEF) as the standards backbone.
+A fullstack AI-governed engineering productivity platform for Zinnia that provides real GitHub integration, PR diff viewing, CI status monitoring, and multi-repo orchestration. Built using the [Zinnia Engineering Foundation (ZEF)](https://github.com/KarthikKaruppasamy880/ZEF) as the standards backbone.
 
 ## Overview
 
-ZECT provides a structured 5-stage delivery pipeline with multi-repo orchestration, analytics, and platform-wide configuration:
-
-| Stage | Purpose |
-|-------|---------|
-| **Ask Mode** | Gather business goals, users, constraints, and dependencies |
-| **Plan Mode** | Define architecture, APIs, database schema, and deployment strategy |
-| **Build Phase** | Track frontend, backend, and integration development progress |
-| **Review** | Automated code analysis with severity-classified findings |
-| **Deployment Readiness** | Pre-production checklist for infrastructure, security, monitoring |
+ZECT connects to the GitHub API to show real repository data, pull request diffs, commit history, and CI/CD status — providing engineering teams with a unified control tower for delivery management.
 
 ### Key Features
 
-- **Multi-Repo Orchestration** — 12 repositories across 3 projects with dependency health maps, CI status, sync tracking, and cross-repo event timelines
-- **Project-Specific Stage Data** — Each of the 6 seeded projects has unique requirements, plans, tasks, review findings, and deploy checklists
-- **Analytics Dashboard** — Stage distribution, weekly activity charts, team performance, repository health overview
-- **Platform Settings** — Feature toggles, configuration options, integration status, team roles and permissions
-- **Workflow Stage Guides** — Detailed explanation pages for each stage with gate criteria and example outputs
+- **Real GitHub Integration** — Live repository data, pull requests with file-by-file diffs, commit history, and CI/CD workflow status
+- **PR Diff Viewer** — View code changes with unified diff display, line numbers, additions/deletions, and file-level summaries
+- **Multi-Repo Orchestration** — Monitor all repositories across projects with real-time GitHub data
+- **Project Management** — CRUD projects linked to GitHub repositories with 5-stage delivery pipeline tracking
+- **Analytics Dashboard** — Project metrics, stage distribution charts, team performance, and token savings
+- **Platform Settings** — Feature toggles and configuration options with persistent storage
+- **Workflow Stage Guides** — Detailed explanation pages for each delivery stage (Ask, Plan, Build, Review, Deploy)
 
 ## Tech Stack
 
-- **Framework:** Next.js 16 (App Router with Turbopack)
-- **Language:** TypeScript (strict mode)
-- **Styling:** Tailwind CSS v4
-- **Data:** Mock TypeScript data modules (prototype phase — no backend required)
-- **Build:** 0 lint errors, 0 type errors, 0 build warnings
+| Layer | Technology |
+|-------|-----------|
+| **Backend** | FastAPI (Python) + SQLAlchemy + SQLite |
+| **Frontend** | React 18 + TypeScript + Vite + Tailwind CSS |
+| **GitHub API** | PyGithub — repos, PRs, diffs, commits, CI workflows |
+| **Charts** | Recharts |
+| **Icons** | Lucide React |
 
 ## Getting Started
 
+### Prerequisites
+
+- Python 3.12+ with Poetry
+- Node.js 18+ with npm
+- GitHub personal access token (optional — enables private repo access and higher rate limits)
+
+### Backend Setup
+
 ```bash
-# Clone the repository
-git clone https://github.com/KarthikKaruppasamy880/ZECT.git
-cd ZECT
+cd backend
+
+# Install dependencies
+poetry install
+
+# Configure environment
+cp .env.example .env
+# Edit .env to add your GITHUB_TOKEN (optional)
+
+# Start development server
+poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend runs at http://localhost:8000. API docs at http://localhost:8000/docs.
+
+### Frontend Setup
+
+```bash
+cd frontend
 
 # Install dependencies
 npm install
+
+# Configure environment
+cp .env.example .env
+# Set VITE_API_URL=http://localhost:8000
 
 # Start development server
 npm run dev
 
 # Quality checks
-npm run lint          # ESLint
-npx tsc --noEmit      # TypeScript type check
-npm run build         # Production build
+npm run lint          # ESLint — 0 errors
+npx tsc --noEmit      # TypeScript — 0 errors
+npm run build         # Production build — success
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to view the dashboard.
+Frontend runs at http://localhost:5173.
 
 ## Project Structure
 
 ```
-src/
-├── app/                           # Next.js App Router pages
-│   ├── page.tsx                   # Dashboard
-│   ├── analytics/page.tsx         # Analytics & Reporting
-│   ├── settings/page.tsx          # Platform Settings
-│   ├── orchestration/page.tsx     # Global Multi-Repo Orchestration
-│   ├── docs/page.tsx              # Docs Center
-│   ├── stages/                    # Workflow stage guide pages
-│   │   ├── ask/page.tsx           # Ask Mode guide
-│   │   ├── plan/page.tsx          # Plan Mode guide
-│   │   ├── build/page.tsx         # Build Phase guide
-│   │   ├── review/page.tsx        # Review guide
-│   │   └── deploy/page.tsx        # Deployment guide
-│   └── projects/
-│       ├── page.tsx               # Projects list with search
-│       ├── new/page.tsx           # Create project wizard
-│       └── [id]/
-│           ├── layout.tsx         # Project detail layout with stage tracker
-│           ├── page.tsx           # Auto-redirect to current stage
-│           ├── ask/page.tsx       # Project-specific Ask Mode
-│           ├── plan/page.tsx      # Project-specific Plan Mode
-│           ├── build/page.tsx     # Project-specific Build Phase
-│           ├── review/page.tsx    # Project-specific Review
-│           ├── deploy/page.tsx    # Project-specific Deployment
-│           └── orchestration/     # Project-level repo orchestration
-├── components/
-│   ├── layout/                    # Sidebar, Header
-│   ├── dashboard/                 # MetricCard, ProjectCard, RecentActivity
-│   ├── orchestration/             # RepoCard, DependencyMap, Timeline, Summary
-│   ├── projects/                  # StageTracker
-│   ├── stages/                    # AskModeView, PlanModeView, BuildPhaseView, ReviewView, DeployReadinessView
-│   └── shared/                    # Card, StatusPill, ProgressBar, SeverityBadge
-├── data/
-│   ├── projects.ts                # 6 seeded projects with metrics
-│   ├── project-stages.ts          # Project-specific stage data for all 6 projects
-│   ├── orchestration.ts           # 12 repos, 14 dependencies, 17 events across 3 projects
-│   ├── dashboard.ts               # Dashboard metrics and activity
-│   └── stage-details.ts           # Sample stage data (shared/fallback)
-├── lib/utils.ts                   # Utility functions
-└── types/index.ts                 # TypeScript interfaces
+ZECT/
+├── backend/                       # FastAPI backend
+│   ├── app/
+│   │   ├── main.py                # FastAPI app, CORS, startup seed
+│   │   ├── database.py            # SQLAlchemy + SQLite setup
+│   │   ├── models.py              # Project, Repo, Setting models
+│   │   ├── schemas.py             # Pydantic request/response schemas
+│   │   ├── github_service.py      # GitHub API integration (PyGithub)
+│   │   └── routers/
+│   │       ├── projects.py        # Project CRUD endpoints
+│   │       ├── github.py          # GitHub API proxy endpoints
+│   │       ├── settings.py        # Settings CRUD with defaults
+│   │       └── analytics.py       # Analytics overview endpoint
+│   ├── pyproject.toml             # Poetry dependencies
+│   └── .env.example               # Environment template
+├── frontend/                      # React + Vite frontend
+│   ├── src/
+│   │   ├── App.tsx                # Router with 10 routes
+│   │   ├── lib/api.ts             # API client (typed fetch wrapper)
+│   │   ├── types/index.ts         # TypeScript interfaces
+│   │   ├── components/
+│   │   │   ├── Layout.tsx         # Sidebar + content layout
+│   │   │   ├── Sidebar.tsx        # Dark sidebar navigation
+│   │   │   └── DiffViewer.tsx     # PR diff viewer with line numbers
+│   │   └── pages/
+│   │       ├── Dashboard.tsx      # Metrics, project cards, stage chart
+│   │       ├── Projects.tsx       # Filterable project list
+│   │       ├── ProjectDetail.tsx  # Project detail with PRs, commits, CI
+│   │       ├── PRViewer.tsx       # PR diff viewer (file-by-file)
+│   │       ├── CreateProject.tsx  # Create project with repo linking
+│   │       ├── Analytics.tsx      # Charts and project breakdown
+│   │       ├── Settings.tsx       # Toggle and select settings
+│   │       ├── Orchestration.tsx  # Multi-repo orchestration view
+│   │       ├── Docs.tsx           # Documentation hub
+│   │       └── StagePage.tsx      # Workflow stage guide
+│   ├── package.json
+│   └── .env.example               # Frontend env template
+├── docs/                          # Additional documentation
+└── README.md
 ```
 
-## Pages (19 routes)
+## API Endpoints
+
+### Projects
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/projects` | List all projects (optional `?status=` filter) |
+| POST | `/api/projects` | Create project with optional repo links |
+| GET | `/api/projects/{id}` | Get project with linked repos |
+| PUT | `/api/projects/{id}` | Update project fields |
+| DELETE | `/api/projects/{id}` | Delete project and repos |
+
+### GitHub Integration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/github/repos/{owner}` | List repositories for owner/org |
+| GET | `/api/github/repos/{owner}/{repo}` | Get repository details |
+| GET | `/api/github/repos/{owner}/{repo}/pulls` | List pull requests |
+| GET | `/api/github/repos/{owner}/{repo}/pulls/{number}` | Get PR details |
+| GET | `/api/github/repos/{owner}/{repo}/pulls/{number}/files` | Get PR file diffs |
+| GET | `/api/github/repos/{owner}/{repo}/commits` | List recent commits |
+| GET | `/api/github/repos/{owner}/{repo}/actions/runs` | List CI/CD workflow runs |
+
+### Settings & Analytics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/settings` | List all settings (auto-seeds defaults) |
+| PUT | `/api/settings/{key}` | Update setting value |
+| GET | `/api/analytics/overview` | Aggregated project analytics |
+
+## Pages
 
 | Page | Route | Description |
 |------|-------|-------------|
-| Dashboard | `/` | Executive overview with metrics, project cards, activity feed |
-| Projects | `/projects` | Filterable project list with search |
-| Create Project | `/projects/new` | 3-step wizard to create a new project |
-| Ask Mode | `/projects/[id]/ask` | Project-specific requirements summary |
-| Plan Mode | `/projects/[id]/plan` | Project-specific architecture and API plan |
-| Build Phase | `/projects/[id]/build` | Project-specific task tracking with progress |
-| Review | `/projects/[id]/review` | Project-specific code analysis findings |
-| Deployment | `/projects/[id]/deploy` | Project-specific readiness checklist |
-| Project Orchestration | `/projects/[id]/orchestration` | Project-level multi-repo view |
-| Global Orchestration | `/orchestration` | Cross-project repo health and events |
-| Analytics | `/analytics` | Stage distribution, team performance, charts |
-| Settings | `/settings` | Feature toggles, integrations, team roles |
-| Docs Center | `/docs` | Searchable documentation hub |
-| Ask Mode Guide | `/stages/ask` | Workflow stage explanation and gate criteria |
-| Plan Mode Guide | `/stages/plan` | Workflow stage explanation and gate criteria |
-| Build Phase Guide | `/stages/build` | Workflow stage explanation and gate criteria |
-| Review Guide | `/stages/review` | Workflow stage explanation and gate criteria |
-| Deployment Guide | `/stages/deploy` | Workflow stage explanation and gate criteria |
-
-## Design
-
-- **Sidebar:** Dark (slate-900) with navigation, workflow stages, and branding
-- **Content area:** Light (slate-50) with rounded white cards
-- **Enterprise-grade:** Premium internal product feel, suitable for leadership demos
-- **Responsive:** Optimized for desktop and tablet viewports
-- **UI elements:** Status pills, progress bars, severity badges, stage trackers, dependency maps
-
-## Prototype Scope
-
-This is a **frontend prototype** with comprehensive mock data. No backend, no authentication, no real AI calls.
-
-### Seeded Mock Projects (6)
-
-| Project | Current Stage | Team | Completion |
-|---------|--------------|------|------------|
-| Policy Admin Modernization | Build | Platform Engineering | 55% |
-| Claims Processing API | Review | Claims Engineering | 78% |
-| Agent Portal Redesign | Plan | Product Engineering | 28% |
-| Underwriting Rules Engine | Deploy | Underwriting Tech | 92% |
-| Customer Notifications Service | Complete | Platform Engineering | 100% |
-| Document Intelligence Pipeline | Ask | AI/ML Engineering | 8% |
-
-### Multi-Repo Orchestration (12 repos, 3 projects)
-
-| Project | Repos | Dependencies | Events |
-|---------|-------|-------------|--------|
-| Policy Admin Modernization | 4 (web, API, shared-types, infra) | 4 | 3 |
-| Claims Processing API | 5 (intake, adjudication, shared-models, event-bus, portal) | 6 | 5 |
-| Agent Portal Redesign | 3 (web, BFF, design-system) | 2 | 2 |
+| Dashboard | `/` | Executive overview with metrics, project cards, stage chart |
+| Projects | `/projects` | Filterable project list with status badges |
+| Create Project | `/projects/new` | Create project with GitHub repo linking |
+| Project Detail | `/projects/:id` | PRs, commits, CI status for linked repos |
+| PR Diff Viewer | `/projects/:id/pr/:owner/:repo/:number` | File-by-file diff with line numbers |
+| Analytics | `/analytics` | Bar/pie charts, team performance, project table |
+| Settings | `/settings` | Feature toggles and configuration options |
+| Orchestration | `/orchestration` | Multi-repo dashboard with GitHub data |
+| Docs Center | `/docs` | Engineering documentation links |
+| Stage Guide | `/stages/:stage` | Workflow stage details, activities, gates |
 
 ## Quality
 
 ```
-Lint:       0 errors, 0 warnings
-TypeCheck:  0 errors
-Build:      Compiled successfully (Turbopack)
-Routes:     19 total (12 static, 7 dynamic)
+Frontend Lint:      0 errors
+Frontend TypeCheck: 0 errors
+Frontend Build:     Compiled successfully (2125 modules)
+Backend:            All endpoints tested and passing
 ```
-
-## Recommended Next Phase
-
-1. Add state persistence (localStorage or backend API)
-2. Build FastAPI backend with PostgreSQL
-3. Integrate real AI analysis via LLM providers
-4. Add authentication and role-based access control
-5. Implement real deployment readiness checks
-6. Add CI/CD pipeline configuration
-7. Connect to real GitHub/GitLab APIs for repo orchestration
-8. Add real-time WebSocket updates for stage transitions
 
 ## ZEF Integration
 
 This project uses [ZEF (Zinnia Engineering Foundation)](https://github.com/KarthikKaruppasamy880/ZEF) for:
-- Workflow standards (5-phase model)
+- Workflow standards (5-phase delivery model)
 - Playbook-driven development patterns
 - Context management across AI sessions
 - Prompt templates for repo analysis and enhancement

@@ -11,12 +11,18 @@ import {
   Hammer,
   Search,
   Rocket,
+  Microscope,
+  Sparkles,
+  BookOpen,
 } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
+  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
+  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
+  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/docs", label: "Docs Center", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },

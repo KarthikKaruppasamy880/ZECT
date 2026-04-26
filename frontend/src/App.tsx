@@ -10,6 +10,9 @@ import Settings from "@/pages/Settings";
 import Orchestration from "@/pages/Orchestration";
 import Docs from "@/pages/Docs";
 import StagePage from "@/pages/StagePage";
+import RepoAnalysis from "@/pages/RepoAnalysis";
+import BlueprintGenerator from "@/pages/BlueprintGenerator";
+import DocGenerator from "@/pages/DocGenerator";
 
 export default function App() {
   return (
@@ -24,6 +27,9 @@ export default function App() {
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/orchestration" element={<Orchestration />} />
+          <Route path="/repo-analysis" element={<RepoAnalysis />} />
+          <Route path="/blueprint" element={<BlueprintGenerator />} />
+          <Route path="/doc-generator" element={<DocGenerator />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>

@@ -22,6 +22,11 @@ import type {
   GitHubPRFile,
   GitHubCommit,
   GitHubWorkflowRun,
+  RepoAnalysisResult,
+  BlueprintResult,
+  TokenUsage,
+  ApiKeyStatus,
+  DocGenResult,
 } from "@/types";
 
 // Projects
@@ -58,3 +63,22 @@ export const getGitHubCommits = (owner: string, repo: string) =>
   request<GitHubCommit[]>(`/api/github/repos/${owner}/${repo}/commits`);
 export const getGitHubWorkflowRuns = (owner: string, repo: string) =>
   request<GitHubWorkflowRun[]>(`/api/github/repos/${owner}/${repo}/actions/runs`);
+
+// Repo Analysis
+export const analyzeRepo = (owner: string, repo: string) =>
+  request<RepoAnalysisResult>("/api/analysis/repo", { method: "POST", body: JSON.stringify({ owner, repo }) });
+export const analyzeMultiRepo = (repos: { owner: string; repo: string }[]) =>
+  request<RepoAnalysisResult[]>("/api/analysis/multi-repo", { method: "POST", body: JSON.stringify({ repos }) });
+export const generateBlueprint = (repos: { owner: string; repo: string }[]) =>
+  request<BlueprintResult>("/api/analysis/blueprint", { method: "POST", body: JSON.stringify({ repos }) });
+export const getTokenUsage = () => request<TokenUsage>("/api/analysis/tokens");
+export const configureApiKey = (github_token: string) =>
+  request<ApiKeyStatus>("/api/analysis/api-key", { method: "POST", body: JSON.stringify({ github_token }) });
+export const getApiKeyStatus = () => request<ApiKeyStatus>("/api/analysis/api-key/status");
+
+// Documentation Generation
+export const generateDocs = (owner: string, repo: string, sections?: string[]) =>
+  request<DocGenResult>("/api/analysis/docs/generate", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, ...(sections ? { sections } : {}) }),
+  });

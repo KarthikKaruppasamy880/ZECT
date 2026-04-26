@@ -11,9 +11,13 @@ ZECT connects to the GitHub API to show real repository data, pull request diffs
 - **Real GitHub Integration** — Live repository data, pull requests with file-by-file diffs, commit history, and CI/CD workflow status
 - **PR Diff Viewer** — View code changes with unified diff display, line numbers, additions/deletions, and file-level summaries
 - **Multi-Repo Orchestration** — Monitor all repositories across projects with real-time GitHub data
+- **Repo Analysis** — Analyze any GitHub repo's structure, dependencies, and architecture
+- **Blueprint Generation** — Synthesize a repo into a single AI-ready prompt for vibe-coding with any AI tool
+- **Granular Documentation Generation** — Generate 6 section types (overview, architecture, API, setup, testing, deployment)
+- **API Key Configuration** — Runtime GitHub token management with rate limit tracking and token usage counter
 - **Project Management** — CRUD projects linked to GitHub repositories with 5-stage delivery pipeline tracking
 - **Analytics Dashboard** — Project metrics, stage distribution charts, team performance, and token savings
-- **Platform Settings** — Feature toggles and configuration options with persistent storage
+- **Platform Settings** — Feature toggles, API key config modal, and token counter
 - **Workflow Stage Guides** — Detailed explanation pages for each delivery stage (Ask, Plan, Build, Review, Deploy)
 
 ## Tech Stack
@@ -90,12 +94,13 @@ ZECT/
 │   │       ├── projects.py        # Project CRUD endpoints
 │   │       ├── github.py          # GitHub API proxy endpoints
 │   │       ├── settings.py        # Settings CRUD with defaults
-│   │       └── analytics.py       # Analytics overview endpoint
+│   │       ├── analytics.py       # Analytics overview endpoint
+│   │       └── repo_analysis.py   # Repo analysis, blueprints, docs, API key
 │   ├── pyproject.toml             # Poetry dependencies
 │   └── .env.example               # Environment template
 ├── frontend/                      # React + Vite frontend
 │   ├── src/
-│   │   ├── App.tsx                # Router with 10 routes
+│   │   ├── App.tsx                # Router with 14 routes
 │   │   ├── lib/api.ts             # API client (typed fetch wrapper)
 │   │   ├── types/index.ts         # TypeScript interfaces
 │   │   ├── components/
@@ -112,10 +117,19 @@ ZECT/
 │   │       ├── Settings.tsx       # Toggle and select settings
 │   │       ├── Orchestration.tsx  # Multi-repo orchestration view
 │   │       ├── Docs.tsx           # Documentation hub
-│   │       └── StagePage.tsx      # Workflow stage guide
+│   │       ├── StagePage.tsx      # Workflow stage guide
+│   │       ├── RepoAnalysis.tsx   # Single + multi-repo analysis
+│   │       ├── BlueprintGenerator.tsx # AI prompt generation
+│   │       └── DocGenerator.tsx   # Granular documentation generation
 │   ├── package.json
 │   └── .env.example               # Frontend env template
-├── docs/                          # Additional documentation
+├── docs/
+│   ├── USER_MANUAL.md             # Complete user guide (12 sections)
+│   ├── REPO_ANALYSIS_GUIDE.md     # Single repo analysis guide
+│   ├── MULTI_REPO_ANALYSIS_GUIDE.md # Multi-repo analysis guide
+│   ├── BLUEPRINT_GENERATION_GUIDE.md # AI prompt generation guide
+│   ├── ASK_PLAN_DEVELOPMENT_WORKFLOW.md # 5-stage workflow guide
+│   └── ARCHITECTURE_USAGE_GUIDE.md # Technical architecture guide
 └── README.md
 ```
 
@@ -143,6 +157,18 @@ ZECT/
 | GET | `/api/github/repos/{owner}/{repo}/commits` | List recent commits |
 | GET | `/api/github/repos/{owner}/{repo}/actions/runs` | List CI/CD workflow runs |
 
+### Repo Analysis & Blueprint Generation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/analysis/repo` | Analyze single repo (structure, deps, architecture) |
+| POST | `/api/analysis/multi-repo` | Analyze multiple repos at once |
+| POST | `/api/analysis/blueprint` | Generate AI-ready vibe-coding prompt |
+| POST | `/api/analysis/docs/generate` | Generate granular documentation (6 section types) |
+| GET | `/api/analysis/tokens` | Get token usage log |
+| POST | `/api/analysis/api-key` | Configure GitHub API key at runtime |
+| GET | `/api/analysis/api-key/status` | Check API key status and rate limits |
+
 ### Settings & Analytics
 
 | Method | Endpoint | Description |
@@ -161,8 +187,11 @@ ZECT/
 | Project Detail | `/projects/:id` | PRs, commits, CI status for linked repos |
 | PR Diff Viewer | `/projects/:id/pr/:owner/:repo/:number` | File-by-file diff with line numbers |
 | Analytics | `/analytics` | Bar/pie charts, team performance, project table |
-| Settings | `/settings` | Feature toggles and configuration options |
+| Settings | `/settings` | Feature toggles, API key config modal, token counter |
 | Orchestration | `/orchestration` | Multi-repo dashboard with GitHub data |
+| Repo Analysis | `/repo-analysis` | Single + multi-repo GitHub analysis |
+| Blueprint Generator | `/blueprint` | AI-ready prompt generation from repo |
+| Doc Generator | `/doc-generator` | Granular documentation generation (6 sections) |
 | Docs Center | `/docs` | Engineering documentation links |
 | Stage Guide | `/stages/:stage` | Workflow stage details, activities, gates |
 
@@ -174,6 +203,17 @@ Frontend TypeCheck: 0 errors
 Frontend Build:     Compiled successfully (2125 modules)
 Backend:            All endpoints tested and passing
 ```
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [User Manual](docs/USER_MANUAL.md) | Complete 12-section user guide covering all features |
+| [Repo Analysis Guide](docs/REPO_ANALYSIS_GUIDE.md) | Step-by-step guide for single repo analysis |
+| [Multi-Repo Analysis Guide](docs/MULTI_REPO_ANALYSIS_GUIDE.md) | Guide for analyzing multiple repos together |
+| [Blueprint Generation Guide](docs/BLUEPRINT_GENERATION_GUIDE.md) | How to generate AI-ready vibe-coding prompts |
+| [Ask/Plan/Development Workflow](docs/ASK_PLAN_DEVELOPMENT_WORKFLOW.md) | 5-stage engineering delivery workflow |
+| [Architecture & Usage Guide](docs/ARCHITECTURE_USAGE_GUIDE.md) | Technical architecture and usage patterns |
 
 ## ZEF Integration
 

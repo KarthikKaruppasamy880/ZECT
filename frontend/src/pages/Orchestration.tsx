@@ -34,8 +34,7 @@ export default function Orchestration() {
         }
       }
       setRepoInfos(infos);
-      setLoading(false);
-    });
+    }).finally(() => setLoading(false));
   }, []);
 
   const allRepos = projects.flatMap((p) =>

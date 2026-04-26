@@ -133,7 +133,7 @@ def _analyze_repo(owner: str, repo: str) -> RepoAnalysisResult:
             try:
                 fc = r.get_contents(fname)
                 if not isinstance(fc, list):
-                    raw = fc.decoded_content.decode("utf-8", errors="replace")[:4000]
+                    raw = fc.decoded_content.decode("utf-8", errors="replace")
                     if mgr == "npm":
                         try:
                             pkg = json.loads(raw)
@@ -142,7 +142,7 @@ def _analyze_repo(owner: str, repo: str) -> RepoAnalysisResult:
                         except json.JSONDecodeError:
                             deps[mgr] = [f"(parse error in {fname})"]
                     else:
-                        lines = [l.strip() for l in raw.split("\n") if l.strip() and not l.startswith("#")]
+                        lines = [l.strip() for l in raw[:4000].split("\n") if l.strip() and not l.strip().startswith("#")]
                         deps[mgr] = lines[:50]
             except GithubException:
                 pass

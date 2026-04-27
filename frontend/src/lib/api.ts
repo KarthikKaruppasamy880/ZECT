@@ -91,3 +91,5 @@ export const login = (username: string, password: string) =>
   });
 export const verifyToken = (token: string) =>
   request<{ valid: boolean; username: string }>(`/api/auth/verify?token=${token}`);
+export const logout = (token: string) =>
+  request<{ status: string }>(`/api/auth/logout?token=${token}`, { method: "POST" });

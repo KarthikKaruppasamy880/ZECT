@@ -15,7 +15,7 @@ import RepoAnalysis from "@/pages/RepoAnalysis";
 import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
 import Login from "@/pages/Login";
-import { verifyToken } from "@/lib/api";
+import { verifyToken, logout as apiLogout } from "@/lib/api";
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -42,6 +42,10 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const token = localStorage.getItem("zect_token");
+    if (token) {
+      apiLogout(token).catch(() => {});
+    }
     localStorage.removeItem("zect_token");
     setAuthenticated(false);
   };

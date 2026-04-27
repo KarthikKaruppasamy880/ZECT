@@ -10,8 +10,16 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # In-memory session tokens
 _active_tokens: set[str] = set()
 
-VALID_USERNAME = os.getenv("ZECT_USERNAME", "karthik.karuppasamy@Zinnia.com")
-VALID_PASSWORD = os.getenv("ZECT_PASSWORD", "Karthik@1234")
+VALID_USERNAME = os.getenv("ZECT_USERNAME", "")
+VALID_PASSWORD = os.getenv("ZECT_PASSWORD", "")
+
+if not VALID_USERNAME or not VALID_PASSWORD:
+    import warnings
+    warnings.warn(
+        "ZECT_USERNAME and ZECT_PASSWORD environment variables are not set. "
+        "Login will be disabled until they are configured.",
+        stacklevel=2,
+    )
 
 
 class LoginRequest(BaseModel):
@@ -26,6 +34,8 @@ class LoginResponse(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 def login(req: LoginRequest):
+    if not VALID_USERNAME or not VALID_PASSWORD:
+        raise HTTPException(status_code=503, detail="Authentication not configured. Set ZECT_USERNAME and ZECT_PASSWORD environment variables.")
     if req.username == VALID_USERNAME and req.password == VALID_PASSWORD:
         token = secrets.token_urlsafe(32)
         _active_tokens.add(token)

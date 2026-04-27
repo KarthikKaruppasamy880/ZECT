@@ -11,12 +11,19 @@ import {
   Hammer,
   Search,
   Rocket,
+  Microscope,
+  Sparkles,
+  BookOpen,
+  LogOut,
 } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
+  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
+  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
+  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/docs", label: "Docs Center", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -30,7 +37,11 @@ const stageItems = [
   { href: "/stages/deploy", label: "Deployment", icon: Rocket },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onLogout?: () => void;
+}
+
+export default function Sidebar({ onLogout }: SidebarProps) {
   const location = useLocation();
 
   return (
@@ -99,6 +110,15 @@ export default function Sidebar() {
       <div className="border-t border-slate-700 px-4 py-3">
         <p className="text-xs text-slate-500">Zinnia Eng</p>
         <p className="text-xs text-slate-600">Internal Platform</p>
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="mt-2 flex items-center gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
+          >
+            <LogOut className="h-3 w-3" />
+            Sign Out
+          </button>
+        )}
       </div>
     </aside>
   );

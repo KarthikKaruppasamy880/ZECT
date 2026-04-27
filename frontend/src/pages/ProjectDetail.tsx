@@ -51,7 +51,7 @@ export default function ProjectDetail() {
         setProject(p);
         if (p.repos.length > 0) {
           const r = p.repos[0];
-          Promise.all([
+          return Promise.all([
             getGitHubPulls(r.owner, r.repo_name).catch(() => []),
             getGitHubCommits(r.owner, r.repo_name).catch(() => []),
             getGitHubWorkflowRuns(r.owner, r.repo_name).catch(() => []),

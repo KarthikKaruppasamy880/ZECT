@@ -109,6 +109,57 @@ export interface AnalyticsOverview {
   stage_distribution: Record<string, number>;
 }
 
+export interface RepoAnalysisResult {
+  owner: string;
+  repo: string;
+  full_name: string;
+  description: string | null;
+  language: string | null;
+  default_branch: string;
+  stars: number;
+  forks: number;
+  open_issues: number;
+  tree: string[];
+  readme_content: string | null;
+  dependencies: Record<string, string[]>;
+  architecture_notes: string[];
+}
+
+export interface BlueprintResult {
+  prompt: string;
+  token_estimate: number;
+  repos_analyzed: number;
+}
+
+export interface TokenLogEntry {
+  action: string;
+  tokens: number;
+  ts: number;
+}
+
+export interface TokenUsage {
+  total_tokens: number;
+  log: TokenLogEntry[];
+}
+
+export interface ApiKeyStatus {
+  configured: boolean;
+  scopes: string[];
+  rate_limit_remaining: number;
+  rate_limit_total: number;
+}
+
+export interface DocSection {
+  title: string;
+  content: string;
+}
+
+export interface DocGenResult {
+  repo_name: string;
+  sections: DocSection[];
+  total_tokens: number;
+}
+
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";
 
 export const STAGES: { key: Stage; label: string }[] = [

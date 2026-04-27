@@ -36,7 +36,9 @@ class LoginResponse(BaseModel):
 def login(req: LoginRequest):
     if not VALID_USERNAME or not VALID_PASSWORD:
         raise HTTPException(status_code=503, detail="Authentication not configured. Set ZECT_USERNAME and ZECT_PASSWORD environment variables.")
-    if req.username == VALID_USERNAME and req.password == VALID_PASSWORD:
+    username_ok = secrets.compare_digest(req.username, VALID_USERNAME)
+    password_ok = secrets.compare_digest(req.password, VALID_PASSWORD)
+    if username_ok and password_ok:
         token = secrets.token_urlsafe(32)
         _active_tokens.add(token)
         return LoginResponse(token=token, username=req.username)

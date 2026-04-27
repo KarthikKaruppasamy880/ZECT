@@ -303,7 +303,7 @@ def configure_api_key(config: ApiKeyConfig):
         os.environ["GITHUB_TOKEN"] = config.github_token
         return ApiKeyStatus(
             configured=True,
-            scopes=["repo", "read:org"],
+            scopes=list(gh.oauth_scopes or []),
             rate_limit_remaining=rate.remaining,
             rate_limit_total=rate.limit,
         )
@@ -464,7 +464,7 @@ def get_api_key_status():
         token = os.getenv("GITHUB_TOKEN", "")
         return ApiKeyStatus(
             configured=bool(token),
-            scopes=["repo", "read:org"] if token else [],
+            scopes=list(gh.oauth_scopes or []) if token else [],
             rate_limit_remaining=rate.remaining,
             rate_limit_total=rate.limit,
         )

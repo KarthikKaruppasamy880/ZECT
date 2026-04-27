@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
 import Dashboard from "@/pages/Dashboard";
@@ -13,12 +14,54 @@ import StagePage from "@/pages/StagePage";
 import RepoAnalysis from "@/pages/RepoAnalysis";
 import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
+import Login from "@/pages/Login";
+import { verifyToken } from "@/lib/api";
 
 export default function App() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem("zect_token");
+    if (token) {
+      verifyToken(token)
+        .then(() => setAuthenticated(true))
+        .catch(() => {
+          localStorage.removeItem("zect_token");
+          setAuthenticated(false);
+        })
+        .finally(() => setChecking(false));
+    } else {
+      setChecking(false);
+    }
+  }, []);
+
+  const handleLogin = (token: string, _username: string) => {
+    localStorage.setItem("zect_token", token);
+    setAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("zect_token");
+    setAuthenticated(false);
+  };
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="text-white text-lg">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<Layout />}>
+        <Route element={<Layout onLogout={handleLogout} />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/new" element={<CreateProject />} />

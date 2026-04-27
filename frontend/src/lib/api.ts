@@ -82,3 +82,12 @@ export const generateDocs = (owner: string, repo: string, sections?: string[]) =
     method: "POST",
     body: JSON.stringify({ owner, repo, ...(sections ? { sections } : {}) }),
   });
+
+// Auth
+export const login = (username: string, password: string) =>
+  request<{ token: string; username: string }>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+export const verifyToken = (token: string) =>
+  request<{ valid: boolean; username: string }>(`/api/auth/verify?token=${token}`);

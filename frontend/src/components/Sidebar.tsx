@@ -14,6 +14,7 @@ import {
   Microscope,
   Sparkles,
   BookOpen,
+  LogOut,
 } from "lucide-react";
 
 const navItems = [
@@ -36,7 +37,11 @@ const stageItems = [
   { href: "/stages/deploy", label: "Deployment", icon: Rocket },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onLogout?: () => void;
+}
+
+export default function Sidebar({ onLogout }: SidebarProps) {
   const location = useLocation();
 
   return (
@@ -105,6 +110,15 @@ export default function Sidebar() {
       <div className="border-t border-slate-700 px-4 py-3">
         <p className="text-xs text-slate-500">Zinnia Eng</p>
         <p className="text-xs text-slate-600">Internal Platform</p>
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            className="mt-2 flex items-center gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
+          >
+            <LogOut className="h-3 w-3" />
+            Sign Out
+          </button>
+        )}
       </div>
     </aside>
   );

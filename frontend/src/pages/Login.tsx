@@ -2,7 +2,7 @@ import { useState } from "react";
 import { login } from "@/lib/api";
 
 interface LoginProps {
-  onLogin: (token: string, username: string) => void;
+  onLogin: (token: string) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
@@ -17,7 +17,7 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     try {
       const res = await login(username, password);
-      onLogin(res.token, res.username);
+      onLogin(res.token);
     } catch {
       setError("Invalid credentials. Please try again.");
     } finally {

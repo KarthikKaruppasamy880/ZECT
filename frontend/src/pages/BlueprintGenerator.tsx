@@ -11,6 +11,7 @@ import {
   AlertCircle,
   FileCode,
 } from "lucide-react";
+import { parseGitHubInput } from "@/lib/utils";
 
 export default function BlueprintGenerator() {
   const [repos, setRepos] = useState<{ owner: string; repo: string }[]>([
@@ -84,8 +85,17 @@ export default function BlueprintGenerator() {
               <input
                 type="text"
                 value={r.repo}
-                onChange={(e) => updateRepo(idx, "repo", e.target.value)}
-                placeholder="e.g. ZECT"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const parsed = parseGitHubInput(val);
+                  if (parsed && parsed.owner && parsed.repo !== val) {
+                    updateRepo(idx, "owner", parsed.owner);
+                    updateRepo(idx, "repo", parsed.repo);
+                  } else {
+                    updateRepo(idx, "repo", val);
+                  }
+                }}
+                placeholder="e.g. ZECT or https://github.com/owner/repo"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
             </div>

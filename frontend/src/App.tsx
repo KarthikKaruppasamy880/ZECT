@@ -36,7 +36,7 @@ export default function App() {
     }
   }, []);
 
-  const handleLogin = (token: string, _username: string) => {
+  const handleLogin = (token: string) => {
     localStorage.setItem("zect_token", token);
     setAuthenticated(true);
   };

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { generateBlueprint } from "@/lib/api";
-import type { BlueprintResult } from "@/types";
+import { generateBlueprint, enhanceBlueprint } from "@/lib/api";
+import type { BlueprintResult, EnhanceBlueprintResponse } from "@/types";
 import {
   Sparkles,
   Plus,
@@ -21,6 +21,9 @@ export default function BlueprintGenerator() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanced, setEnhanced] = useState<EnhanceBlueprintResponse | null>(null);
+  const [enhanceCopied, setEnhanceCopied] = useState(false);
 
   const addRepo = () => setRepos([...repos, { owner: "", repo: "" }]);
   const removeRepo = (idx: number) => setRepos(repos.filter((_, i) => i !== idx));
@@ -170,9 +173,75 @@ export default function BlueprintGenerator() {
                 {result.prompt}
               </pre>
             </div>
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  if (!result) return;
+                  setEnhancing(true);
+                  try {
+                    const res = await enhanceBlueprint(result.prompt);
+                    setEnhanced(res);
+                  } catch {
+                    setError("Failed to enhance blueprint. Check your OpenAI API key in Settings.");
+                  } finally {
+                    setEnhancing(false);
+                  }
+                }}
+                disabled={enhancing}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {enhancing ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                {enhancing ? "Enhancing..." : "Enhance with AI"}
+              </button>
+              <p className="text-xs text-gray-400">
+                Uses OpenAI to improve clarity, add priorities, and optimize for AI comprehension.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enhanced Result */}
+      {enhanced && (
+        <div className="bg-white rounded-xl border border-emerald-200">
+          <div className="p-5 border-b border-emerald-200 flex items-center justify-between bg-emerald-50">
+            <div className="flex items-center gap-3">
+              <Sparkles size={20} className="text-emerald-600" />
+              <div>
+                <h2 className="font-semibold text-gray-900">AI-Enhanced Blueprint</h2>
+                <p className="text-xs text-gray-500">
+                  Enhanced by {enhanced.model} &middot; ~{enhanced.tokens_used.toLocaleString()} tokens
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                await navigator.clipboard.writeText(enhanced.enhanced_prompt);
+                setEnhanceCopied(true);
+                setTimeout(() => setEnhanceCopied(false), 2000);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
+                enhanceCopied
+                  ? "bg-green-100 text-green-700"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              }`}
+            >
+              {enhanceCopied ? <Check size={16} /> : <Copy size={16} />}
+              {enhanceCopied ? "Copied!" : "Copy Enhanced"}
+            </button>
+          </div>
+          <div className="p-5">
+            <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+              <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap">
+                {enhanced.enhanced_prompt}
+              </pre>
+            </div>
             <p className="text-xs text-gray-400 mt-3">
-              Paste this prompt into any AI coding tool (Cursor, Claude Code, Codex, Windsurf, etc.)
-              to recreate the project structure and start coding.
+              This AI-enhanced prompt is optimized for maximum comprehension by Cursor, Claude Code, Codex, Windsurf, etc.
             </p>
           </div>
         </div>

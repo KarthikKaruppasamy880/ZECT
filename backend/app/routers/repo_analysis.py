@@ -97,6 +97,16 @@ def _analyze_repo(owner: str, repo: str) -> RepoAnalysisResult:
     try:
         r = gh.get_repo(f"{owner}/{repo}")
     except GithubException as e:
+        if e.status == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository '{owner}/{repo}' not found. Check the owner/repo name. For private repos, configure a GitHub token in Settings.",
+            )
+        if e.status == 403:
+            raise HTTPException(
+                status_code=403,
+                detail="GitHub API rate limit exceeded. Configure a GitHub Personal Access Token in Settings to increase the limit.",
+            )
         raise HTTPException(status_code=e.status, detail=str(e.data))
 
     # Fetch top-level tree (limit depth to 2 for speed)

@@ -160,6 +160,31 @@ export interface DocGenResult {
   total_tokens: number;
 }
 
+// LLM Types
+export interface AskResponse {
+  answer: string;
+  model: string;
+  tokens_used: number;
+}
+
+export interface PlanResponse {
+  plan: string;
+  phases: string[];
+  model: string;
+  tokens_used: number;
+}
+
+export interface EnhanceBlueprintResponse {
+  enhanced_prompt: string;
+  model: string;
+  tokens_used: number;
+}
+
+export interface LLMKeyStatus {
+  configured: boolean;
+  model: string;
+}
+
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";
 
 export const STAGES: { key: Stage; label: string }[] = [

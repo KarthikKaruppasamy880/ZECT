@@ -17,7 +17,11 @@ ZECT connects to the GitHub API to show real repository data, pull request diffs
 - **API Key Configuration** — Runtime GitHub token management with rate limit tracking and token usage counter
 - **Project Management** — CRUD projects linked to GitHub repositories with 5-stage delivery pipeline tracking
 - **Analytics Dashboard** — Project metrics, stage distribution charts, team performance, and token savings
-- **Platform Settings** — Feature toggles, API key config modal, and token counter
+- **Ask Mode (LLM)** — AI-powered Q&A about engineering topics with optional repo context (OpenAI gpt-4o-mini)
+- **Plan Mode (LLM)** — Structured engineering plan generation with phase extraction
+- **Blueprint AI Enhancement** — LLM-powered improvement of generated blueprints
+- **OpenAI API Key Configuration** — Runtime OpenAI key management via Settings UI
+- **Platform Settings** — Feature toggles, API key config modal (GitHub + OpenAI), and token counter
 - **Workflow Stage Guides** — Detailed explanation pages for each delivery stage (Ask, Plan, Build, Review, Deploy)
 
 ## Tech Stack
@@ -27,6 +31,7 @@ ZECT connects to the GitHub API to show real repository data, pull request diffs
 | **Backend** | FastAPI (Python) + SQLAlchemy + SQLite |
 | **Frontend** | React 18 + TypeScript + Vite + Tailwind CSS |
 | **GitHub API** | PyGithub — repos, PRs, diffs, commits, CI workflows |
+| **LLM** | OpenAI API (gpt-4o-mini) — Ask Mode, Plan Mode, Blueprint Enhancement |
 | **Charts** | Recharts |
 | **Icons** | Lucide React |
 
@@ -95,7 +100,8 @@ ZECT/
 │   │       ├── github.py          # GitHub API proxy endpoints
 │   │       ├── settings.py        # Settings CRUD with defaults
 │   │       ├── analytics.py       # Analytics overview endpoint
-│   │       └── repo_analysis.py   # Repo analysis, blueprints, docs, API key
+│   │       ├── repo_analysis.py   # Repo analysis, blueprints, docs, API key
+│   │       └── llm.py             # LLM endpoints (Ask, Plan, Blueprint enhance)
 │   ├── pyproject.toml             # Poetry dependencies
 │   └── .env.example               # Environment template
 ├── frontend/                      # React + Vite frontend
@@ -119,8 +125,10 @@ ZECT/
 │   │       ├── Docs.tsx           # Documentation hub
 │   │       ├── StagePage.tsx      # Workflow stage guide
 │   │       ├── RepoAnalysis.tsx   # Single + multi-repo analysis
-│   │       ├── BlueprintGenerator.tsx # AI prompt generation
-│   │       └── DocGenerator.tsx   # Granular documentation generation
+│   │       ├── BlueprintGenerator.tsx # AI prompt generation + LLM enhancement
+│   │       ├── DocGenerator.tsx   # Granular documentation generation
+│   │       ├── AskMode.tsx        # LLM-powered Q&A chat
+│   │       └── PlanMode.tsx       # LLM-powered project planning
 │   ├── package.json
 │   └── .env.example               # Frontend env template
 ├── docs/
@@ -132,6 +140,10 @@ ZECT/
 │   ├── ARCHITECTURE_USAGE_GUIDE.md # Technical architecture guide
 │   ├── AI_AGNOSTIC_USAGE.md      # AI-agnostic usage guide (works with any AI tool)
 │   └── FEATURES_REFERENCE.md      # Granular feature reference (all endpoints)
+│   ├── ENV_SETUP_GUIDE.md         # Step-by-step environment setup
+│   ├── ZECT_USAGE_GUIDE.md        # Feature-by-feature usage guide
+│   ├── ZEF_FOR_ZECT_GUIDE.md      # How ZEF supports ZECT
+│   └── PROJECT_STATUS_REPORT.md   # Project status and roadmap
 └── README.md
 ```
 
@@ -172,6 +184,23 @@ ZECT/
 | POST | `/api/analysis/api-key` | Configure GitHub API key at runtime |
 | GET | `/api/analysis/api-key/status` | Check API key status and rate limits |
 
+### LLM (OpenAI)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/llm/ask` | Ask engineering questions with optional repo context |
+| POST | `/api/llm/plan` | Generate structured project plans |
+| POST | `/api/llm/enhance-blueprint` | Enhance blueprint prompts with AI |
+| POST | `/api/llm/configure-key` | Configure OpenAI API key at runtime |
+| GET | `/api/llm/status` | Check LLM key configuration status |
+
+### Authentication
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Login with credentials |
+| POST | `/api/auth/logout` | End session |
+
 ### Settings & Analytics
 
 | Method | Endpoint | Description |
@@ -195,6 +224,8 @@ ZECT/
 | Repo Analysis | `/repo-analysis` | Single + multi-repo GitHub analysis |
 | Blueprint Generator | `/blueprint` | AI-ready prompt generation (Standard + Focused modes) |
 | Doc Generator | `/doc-generator` | Granular documentation generation (6 sections) |
+| Ask Mode | `/ask` | AI-powered Q&A chat (OpenAI) |
+| Plan Mode | `/plan` | AI-powered project planning |
 | Docs Center | `/docs` | Engineering documentation links |
 | Stage Guide | `/stages/:stage` | Workflow stage details, activities, gates |
 
@@ -219,6 +250,10 @@ Backend:            All endpoints tested and passing
 | [Architecture & Usage Guide](docs/ARCHITECTURE_USAGE_GUIDE.md) | Technical architecture and usage patterns |
 | [AI-Agnostic Usage Guide](docs/AI_AGNOSTIC_USAGE.md) | How to use ZECT with any AI tool (Cursor, Claude Code, Codex, etc.) |
 | [Features Reference](docs/FEATURES_REFERENCE.md) | Granular reference for every feature, endpoint, and data type |
+| [Environment Setup Guide](docs/ENV_SETUP_GUIDE.md) | Step-by-step .env configuration with exact commands |
+| [ZECT Usage Guide](docs/ZECT_USAGE_GUIDE.md) | Screen-by-screen feature usage guide |
+| [ZEF for ZECT Guide](docs/ZEF_FOR_ZECT_GUIDE.md) | How ZEF supports ZECT development |
+| [Project Status Report](docs/PROJECT_STATUS_REPORT.md) | Current status, roadmap, and quality metrics |
 
 ## ZEF Integration
 

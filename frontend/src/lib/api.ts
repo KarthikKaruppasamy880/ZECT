@@ -28,6 +28,10 @@ import type {
   TokenUsage,
   ApiKeyStatus,
   DocGenResult,
+  AskResponse,
+  PlanResponse,
+  EnhanceBlueprintResponse,
+  LLMKeyStatus,
 } from "@/types";
 
 // Projects
@@ -88,6 +92,26 @@ export const generateDocs = (owner: string, repo: string, sections?: string[]) =
     method: "POST",
     body: JSON.stringify({ owner, repo, ...(sections ? { sections } : {}) }),
   });
+
+// LLM
+export const askQuestion = (question: string, repo_context?: string) =>
+  request<AskResponse>("/api/llm/ask", {
+    method: "POST",
+    body: JSON.stringify({ question, ...(repo_context ? { repo_context } : {}) }),
+  });
+export const generatePlan = (project_description: string, repo_context?: string, constraints?: string) =>
+  request<PlanResponse>("/api/llm/plan", {
+    method: "POST",
+    body: JSON.stringify({ project_description, ...(repo_context ? { repo_context } : {}), ...(constraints ? { constraints } : {}) }),
+  });
+export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =>
+  request<EnhanceBlueprintResponse>("/api/llm/enhance-blueprint", {
+    method: "POST",
+    body: JSON.stringify({ raw_blueprint, ...(instructions ? { instructions } : {}) }),
+  });
+export const configureLLMKey = (openai_api_key: string) =>
+  request<LLMKeyStatus>("/api/llm/configure-key", { method: "POST", body: JSON.stringify({ openai_api_key }) });
+export const getLLMStatus = () => request<LLMKeyStatus>("/api/llm/status");
 
 // Auth
 export const login = (username: string, password: string) =>

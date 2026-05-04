@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage } from "@/lib/api";
-import type { Setting, ApiKeyStatus, TokenUsage } from "@/types";
+import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus } from "@/lib/api";
+import type { Setting, ApiKeyStatus, TokenUsage, LLMKeyStatus } from "@/types";
 import {
   Settings as SettingsIcon,
   ToggleLeft,
@@ -25,6 +25,13 @@ export default function Settings() {
   const [apiLoading, setApiLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
 
+  // LLM Key Modal
+  const [showLLMModal, setShowLLMModal] = useState(false);
+  const [llmToken, setLlmToken] = useState("");
+  const [llmStatus, setLlmStatus] = useState<LLMKeyStatus | null>(null);
+  const [llmLoading, setLlmLoading] = useState(false);
+  const [llmError, setLlmError] = useState<string | null>(null);
+
   // Token Counter Modal
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
@@ -36,6 +43,9 @@ export default function Settings() {
       .finally(() => setLoading(false));
     getApiKeyStatus()
       .then(setApiStatus)
+      .catch(() => {});
+    getLLMStatus()
+      .then(setLlmStatus)
       .catch(() => {});
   }, []);
 
@@ -66,6 +76,25 @@ export default function Settings() {
       setApiError(e instanceof Error ? e.message : "Failed to configure API key.");
     } finally {
       setApiLoading(false);
+    }
+  };
+
+  const handleConfigureLLMKey = async () => {
+    if (!llmToken.trim()) {
+      setLlmError("Please enter an OpenAI API key.");
+      return;
+    }
+    setLlmLoading(true);
+    setLlmError(null);
+    try {
+      const status = await configureLLMKey(llmToken.trim());
+      setLlmStatus(status);
+      setLlmToken("");
+      setShowLLMModal(false);
+    } catch (e) {
+      setLlmError(e instanceof Error ? e.message : "Failed to configure LLM key.");
+    } finally {
+      setLlmLoading(false);
     }
   };
 
@@ -100,8 +129,8 @@ export default function Settings() {
         <p className="text-slate-500 text-sm">Configure ZECT behavior and integrations</p>
       </div>
 
-      {/* API Key & Token Counter Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      {/* API Key Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {/* API Key Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <div className="flex items-center gap-3 mb-3">
@@ -135,6 +164,41 @@ export default function Settings() {
               className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700"
             >
               {apiStatus?.configured ? "Update" : "Configure"}
+            </button>
+          </div>
+        </div>
+
+        {/* OpenAI LLM Key Card */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-emerald-50 rounded-lg">
+              <Key size={18} className="text-emerald-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">OpenAI API Key</h3>
+              <p className="text-xs text-slate-500">Powers Ask Mode, Plan Mode & Blueprint AI</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              {llmStatus?.configured ? (
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-green-500 rounded-full" />
+                  <span className="text-sm text-green-700">Configured</span>
+                  <span className="text-xs text-slate-400">({llmStatus.model})</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-amber-500 rounded-full" />
+                  <span className="text-sm text-amber-700">Not configured</span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowLLMModal(true)}
+              className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-medium hover:bg-emerald-700"
+            >
+              {llmStatus?.configured ? "Update" : "Configure"}
             </button>
           </div>
         </div>
@@ -283,6 +347,71 @@ export default function Settings() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
               >
                 {apiLoading && <Loader2 size={14} className="animate-spin" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LLM Key Modal */}
+      {showLLMModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900">Configure OpenAI API Key</h3>
+              <button onClick={() => setShowLLMModal(false)} className="p-1 hover:bg-slate-100 rounded-lg">
+                <X size={18} className="text-slate-400" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  OpenAI API Key
+                </label>
+                <input
+                  type="password"
+                  value={llmToken}
+                  onChange={(e) => setLlmToken(e.target.value)}
+                  placeholder="sk-xxxxxxxxxxxx"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  Get your API key from{" "}
+                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-emerald-600 hover:underline">
+                    platform.openai.com/api-keys
+                  </a>.
+                  Used for Ask Mode, Plan Mode, and Blueprint enhancement.
+                </p>
+              </div>
+              {llmError && (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <AlertCircle size={14} />
+                  {llmError}
+                </div>
+              )}
+              {llmStatus?.configured && (
+                <div className="bg-green-50 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-sm text-green-700">
+                    <Check size={14} />
+                    Currently configured — using {llmStatus.model}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 p-5 border-t border-slate-200">
+              <button
+                onClick={() => setShowLLMModal(false)}
+                className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfigureLLMKey}
+                disabled={llmLoading}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {llmLoading && <Loader2 size={14} className="animate-spin" />}
                 Save
               </button>
             </div>

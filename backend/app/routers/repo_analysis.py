@@ -395,6 +395,20 @@ def generate_blueprint(req: MultiRepoAnalysisRequest):
     )
 
 
+class FocusedBlueprintRequest(BaseModel):
+    owner: str
+    repo: str
+    focus_area: str  # e.g. "authentication", "API layer", "database schema"
+    goal: str = "understand and replicate"  # what the user wants to do
+
+
+class FocusedBlueprintResult(BaseModel):
+    prompt: str
+    token_estimate: int
+    focus_area: str
+    repo_name: str
+
+
 @router.post("/blueprint/focused", response_model=FocusedBlueprintResult)
 def generate_focused_blueprint(req: FocusedBlueprintRequest):
     """Generate a prompt focused on a specific area of a repository.
@@ -442,20 +456,6 @@ def configure_api_key(config: ApiKeyConfig):
         )
     except GithubException as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e.data}")
-
-
-class FocusedBlueprintRequest(BaseModel):
-    owner: str
-    repo: str
-    focus_area: str  # e.g. "authentication", "API layer", "database schema"
-    goal: str = "understand and replicate"  # what the user wants to do
-
-
-class FocusedBlueprintResult(BaseModel):
-    prompt: str
-    token_estimate: int
-    focus_area: str
-    repo_name: str
 
 
 class DocGenRequest(BaseModel):

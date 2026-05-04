@@ -192,6 +192,62 @@ export interface LLMKeyStatus {
   model: string;
 }
 
+// Token Dashboard
+export interface TokenDashboardFeature {
+  calls: number;
+  tokens: number;
+  cost: number;
+}
+
+export interface TokenDashboardEntry {
+  id: number;
+  action: string;
+  feature: string;
+  model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  created_at: string;
+}
+
+export interface TokenDashboard {
+  total_calls: number;
+  total_tokens: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_cost_usd: number;
+  by_feature: Record<string, TokenDashboardFeature>;
+  by_model: Record<string, TokenDashboardFeature>;
+  recent: TokenDashboardEntry[];
+}
+
+// Code Review
+export interface ReviewFinding {
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  file: string | null;
+  line: number | null;
+  suggestion: string | null;
+  code_snippet: string | null;
+}
+
+export interface ReviewResponse {
+  summary: string;
+  quality_score: number;
+  total_issues: number;
+  categories: Record<string, number>;
+  findings: ReviewFinding[];
+  strengths: string[];
+  recommendations: string[];
+  tokens_used: number;
+  model: string;
+  pr_number?: number;
+  repo?: string;
+}
+
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";
 
 export const STAGES: { key: Stage; label: string }[] = [

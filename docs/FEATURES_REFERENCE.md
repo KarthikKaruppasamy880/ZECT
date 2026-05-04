@@ -259,35 +259,68 @@ Configures a GitHub Personal Access Token at runtime. Validates the token, check
 
 ## 7. Token Usage Tracking
 
-**API:** `GET /api/analysis/tokens`
+**API:** `GET /api/analysis/tokens` | **Dashboard API:** `GET /api/analytics/token-dashboard`
 
 ### What It Does
 
-Returns a log of all token-consuming operations with timestamps and counts.
+Persists every token-consuming operation to the `token_logs` database table. Provides aggregated usage stats, cost tracking, and audit trail.
 
-### Output (TokenUsage)
+### Token Log API (`GET /api/analysis/tokens`)
+
+Returns recent token usage entries (legacy format).
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `total_tokens` | number | Sum of all token usage |
 | `log` | TokenLogEntry[] | Per-action entries |
 
-### Log Entry
+### Token Dashboard API (`GET /api/analytics/token-dashboard`)
+
+Returns comprehensive token usage summary for the Dashboard control panel.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `action` | string | Operation name (e.g., `blueprint_generation`) |
-| `tokens` | number | Token count for this operation |
-| `ts` | number | Unix timestamp |
+| `total_calls` | number | Total number of API calls made |
+| `total_tokens` | number | Total tokens consumed |
+| `total_prompt_tokens` | number | Total input/prompt tokens |
+| `total_completion_tokens` | number | Total output/completion tokens |
+| `total_cost_usd` | number | Estimated total cost in USD |
+| `by_feature` | Record<string, FeatureStats> | Breakdown by feature (calls, tokens, cost) |
+| `by_model` | Record<string, ModelStats> | Breakdown by model (calls, tokens, cost) |
+| `recent` | TokenLogEntry[] | Last 50 operations with full details |
+
+### Database Schema (`token_logs` table)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | Integer | Primary key |
+| `action` | String | Operation name |
+| `feature` | String | Feature category |
+| `model` | String | Model used (e.g., gpt-4o-mini) |
+| `prompt_tokens` | Integer | Input tokens |
+| `completion_tokens` | Integer | Output tokens |
+| `total_tokens` | Integer | Total tokens |
+| `estimated_cost_usd` | Float | Cost estimate in USD |
+| `created_at` | DateTime | Timestamp |
+
+### Cost Estimation
+
+Pricing per 1M tokens (GPT-4o-mini):
+- Input: $0.15
+- Output: $0.60
+- GitHub API: $0.00
 
 ### Tracked Actions
 
-| Action | When |
-|--------|------|
-| `repo_analysis` | Single or multi-repo analysis |
-| `blueprint_generation` | Standard blueprint generation |
-| `focused_blueprint` | Focused blueprint generation |
-| `doc_generation` | Documentation generation |
+| Action | Feature | When |
+|--------|---------|------|
+| `ask_question` | `ask_mode` | Ask Mode question |
+| `generate_plan` | `plan_mode` | Plan Mode generation |
+| `enhance_blueprint` | `blueprint` | Blueprint AI enhancement |
+| `repo_analysis` | `repo_analysis` | Single/multi-repo analysis |
+| `blueprint_generation` | `blueprint` | Standard blueprint generation |
+| `focused_blueprint` | `blueprint` | Focused blueprint generation |
+| `doc_generation` | `doc_gen` | Documentation generation |
 
 ---
 
@@ -370,10 +403,70 @@ Returns a log of all token-consuming operations with timestamps and counts.
 
 | Key | Label | Type | Default |
 |-----|-------|------|---------|
-| `auto_sync` | Auto-sync repos | toggle | `true` |
-| `pr_notifications` | PR notifications | toggle | `true` |
-| `ci_monitoring` | CI monitoring | toggle | `true` |
-| `review_reminders` | Code review reminders | toggle | `false` |
-| `branch_convention` | Branch naming convention | select | `feature/` |
-| `pr_workflow` | PR review workflow | select | `required` |
-| `notification_channel` | Notification channel | select | `in-app` |
+| `auto-review` | Automated Code Review | toggle | `true` |
+| `token-tracking` | Token Usage Tracking | toggle | `true` |
+| `deploy-gates` | Deployment Gate Enforcement | toggle | `true` |
+| `risk-alerts` | Risk Alert Notifications | toggle | `false` |
+| `auto-plan` | Auto-Generate Plan from Requirements | toggle | `false` |
+| `session-context` | Session Context Memory | toggle | `true` |
+| `default-stage` | Default Starting Stage | select | `Ask Mode` |
+| `review-severity` | Minimum Review Severity | select | `Medium` |
+| `deploy-approval` | Deployment Approval Mode | select | `Tech Lead + PM` |
+| `token-budget` | Monthly Token Budget Alert | select | `80% of budget` |
+
+---
+
+## 12. LLM Integration
+
+**API:** `/api/llm`
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/llm/ask` | Ask engineering questions (Ask Mode) |
+| POST | `/api/llm/plan` | Generate engineering plans (Plan Mode) |
+| POST | `/api/llm/enhance-blueprint` | Enhance blueprint with AI |
+| POST | `/api/llm/configure-key` | Configure OpenAI API key at runtime |
+| GET | `/api/llm/status` | Check if LLM key is configured |
+
+### Ask Mode (`POST /api/llm/ask`)
+
+| Input Field | Type | Required | Description |
+|-------------|------|----------|-------------|
+| `question` | string | Yes | Engineering question |
+| `repo_context` | string | No | Repo analysis context |
+
+| Output Field | Type | Description |
+|--------------|------|-------------|
+| `answer` | string | AI-generated answer |
+| `model` | string | Model used (gpt-4o-mini) |
+| `tokens_used` | number | Tokens consumed |
+
+### Plan Mode (`POST /api/llm/plan`)
+
+| Input Field | Type | Required | Description |
+|-------------|------|----------|-------------|
+| `description` | string | Yes | Project/feature description |
+| `repo_context` | string | No | Repo analysis context |
+| `constraints` | string | No | Technical constraints |
+
+| Output Field | Type | Description |
+|--------------|------|-------------|
+| `plan` | string | Full engineering plan |
+| `phases` | string[] | Extracted phase names |
+| `model` | string | Model used |
+| `tokens_used` | number | Tokens consumed |
+
+### Blueprint Enhancement (`POST /api/llm/enhance-blueprint`)
+
+| Input Field | Type | Required | Description |
+|-------------|------|----------|-------------|
+| `blueprint` | string | Yes | Raw blueprint to enhance |
+| `instructions` | string | No | Enhancement instructions |
+
+| Output Field | Type | Description |
+|--------------|------|-------------|
+| `enhanced_prompt` | string | Improved blueprint |
+| `model` | string | Model used |
+| `tokens_used` | number | Tokens consumed |

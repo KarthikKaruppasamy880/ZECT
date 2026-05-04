@@ -144,7 +144,7 @@ def list_commits(owner: str, repo_name: str, limit: int = 20) -> list[GitHubComm
             html_url=c.html_url,
             additions=c.stats.additions if c.stats else 0,
             deletions=c.stats.deletions if c.stats else 0,
-            files_changed=len(c.files) if c.files else 0,
+            files_changed=c.stats.total if c.stats else 0,
         ))
     return result
 

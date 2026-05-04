@@ -58,11 +58,18 @@ Current status of all features, what works, and what's planned for future phases
 - `POST /api/auth/login` — Login with credentials
 - `POST /api/auth/logout` — End session
 
-### GitHub
+### GitHub & Repo Analysis
 - `POST /api/analysis/repo` — Analyze a GitHub repository
-- `POST /api/github/generate-blueprint` — Generate blueprint prompt
-- `POST /api/github/generate-docs` — Generate documentation
+- `POST /api/analysis/multi-repo` — Analyze multiple repos at once
+- `POST /api/analysis/blueprint` — Generate blueprint prompt (standard mode)
+- `POST /api/analysis/blueprint/focused` — Generate focused blueprint prompt
+- `POST /api/analysis/docs/generate` — Generate documentation (6 section types)
+- `GET /api/analysis/tokens` — Get token usage log
+- `POST /api/analysis/api-key` — Configure GitHub API key at runtime
+- `GET /api/analysis/api-key/status` — Check API key status and rate limits
 - `GET /api/github/repos/{owner}/{repo}/pulls` — List pull requests
+- `GET /api/github/repos/{owner}/{repo}/commits` — List recent commits
+- `GET /api/github/repos/{owner}/{repo}/actions/runs` — List CI/CD workflow runs
 
 ### LLM
 - `POST /api/llm/ask` — Ask engineering questions
@@ -78,26 +85,29 @@ Current status of all features, what works, and what's planned for future phases
 - `PUT /api/projects/{id}` — Update project
 
 ### Analytics & Settings
-- `GET /api/analytics/summary` — Dashboard analytics
-- `GET /api/settings` — Get app settings
-- `PUT /api/settings` — Update settings
+- `GET /api/analytics/overview` — Dashboard analytics
+- `GET /api/settings` — Get app settings (auto-seeds defaults)
+- `PUT /api/settings/{key}` — Update setting value
 
 ---
 
-## Frontend Pages (10 Total)
+## Frontend Pages (15 Total)
 
 1. `/login` — Authentication page
 2. `/` — Dashboard with project overview
 3. `/projects` — Project listing and management
-4. `/projects/:id` — Project detail with stage progress
-5. `/repo-analysis` — GitHub repository analysis
-6. `/blueprint` — Blueprint prompt generator
-7. `/docs` — Documentation generator
-8. `/ask` — AI-powered Q&A (Ask Mode)
-9. `/plan` — AI-powered project planning (Plan Mode)
-10. `/settings` — API key configuration and app settings
-11. `/analytics` — Charts and metrics
-12. `/orchestration` — Multi-repo dashboard
+4. `/projects/new` — Create project with GitHub repo linking
+5. `/projects/:id` — Project detail with stage progress
+6. `/projects/:id/pr/:owner/:repo/:number` — PR diff viewer
+7. `/repo-analysis` — GitHub repository analysis
+8. `/blueprint` — Blueprint prompt generator (Standard + Focused modes)
+9. `/doc-generator` — Granular documentation generation (6 sections)
+10. `/ask` — AI-powered Q&A (Ask Mode)
+11. `/plan` — AI-powered project planning (Plan Mode)
+12. `/settings` — API key configuration and app settings
+13. `/analytics` — Charts and metrics
+14. `/orchestration` — Multi-repo dashboard
+15. `/stages/:stage` — Workflow stage guide
 
 ---
 

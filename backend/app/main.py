@@ -6,7 +6,7 @@ load_dotenv()
 
 from app.database import init_db, SessionLocal
 from app.models import Project, Repo
-from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm
+from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 
 app = FastAPI(title="ZECT API", version="1.0.0")
 
@@ -26,6 +26,7 @@ app.include_router(analytics.router)
 app.include_router(repo_analysis.router)
 app.include_router(auth.router)
 app.include_router(llm.router)
+app.include_router(code_review.router)
 
 
 @app.get("/healthz")

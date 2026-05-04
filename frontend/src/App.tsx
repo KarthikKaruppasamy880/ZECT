@@ -16,6 +16,7 @@ import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
 import AskMode from "@/pages/AskMode";
 import PlanMode from "@/pages/PlanMode";
+import CodeReview from "@/pages/CodeReview";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -82,6 +83,7 @@ export default function App() {
           <Route path="/ask" element={<AskMode />} />
           <Route path="/plan" element={<PlanMode />} />
           <Route path="/docs" element={<Docs />} />
+          <Route path="/code-review" element={<CodeReview />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

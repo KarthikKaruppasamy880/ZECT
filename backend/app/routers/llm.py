@@ -4,6 +4,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI, APIError
+from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
 
@@ -101,6 +102,16 @@ def ask_question(req: AskRequest):
         )
         answer = resp.choices[0].message.content or ""
         tokens = resp.usage.total_tokens if resp.usage else 0
+        prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
+        completion_tok = resp.usage.completion_tokens if resp.usage else 0
+        log_tokens(
+            action="ask_question",
+            feature="ask_mode",
+            model="gpt-4o-mini",
+            prompt_tokens=prompt_tok,
+            completion_tokens=completion_tok,
+            total_tokens=tokens,
+        )
         return AskResponse(answer=answer, model="gpt-4o-mini", tokens_used=tokens)
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
@@ -153,6 +164,14 @@ def generate_plan(req: PlanRequest):
         if not phases:
             phases = ["Phase 1: Foundation", "Phase 2: Core Features", "Phase 3: Polish & Deploy"]
 
+        log_tokens(
+            action="generate_plan",
+            feature="plan_mode",
+            model="gpt-4o-mini",
+            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
+            total_tokens=tokens,
+        )
         return PlanResponse(plan=plan_text, phases=phases, model="gpt-4o-mini", tokens_used=tokens)
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
@@ -188,6 +207,14 @@ def enhance_blueprint(req: EnhanceBlueprintRequest):
         )
         enhanced = resp.choices[0].message.content or ""
         tokens = resp.usage.total_tokens if resp.usage else 0
+        log_tokens(
+            action="enhance_blueprint",
+            feature="blueprint",
+            model="gpt-4o-mini",
+            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
+            total_tokens=tokens,
+        )
         return EnhanceBlueprintResponse(
             enhanced_prompt=enhanced, model="gpt-4o-mini", tokens_used=tokens
         )

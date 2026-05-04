@@ -4,6 +4,21 @@ from datetime import datetime, timezone
 from app.database import Base
 
 
+class TokenLog(Base):
+    """Persistent audit log for every token-consuming operation."""
+    __tablename__ = "token_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String, nullable=False)       # e.g. ask, plan, enhance_blueprint, repo_analysis, etc.
+    feature = Column(String, default="")           # ask_mode, plan_mode, blueprint, doc_gen, repo_analysis
+    model = Column(String, default="")             # e.g. gpt-4o-mini, github-api
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    estimated_cost_usd = Column(Float, default=0.0)  # estimated cost in USD
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Project(Base):
     __tablename__ = "projects"
 

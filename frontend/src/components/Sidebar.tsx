@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -16,6 +17,10 @@ import {
   BookOpen,
   ShieldCheck,
   LogOut,
+  ChevronLeft,
+  ChevronRight,
+  Menu,
+  X,
 } from "lucide-react";
 
 const navItems = [
@@ -41,26 +46,53 @@ const stageItems = [
 
 interface SidebarProps {
   onLogout?: () => void;
+  collapsed: boolean;
+  onToggle: () => void;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
 }
 
-export default function Sidebar({ onLogout }: SidebarProps) {
+export default function Sidebar({
+  onLogout,
+  collapsed,
+  onToggle,
+  mobileOpen,
+  onMobileClose,
+}: SidebarProps) {
   const location = useLocation();
 
-  return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-56 bg-slate-900 text-slate-300 flex flex-col">
-      <div className="px-4 py-5 border-b border-slate-700">
-        <p className="text-xs uppercase tracking-wider text-slate-500">Zinnia</p>
-        <h1 className="text-base font-bold text-white leading-tight">
-          Engineering Delivery
-          <br />
-          Control Tower
-        </h1>
+  // Close mobile menu on route change
+  useEffect(() => {
+    onMobileClose();
+  }, [location.pathname]);
+
+  const sidebarContent = (
+    <>
+      {/* Header */}
+      <div className={`border-b border-slate-700 ${collapsed ? "px-2 py-4" : "px-4 py-5"}`}>
+        {collapsed ? (
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-bold text-white">Z</span>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs uppercase tracking-wider text-slate-500">Zinnia</p>
+            <h1 className="text-base font-bold text-white leading-tight">
+              Engineering Delivery
+              <br />
+              Control Tower
+            </h1>
+          </>
+        )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <p className="px-2 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Navigation
-        </p>
+      {/* Nav */}
+      <nav className="flex-1 overflow-y-auto px-2 py-4">
+        {!collapsed && (
+          <p className="px-2 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Navigation
+          </p>
+        )}
         <ul className="space-y-0.5">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -69,23 +101,28 @@ export default function Sidebar({ onLogout }: SidebarProps) {
               <li key={item.href}>
                 <Link
                   to={item.href}
-                  className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
                     active
                       ? "bg-slate-800 text-white font-medium"
                       : "hover:bg-slate-800/60 hover:text-white"
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  {!collapsed && <span>{item.label}</span>}
                 </Link>
               </li>
             );
           })}
         </ul>
 
-        <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Workflow Stages
-        </p>
+        {!collapsed ? (
+          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Workflow Stages
+          </p>
+        ) : (
+          <div className="my-4 border-t border-slate-700" />
+        )}
         <ul className="space-y-0.5">
           {stageItems.map((item) => {
             const Icon = item.icon;
@@ -94,14 +131,15 @@ export default function Sidebar({ onLogout }: SidebarProps) {
               <li key={item.href}>
                 <Link
                   to={item.href}
-                  className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
                     active
                       ? "bg-slate-800 text-white font-medium"
                       : "hover:bg-slate-800/60 hover:text-white"
                   }`}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  {!collapsed && <span>{item.label}</span>}
                 </Link>
               </li>
             );
@@ -109,19 +147,75 @@ export default function Sidebar({ onLogout }: SidebarProps) {
         </ul>
       </nav>
 
-      <div className="border-t border-slate-700 px-4 py-3">
-        <p className="text-xs text-slate-500">Zinnia Eng</p>
-        <p className="text-xs text-slate-600">Internal Platform</p>
+      {/* Footer */}
+      <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>
+        {!collapsed && (
+          <>
+            <p className="text-xs text-slate-500">Zinnia Eng</p>
+            <p className="text-xs text-slate-600">Internal Platform</p>
+          </>
+        )}
         {onLogout && (
           <button
             onClick={onLogout}
-            className="mt-2 flex items-center gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
+            title={collapsed ? "Sign Out" : undefined}
+            className={`mt-2 flex items-center ${collapsed ? "justify-center w-full" : ""} gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors`}
           >
-            <LogOut className="h-3 w-3" />
-            Sign Out
+            <LogOut className="h-3.5 w-3.5" />
+            {!collapsed && "Sign Out"}
           </button>
         )}
       </div>
-    </aside>
+
+      {/* Collapse Toggle (desktop only) */}
+      <div className="hidden md:block border-t border-slate-700 p-2">
+        <button
+          onClick={onToggle}
+          className="w-full flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+        >
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile hamburger button */}
+      <button
+        onClick={() => (mobileOpen ? onMobileClose() : onMobileClose() || onToggle())}
+        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-slate-900 text-white rounded-lg shadow-lg"
+        aria-label="Toggle navigation"
+      >
+        {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+          onClick={onMobileClose}
+        />
+      )}
+
+      {/* Mobile sidebar (overlay) */}
+      <aside
+        className={`md:hidden fixed left-0 top-0 z-50 h-screen w-64 bg-slate-900 text-slate-300 flex flex-col transform transition-transform duration-200 ease-in-out ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        {sidebarContent}
+      </aside>
+
+      {/* Desktop sidebar */}
+      <aside
+        className={`hidden md:flex fixed left-0 top-0 z-40 h-screen bg-slate-900 text-slate-300 flex-col transition-all duration-200 ease-in-out ${
+          collapsed ? "w-16" : "w-56"
+        }`}
+      >
+        {sidebarContent}
+      </aside>
+    </>
   );
 }

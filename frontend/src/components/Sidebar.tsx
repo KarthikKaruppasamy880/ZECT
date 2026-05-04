@@ -21,6 +21,8 @@ import {
   ChevronRight,
   Menu,
   X,
+  Coins,
+  Shield,
 } from "lucide-react";
 
 const navItems = [
@@ -39,9 +41,11 @@ const navItems = [
 const stageItems = [
   { href: "/ask", label: "Ask Mode", icon: MessageSquare },
   { href: "/plan", label: "Plan Mode", icon: ClipboardList },
-  { href: "/stages/build", label: "Build Phase", icon: Hammer },
-  { href: "/stages/review", label: "Review", icon: Search },
-  { href: "/stages/deploy", label: "Deployment", icon: Rocket },
+  { href: "/build", label: "Build Phase", icon: Hammer },
+  { href: "/review", label: "Review Phase", icon: Shield },
+  { href: "/deploy", label: "Deployment", icon: Rocket },
+  { href: "/skills", label: "Skill Library", icon: BookOpen },
+  { href: "/token-controls", label: "Token Controls", icon: Coins },
 ];
 
 interface SidebarProps {

@@ -128,6 +128,64 @@ export const reviewSnippet = (code: string, language?: string) =>
     body: JSON.stringify({ code, ...(language ? { language } : {}) }),
   });
 
+// Build Phase
+export const buildGenerate = (plan_step: string, tech_stack?: string, project_context?: string, file_path?: string) =>
+  request<any>("/api/build/generate", {
+    method: "POST",
+    body: JSON.stringify({ plan_step, ...(tech_stack ? { tech_stack } : {}), ...(project_context ? { project_context } : {}), ...(file_path ? { file_path } : {}) }),
+  });
+export const buildFromPlan = (full_plan: string, step_index: number, tech_stack?: string) =>
+  request<any>("/api/build/from-plan", {
+    method: "POST",
+    body: JSON.stringify({ full_plan, step_index, ...(tech_stack ? { tech_stack } : {}) }),
+  });
+
+// Review Phase
+export const reviewAnalyze = (code: string, language?: string, severity_threshold?: string) =>
+  request<any>("/api/review/analyze", {
+    method: "POST",
+    body: JSON.stringify({ code, language: language || "typescript", severity_threshold: severity_threshold || "medium" }),
+  });
+export const reviewFixPrompt = (code: string, findings: any[], language?: string) =>
+  request<any>("/api/review/fix-prompt", {
+    method: "POST",
+    body: JSON.stringify({ code, findings, language: language || "typescript" }),
+  });
+
+// Deploy Phase
+export const deployChecklist = (project_name: string, tech_stack?: string, environment?: string, deployment_type?: string) =>
+  request<any>("/api/deploy/checklist", {
+    method: "POST",
+    body: JSON.stringify({ project_name, ...(tech_stack ? { tech_stack } : {}), environment: environment || "production", deployment_type: deployment_type || "standard" }),
+  });
+export const deployRunbook = (project_name: string, tech_stack?: string, infrastructure?: string, services?: string[]) =>
+  request<any>("/api/deploy/runbook", {
+    method: "POST",
+    body: JSON.stringify({ project_name, ...(tech_stack ? { tech_stack } : {}), ...(infrastructure ? { infrastructure } : {}), ...(services ? { services } : {}) }),
+  });
+
+// Skills
+export const getSkills = (category?: string) =>
+  request<any[]>(`/api/skills${category ? `?category=${category}` : ""}`);
+export const createSkill = (data: any) =>
+  request<any>("/api/skills", { method: "POST", body: JSON.stringify(data) });
+export const updateSkill = (id: number, data: any) =>
+  request<any>(`/api/skills/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteSkill = (id: number) =>
+  request<void>(`/api/skills/${id}`, { method: "DELETE" });
+export const detectSkillPatterns = (code: string, context?: string) =>
+  request<any>("/api/skills/detect", {
+    method: "POST",
+    body: JSON.stringify({ code, ...(context ? { context } : {}) }),
+  });
+
+// Token Controls
+export const getTokenUsageFull = () => request<any>("/api/tokens/usage");
+export const getTokenBudget = () => request<any>("/api/tokens/budget");
+export const updateTokenBudget = (config: any) =>
+  request<any>("/api/tokens/budget", { method: "PUT", body: JSON.stringify(config) });
+export const getModelBreakdown = () => request<any[]>("/api/tokens/models");
+
 // Auth
 export const login = (username: string, password: string) =>
   request<{ token: string; username: string }>("/api/auth/login", {

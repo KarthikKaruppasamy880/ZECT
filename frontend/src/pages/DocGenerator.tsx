@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { parseGitHubInput } from "@/lib/utils";
 
 const AVAILABLE_SECTIONS = [
   { key: "overview", label: "Overview" },
@@ -105,8 +106,17 @@ export default function DocGenerator() {
             <input
               type="text"
               value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              placeholder="e.g. ZECT"
+              onChange={(e) => {
+                const val = e.target.value;
+                const parsed = parseGitHubInput(val);
+                if (parsed && parsed.owner && parsed.repo !== val) {
+                  setOwner(parsed.owner);
+                  setRepo(parsed.repo);
+                } else {
+                  setRepo(val);
+                }
+              }}
+              placeholder="e.g. ZECT or https://github.com/owner/repo"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             />
           </div>

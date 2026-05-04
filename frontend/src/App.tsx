@@ -14,6 +14,8 @@ import StagePage from "@/pages/StagePage";
 import RepoAnalysis from "@/pages/RepoAnalysis";
 import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
+import AskMode from "@/pages/AskMode";
+import PlanMode from "@/pages/PlanMode";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -36,7 +38,7 @@ export default function App() {
     }
   }, []);
 
-  const handleLogin = (token: string, _username: string) => {
+  const handleLogin = (token: string) => {
     localStorage.setItem("zect_token", token);
     setAuthenticated(true);
   };
@@ -77,6 +79,8 @@ export default function App() {
           <Route path="/repo-analysis" element={<RepoAnalysis />} />
           <Route path="/blueprint" element={<BlueprintGenerator />} />
           <Route path="/doc-generator" element={<DocGenerator />} />
+          <Route path="/ask" element={<AskMode />} />
+          <Route path="/plan" element={<PlanMode />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>

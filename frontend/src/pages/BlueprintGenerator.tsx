@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { generateBlueprint } from "@/lib/api";
-import type { BlueprintResult } from "@/types";
+import { generateBlueprint, generateFocusedBlueprint, enhanceBlueprint } from "@/lib/api";
+import type { BlueprintResult, FocusedBlueprintResult, EnhanceBlueprintResponse } from "@/types";
 import {
   Sparkles,
   Plus,
@@ -10,16 +10,35 @@ import {
   Loader2,
   AlertCircle,
   FileCode,
+  Target,
 } from "lucide-react";
+import { parseGitHubInput } from "@/lib/utils";
+
+type Mode = "standard" | "focused";
 
 export default function BlueprintGenerator() {
+  const [mode, setMode] = useState<Mode>("standard");
+
+  // Standard mode state
   const [repos, setRepos] = useState<{ owner: string; repo: string }[]>([
     { owner: "", repo: "" },
   ]);
   const [result, setResult] = useState<BlueprintResult | null>(null);
+
+  // Focused mode state
+  const [focusOwner, setFocusOwner] = useState("");
+  const [focusRepo, setFocusRepo] = useState("");
+  const [focusArea, setFocusArea] = useState("");
+  const [focusGoal, setFocusGoal] = useState("");
+  const [focusedResult, setFocusedResult] = useState<FocusedBlueprintResult | null>(null);
+
+  // Shared state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanced, setEnhanced] = useState<EnhanceBlueprintResponse | null>(null);
+  const [enhanceCopied, setEnhanceCopied] = useState(false);
 
   const addRepo = () => setRepos([...repos, { owner: "", repo: "" }]);
   const removeRepo = (idx: number) => setRepos(repos.filter((_, i) => i !== idx));
@@ -47,12 +66,40 @@ export default function BlueprintGenerator() {
     }
   };
 
-  const handleCopy = async () => {
-    if (!result) return;
-    await navigator.clipboard.writeText(result.prompt);
+  const handleFocusedGenerate = async () => {
+    if (!focusOwner.trim() || !focusRepo.trim()) {
+      setError("Enter both owner and repository name.");
+      return;
+    }
+    if (!focusArea.trim()) {
+      setError("Enter a focus area (e.g. authentication, API layer, database).");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setFocusedResult(null);
+    try {
+      const data = await generateFocusedBlueprint(
+        focusOwner.trim(),
+        focusRepo.trim(),
+        focusArea.trim(),
+        focusGoal.trim() || undefined
+      );
+      setFocusedResult(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Focused blueprint generation failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async (text: string) => {
+    await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const activePrompt = mode === "standard" ? result?.prompt : focusedResult?.prompt;
 
   return (
     <div className="space-y-6">
@@ -64,17 +111,115 @@ export default function BlueprintGenerator() {
         </p>
       </div>
 
-      {/* Input */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700">Repositories to Analyze</h2>
-        {repos.map((r, idx) => (
-          <div key={idx} className="flex gap-3 items-end">
+      {/* Mode Tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => { setMode("standard"); setError(null); }}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${
+            mode === "standard"
+              ? "bg-white text-purple-700 shadow-sm"
+              : "text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          <Sparkles size={14} />
+          Standard
+        </button>
+        <button
+          onClick={() => { setMode("focused"); setError(null); }}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${
+            mode === "focused"
+              ? "bg-white text-purple-700 shadow-sm"
+              : "text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          <Target size={14} />
+          Focused
+        </button>
+      </div>
+
+      {/* Standard Mode Input */}
+      {mode === "standard" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-700">Repositories to Analyze</h2>
+          {repos.map((r, idx) => (
+            <div key={idx} className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>
+                <input
+                  type="text"
+                  value={r.owner}
+                  onChange={(e) => updateRepo(idx, "owner", e.target.value)}
+                  placeholder="e.g. KarthikKaruppasamy880"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Repository</label>
+                <input
+                  type="text"
+                  value={r.repo}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const parsed = parseGitHubInput(val);
+                    if (parsed && parsed.owner && parsed.repo !== val) {
+                      updateRepo(idx, "owner", parsed.owner);
+                      updateRepo(idx, "repo", parsed.repo);
+                    } else {
+                      updateRepo(idx, "repo", val);
+                    }
+                  }}
+                  placeholder="e.g. ZECT or https://github.com/owner/repo"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+              </div>
+              {repos.length > 1 && (
+                <button
+                  onClick={() => removeRepo(idx)}
+                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="flex gap-3">
+            <button
+              onClick={addRepo}
+              className="px-4 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2"
+            >
+              <Plus size={14} /> Add Another Repo
+            </button>
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Sparkles size={16} />
+              )}
+              Generate Blueprint
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Focused Mode Input */}
+      {mode === "focused" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-700">Focused Repository Analysis</h2>
+          <p className="text-xs text-gray-500">
+            Generate a prompt scoped to a specific feature or layer of a repository —
+            ideal for understanding authentication, API routes, database schemas, etc.
+          </p>
+          <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>
               <input
                 type="text"
-                value={r.owner}
-                onChange={(e) => updateRepo(idx, "owner", e.target.value)}
+                value={focusOwner}
+                onChange={(e) => setFocusOwner(e.target.value)}
                 placeholder="e.g. KarthikKaruppasamy880"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
@@ -83,43 +228,58 @@ export default function BlueprintGenerator() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Repository</label>
               <input
                 type="text"
-                value={r.repo}
-                onChange={(e) => updateRepo(idx, "repo", e.target.value)}
-                placeholder="e.g. ZECT"
+                value={focusRepo}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const parsed = parseGitHubInput(val);
+                  if (parsed && parsed.owner && parsed.repo !== val) {
+                    setFocusOwner(parsed.owner);
+                    setFocusRepo(parsed.repo);
+                  } else {
+                    setFocusRepo(val);
+                  }
+                }}
+                placeholder="e.g. ZECT or https://github.com/owner/repo"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
             </div>
-            {repos.length > 1 && (
-              <button
-                onClick={() => removeRepo(idx)}
-                className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
           </div>
-        ))}
-        <div className="flex gap-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Focus Area</label>
+            <input
+              type="text"
+              value={focusArea}
+              onChange={(e) => setFocusArea(e.target.value)}
+              placeholder="e.g. authentication, API layer, database schema, CI/CD pipeline"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Goal <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={focusGoal}
+              onChange={(e) => setFocusGoal(e.target.value)}
+              placeholder="e.g. understand and replicate, migrate to new framework, add tests"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+            />
+          </div>
           <button
-            onClick={addRepo}
-            className="px-4 py-2 border border-dashed border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-2"
-          >
-            <Plus size={14} /> Add Another Repo
-          </button>
-          <button
-            onClick={handleGenerate}
+            onClick={handleFocusedGenerate}
             disabled={loading}
             className="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
           >
             {loading ? (
               <Loader2 size={16} className="animate-spin" />
             ) : (
-              <Sparkles size={16} />
+              <Target size={16} />
             )}
-            Generate Blueprint
+            Generate Focused Blueprint
           </button>
         </div>
-      </div>
+      )}
 
       {/* Error */}
       {error && (
@@ -129,8 +289,8 @@ export default function BlueprintGenerator() {
         </div>
       )}
 
-      {/* Result */}
-      {result && (
+      {/* Standard Result */}
+      {mode === "standard" && result && (
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="p-5 border-b border-gray-200 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -143,7 +303,7 @@ export default function BlueprintGenerator() {
               </div>
             </div>
             <button
-              onClick={handleCopy}
+              onClick={() => handleCopy(result.prompt)}
               className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
                 copied
                   ? "bg-green-100 text-green-700"
@@ -160,9 +320,139 @@ export default function BlueprintGenerator() {
                 {result.prompt}
               </pre>
             </div>
+            <div className="mt-4 flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  if (!result) return;
+                  setEnhancing(true);
+                  try {
+                    const res = await enhanceBlueprint(result.prompt);
+                    setEnhanced(res);
+                  } catch {
+                    setError("Failed to enhance blueprint. Check your OpenAI API key in Settings.");
+                  } finally {
+                    setEnhancing(false);
+                  }
+                }}
+                disabled={enhancing}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                {enhancing ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                {enhancing ? "Enhancing..." : "Enhance with AI"}
+              </button>
+              <p className="text-xs text-gray-400">
+                Uses OpenAI to improve clarity, add priorities, and optimize for AI comprehension.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enhanced Result */}
+      {enhanced && (
+        <div className="bg-white rounded-xl border border-emerald-200">
+          <div className="p-5 border-b border-emerald-200 flex items-center justify-between bg-emerald-50">
+            <div className="flex items-center gap-3">
+              <Sparkles size={20} className="text-emerald-600" />
+              <div>
+                <h2 className="font-semibold text-gray-900">AI-Enhanced Blueprint</h2>
+                <p className="text-xs text-gray-500">
+                  Enhanced by {enhanced.model} &middot; ~{enhanced.tokens_used.toLocaleString()} tokens
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                await navigator.clipboard.writeText(enhanced.enhanced_prompt);
+                setEnhanceCopied(true);
+                setTimeout(() => setEnhanceCopied(false), 2000);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
+                enhanceCopied
+                  ? "bg-green-100 text-green-700"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              }`}
+            >
+              {enhanceCopied ? <Check size={16} /> : <Copy size={16} />}
+              {enhanceCopied ? "Copied!" : "Copy Enhanced"}
+            </button>
+          </div>
+          <div className="p-5">
+            <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+              <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap">
+                {enhanced.enhanced_prompt}
+              </pre>
+            </div>
             <p className="text-xs text-gray-400 mt-3">
-              Paste this prompt into any AI coding tool (Cursor, Claude Code, Codex, Windsurf, etc.)
-              to recreate the project structure and start coding.
+              This AI-enhanced prompt is optimized for maximum comprehension by Cursor, Claude Code, Codex, Windsurf, etc.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Focused Result */}
+      {mode === "focused" && focusedResult && (
+        <div className="bg-white rounded-xl border border-gray-200">
+          <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Target size={20} className="text-purple-600" />
+              <div>
+                <h2 className="font-semibold text-gray-900">Focused Blueprint: {focusedResult.focus_area}</h2>
+                <p className="text-xs text-gray-500">
+                  {focusedResult.repo_name} &middot; ~{focusedResult.token_estimate.toLocaleString()} tokens
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => handleCopy(focusedResult.prompt)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
+                copied
+                  ? "bg-green-100 text-green-700"
+                  : "bg-purple-600 text-white hover:bg-purple-700"
+              }`}
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? "Copied!" : "Copy to Clipboard"}
+            </button>
+          </div>
+          <div className="p-5">
+            <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+              <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap">
+                {focusedResult.prompt}
+              </pre>
+            </div>
+            <p className="text-xs text-gray-400 mt-3">
+              This prompt is scoped to &quot;{focusedResult.focus_area}&quot; — paste it into any AI tool
+              (Cursor, Claude Code, Codex, Windsurf, etc.) for targeted analysis and implementation guidance.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Usage Tips */}
+      {!activePrompt && !loading && (
+        <div className="bg-gray-50 rounded-xl border border-gray-100 p-6">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">How It Works</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+            <div>
+              <p className="font-medium text-gray-800 mb-1">Standard Mode</p>
+              <p>Analyzes one or more repos and generates a comprehensive prompt to recreate
+              the entire project from scratch. Best for full project blueprints.</p>
+            </div>
+            <div>
+              <p className="font-medium text-gray-800 mb-1">Focused Mode</p>
+              <p>Scopes analysis to a specific feature or layer (e.g. auth, API, database).
+              Best for understanding or replicating a specific part of a codebase.</p>
+            </div>
+          </div>
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <p className="text-xs text-gray-500">
+              <strong>AI-Agnostic:</strong> Generated prompts work with any AI coding tool —
+              Cursor, Claude Code, Codex, Windsurf, ChatGPT, Devin, or any other.
             </p>
           </div>
         </div>

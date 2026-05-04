@@ -131,6 +131,13 @@ export interface BlueprintResult {
   repos_analyzed: number;
 }
 
+export interface FocusedBlueprintResult {
+  prompt: string;
+  token_estimate: number;
+  focus_area: string;
+  repo_name: string;
+}
+
 export interface TokenLogEntry {
   action: string;
   tokens: number;
@@ -158,6 +165,31 @@ export interface DocGenResult {
   repo_name: string;
   sections: DocSection[];
   total_tokens: number;
+}
+
+// LLM Types
+export interface AskResponse {
+  answer: string;
+  model: string;
+  tokens_used: number;
+}
+
+export interface PlanResponse {
+  plan: string;
+  phases: string[];
+  model: string;
+  tokens_used: number;
+}
+
+export interface EnhanceBlueprintResponse {
+  enhanced_prompt: string;
+  model: string;
+  tokens_used: number;
+}
+
+export interface LLMKeyStatus {
+  configured: boolean;
+  model: string;
 }
 
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";

@@ -24,6 +24,7 @@ import type {
   GitHubWorkflowRun,
   RepoAnalysisResult,
   BlueprintResult,
+  FocusedBlueprintResult,
   TokenUsage,
   ApiKeyStatus,
   DocGenResult,
@@ -71,6 +72,11 @@ export const analyzeMultiRepo = (repos: { owner: string; repo: string }[]) =>
   request<RepoAnalysisResult[]>("/api/analysis/multi-repo", { method: "POST", body: JSON.stringify({ repos }) });
 export const generateBlueprint = (repos: { owner: string; repo: string }[]) =>
   request<BlueprintResult>("/api/analysis/blueprint", { method: "POST", body: JSON.stringify({ repos }) });
+export const generateFocusedBlueprint = (owner: string, repo: string, focus_area: string, goal?: string) =>
+  request<FocusedBlueprintResult>("/api/analysis/blueprint/focused", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, focus_area, ...(goal ? { goal } : {}) }),
+  });
 export const getTokenUsage = () => request<TokenUsage>("/api/analysis/tokens");
 export const configureApiKey = (github_token: string) =>
   request<ApiKeyStatus>("/api/analysis/api-key", { method: "POST", body: JSON.stringify({ github_token }) });

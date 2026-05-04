@@ -194,11 +194,32 @@ def _analyze_repo(owner: str, repo: str) -> RepoAnalysisResult:
 
 
 def _build_prompt(analyses: list[RepoAnalysisResult]) -> str:
-    """Synthesise a single vibe-coding prompt from analysis results."""
+    """Synthesise a single vibe-coding prompt from analysis results.
+
+    Generates a conversational, outcome-focused prompt (not a technical spec)
+    that can be pasted into any AI coding tool to recreate/extend the project.
+    """
     sections: list[str] = []
-    sections.append("# Project Blueprint — AI-Ready Prompt")
-    sections.append("")
-    sections.append("Use this prompt in Cursor, Claude Code, Codex, Windsurf, or any AI coding tool to recreate / extend this project from scratch.")
+
+    # Conversational intro
+    if len(analyses) == 1:
+        a = analyses[0]
+        desc = a.description or "a software project"
+        lang = f" built with {a.language}" if a.language else ""
+        sections.append(
+            f"I want to build a project like {a.full_name} — {desc}{lang}. "
+            f"Here is everything you need to know about the original repository "
+            f"so you can recreate it from scratch with the same architecture, "
+            f"patterns, and quality."
+        )
+    else:
+        names = ", ".join(a.full_name for a in analyses)
+        sections.append(
+            f"I want to build a project that combines patterns from these "
+            f"repositories: {names}. Below is a detailed analysis of each repo. "
+            f"Use this context to create a unified project that incorporates "
+            f"the best architecture and patterns from all of them."
+        )
     sections.append("")
 
     for a in analyses:
@@ -208,6 +229,7 @@ def _build_prompt(analyses: list[RepoAnalysisResult]) -> str:
         if a.language:
             sections.append(f"**Primary Language:** {a.language}")
         sections.append(f"**Default Branch:** {a.default_branch}")
+        sections.append(f"**Stars:** {a.stars} | **Forks:** {a.forks}")
         sections.append("")
 
         # Architecture
@@ -224,13 +246,13 @@ def _build_prompt(analyses: list[RepoAnalysisResult]) -> str:
                 sections.append(f"**{mgr}:** {', '.join(pkgs[:20])}")
             sections.append("")
 
-        # File structure (top 60)
+        # File structure (top 80)
         sections.append("### File Structure")
         sections.append("```")
-        for path in a.tree[:60]:
+        for path in a.tree[:80]:
             sections.append(path)
-        if len(a.tree) > 60:
-            sections.append(f"... and {len(a.tree) - 60} more files")
+        if len(a.tree) > 80:
+            sections.append(f"... and {len(a.tree) - 80} more files")
         sections.append("```")
         sections.append("")
 
@@ -238,23 +260,104 @@ def _build_prompt(analyses: list[RepoAnalysisResult]) -> str:
         if a.readme_content:
             sections.append("### README (excerpt)")
             sections.append("```markdown")
-            sections.append(a.readme_content[:3000])
+            sections.append(a.readme_content[:4000])
             sections.append("```")
             sections.append("")
 
     sections.append("---")
     sections.append("")
-    sections.append("## Instructions for AI")
+    sections.append("## What I Need You To Do")
     sections.append("")
     sections.append("Using the repository analysis above:")
     sections.append("1. Recreate the full project structure following the file layout shown")
-    sections.append("2. Install all listed dependencies")
-    sections.append("3. Implement the core architecture as described")
+    sections.append("2. Install all listed dependencies using the correct package manager")
+    sections.append("3. Implement the core architecture as described in the architecture notes")
     sections.append("4. Follow the patterns and conventions visible in the file structure")
-    sections.append("5. Ensure the project builds, lints, and tests pass")
-    sections.append("6. Match the README description and goals")
+    sections.append("5. Ensure the project builds, lints cleanly, and all tests pass")
+    sections.append("6. Match the README description, goals, and feature set")
+    sections.append("7. Use production-quality code — proper error handling, types, and documentation")
     sections.append("")
-    sections.append("Begin implementation now.")
+    sections.append("Start with the project scaffold, then implement each module. Ask me if anything is unclear.")
+
+    return "\n".join(sections)
+
+
+def _build_focused_prompt(analysis: RepoAnalysisResult, focus_area: str, goal: str) -> str:
+    """Build a prompt focused on a specific area of a repository."""
+    sections: list[str] = []
+
+    # Filter tree items related to the focus area
+    focus_lower = focus_area.lower()
+    relevant_files = [
+        p for p in analysis.tree
+        if any(kw in p.lower() for kw in focus_lower.split())
+    ]
+
+    sections.append(
+        f"I want to {goal} the **{focus_area}** part of the {analysis.full_name} repository. "
+        f"Here is the relevant context from the repo so you can help me."
+    )
+    sections.append("")
+    sections.append(f"## Repository: {analysis.full_name}")
+    if analysis.description:
+        sections.append(f"**Description:** {analysis.description}")
+    if analysis.language:
+        sections.append(f"**Primary Language:** {analysis.language}")
+    sections.append("")
+
+    # Architecture notes
+    if analysis.architecture_notes:
+        sections.append("### Architecture Context")
+        for n in analysis.architecture_notes:
+            sections.append(f"- {n}")
+        sections.append("")
+
+    # Relevant files
+    if relevant_files:
+        sections.append(f"### Files Related to \"{focus_area}\"")
+        sections.append("```")
+        for path in relevant_files[:50]:
+            sections.append(path)
+        sections.append("```")
+        sections.append("")
+
+    # Full tree for context
+    sections.append("### Full File Structure (for context)")
+    sections.append("```")
+    for path in analysis.tree[:60]:
+        sections.append(path)
+    if len(analysis.tree) > 60:
+        sections.append(f"... and {len(analysis.tree) - 60} more files")
+    sections.append("```")
+    sections.append("")
+
+    # Dependencies
+    if analysis.dependencies:
+        sections.append("### Dependencies")
+        for mgr, pkgs in analysis.dependencies.items():
+            sections.append(f"**{mgr}:** {', '.join(pkgs[:20])}")
+        sections.append("")
+
+    # README excerpt
+    if analysis.readme_content:
+        sections.append("### README (excerpt)")
+        sections.append("```markdown")
+        sections.append(analysis.readme_content[:3000])
+        sections.append("```")
+        sections.append("")
+
+    sections.append("---")
+    sections.append("")
+    sections.append(f"## Focus: {focus_area}")
+    sections.append("")
+    sections.append(f"My goal is to **{goal}** the {focus_area} functionality from this repo.")
+    sections.append("Please:")
+    sections.append(f"1. Explain how the {focus_area} is implemented in this codebase")
+    sections.append("2. Identify the key files and patterns used")
+    sections.append("3. Provide a step-by-step plan to implement this in my project")
+    sections.append("4. Include any gotchas, edge cases, or best practices to follow")
+    sections.append("")
+    sections.append("Be specific and reference the actual file structure shown above.")
 
     return "\n".join(sections)
 
@@ -292,6 +395,26 @@ def generate_blueprint(req: MultiRepoAnalysisRequest):
     )
 
 
+@router.post("/blueprint/focused", response_model=FocusedBlueprintResult)
+def generate_focused_blueprint(req: FocusedBlueprintRequest):
+    """Generate a prompt focused on a specific area of a repository.
+
+    Unlike the standard blueprint which covers the full repo,
+    focused mode scopes the output to a particular feature or layer
+    (e.g. 'authentication', 'API routes', 'database schema').
+    """
+    analysis = _analyze_repo(req.owner, req.repo)
+    prompt = _build_focused_prompt(analysis, req.focus_area, req.goal)
+    token_est = len(prompt) // 4
+    _log_tokens("focused_blueprint", token_est)
+    return FocusedBlueprintResult(
+        prompt=prompt,
+        token_estimate=token_est,
+        focus_area=req.focus_area,
+        repo_name=analysis.full_name,
+    )
+
+
 @router.get("/tokens", response_model=TokenUsage)
 def get_token_usage():
     """Get token usage log."""
@@ -319,6 +442,20 @@ def configure_api_key(config: ApiKeyConfig):
         )
     except GithubException as e:
         raise HTTPException(status_code=401, detail=f"Invalid token: {e.data}")
+
+
+class FocusedBlueprintRequest(BaseModel):
+    owner: str
+    repo: str
+    focus_area: str  # e.g. "authentication", "API layer", "database schema"
+    goal: str = "understand and replicate"  # what the user wants to do
+
+
+class FocusedBlueprintResult(BaseModel):
+    prompt: str
+    token_estimate: int
+    focus_area: str
+    repo_name: str
 
 
 class DocGenRequest(BaseModel):

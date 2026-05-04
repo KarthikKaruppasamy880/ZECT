@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { askQuestion } from "@/lib/api";
+import CodeOutput from "@/components/CodeOutput";
 import {
   MessageSquare,
   Send,
@@ -132,7 +133,21 @@ export default function AskMode() {
                   : "bg-white border border-gray-200 text-gray-800"
               }`}
             >
-              <pre className="text-sm whitespace-pre-wrap font-sans">{msg.content}</pre>
+              {msg.role === "assistant" ? (
+                <div className="space-y-3">
+                  {msg.content.split(/(```[\s\S]*?```)/g).map((part, i) => {
+                    if (part.startsWith("```")) {
+                      const lines = part.slice(3, -3).split("\n");
+                      const lang = lines[0]?.trim() || "text";
+                      const code = lines.slice(1).join("\n");
+                      return <CodeOutput key={i} code={code} language={lang} title={lang} maxHeight="300px" />;
+                    }
+                    return part ? <pre key={i} className="text-sm whitespace-pre-wrap font-sans">{part}</pre> : null;
+                  })}
+                </div>
+              ) : (
+                <pre className="text-sm whitespace-pre-wrap font-sans">{msg.content}</pre>
+              )}
               {msg.tokens && (
                 <p className="text-xs mt-2 opacity-60">{msg.tokens} tokens used</p>
               )}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { generatePlan } from "@/lib/api";
+import CodeOutput from "@/components/CodeOutput";
 import {
   ClipboardList,
   Loader2,
@@ -177,11 +178,7 @@ export default function PlanMode() {
           )}
 
           <div className="p-5">
-            <div className="bg-gray-50 rounded-lg p-4 max-h-[500px] overflow-y-auto">
-              <pre className="text-sm text-gray-700 font-mono whitespace-pre-wrap">
-                {plan}
-              </pre>
-            </div>
+            <CodeOutput code={plan} language="markdown" title="Engineering Plan" maxHeight="500px" />
           </div>
         </div>
       )}

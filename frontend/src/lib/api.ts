@@ -32,6 +32,7 @@ import type {
   PlanResponse,
   EnhanceBlueprintResponse,
   LLMKeyStatus,
+  TokenDashboard,
 } from "@/types";
 
 // Projects
@@ -52,6 +53,7 @@ export const updateSetting = (key: string, value: string) =>
 
 // Analytics
 export const getAnalytics = () => request<AnalyticsOverview>("/api/analytics/overview");
+export const getTokenDashboard = () => request<TokenDashboard>("/api/analytics/token-dashboard");
 
 // GitHub
 export const getGitHubRepos = (owner: string) =>

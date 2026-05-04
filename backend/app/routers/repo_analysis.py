@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Setting
+from app.models import Setting, TokenLog
 from app import github_service
+from app.token_tracker import log_tokens as _persist_tokens, get_usage_summary
 from github import GithubException
 import json
 import os
@@ -17,18 +18,15 @@ import time
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
-# ---------------------------------------------------------------------------
-# Token counter (in-memory for simplicity; persisted to DB setting on write)
-# ---------------------------------------------------------------------------
-_token_log: list[dict] = []
-
 
 def _log_tokens(action: str, tokens: int):
-    _token_log.append({"action": action, "tokens": tokens, "ts": time.time()})
-
-
-def _get_total_tokens() -> int:
-    return sum(e["tokens"] for e in _token_log)
+    """Log token usage to the database."""
+    _persist_tokens(
+        action=action,
+        feature="repo_analysis" if "analysis" in action else "blueprint" if "blueprint" in action else "doc_gen",
+        model="github-api",
+        total_tokens=tokens,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +428,15 @@ def generate_focused_blueprint(req: FocusedBlueprintRequest):
 
 
 @router.get("/tokens", response_model=TokenUsage)
-def get_token_usage():
-    """Get token usage log."""
-    return TokenUsage(total_tokens=_get_total_tokens(), log=_token_log)
+def get_token_usage(db: Session = Depends(get_db)):
+    """Get token usage log from the database."""
+    logs = db.query(TokenLog).order_by(TokenLog.created_at.desc()).limit(100).all()
+    total = sum(l.total_tokens for l in logs)
+    log_entries = [
+        {"action": l.action, "tokens": l.total_tokens, "ts": l.created_at.timestamp() if l.created_at else 0}
+        for l in logs
+    ]
+    return TokenUsage(total_tokens=total, log=log_entries)
 
 
 @router.post("/api-key", response_model=ApiKeyStatus)

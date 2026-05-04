@@ -57,10 +57,27 @@ Navigate to **Settings** and click **Configure** on the GitHub API Key card. Ent
 
 The Dashboard is the home screen showing:
 
-- **Project cards** — all registered projects with status, repo count, and team info
-- **Metrics** — total projects, active stages, connected repos, team members
-- **Activity feed** — recent project activity and stage transitions
-- **Quick links** — navigate to any project or create a new one
+- **Metric cards** — Total Projects, Active Projects, Avg Token Savings, Risk Alerts
+- **Token Usage Control** — real-time panel showing total API calls, total tokens consumed, estimated cost (USD), with expandable breakdown by feature and model, plus recent activity log
+- **Stage Distribution** — bar chart showing project counts per delivery stage
+- **Project cards** — all registered projects with status, completion bar, repo count, and team info
+
+### Token Usage Control Panel
+
+The dashboard includes a dedicated token control widget:
+
+| Metric | Description |
+|--------|-------------|
+| Total API Calls | Number of LLM and GitHub API calls made |
+| Total Tokens | Prompt + completion tokens consumed |
+| Estimated Cost | USD cost based on model pricing (GPT-4o-mini rates) |
+
+Click **"Details"** to expand:
+- **Usage by Feature** — breakdown by ask_mode, plan_mode, blueprint, doc_gen, repo_analysis
+- **Usage by Model** — breakdown by gpt-4o-mini, github-api, etc.
+- **Recent Activity** — table of last 10 operations with action, feature, model, tokens, cost, and timestamp
+
+All token data is persisted to the database (`token_logs` table) for full audit trail.
 
 ### Actions
 
@@ -68,6 +85,7 @@ The Dashboard is the home screen showing:
 |--------|-----|
 | View a project | Click any project card |
 | Create a new project | Click "New Project" button |
+| View token details | Click "Details" on Token Usage Control panel |
 | Navigate to stages | Use the sidebar workflow stages |
 
 ---
@@ -281,25 +299,36 @@ Navigate to **Settings** in the sidebar.
 **Creating a token:**
 Go to GitHub Settings > Developer settings > Personal access tokens > Generate new token. Select the `repo` scope (read access).
 
+### OpenAI API Key
+
+1. Click **Configure** on the OpenAI API Key card
+2. Enter your OpenAI API key (starts with `sk-`)
+3. Click **Save**
+4. Required for: Ask Mode, Plan Mode, Blueprint Enhancement
+
 ### Token Usage Log
 
 1. Click **View Log** on the Token Usage card
-2. See total tokens consumed and a log of each action (repo analysis, blueprint generation, doc generation)
+2. See total tokens consumed and a log of each action with timestamps
 3. Each entry shows action name, token count, and timestamp
+4. All data is persisted in the database for audit purposes
 
 ### Feature Toggles
 
 Toggle features on/off:
-- Auto-sync repos
-- PR notifications
-- CI monitoring
-- Code review reminders
+- Automated Code Review
+- Token Usage Tracking
+- Deployment Gate Enforcement
+- Risk Alert Notifications
+- Auto-Generate Plan from Requirements
+- Session Context Memory
 
 ### Configuration Options
 
-- Default branch naming convention
-- PR review workflow
-- Notification channel
+- Default Starting Stage (Ask Mode / Plan Mode / Build Phase)
+- Minimum Review Severity (Critical / High / Medium / Low / Info)
+- Deployment Approval Mode (Anyone / Tech Lead / Tech Lead + PM / VP Engineering)
+- Monthly Token Budget Alert (50% / 70% / 80% / 90% / No alert)
 
 ---
 

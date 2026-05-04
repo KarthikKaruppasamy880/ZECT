@@ -4,8 +4,15 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models import Project, Repo
 from app.schemas import AnalyticsOverview
+from app.token_tracker import get_usage_summary
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+
+@router.get("/token-dashboard")
+def token_dashboard(db: Session = Depends(get_db)):
+    """Aggregated token usage for the dashboard control panel."""
+    return get_usage_summary(db)
 
 
 @router.get("/overview", response_model=AnalyticsOverview)

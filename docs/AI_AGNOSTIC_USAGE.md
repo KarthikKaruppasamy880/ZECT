@@ -153,16 +153,29 @@ Each section can be copied individually or all at once.
 
 ## API Key Requirements
 
-| Feature | GitHub Token Required? | Other API Keys? |
-|---------|----------------------|-----------------|
-| Repo Analysis | Recommended (increases rate limit) | None |
-| Blueprint Generator (Standard) | Recommended | None |
-| Blueprint Generator (Focused) | Recommended | None |
-| Documentation Generator | Recommended | None |
+| Feature | GitHub Token Required? | OpenAI Key Required? |
+|---------|----------------------|---------------------|
+| Repo Analysis | Recommended (increases rate limit) | No |
+| Blueprint Generator (Standard) | Recommended | No |
+| Blueprint Generator (Focused) | Recommended | No |
+| Blueprint Enhancement (AI) | Recommended | **Yes** |
+| Documentation Generator | Recommended | No |
+| Ask Mode | No | **Yes** |
+| Plan Mode | No | **Yes** |
 
-**No AI API keys needed.** ZECT generates prompts locally — the AI processing happens in whatever tool you paste the prompt into.
+**Blueprint generation is AI-agnostic** — ZECT generates prompts locally from GitHub data. The AI processing happens in whatever tool you paste the prompt into.
+
+**AI-powered features** (Ask Mode, Plan Mode, Blueprint Enhancement) require an OpenAI API key configured in Settings. These features use GPT-4o-mini.
 
 **GitHub Token:** Optional but recommended. Without it, you get 60 API requests/hour. With it, you get 5,000/hour. Configure in **Settings** → **GitHub API Key**.
+
+### Token Usage Tracking
+
+All token-consuming operations are tracked in the database with full audit trail:
+- Total API calls, tokens consumed, and estimated cost visible on the **Dashboard**
+- Breakdown by feature (Ask Mode, Plan Mode, Blueprint, Doc Gen, Repo Analysis)
+- Breakdown by model (gpt-4o-mini, github-api)
+- Recent activity log with per-operation details
 
 ---
 

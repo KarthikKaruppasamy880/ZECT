@@ -139,10 +139,11 @@ ZECT/
 │   ├── ASK_PLAN_DEVELOPMENT_WORKFLOW.md # 5-stage workflow guide
 │   ├── ARCHITECTURE_USAGE_GUIDE.md # Technical architecture guide
 │   ├── AI_AGNOSTIC_USAGE.md      # AI-agnostic usage guide (works with any AI tool)
-│   └── FEATURES_REFERENCE.md      # Granular feature reference (all endpoints)
+│   ├── FEATURES_REFERENCE.md      # Granular feature reference (all endpoints)
 │   ├── ENV_SETUP_GUIDE.md         # Step-by-step environment setup
 │   ├── ZECT_USAGE_GUIDE.md        # Feature-by-feature usage guide
 │   ├── ZEF_FOR_ZECT_GUIDE.md      # How ZEF supports ZECT
+│   ├── ZECT-repo-analysis-integration.md # Repo analysis integration notes
 │   └── PROJECT_STATUS_REPORT.md   # Project status and roadmap
 └── README.md
 ```
@@ -253,6 +254,7 @@ Backend:            All endpoints tested and passing
 | [Environment Setup Guide](docs/ENV_SETUP_GUIDE.md) | Step-by-step .env configuration with exact commands |
 | [ZECT Usage Guide](docs/ZECT_USAGE_GUIDE.md) | Screen-by-screen feature usage guide |
 | [ZEF for ZECT Guide](docs/ZEF_FOR_ZECT_GUIDE.md) | How ZEF supports ZECT development |
+| [Repo Analysis Integration](docs/ZECT-repo-analysis-integration.md) | Repo analysis integration notes |
 | [Project Status Report](docs/PROJECT_STATUS_REPORT.md) | Current status, roadmap, and quality metrics |
 
 ## ZEF Integration

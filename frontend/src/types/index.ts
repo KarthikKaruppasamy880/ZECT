@@ -131,6 +131,13 @@ export interface BlueprintResult {
   repos_analyzed: number;
 }
 
+export interface FocusedBlueprintResult {
+  prompt: string;
+  token_estimate: number;
+  focus_area: string;
+  repo_name: string;
+}
+
 export interface TokenLogEntry {
   action: string;
   tokens: number;

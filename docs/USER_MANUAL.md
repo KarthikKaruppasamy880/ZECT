@@ -149,27 +149,47 @@ Click any repo in the results to expand/collapse its details.
 
 Navigate to **Blueprint** in the sidebar.
 
-### How It Works
+The Blueprint Generator has two modes: **Standard** and **Focused**. Switch between them using the mode tabs.
 
-1. Add one or more repos (Owner + Repository)
-2. Click **Generate Blueprint**
-3. ZECT analyzes each repo (structure, README, dependencies, architecture)
-4. Synthesizes a single copy-paste prompt
-5. Click **Copy to Clipboard**
-6. Paste into any AI tool (Cursor, Claude Code, Codex, Windsurf, etc.)
+### Standard Mode
 
-### What the Blueprint Contains
+1. Select the **Standard** tab
+2. Add one or more repos (Owner + Repository)
+3. Click **Generate Blueprint**
+4. ZECT analyzes each repo (structure, README, dependencies, architecture)
+5. Synthesizes a single copy-paste prompt
+6. Click **Copy to Clipboard**
+7. Paste into any AI tool (Cursor, Claude Code, Codex, Windsurf, etc.)
+
+**What the Standard Blueprint Contains:**
 
 - Repository metadata and description
 - Architecture notes
 - Full dependency list
-- File structure (top 60 files)
+- File structure (top 80 files)
 - README excerpt
 - AI instructions for recreating the project
 
+### Focused Mode
+
+1. Select the **Focused** tab
+2. Enter the repo Owner and Repository name
+3. Enter a **Focus Area** (e.g., `authentication`, `API layer`, `database schema`)
+4. Optionally enter a **Goal** (e.g., `understand and replicate`, `migrate to new framework`)
+5. Click **Generate Focused Blueprint**
+6. The prompt is scoped to files related to the focus area
+7. Click **Copy to Clipboard**
+
+**What the Focused Blueprint Contains:**
+
+- Files relevant to the focus area (highlighted first)
+- Full file tree for context
+- Architecture notes
+- Goal-specific instructions for the AI tool
+
 ### Token Estimate
 
-The blueprint shows an estimated token count so you can gauge if it fits within your AI tool's context window.
+Both modes show an estimated token count so you can gauge if the prompt fits within your AI tool's context window.
 
 ---
 

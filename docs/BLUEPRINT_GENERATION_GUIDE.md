@@ -17,6 +17,15 @@ GitHub Repo(s) → ZECT Analysis → Structured Prompt → Copy to Clipboard →
 3. You copy it to your clipboard with one click
 4. Paste into any AI tool to start vibe-coding
 
+## Two Modes
+
+| Mode | Use Case | Scope |
+|------|----------|-------|
+| **Standard** | Full project recreation or understanding | Entire repo(s) |
+| **Focused** | Specific feature or layer analysis | Single repo, scoped to a focus area |
+
+Both modes are available from the Blueprint page via tabs.
+
 ## Prerequisites
 
 1. ZECT backend running (`poetry run uvicorn app.main:app --port 8000`)
@@ -29,7 +38,11 @@ GitHub Repo(s) → ZECT Analysis → Structured Prompt → Copy to Clipboard →
 
 Click **Blueprint** in the sidebar, or go to `/blueprint`.
 
-### Step 2: Add Repositories
+### Step 2: Choose a Mode
+
+Select **Standard** or **Focused** from the mode tabs at the top.
+
+### Step 3 (Standard): Add Repositories
 
 Enter the Owner and Repository name. For multi-repo blueprints, click **Add Another Repo**.
 
@@ -46,11 +59,22 @@ Enter the Owner and Repository name. For multi-repo blueprints, click **Add Anot
 | KarthikKaruppasamy880 | ZECT |
 | KarthikKaruppasamy880 | ZEF |
 
-### Step 3: Click Generate Blueprint
+### Step 4 (Standard): Click Generate Blueprint
 
 ZECT analyzes each repo and builds the prompt. This takes a few seconds per repo.
 
-### Step 4: Review the Blueprint
+### Step 3 (Focused): Enter Focus Details
+
+| Field | Required | Example |
+|-------|----------|--------|
+| Owner | Yes | `KarthikKaruppasamy880` |
+| Repository | Yes | `ZECT` |
+| Focus Area | Yes | `authentication`, `API layer`, `database` |
+| Goal | No | `understand and replicate` (default) |
+
+Click **Generate Focused Blueprint**.
+
+### Step 5: Review the Blueprint
 
 The generated blueprint includes:
 
@@ -64,11 +88,11 @@ The generated blueprint includes:
 | README excerpt | First 3,000 characters |
 | AI instructions | Step-by-step instructions for the AI tool |
 
-### Step 5: Copy to Clipboard
+### Step 6: Copy to Clipboard
 
 Click **Copy to Clipboard**. The button turns green with "Copied!" confirmation.
 
-### Step 6: Paste into Your AI Tool
+### Step 7: Paste into Your AI Tool
 
 Open your preferred AI coding tool and paste the blueprint:
 
@@ -77,7 +101,7 @@ Open your preferred AI coding tool and paste the blueprint:
 - **Codex** — Use as a system prompt or paste into the context
 - **Windsurf** — Paste into the AI assistant chat
 
-### Step 7: Start Vibe-Coding
+### Step 8: Start Vibe-Coding
 
 The AI tool now has full context about your project's structure, dependencies, and conventions. Ask it to:
 
@@ -86,7 +110,9 @@ The AI tool now has full context about your project's structure, dependencies, a
 - Refactor or upgrade specific components
 - Write tests matching the project's testing framework
 
-## API Endpoint
+## API Endpoints
+
+### Standard Mode
 
 ```
 POST /api/analysis/blueprint
@@ -99,13 +125,38 @@ Content-Type: application/json
 }
 ```
 
-### Response
+Response:
 
 ```json
 {
-  "prompt": "# Project Blueprint — AI-Ready Prompt\n\nUse this prompt in Cursor, Claude Code...",
+  "prompt": "I want to build a project like...",
   "token_estimate": 4500,
   "repos_analyzed": 1
+}
+```
+
+### Focused Mode
+
+```
+POST /api/analysis/blueprint/focused
+Content-Type: application/json
+
+{
+  "owner": "KarthikKaruppasamy880",
+  "repo": "ZECT",
+  "focus_area": "authentication",
+  "goal": "understand and replicate"
+}
+```
+
+Response:
+
+```json
+{
+  "prompt": "I want to understand and replicate the authentication part of...",
+  "token_estimate": 2100,
+  "focus_area": "authentication",
+  "repo_name": "KarthikKaruppasamy880/ZECT"
 }
 ```
 
@@ -124,7 +175,8 @@ A typical single-repo blueprint is 2,000-10,000 tokens.
 
 ## Tips
 
-- For very large repos, the file tree is capped at 60 items in the blueprint
+- For very large repos, the file tree is capped at 80 items in the blueprint
+- Use Focused mode to scope analysis to a specific feature — ideal for large repos
 - Multi-repo blueprints are larger — check the token estimate before pasting
 - Add your own instructions after pasting the blueprint for best results
 - The blueprint is AI-tool-agnostic — works with any tool that accepts text input

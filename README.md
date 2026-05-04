@@ -12,7 +12,7 @@ ZECT connects to the GitHub API to show real repository data, pull request diffs
 - **PR Diff Viewer** — View code changes with unified diff display, line numbers, additions/deletions, and file-level summaries
 - **Multi-Repo Orchestration** — Monitor all repositories across projects with real-time GitHub data
 - **Repo Analysis** — Analyze any GitHub repo's structure, dependencies, and architecture
-- **Blueprint Generation** — Synthesize a repo into a single AI-ready prompt for vibe-coding with any AI tool
+- **Blueprint Generation (Standard + Focused)** — Synthesize a repo into a single AI-ready prompt for vibe-coding with any AI tool. Focused mode scopes to a specific feature or layer
 - **Granular Documentation Generation** — Generate 6 section types (overview, architecture, API, setup, testing, deployment)
 - **API Key Configuration** — Runtime GitHub token management with rate limit tracking and token usage counter
 - **Project Management** — CRUD projects linked to GitHub repositories with 5-stage delivery pipeline tracking
@@ -138,6 +138,8 @@ ZECT/
 │   ├── BLUEPRINT_GENERATION_GUIDE.md # AI prompt generation guide
 │   ├── ASK_PLAN_DEVELOPMENT_WORKFLOW.md # 5-stage workflow guide
 │   ├── ARCHITECTURE_USAGE_GUIDE.md # Technical architecture guide
+│   ├── AI_AGNOSTIC_USAGE.md      # AI-agnostic usage guide (works with any AI tool)
+│   └── FEATURES_REFERENCE.md      # Granular feature reference (all endpoints)
 │   ├── ENV_SETUP_GUIDE.md         # Step-by-step environment setup
 │   ├── ZECT_USAGE_GUIDE.md        # Feature-by-feature usage guide
 │   ├── ZEF_FOR_ZECT_GUIDE.md      # How ZEF supports ZECT
@@ -175,7 +177,8 @@ ZECT/
 |--------|----------|-------------|
 | POST | `/api/analysis/repo` | Analyze single repo (structure, deps, architecture) |
 | POST | `/api/analysis/multi-repo` | Analyze multiple repos at once |
-| POST | `/api/analysis/blueprint` | Generate AI-ready vibe-coding prompt |
+| POST | `/api/analysis/blueprint` | Generate AI-ready vibe-coding prompt (standard mode) |
+| POST | `/api/analysis/blueprint/focused` | Generate focused prompt scoped to a feature/layer |
 | POST | `/api/analysis/docs/generate` | Generate granular documentation (6 section types) |
 | GET | `/api/analysis/tokens` | Get token usage log |
 | POST | `/api/analysis/api-key` | Configure GitHub API key at runtime |
@@ -219,7 +222,7 @@ ZECT/
 | Settings | `/settings` | Feature toggles, API key config modal, token counter |
 | Orchestration | `/orchestration` | Multi-repo dashboard with GitHub data |
 | Repo Analysis | `/repo-analysis` | Single + multi-repo GitHub analysis |
-| Blueprint Generator | `/blueprint` | AI-ready prompt generation from repo |
+| Blueprint Generator | `/blueprint` | AI-ready prompt generation (Standard + Focused modes) |
 | Doc Generator | `/doc-generator` | Granular documentation generation (6 sections) |
 | Ask Mode | `/ask` | AI-powered Q&A chat (OpenAI) |
 | Plan Mode | `/plan` | AI-powered project planning |
@@ -245,6 +248,8 @@ Backend:            All endpoints tested and passing
 | [Blueprint Generation Guide](docs/BLUEPRINT_GENERATION_GUIDE.md) | How to generate AI-ready vibe-coding prompts |
 | [Ask/Plan/Development Workflow](docs/ASK_PLAN_DEVELOPMENT_WORKFLOW.md) | 5-stage engineering delivery workflow |
 | [Architecture & Usage Guide](docs/ARCHITECTURE_USAGE_GUIDE.md) | Technical architecture and usage patterns |
+| [AI-Agnostic Usage Guide](docs/AI_AGNOSTIC_USAGE.md) | How to use ZECT with any AI tool (Cursor, Claude Code, Codex, etc.) |
+| [Features Reference](docs/FEATURES_REFERENCE.md) | Granular reference for every feature, endpoint, and data type |
 | [Environment Setup Guide](docs/ENV_SETUP_GUIDE.md) | Step-by-step .env configuration with exact commands |
 | [ZECT Usage Guide](docs/ZECT_USAGE_GUIDE.md) | Screen-by-screen feature usage guide |
 | [ZEF for ZECT Guide](docs/ZEF_FOR_ZECT_GUIDE.md) | How ZEF supports ZECT development |

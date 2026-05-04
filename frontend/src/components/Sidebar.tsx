@@ -14,6 +14,7 @@ import {
   Microscope,
   Sparkles,
   BookOpen,
+  ShieldCheck,
   LogOut,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
   { href: "/blueprint", label: "Blueprint", icon: Sparkles },
   { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
+  { href: "/code-review", label: "Code Review", icon: ShieldCheck },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/docs", label: "Docs Center", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },

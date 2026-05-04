@@ -33,6 +33,7 @@ import type {
   EnhanceBlueprintResponse,
   LLMKeyStatus,
   TokenDashboard,
+  ReviewResponse,
 } from "@/types";
 
 // Projects
@@ -114,6 +115,18 @@ export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =
 export const configureLLMKey = (openai_api_key: string) =>
   request<LLMKeyStatus>("/api/llm/configure-key", { method: "POST", body: JSON.stringify({ openai_api_key }) });
 export const getLLMStatus = () => request<LLMKeyStatus>("/api/llm/status");
+
+// Code Review
+export const reviewPR = (owner: string, repo: string, pr_number: number) =>
+  request<ReviewResponse>("/api/review/pr", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, pr_number }),
+  });
+export const reviewSnippet = (code: string, language?: string) =>
+  request<ReviewResponse>("/api/review/snippet", {
+    method: "POST",
+    body: JSON.stringify({ code, ...(language ? { language } : {}) }),
+  });
 
 // Auth
 export const login = (username: string, password: string) =>

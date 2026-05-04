@@ -222,6 +222,32 @@ export interface TokenDashboard {
   recent: TokenDashboardEntry[];
 }
 
+// Code Review
+export interface ReviewFinding {
+  severity: string;
+  category: string;
+  title: string;
+  description: string;
+  file: string | null;
+  line: number | null;
+  suggestion: string | null;
+  code_snippet: string | null;
+}
+
+export interface ReviewResponse {
+  summary: string;
+  quality_score: number;
+  total_issues: number;
+  categories: Record<string, number>;
+  findings: ReviewFinding[];
+  strengths: string[];
+  recommendations: string[];
+  tokens_used: number;
+  model: string;
+  pr_number?: number;
+  repo?: string;
+}
+
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";
 
 export const STAGES: { key: Stage; label: string }[] = [

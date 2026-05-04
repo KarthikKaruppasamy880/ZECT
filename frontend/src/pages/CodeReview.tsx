@@ -20,6 +20,9 @@ import {
   ClipboardList,
   ThumbsUp,
   Lightbulb,
+  Copy,
+  Wand2,
+  Check,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -164,6 +167,8 @@ export default function CodeReview() {
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
 
   const runReview = async () => {
     setError(null);
@@ -205,6 +210,67 @@ export default function CodeReview() {
         return acc;
       }, {})
     : {};
+
+  const generateFixPrompt = (r: ReviewResponse): string => {
+    const lines: string[] = [];
+    lines.push("# ZECT Code Review — Fix Prompt");
+    lines.push("");
+    if (r.repo) lines.push(`**Repository:** ${r.repo}`);
+    if (r.pr_number) lines.push(`**PR:** #${r.pr_number}`);
+    lines.push(`**Quality Score:** ${r.quality_score}/100`);
+    lines.push(`**Total Issues:** ${r.total_issues}`);
+    lines.push("");
+    lines.push("## Instructions");
+    lines.push("Fix ALL of the following issues identified by the ZECT Code Review Engine.");
+    lines.push("For each issue, apply the suggested fix. Do not introduce new issues.");
+    lines.push("After fixing, run lint and type checks to ensure 0 errors.");
+    lines.push("");
+
+    // Group findings by severity
+    const bySeverity: Record<string, ReviewFinding[]> = {};
+    for (const f of r.findings) {
+      (bySeverity[f.severity] ||= []).push(f);
+    }
+
+    const severityOrder = ["critical", "high", "medium", "low", "info"];
+    for (const sev of severityOrder) {
+      const items = bySeverity[sev];
+      if (!items || items.length === 0) continue;
+      lines.push(`## ${sev.toUpperCase()} (${items.length} issue${items.length > 1 ? "s" : ""})`);
+      lines.push("");
+      for (const f of items) {
+        lines.push(`### ${f.title}`);
+        lines.push(`- **Category:** ${CATEGORY_LABELS[f.category] || f.category}`);
+        if (f.file) lines.push(`- **File:** ${f.file}${f.line != null ? `:${f.line}` : ""}`);
+        lines.push(`- **Problem:** ${f.description}`);
+        if (f.suggestion) lines.push(`- **Fix:** ${f.suggestion}`);
+        if (f.code_snippet) {
+          lines.push("- **Code:**");
+          lines.push("```");
+          lines.push(f.code_snippet);
+          lines.push("```");
+        }
+        lines.push("");
+      }
+    }
+
+    if (r.recommendations.length > 0) {
+      lines.push("## Additional Recommendations");
+      for (const rec of r.recommendations) {
+        lines.push(`- ${rec}`);
+      }
+      lines.push("");
+    }
+
+    lines.push("## Completion Criteria");
+    lines.push("1. All issues above are resolved");
+    lines.push("2. No new issues introduced");
+    lines.push("3. Lint passes with 0 errors");
+    lines.push("4. TypeScript compiles with 0 errors");
+    lines.push("5. All existing tests pass");
+
+    return lines.join("\n");
+  };
 
   return (
     <div className="max-w-6xl">
@@ -440,6 +506,49 @@ export default function CodeReview() {
               </div>
             )}
           </div>
+
+          {/* Generate Fix Prompt */}
+          {review.findings.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                  <Wand2 className="h-4 w-4 text-purple-600" />
+                  Agent Fix Prompt
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowPrompt(!showPrompt)}
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    {showPrompt ? "Hide Prompt" : "Show Prompt"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const prompt = generateFixPrompt(review);
+                      navigator.clipboard.writeText(prompt);
+                      setPromptCopied(true);
+                      setTimeout(() => setPromptCopied(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 transition-colors"
+                  >
+                    {promptCopied ? (
+                      <><Check className="h-4 w-4" /> Copied!</>
+                    ) : (
+                      <><Copy className="h-4 w-4" /> Copy Fix Prompt for Agent</>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mb-3">
+                Copy this structured prompt and send it to any AI agent (Devin, Cursor, etc.) to automatically fix all issues found in this review.
+              </p>
+              {showPrompt && (
+                <div className="rounded-lg bg-slate-900 p-4 overflow-x-auto max-h-96 overflow-y-auto">
+                  <pre className="text-xs text-slate-200 font-mono whitespace-pre-wrap">{generateFixPrompt(review)}</pre>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Strengths & Recommendations */}
           <div className="grid grid-cols-2 gap-6">

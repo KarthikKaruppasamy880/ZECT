@@ -165,8 +165,14 @@ export const deployRunbook = (project_name: string, tech_stack?: string, infrast
   });
 
 // Skills
-export const getSkills = (category?: string) =>
-  request<any[]>(`/api/skills${category ? `?category=${category}` : ""}`);
+export const getSkills = (category?: string, repoId?: number, scope?: string) => {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (repoId) params.set("repo_id", String(repoId));
+  if (scope) params.set("scope", scope);
+  const qs = params.toString();
+  return request<any[]>(`/api/skills${qs ? `?${qs}` : ""}`);
+};
 export const createSkill = (data: any) =>
   request<any>("/api/skills", { method: "POST", body: JSON.stringify(data) });
 export const updateSkill = (id: number, data: any) =>
@@ -178,6 +184,11 @@ export const detectSkillPatterns = (code: string, context?: string) =>
     method: "POST",
     body: JSON.stringify({ code, ...(context ? { context } : {}) }),
   });
+
+// Repos (for skill scoping)
+export const getRepos = () => request<any[]>("/api/projects").then((projects: any[]) =>
+  projects.flatMap((p: any) => (p.repos || []).map((r: any) => ({ ...r, project_name: p.name })))
+);
 
 // Token Controls
 export const getTokenUsageFull = () => request<any>("/api/tokens/usage");

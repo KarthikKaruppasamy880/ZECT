@@ -108,7 +108,7 @@ class Setting(Base):
 
 
 class Skill(Base):
-    """Reusable skill templates for AI agents."""
+    """Reusable skill templates for AI agents — can be global or scoped to a repo."""
     __tablename__ = "skills"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -119,8 +119,12 @@ class Skill(Base):
     trigger_pattern = Column(String, nullable=True)  # Regex or keyword that triggers this skill
     tags = Column(String, default="[]")  # JSON array of tags
     usage_count = Column(Integer, default=0)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)  # null = global skill
+    scope = Column(String, default="global")  # global, repo
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    repo = relationship("Repo", backref="skills")
 
 
 class TokenBudget(Base):

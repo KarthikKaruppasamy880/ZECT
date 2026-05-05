@@ -181,10 +181,24 @@ export const detectSkillPatterns = (code: string, context?: string) =>
 
 // Token Controls
 export const getTokenUsageFull = () => request<any>("/api/tokens/usage");
-export const getTokenBudget = () => request<any>("/api/tokens/budget");
-export const updateTokenBudget = (config: any) =>
-  request<any>("/api/tokens/budget", { method: "PUT", body: JSON.stringify(config) });
-export const getModelBreakdown = () => request<any[]>("/api/tokens/models");
+export const getTokenBudget = (userId?: number) =>
+  request<any>(`/api/tokens/budget${userId ? `?user_id=${userId}` : ""}`);
+export const updateTokenBudget = (config: any, userId?: number) =>
+  request<any>(`/api/tokens/budget${userId ? `?user_id=${userId}` : ""}`, { method: "PUT", body: JSON.stringify(config) });
+export const getModelBreakdown = (userId?: number) =>
+  request<any[]>(`/api/tokens/models${userId ? `?user_id=${userId}` : ""}`);
+export const getUsersActivity = () => request<any[]>("/api/tokens/users");
+export const getUserActivityDetail = (userId: number) => request<any>(`/api/tokens/users/${userId}`);
+export const getTeamUsage = () => request<any[]>("/api/tokens/teams");
+export const getUsageTrends = (days?: number, userId?: number) => {
+  const params = new URLSearchParams();
+  if (days) params.set("days", String(days));
+  if (userId) params.set("user_id", String(userId));
+  const qs = params.toString();
+  return request<any[]>(`/api/tokens/trends${qs ? `?${qs}` : ""}`);
+};
+export const checkTokenLimit = (userId?: number) =>
+  request<any>(`/api/tokens/check-limit${userId ? `?user_id=${userId}` : ""}`);
 
 // Auth
 export const login = (username: string, password: string) =>

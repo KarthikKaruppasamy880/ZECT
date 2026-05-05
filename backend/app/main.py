@@ -9,7 +9,7 @@ from app.models import Project, Repo
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
 
-app = FastAPI(title="ZECT API", version="1.0.0")
+app = FastAPI(title="ZECT API", version="1.0.0", redirect_slashes=False)
 
 # Disable CORS. Do not remove this for full-stack development.
 app.add_middleware(

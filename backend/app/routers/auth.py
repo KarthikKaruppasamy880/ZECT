@@ -2,6 +2,9 @@
 
 import os
 import secrets
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -10,16 +13,15 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # In-memory session tokens
 _active_tokens: set[str] = set()
 
-VALID_USERNAME = os.getenv("ZECT_USERNAME", "")
-VALID_PASSWORD = os.getenv("ZECT_PASSWORD", "")
+# backend/.env (same file main.py loads)
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
-if not VALID_USERNAME or not VALID_PASSWORD:
-    import warnings
-    warnings.warn(
-        "ZECT_USERNAME and ZECT_PASSWORD environment variables are not set. "
-        "Login will be disabled until they are configured.",
-        stacklevel=2,
-    )
+
+def _auth_creds() -> tuple[str, str]:
+    """Reload .env each time so password edits apply without restart; then read os.environ."""
+    if _ENV_FILE.is_file():
+        load_dotenv(_ENV_FILE, override=True)
+    return os.getenv("ZECT_USERNAME", "").strip(), os.getenv("ZECT_PASSWORD", "")
 
 
 class LoginRequest(BaseModel):
@@ -32,12 +34,25 @@ class LoginResponse(BaseModel):
     username: str
 
 
+def _safe_compare(a: str, b: str) -> bool:
+    """Constant-time compare for UTF-8 strings (length mismatch => no match)."""
+    ae, be = a.encode("utf-8"), b.encode("utf-8")
+    if len(ae) != len(be):
+        return False
+    return secrets.compare_digest(ae, be)
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(req: LoginRequest):
-    if not VALID_USERNAME or not VALID_PASSWORD:
-        raise HTTPException(status_code=503, detail="Authentication not configured. Set ZECT_USERNAME and ZECT_PASSWORD environment variables.")
-    username_ok = secrets.compare_digest(req.username, VALID_USERNAME)
-    password_ok = secrets.compare_digest(req.password, VALID_PASSWORD)
+    valid_user, valid_pass = _auth_creds()
+    if not valid_user or not valid_pass:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication not configured. Set ZECT_USERNAME and ZECT_PASSWORD environment variables.",
+        )
+    # Email/username: case-insensitive so zinnia.com matches Zinnia.Com from .env
+    username_ok = _safe_compare(req.username.strip().lower(), valid_user.lower())
+    password_ok = _safe_compare(req.password, valid_pass)
     if username_ok and password_ok:
         token = secrets.token_urlsafe(32)
         _active_tokens.add(token)
@@ -54,5 +69,6 @@ def logout(token: str = ""):
 @router.get("/verify")
 def verify(token: str = ""):
     if token in _active_tokens:
-        return {"valid": True, "username": VALID_USERNAME}
+        u, _ = _auth_creds()
+        return {"valid": True, "username": u or ""}
     raise HTTPException(status_code=401, detail="Invalid or expired token")

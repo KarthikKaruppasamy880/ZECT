@@ -35,24 +35,24 @@ def log_tokens(
     if total_tokens == 0:
         total_tokens = prompt_tokens + completion_tokens
     cost = _estimate_cost(model, prompt_tokens, completion_tokens)
+    db = SessionLocal()
     try:
-        db = SessionLocal()
-        try:
-            entry = TokenLog(
-                action=action,
-                feature=feature,
-                model=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                estimated_cost_usd=cost,
-            )
-            db.add(entry)
-            db.commit()
-        finally:
-            db.close()
-    except Exception as e:
-        print(f"[ZECT TOKEN TRACKER] Failed to log tokens: {e}")
+        entry = TokenLog(
+            action=action,
+            feature=feature,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost_usd=cost,
+        )
+        db.add(entry)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        print(f"[ZECT TOKEN TRACKER] Failed to log tokens ({action}/{feature}): {exc}")
+    finally:
+        db.close()
 
 
 def get_usage_summary(db: Session) -> dict:

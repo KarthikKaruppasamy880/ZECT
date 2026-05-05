@@ -18,8 +18,10 @@ export default function Login({ onLogin }: LoginProps) {
     try {
       const res = await login(username, password);
       onLogin(res.token);
-    } catch {
-      setError("Invalid credentials. Please try again.");
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Invalid credentials. Please try again.";
+      setError(msg || "Invalid credentials. Please try again.");
     } finally {
       setLoading(false);
     }

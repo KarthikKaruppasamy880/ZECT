@@ -12,7 +12,20 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 @router.get("/token-dashboard")
 def token_dashboard(db: Session = Depends(get_db)):
     """Aggregated token usage for the dashboard control panel."""
-    return get_usage_summary(db)
+    try:
+        return get_usage_summary(db)
+    except Exception:
+        # Return empty data if table doesn't exist or query fails
+        return {
+            "total_calls": 0,
+            "total_tokens": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_cost_usd": 0,
+            "by_feature": {},
+            "by_model": {},
+            "recent": [],
+        }
 
 
 @router.get("/overview", response_model=AnalyticsOverview)

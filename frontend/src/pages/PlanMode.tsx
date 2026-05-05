@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { generatePlan } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
@@ -14,7 +14,7 @@ import {
   FileText,
   FolderGit2,
   FileCode,
-  Paperclip,
+  Upload,
 } from "lucide-react";
 
 interface AttachedFile {
@@ -42,6 +42,7 @@ export default function PlanMode() {
   const [newFileName, setNewFileName] = useState("");
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -52,6 +53,23 @@ export default function PlanMode() {
     setNewFileName("");
     setNewFileContent("");
     setShowAddPanel(false);
+  };
+
+  const handleBrowseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const content = ev.target?.result as string;
+        setAttachedFiles((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${file.name}`, name: file.name, type: "file", content },
+        ]);
+      };
+      reader.readAsText(file);
+    });
+    e.target.value = "";
   };
 
   const handleRemoveFile = (id: string) => {
@@ -147,6 +165,28 @@ export default function PlanMode() {
         {/* Add File Panel */}
         {showAddPanel && (
           <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+            {/* Browse files from system */}
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleBrowseFiles}
+                className="hidden"
+                accept="*/*"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg font-medium hover:bg-indigo-700 transition"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Browse Files from System
+              </button>
+              <span className="text-[11px] text-slate-500">Select files from your local machine</span>
+            </div>
+
+            {/* Manual entry */}
+            <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Or add manually:</p>
             <div className="flex gap-2">
               {(["file", "repo", "snippet"] as const).map((type) => (
                 <button

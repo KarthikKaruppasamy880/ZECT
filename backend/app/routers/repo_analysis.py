@@ -106,6 +106,11 @@ def _analyze_repo(owner: str, repo: str) -> RepoAnalysisResult:
                 detail="GitHub API rate limit exceeded. Configure a GitHub Personal Access Token in Settings to increase the limit.",
             )
         raise HTTPException(status_code=e.status, detail=str(e.data))
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to connect to GitHub API: {str(e)}. Check your network connection and try again.",
+        )
 
     # Fetch top-level tree (limit depth to 2 for speed)
     tree_items: list[str] = []

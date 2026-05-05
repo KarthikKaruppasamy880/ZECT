@@ -20,13 +20,16 @@ router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
 
 def _log_tokens(action: str, tokens: int):
-    """Log token usage via token_tracker (fail-safe at persistence layer)."""
-    _persist_tokens(
-        action=action,
-        feature="repo_analysis" if "analysis" in action else "blueprint" if "blueprint" in action else "doc_gen",
-        model="github-api",
-        total_tokens=tokens,
-    )
+    """Log token usage to the database (fail-safe — never crashes the request)."""
+    try:
+        _persist_tokens(
+            action=action,
+            feature="repo_analysis" if "analysis" in action else "blueprint" if "blueprint" in action else "doc_gen",
+            model="github-api",
+            total_tokens=tokens,
+        )
+    except Exception as e:
+        print(f"[ZECT] Token logging failed (non-fatal): {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -614,8 +617,8 @@ def _generate_doc_section(key: str, analysis: RepoAnalysisResult) -> tuple[str, 
 @router.get("/api-key/status", response_model=ApiKeyStatus)
 def get_api_key_status():
     """Check current GitHub API key status."""
-    gh = github_service.get_github()
     try:
+        gh = github_service.get_github()
         rate = gh.get_rate_limit().core
         token = os.getenv("GITHUB_TOKEN", "")
         return ApiKeyStatus(
@@ -624,7 +627,7 @@ def get_api_key_status():
             rate_limit_remaining=rate.remaining,
             rate_limit_total=rate.limit,
         )
-    except GithubException:
+    except Exception:
         return ApiKeyStatus(
             configured=False,
             scopes=[],

@@ -40,6 +40,8 @@ class SkillCreate(BaseModel):
     template: str  # The actual skill content/template
     trigger_pattern: str | None = None  # Regex or keyword pattern that triggers this skill
     tags: list[str] = []
+    repo_id: int | None = None  # null = global skill, set to scope to a repo
+    scope: str = "global"  # global, repo
 
 
 class SkillUpdate(BaseModel):
@@ -49,6 +51,8 @@ class SkillUpdate(BaseModel):
     template: str | None = None
     trigger_pattern: str | None = None
     tags: list[str] | None = None
+    repo_id: int | None = None
+    scope: str | None = None
 
 
 class SkillResponse(BaseModel):
@@ -60,6 +64,9 @@ class SkillResponse(BaseModel):
     trigger_pattern: str | None
     tags: list[str]
     usage_count: int
+    repo_id: int | None
+    scope: str
+    repo_name: str | None = None
     created_at: str
     updated_at: str
 
@@ -80,30 +87,44 @@ class DetectSkillResponse(BaseModel):
 # CRUD Endpoints
 # ---------------------------------------------------------------------------
 
+def _skill_to_response(s: Skill) -> SkillResponse:
+    """Convert a Skill ORM object to a SkillResponse."""
+    repo_name = None
+    if s.repo:
+        repo_name = f"{s.repo.owner}/{s.repo.repo_name}"
+    return SkillResponse(
+        id=s.id,
+        name=s.name,
+        description=s.description,
+        category=s.category,
+        template=s.template,
+        trigger_pattern=s.trigger_pattern,
+        tags=json.loads(s.tags) if s.tags else [],
+        usage_count=s.usage_count,
+        repo_id=s.repo_id,
+        scope=s.scope or "global",
+        repo_name=repo_name,
+        created_at=s.created_at.isoformat() if s.created_at else "",
+        updated_at=s.updated_at.isoformat() if s.updated_at else "",
+    )
+
+
+@router.get("", response_model=list[SkillResponse])
 @router.get("/", response_model=list[SkillResponse])
-def list_skills(category: str | None = None, db: Session = Depends(get_db)):
-    """List all skills, optionally filtered by category."""
+def list_skills(category: str | None = None, repo_id: int | None = None, scope: str | None = None, db: Session = Depends(get_db)):
+    """List all skills, optionally filtered by category, repo_id, or scope."""
     query = db.query(Skill)
     if category:
         query = query.filter(Skill.category == category)
+    if repo_id is not None:
+        query = query.filter(Skill.repo_id == repo_id)
+    if scope:
+        query = query.filter(Skill.scope == scope)
     skills = query.order_by(Skill.usage_count.desc()).all()
-    return [
-        SkillResponse(
-            id=s.id,
-            name=s.name,
-            description=s.description,
-            category=s.category,
-            template=s.template,
-            trigger_pattern=s.trigger_pattern,
-            tags=json.loads(s.tags) if s.tags else [],
-            usage_count=s.usage_count,
-            created_at=s.created_at.isoformat() if s.created_at else "",
-            updated_at=s.updated_at.isoformat() if s.updated_at else "",
-        )
-        for s in skills
-    ]
+    return [_skill_to_response(s) for s in skills]
 
 
+@router.post("", response_model=SkillResponse)
 @router.post("/", response_model=SkillResponse)
 def create_skill(req: SkillCreate, db: Session = Depends(get_db)):
     """Create a new skill."""
@@ -114,22 +135,13 @@ def create_skill(req: SkillCreate, db: Session = Depends(get_db)):
         template=req.template,
         trigger_pattern=req.trigger_pattern,
         tags=json.dumps(req.tags),
+        repo_id=req.repo_id,
+        scope=req.scope if req.repo_id else "global",
     )
     db.add(skill)
     db.commit()
     db.refresh(skill)
-    return SkillResponse(
-        id=skill.id,
-        name=skill.name,
-        description=skill.description,
-        category=skill.category,
-        template=skill.template,
-        trigger_pattern=skill.trigger_pattern,
-        tags=json.loads(skill.tags) if skill.tags else [],
-        usage_count=skill.usage_count,
-        created_at=skill.created_at.isoformat() if skill.created_at else "",
-        updated_at=skill.updated_at.isoformat() if skill.updated_at else "",
-    )
+    return _skill_to_response(skill)
 
 
 @router.get("/{skill_id}", response_model=SkillResponse)
@@ -138,18 +150,7 @@ def get_skill(skill_id: int, db: Session = Depends(get_db)):
     skill = db.query(Skill).filter(Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    return SkillResponse(
-        id=skill.id,
-        name=skill.name,
-        description=skill.description,
-        category=skill.category,
-        template=skill.template,
-        trigger_pattern=skill.trigger_pattern,
-        tags=json.loads(skill.tags) if skill.tags else [],
-        usage_count=skill.usage_count,
-        created_at=skill.created_at.isoformat() if skill.created_at else "",
-        updated_at=skill.updated_at.isoformat() if skill.updated_at else "",
-    )
+    return _skill_to_response(skill)
 
 
 @router.put("/{skill_id}", response_model=SkillResponse)
@@ -170,21 +171,17 @@ def update_skill(skill_id: int, req: SkillUpdate, db: Session = Depends(get_db))
         skill.trigger_pattern = req.trigger_pattern
     if req.tags is not None:
         skill.tags = json.dumps(req.tags)
+    if req.repo_id is not None:
+        skill.repo_id = req.repo_id
+        skill.scope = "repo"
+    if req.scope is not None:
+        skill.scope = req.scope
+        if req.scope == "global":
+            skill.repo_id = None
     skill.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(skill)
-    return SkillResponse(
-        id=skill.id,
-        name=skill.name,
-        description=skill.description,
-        category=skill.category,
-        template=skill.template,
-        trigger_pattern=skill.trigger_pattern,
-        tags=json.loads(skill.tags) if skill.tags else [],
-        usage_count=skill.usage_count,
-        created_at=skill.created_at.isoformat() if skill.created_at else "",
-        updated_at=skill.updated_at.isoformat() if skill.updated_at else "",
-    )
+    return _skill_to_response(skill)
 
 
 @router.delete("/{skill_id}")

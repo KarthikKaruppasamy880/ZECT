@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { generatePlan } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
+import PromptHygieneTips from "@/components/PromptHygieneTips";
 import {
   ClipboardList,
   Loader2,
@@ -124,6 +125,9 @@ export default function PlanMode() {
           Generate a detailed, phased engineering plan for any project or feature.
         </p>
       </div>
+
+      {/* Prompt Hygiene Tips */}
+      <PromptHygieneTips mode="plan" />
 
       {/* Input */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">

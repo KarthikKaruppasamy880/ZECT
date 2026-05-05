@@ -1,11 +1,14 @@
 import { useState, useEffect } from "react";
-import { getSkills, createSkill, deleteSkill, detectSkillPatterns } from "@/lib/api";
+import { getSkills, createSkill, deleteSkill, detectSkillPatterns, getRepos } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
-import { BookOpen, Plus, Trash2, Search, Wand2, Loader2, Tag, Zap } from "lucide-react";
+import { BookOpen, Plus, Trash2, Search, Wand2, Loader2, Tag, Zap, Globe, FolderGit2, Filter } from "lucide-react";
 
 export default function SkillLibrary() {
   const [skills, setSkills] = useState<any[]>([]);
+  const [repos, setRepos] = useState<any[]>([]);
   const [category, setCategory] = useState("");
+  const [scopeFilter, setScopeFilter] = useState<"all" | "global" | "repo">("all");
+  const [repoFilter, setRepoFilter] = useState<number | undefined>(undefined);
   const [showCreate, setShowCreate] = useState(false);
   const [showDetect, setShowDetect] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,17 +22,33 @@ export default function SkillLibrary() {
   const [newCategory, setNewCategory] = useState("general");
   const [newTemplate, setNewTemplate] = useState("");
   const [newTags, setNewTags] = useState("");
+  const [newRepoId, setNewRepoId] = useState<number | undefined>(undefined);
+  const [newScope, setNewScope] = useState<"global" | "repo">("global");
 
   // Detect form
   const [detectCode, setDetectCode] = useState("");
 
   useEffect(() => {
     loadSkills();
-  }, [category]);
+  }, [category, scopeFilter, repoFilter]);
+
+  useEffect(() => {
+    loadRepos();
+  }, []);
+
+  const loadRepos = async () => {
+    try {
+      const res = await getRepos();
+      setRepos(res);
+    } catch {
+      setRepos([]);
+    }
+  };
 
   const loadSkills = async () => {
     try {
-      const res = await getSkills(category || undefined);
+      const scope = scopeFilter === "all" ? undefined : scopeFilter;
+      const res = await getSkills(category || undefined, repoFilter, scope);
       setSkills(res);
     } catch {
       setSkills([]);
@@ -47,9 +66,12 @@ export default function SkillLibrary() {
         category: newCategory,
         template: newTemplate,
         tags: newTags.split(",").map((t) => t.trim()).filter(Boolean),
+        repo_id: newScope === "repo" ? newRepoId : null,
+        scope: newScope,
       });
       setShowCreate(false);
       setNewName(""); setNewDesc(""); setNewTemplate(""); setNewTags("");
+      setNewRepoId(undefined); setNewScope("global");
       loadSkills();
     } catch (e: any) {
       setError(e.message);
@@ -94,7 +116,7 @@ export default function SkillLibrary() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Skill Library</h1>
-            <p className="text-slate-500">Reusable AI skill templates — save, browse, and auto-detect patterns</p>
+            <p className="text-slate-500">Reusable AI skill templates — global or scoped per-repo</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -113,23 +135,63 @@ export default function SkillLibrary() {
         </div>
       </div>
 
-      {/* Category Filter */}
-      <div className="flex gap-2 flex-wrap">
-        <button
-          onClick={() => setCategory("")}
-          className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${!category ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-        >
-          All
-        </button>
-        {categories.map((c) => (
+      {/* Filters Row */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Category Filter */}
+        <div className="flex gap-1.5 flex-wrap">
           <button
-            key={c}
-            onClick={() => setCategory(c)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition ${category === c ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+            onClick={() => setCategory("")}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${!category ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
           >
-            {c}
+            All
           </button>
-        ))}
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategory(c)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition ${category === c ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
+        {/* Scope Filter */}
+        <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3">
+          <Filter className="h-3.5 w-3.5 text-slate-400" />
+          <button
+            onClick={() => { setScopeFilter("all"); setRepoFilter(undefined); }}
+            className={`px-2.5 py-1 rounded text-xs font-medium transition ${scopeFilter === "all" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            All Scopes
+          </button>
+          <button
+            onClick={() => { setScopeFilter("global"); setRepoFilter(undefined); }}
+            className={`px-2.5 py-1 rounded text-xs font-medium transition flex items-center gap-1 ${scopeFilter === "global" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            <Globe className="h-3 w-3" /> Global
+          </button>
+          <button
+            onClick={() => setScopeFilter("repo")}
+            className={`px-2.5 py-1 rounded text-xs font-medium transition flex items-center gap-1 ${scopeFilter === "repo" ? "bg-green-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            <FolderGit2 className="h-3 w-3" /> Per-Repo
+          </button>
+        </div>
+
+        {/* Repo dropdown when filtering by repo */}
+        {scopeFilter === "repo" && repos.length > 0 && (
+          <select
+            value={repoFilter ?? ""}
+            onChange={(e) => setRepoFilter(e.target.value ? Number(e.target.value) : undefined)}
+            className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs"
+          >
+            <option value="">All Repos</option>
+            {repos.map((r: any) => (
+              <option key={r.id} value={r.id}>{r.owner}/{r.repo_name}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Auto-Detect Panel */}
@@ -176,17 +238,49 @@ export default function SkillLibrary() {
       {showCreate && (
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
           <h3 className="font-semibold text-slate-900">Create New Skill</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Skill Name *" className="p-2.5 border border-slate-300 rounded-lg text-sm" />
             <select value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className="p-2.5 border border-slate-300 rounded-lg text-sm">
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setNewScope("global")}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium border transition ${
+                  newScope === "global" ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-500 hover:border-blue-200"
+                }`}
+              >
+                <Globe className="h-3.5 w-3.5" /> Global
+              </button>
+              <button
+                onClick={() => setNewScope("repo")}
+                className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded-lg text-xs font-medium border transition ${
+                  newScope === "repo" ? "bg-green-50 border-green-300 text-green-700" : "border-slate-200 text-slate-500 hover:border-green-200"
+                }`}
+              >
+                <FolderGit2 className="h-3.5 w-3.5" /> Per-Repo
+              </button>
+            </div>
           </div>
+
+          {newScope === "repo" && (
+            <select
+              value={newRepoId ?? ""}
+              onChange={(e) => setNewRepoId(e.target.value ? Number(e.target.value) : undefined)}
+              className="w-full p-2.5 border border-slate-300 rounded-lg text-sm"
+            >
+              <option value="">Select a repo to scope this skill to...</option>
+              {repos.map((r: any) => (
+                <option key={r.id} value={r.id}>{r.owner}/{r.repo_name} ({r.project_name})</option>
+              ))}
+            </select>
+          )}
+
           <input type="text" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Description" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" />
           <textarea value={newTemplate} onChange={(e) => setNewTemplate(e.target.value)} placeholder="Skill Template / Content *" className="w-full h-32 p-3 border border-slate-300 rounded-lg text-sm font-mono" />
           <input type="text" value={newTags} onChange={(e) => setNewTags(e.target.value)} placeholder="Tags (comma separated)" className="w-full p-2.5 border border-slate-300 rounded-lg text-sm" />
           <div className="flex gap-2">
-            <button onClick={handleCreate} disabled={loading} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium">
+            <button onClick={handleCreate} disabled={loading || (newScope === "repo" && !newRepoId)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium">
               {loading ? "Saving..." : "Save Skill"}
             </button>
             <button onClick={() => setShowCreate(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm">Cancel</button>
@@ -215,8 +309,17 @@ export default function SkillLibrary() {
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-medium capitalize">{skill.category}</span>
+                {skill.scope === "global" ? (
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-medium flex items-center gap-0.5">
+                    <Globe className="h-2.5 w-2.5" /> Global
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-green-50 text-green-600 rounded text-[10px] font-medium flex items-center gap-0.5">
+                    <FolderGit2 className="h-2.5 w-2.5" /> {skill.repo_name || "Repo"}
+                  </span>
+                )}
                 <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
                   <Zap className="h-3 w-3" /> {skill.usage_count} uses
                 </span>

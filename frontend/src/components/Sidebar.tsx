@@ -22,6 +22,11 @@ import {
   X,
   Coins,
   Shield,
+  ScrollText,
+  Plug,
+  Scale,
+  Download,
+  History,
 } from "lucide-react";
 
 const navItems = [
@@ -45,6 +50,14 @@ const stageItems = [
   { href: "/deploy", label: "Deployment", icon: Rocket },
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/token-controls", label: "Token Controls", icon: Coins },
+];
+
+const enterpriseItems = [
+  { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
+  { href: "/rules", label: "Rules Engine", icon: Scale },
+  { href: "/integrations", label: "Integrations", icon: Plug },
+  { href: "/export", label: "Export/Share", icon: Download },
+  { href: "/output-history", label: "Output History", icon: History },
 ];
 
 interface SidebarProps {
@@ -138,6 +151,36 @@ export default function Sidebar({
         )}
         <ul className="space-y-0.5">
           {stageItems.map((item) => {
+            const Icon = item.icon;
+            const active = location.pathname === item.href;
+            return (
+              <li key={item.href}>
+                <Link
+                  to={item.href}
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
+                    active
+                      ? "bg-slate-800 text-white font-medium"
+                      : "hover:bg-slate-800/60 hover:text-white"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && <span>{item.label}</span>}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!collapsed ? (
+          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Enterprise
+          </p>
+        ) : (
+          <div className="my-4 border-t border-slate-700" />
+        )}
+        <ul className="space-y-0.5">
+          {enterpriseItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.href;
             return (

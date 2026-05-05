@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { buildGenerate } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
+import PromptHygieneTips from "@/components/PromptHygieneTips";
 import {
   Hammer,
   Play,
@@ -161,6 +162,9 @@ export default function BuildPhase() {
           </div>
         )}
       </div>
+
+      {/* Prompt Hygiene Tips */}
+      <PromptHygieneTips mode="build" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Panel — Input & Output */}

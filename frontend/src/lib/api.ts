@@ -211,6 +211,35 @@ export const getUsageTrends = (days?: number, userId?: number) => {
 export const checkTokenLimit = (userId?: number) =>
   request<any>(`/api/tokens/check-limit${userId ? `?user_id=${userId}` : ""}`);
 
+// App Runner
+export const runnerExecute = (command: string, cwd?: string, timeout?: number) =>
+  request<any>("/api/runner/execute", {
+    method: "POST",
+    body: JSON.stringify({ command, ...(cwd ? { cwd } : {}), ...(timeout ? { timeout } : {}) }),
+  });
+export const runnerStart = (command: string, cwd?: string, label?: string, env_vars?: Record<string, string>) =>
+  request<any>("/api/runner/start", {
+    method: "POST",
+    body: JSON.stringify({ command, ...(cwd ? { cwd } : {}), ...(label ? { label } : {}), ...(env_vars ? { env_vars } : {}) }),
+  });
+export const runnerStop = (processId: string) =>
+  request<any>(`/api/runner/stop/${processId}`, { method: "POST" });
+export const runnerProcesses = () => request<any[]>("/api/runner/processes");
+export const runnerOutput = (processId: string, offset?: number, limit?: number) => {
+  const params = new URLSearchParams();
+  if (offset !== undefined) params.set("offset", String(offset));
+  if (limit !== undefined) params.set("limit", String(limit));
+  const qs = params.toString();
+  return request<any>(`/api/runner/output/${processId}${qs ? `?${qs}` : ""}`);
+};
+export const runnerRemoveProcess = (processId: string) =>
+  request<any>(`/api/runner/processes/${processId}`, { method: "DELETE" });
+export const runnerConfigure = (repo_path: string, opts?: { env_vars?: Record<string, string>; startup_command?: string; install_command?: string; preview_port?: number }) =>
+  request<any>("/api/runner/configure", {
+    method: "POST",
+    body: JSON.stringify({ repo_path, ...opts }),
+  });
+
 // Auth
 export const login = (username: string, password: string) =>
   request<{ token: string; username: string }>("/api/auth/login", {

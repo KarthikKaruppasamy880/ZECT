@@ -27,6 +27,7 @@ import {
   Scale,
   Download,
   History,
+  MonitorPlay,
 } from "lucide-react";
 
 const navItems = [
@@ -50,6 +51,7 @@ const stageItems = [
   { href: "/deploy", label: "Deployment", icon: Rocket },
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/token-controls", label: "Token Controls", icon: Coins },
+  { href: "/app-runner", label: "App Runner", icon: MonitorPlay },
 ];
 
 const enterpriseItems = [

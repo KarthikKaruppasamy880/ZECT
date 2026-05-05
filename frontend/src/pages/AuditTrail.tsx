@@ -134,7 +134,7 @@ export default function AuditTrail() {
       </div>
 
       {/* Entries Table */}
-      <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
+      <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-x-auto">
         {loading ? (
           <div className="p-8 text-center text-slate-400">Loading audit trail...</div>
         ) : entries.length === 0 ? (

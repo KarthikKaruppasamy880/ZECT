@@ -26,25 +26,33 @@ def log_tokens(
     completion_tokens: int = 0,
     total_tokens: int = 0,
 ) -> None:
-    """Persist a token usage record to the database."""
+    """Persist a token usage record to the database.
+
+    This function is fail-safe: if the database write fails for any reason
+    (missing table, connection error, etc.), it logs the error to stdout
+    but does NOT raise — token tracking must never crash the main request.
+    """
     if total_tokens == 0:
         total_tokens = prompt_tokens + completion_tokens
     cost = _estimate_cost(model, prompt_tokens, completion_tokens)
-    db = SessionLocal()
     try:
-        entry = TokenLog(
-            action=action,
-            feature=feature,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            estimated_cost_usd=cost,
-        )
-        db.add(entry)
-        db.commit()
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            entry = TokenLog(
+                action=action,
+                feature=feature,
+                model=model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=cost,
+            )
+            db.add(entry)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[ZECT TOKEN TRACKER] Failed to log tokens: {e}")
 
 
 def get_usage_summary(db: Session) -> dict:

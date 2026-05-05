@@ -118,81 +118,101 @@ class TeamUsageSummary(BaseModel):
 @router.get("/usage", response_model=TokenUsageSummary)
 def get_token_usage(db: Session = Depends(get_db)):
     """Get full token usage summary with breakdowns."""
-    summary = get_usage_summary(db)
-    return TokenUsageSummary(**summary)
+    try:
+        summary = get_usage_summary(db)
+        return TokenUsageSummary(**summary)
+    except Exception as exc:
+        print(f"[ZECT TOKENS] Error getting usage: {exc}")
+        return TokenUsageSummary(
+            total_calls=0, total_tokens=0, total_prompt_tokens=0,
+            total_completion_tokens=0, total_cost_usd=0.0,
+            by_feature={}, by_model={}, recent=[],
+        )
 
 
 @router.get("/budget", response_model=BudgetStatus)
 def get_budget_status(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get current budget status including limits and alerts."""
-    # Get budget config (user-specific or global)
-    budget = None
-    if user_id:
-        budget = db.query(TokenBudget).filter(TokenBudget.user_id == user_id).first()
-    if not budget:
-        budget = db.query(TokenBudget).filter(TokenBudget.user_id == None).first()  # noqa: E711
-    if not budget:
-        budget = TokenBudget()
-        db.add(budget)
-        db.commit()
-        db.refresh(budget)
+    try:
+        # Get budget config (user-specific or global)
+        budget = None
+        if user_id:
+            budget = db.query(TokenBudget).filter(TokenBudget.user_id == user_id).first()
+        if not budget:
+            budget = db.query(TokenBudget).filter(TokenBudget.user_id == None).first()  # noqa: E711
+        if not budget:
+            budget = TokenBudget()
+            db.add(budget)
+            db.commit()
+            db.refresh(budget)
 
-    # Calculate daily usage
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_query = db.query(TokenLog).filter(TokenLog.created_at >= today_start)
-    if user_id:
-        daily_query = daily_query.filter(TokenLog.user_id == user_id)
-    daily_logs = daily_query.all()
-    daily_tokens = sum(log.total_tokens for log in daily_logs)
-    daily_cost = sum(log.estimated_cost_usd for log in daily_logs)
+        # Calculate daily usage
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        daily_query = db.query(TokenLog).filter(TokenLog.created_at >= today_start)
+        if user_id:
+            daily_query = daily_query.filter(TokenLog.user_id == user_id)
+        daily_logs = daily_query.all()
+        daily_tokens = sum(log.total_tokens for log in daily_logs)
+        daily_cost = sum(log.estimated_cost_usd for log in daily_logs)
 
-    # Calculate monthly usage
-    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    monthly_query = db.query(TokenLog).filter(TokenLog.created_at >= month_start)
-    if user_id:
-        monthly_query = monthly_query.filter(TokenLog.user_id == user_id)
-    monthly_logs = monthly_query.all()
-    monthly_tokens = sum(log.total_tokens for log in monthly_logs)
-    monthly_cost = sum(log.estimated_cost_usd for log in monthly_logs)
+        # Calculate monthly usage
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        monthly_query = db.query(TokenLog).filter(TokenLog.created_at >= month_start)
+        if user_id:
+            monthly_query = monthly_query.filter(TokenLog.user_id == user_id)
+        monthly_logs = monthly_query.all()
+        monthly_tokens = sum(log.total_tokens for log in monthly_logs)
+        monthly_cost = sum(log.estimated_cost_usd for log in monthly_logs)
 
-    # Check alerts
-    alert_triggered = False
-    alert_message = ""
+        # Check alerts
+        alert_triggered = False
+        alert_message = ""
 
-    if budget.daily_token_limit > 0:
-        pct = (daily_tokens / budget.daily_token_limit) * 100
-        if pct >= budget.alert_threshold_percent:
-            alert_triggered = True
-            alert_message = f"Daily token usage at {pct:.0f}% of limit"
+        if budget.daily_token_limit > 0:
+            pct = (daily_tokens / budget.daily_token_limit) * 100
+            if pct >= budget.alert_threshold_percent:
+                alert_triggered = True
+                alert_message = f"Daily token usage at {pct:.0f}% of limit"
 
-    if budget.monthly_token_limit > 0:
-        pct = (monthly_tokens / budget.monthly_token_limit) * 100
-        if pct >= budget.alert_threshold_percent:
-            alert_triggered = True
-            alert_message = f"Monthly token usage at {pct:.0f}% of limit"
+        if budget.monthly_token_limit > 0:
+            pct = (monthly_tokens / budget.monthly_token_limit) * 100
+            if pct >= budget.alert_threshold_percent:
+                alert_triggered = True
+                alert_message = f"Monthly token usage at {pct:.0f}% of limit"
 
-    if budget.monthly_cost_limit_usd > 0:
-        pct = (monthly_cost / budget.monthly_cost_limit_usd) * 100
-        if pct >= budget.alert_threshold_percent:
-            alert_triggered = True
-            alert_message = f"Monthly cost at {pct:.0f}% of budget (${monthly_cost:.4f}/${budget.monthly_cost_limit_usd:.2f})"
+        if budget.monthly_cost_limit_usd > 0:
+            pct = (monthly_cost / budget.monthly_cost_limit_usd) * 100
+            if pct >= budget.alert_threshold_percent:
+                alert_triggered = True
+                alert_message = f"Monthly cost at {pct:.0f}% of budget (${monthly_cost:.4f}/${budget.monthly_cost_limit_usd:.2f})"
 
-    allowed_models = budget.allowed_models.split(",") if budget.allowed_models else ["gpt-4o-mini"]
+        allowed_models = budget.allowed_models.split(",") if budget.allowed_models else ["gpt-4o-mini"]
 
-    return BudgetStatus(
-        daily_tokens_used=daily_tokens,
-        daily_tokens_limit=budget.daily_token_limit,
-        daily_cost_used=round(daily_cost, 6),
-        daily_cost_limit=budget.daily_cost_limit_usd,
-        monthly_tokens_used=monthly_tokens,
-        monthly_tokens_limit=budget.monthly_token_limit,
-        monthly_cost_used=round(monthly_cost, 6),
-        monthly_cost_limit=budget.monthly_cost_limit_usd,
-        alert_triggered=alert_triggered,
-        alert_message=alert_message,
-        preferred_model=budget.preferred_model or "gpt-4o-mini",
-        allowed_models=allowed_models,
-    )
+        return BudgetStatus(
+            daily_tokens_used=daily_tokens,
+            daily_tokens_limit=budget.daily_token_limit,
+            daily_cost_used=round(daily_cost, 6),
+            daily_cost_limit=budget.daily_cost_limit_usd,
+            monthly_tokens_used=monthly_tokens,
+            monthly_tokens_limit=budget.monthly_token_limit,
+            monthly_cost_used=round(monthly_cost, 6),
+            monthly_cost_limit=budget.monthly_cost_limit_usd,
+            alert_triggered=alert_triggered,
+            alert_message=alert_message,
+            preferred_model=budget.preferred_model or "gpt-4o-mini",
+            allowed_models=allowed_models,
+        )
+    except Exception as exc:
+        print(f"[ZECT TOKENS] Error getting budget: {exc}")
+        return BudgetStatus(
+            daily_tokens_used=0, daily_tokens_limit=0,
+            daily_cost_used=0.0, daily_cost_limit=0.0,
+            monthly_tokens_used=0, monthly_tokens_limit=0,
+            monthly_cost_used=0.0, monthly_cost_limit=0.0,
+            alert_triggered=False, alert_message="",
+            preferred_model="gpt-4o-mini",
+            allowed_models=["gpt-4o-mini"],
+        )
 
 
 @router.put("/budget")
@@ -225,31 +245,35 @@ def update_budget(config: BudgetConfig, user_id: Optional[int] = None, db: Sessi
 @router.get("/models", response_model=list[ModelUsageBreakdown])
 def get_model_breakdown(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get per-model usage breakdown for analytics."""
-    query = db.query(TokenLog)
-    if user_id:
-        query = query.filter(TokenLog.user_id == user_id)
-    logs = query.all()
-    total_tokens = sum(log.total_tokens for log in logs) or 1
+    try:
+        query = db.query(TokenLog)
+        if user_id:
+            query = query.filter(TokenLog.user_id == user_id)
+        logs = query.all()
+        total_tokens = sum(log.total_tokens for log in logs) or 1
 
-    models: dict[str, dict] = {}
-    for log in logs:
-        key = log.model or "unknown"
-        if key not in models:
-            models[key] = {"calls": 0, "tokens": 0, "cost": 0.0}
-        models[key]["calls"] += 1
-        models[key]["tokens"] += log.total_tokens
-        models[key]["cost"] += log.estimated_cost_usd
+        models: dict[str, dict] = {}
+        for log in logs:
+            key = log.model or "unknown"
+            if key not in models:
+                models[key] = {"calls": 0, "tokens": 0, "cost": 0.0}
+            models[key]["calls"] += 1
+            models[key]["tokens"] += log.total_tokens
+            models[key]["cost"] += log.estimated_cost_usd
 
-    return [
-        ModelUsageBreakdown(
-            model=name,
-            calls=data["calls"],
-            tokens=data["tokens"],
-            cost=round(data["cost"], 6),
-            percentage=round((data["tokens"] / total_tokens) * 100, 1),
-        )
-        for name, data in sorted(models.items(), key=lambda x: x[1]["tokens"], reverse=True)
-    ]
+        return [
+            ModelUsageBreakdown(
+                model=name,
+                calls=data["calls"],
+                tokens=data["tokens"],
+                cost=round(data["cost"], 6),
+                percentage=round((data["tokens"] / total_tokens) * 100, 1),
+            )
+            for name, data in sorted(models.items(), key=lambda x: x[1]["tokens"], reverse=True)
+        ]
+    except Exception as exc:
+        print(f"[ZECT TOKENS] Error getting model breakdown: {exc}")
+        return []
 
 
 # ---------------------------------------------------------------------------

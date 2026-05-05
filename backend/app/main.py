@@ -14,8 +14,10 @@ from app.database import init_db, SessionLocal
 from app.models import Project, Repo
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
+from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
+from app.middleware.rate_limiter import RateLimitMiddleware
 
-app = FastAPI(title="ZECT API", version="1.0.0", redirect_slashes=False)
+app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
 
 # Disable CORS. Do not remove this for full-stack development.
 app.add_middleware(
@@ -25,6 +27,9 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+# Rate limiting: 120 requests/minute per IP, burst of 20
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
 
 
 @app.exception_handler(Exception)
@@ -60,6 +65,16 @@ app.include_router(token_controls.router)
 app.include_router(model_selection.router)
 app.include_router(orchestration.router)
 app.include_router(context_management.router)
+
+# Enterprise routers
+app.include_router(audit_trail.router)
+app.include_router(ultrareview.router)
+app.include_router(jira_integration.router)
+app.include_router(slack_integration.router)
+app.include_router(rules_engine.router)
+app.include_router(export_share.router)
+app.include_router(user_sessions.router)
+app.include_router(generated_outputs.router)
 
 
 @app.get("/healthz")

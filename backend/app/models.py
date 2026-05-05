@@ -217,3 +217,185 @@ class GeneratedOutput(Base):
     # Relationships
     user = relationship("User", back_populates="generated_outputs")
     session = relationship("UserSession", back_populates="generated_outputs")
+
+
+# ---------------------------------------------------------------------------
+# Audit Trail
+# ---------------------------------------------------------------------------
+
+class AuditLog(Base):
+    """Full audit trail for all CRUD operations."""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String, nullable=False)  # create, update, delete, login, logout, export, review
+    resource_type = Column(String, nullable=False)  # project, repo, skill, setting, user, review, etc.
+    resource_id = Column(Integer, nullable=True)
+    resource_name = Column(String, default="")
+    details = Column(Text, default="")  # JSON with old/new values or extra context
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Code Review (Ultrareview-style)
+# ---------------------------------------------------------------------------
+
+class ReviewSession(Base):
+    """A code review session — can review a PR, branch diff, or standalone code."""
+    __tablename__ = "review_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)
+    review_type = Column(String, nullable=False)  # pr, branch, snippet, full_repo
+    pr_number = Column(Integer, nullable=True)
+    branch_name = Column(String, nullable=True)
+    base_branch = Column(String, nullable=True)
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    total_findings = Column(Integer, default=0)
+    critical_count = Column(Integer, default=0)
+    high_count = Column(Integer, default=0)
+    medium_count = Column(Integer, default=0)
+    low_count = Column(Integer, default=0)
+    info_count = Column(Integer, default=0)
+    overall_score = Column(Float, default=0.0)  # 0-100
+    review_summary = Column(Text, default="")
+    files_reviewed = Column(Integer, default=0)
+    lines_reviewed = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    duration_seconds = Column(Integer, default=0)
+    model_used = Column(String, default="gpt-4o-mini")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    findings = relationship("ReviewFinding", back_populates="review_session", cascade="all, delete-orphan")
+    repo = relationship("Repo", backref="review_sessions")
+
+
+class ReviewFinding(Base):
+    """Individual finding from a code review — bug, security issue, style, etc."""
+    __tablename__ = "review_findings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    review_session_id = Column(Integer, ForeignKey("review_sessions.id"), nullable=False, index=True)
+    category = Column(String, nullable=False)  # bug, security, performance, style, architecture, best_practice
+    severity = Column(String, nullable=False)  # critical, high, medium, low, info
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    file_path = Column(String, nullable=True)
+    line_start = Column(Integer, nullable=True)
+    line_end = Column(Integer, nullable=True)
+    code_snippet = Column(Text, nullable=True)
+    suggestion = Column(Text, nullable=True)  # recommended fix
+    fixed_code = Column(Text, nullable=True)  # auto-generated fix
+    cwe_id = Column(String, nullable=True)  # CWE ID for security findings
+    owasp_category = Column(String, nullable=True)  # OWASP category
+    is_verified = Column(Boolean, default=False)  # independently verified (ultrareview)
+    is_false_positive = Column(Boolean, default=False)  # user marked as false positive
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    review_session = relationship("ReviewSession", back_populates="findings")
+
+
+# ---------------------------------------------------------------------------
+# Jira Integration
+# ---------------------------------------------------------------------------
+
+class JiraConfig(Base):
+    """Jira integration configuration."""
+    __tablename__ = "jira_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    base_url = Column(String, nullable=False)  # https://yourcompany.atlassian.net
+    email = Column(String, nullable=False)
+    api_token_encrypted = Column(String, nullable=False)  # encrypted Jira API token
+    default_project_key = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class JiraTicketLink(Base):
+    """Link between ZECT entities and Jira tickets."""
+    __tablename__ = "jira_ticket_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jira_config_id = Column(Integer, ForeignKey("jira_configs.id"), nullable=False)
+    ticket_key = Column(String, nullable=False, index=True)  # e.g. PROJ-123
+    ticket_url = Column(String, nullable=False)
+    ticket_summary = Column(String, default="")
+    ticket_status = Column(String, default="")
+    ticket_type = Column(String, default="")  # story, bug, task, epic
+    resource_type = Column(String, nullable=False)  # project, review_session, generated_output
+    resource_id = Column(Integer, nullable=False)
+    synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Slack Integration
+# ---------------------------------------------------------------------------
+
+class SlackConfig(Base):
+    """Slack integration configuration."""
+    __tablename__ = "slack_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_name = Column(String, default="")
+    bot_token_encrypted = Column(String, nullable=False)
+    default_channel = Column(String, default="")  # e.g. #zect-notifications
+    notify_on_review = Column(Boolean, default=True)
+    notify_on_deploy = Column(Boolean, default=True)
+    notify_on_budget_alert = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# User-Created Rules
+# ---------------------------------------------------------------------------
+
+class Rule(Base):
+    """User-created rules for code review, quality gates, deployment, etc."""
+    __tablename__ = "rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)  # null = global rule
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    rule_type = Column(String, nullable=False)  # review, quality_gate, deploy, naming, security
+    condition = Column(Text, nullable=False)  # JSON rule condition or regex pattern
+    action = Column(String, default="warn")  # warn, block, auto_fix, notify
+    severity = Column(String, default="medium")  # critical, high, medium, low, info
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    repo = relationship("Repo", backref="rules")
+
+
+# ---------------------------------------------------------------------------
+# Export Jobs
+# ---------------------------------------------------------------------------
+
+class ExportJob(Base):
+    """Track export requests for PDF/Markdown generation."""
+    __tablename__ = "export_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    export_type = Column(String, nullable=False)  # pdf, markdown
+    content_type = Column(String, nullable=False)  # blueprint, plan, review, code, deploy_checklist
+    source_id = Column(Integer, nullable=True)  # ID of the source (generated_output, review_session, etc.)
+    title = Column(String, default="")
+    status = Column(String, default="pending")  # pending, processing, completed, failed
+    file_path = Column(String, nullable=True)  # path to generated file
+    file_size_bytes = Column(Integer, default=0)
+    error_message = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)

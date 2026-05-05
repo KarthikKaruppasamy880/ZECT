@@ -22,6 +22,11 @@ import ReviewPhase from "@/pages/ReviewPhase";
 import DeployPhase from "@/pages/DeployPhase";
 import SkillLibrary from "@/pages/SkillLibrary";
 import TokenControls from "@/pages/TokenControls";
+import AuditTrail from "@/pages/AuditTrail";
+import RulesEngine from "@/pages/RulesEngine";
+import Integrations from "@/pages/Integrations";
+import ExportShare from "@/pages/ExportShare";
+import OutputHistory from "@/pages/OutputHistory";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -94,6 +99,11 @@ export default function App() {
           <Route path="/deploy" element={<DeployPhase />} />
           <Route path="/skills" element={<SkillLibrary />} />
           <Route path="/token-controls" element={<TokenControls />} />
+          <Route path="/audit-trail" element={<AuditTrail />} />
+          <Route path="/rules" element={<RulesEngine />} />
+          <Route path="/integrations" element={<Integrations />} />
+          <Route path="/export" element={<ExportShare />} />
+          <Route path="/output-history" element={<OutputHistory />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

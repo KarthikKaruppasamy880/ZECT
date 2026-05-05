@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Scale, Plus, Trash2, Edit, Play, Shield } from "lucide-react";
+import { Scale, Plus, Trash2, Play, Shield } from "lucide-react";
 
 interface Rule {
   id: number;

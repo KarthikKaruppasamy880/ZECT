@@ -18,13 +18,11 @@ import {
   PieChart,
   Settings2,
   Users,
-  User,
   Activity,
   BarChart3,
   Clock,
   Shield,
   Filter,
-  ChevronDown,
   ChevronRight,
   Zap,
   DollarSign,
@@ -142,14 +140,14 @@ export default function TokenControls() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-emerald-100 rounded-xl">
-            <Coins className="h-6 w-6 text-emerald-600" />
+          <div className="p-2.5 sm:p-3 bg-emerald-100 rounded-xl">
+            <Coins className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-600" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Token Controls</h1>
-            <p className="text-slate-500">Per-user monitoring, budgets, and model spending analytics</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Token Controls</h1>
+            <p className="text-xs sm:text-sm text-slate-500">Per-user monitoring, budgets, and model spending analytics</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -166,22 +164,23 @@ export default function TokenControls() {
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+      {/* Tab Navigation — scrollable on mobile */}
+      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl overflow-x-auto scrollbar-hide">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all whitespace-nowrap ${
                 activeTab === tab.key
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              <Icon className="h-4 w-4" />
-              {tab.label}
+              <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
             </button>
           );
         })}

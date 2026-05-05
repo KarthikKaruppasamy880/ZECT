@@ -20,16 +20,13 @@ router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
 
 def _log_tokens(action: str, tokens: int):
-    """Log token usage to the database (fail-safe — never crashes the request)."""
-    try:
-        _persist_tokens(
-            action=action,
-            feature="repo_analysis" if "analysis" in action else "blueprint" if "blueprint" in action else "doc_gen",
-            model="github-api",
-            total_tokens=tokens,
-        )
-    except Exception as e:
-        print(f"[ZECT] Token logging failed (non-fatal): {e}")
+    """Log token usage via token_tracker (fail-safe at persistence layer)."""
+    _persist_tokens(
+        action=action,
+        feature="repo_analysis" if "analysis" in action else "blueprint" if "blueprint" in action else "doc_gen",
+        model="github-api",
+        total_tokens=tokens,
+    )
 
 
 # ---------------------------------------------------------------------------

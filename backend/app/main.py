@@ -1,10 +1,14 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import traceback
 
-load_dotenv()
+# Load backend/.env regardless of process cwd (fixes auth/env when uvicorn cwd differs).
+_backend_root = Path(__file__).resolve().parents[1]
+load_dotenv(_backend_root / ".env")
 
 from app.database import init_db, SessionLocal
 from app.models import Project, Repo

@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import { askQuestion } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
+import PromptHygieneTips from "@/components/PromptHygieneTips";
 import {
   MessageSquare,
   Send,
@@ -220,6 +221,9 @@ export default function AskMode() {
           </div>
         </div>
       )}
+
+      {/* Prompt Hygiene Tips */}
+      <PromptHygieneTips mode="ask" className="mb-3" />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-4 bg-gray-50 rounded-xl p-4 mb-4">

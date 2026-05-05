@@ -16,8 +16,11 @@ if config.config_file_name is not None:
 # Override sqlalchemy.url from environment variable
 database_url = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost:5432/zect_db",
+    "postgresql+psycopg://postgres:postgres@localhost:5432/zect_db",
 )
+# Ensure the psycopg (v3) driver prefix is present
+if database_url.startswith("postgresql://"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Import all models so Alembic can detect them for autogenerate

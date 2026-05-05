@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir poetry && \
 
 COPY . .
 
-# Run Alembic migrations then start server
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# Start server (init_db() on startup handles table creation and auto-migration)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 EXPOSE 8000

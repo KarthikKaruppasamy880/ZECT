@@ -80,6 +80,7 @@ class DetectSkillResponse(BaseModel):
 # CRUD Endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("", response_model=list[SkillResponse])
 @router.get("/", response_model=list[SkillResponse])
 def list_skills(category: str | None = None, db: Session = Depends(get_db)):
     """List all skills, optionally filtered by category."""
@@ -104,6 +105,7 @@ def list_skills(category: str | None = None, db: Session = Depends(get_db)):
     ]
 
 
+@router.post("", response_model=SkillResponse)
 @router.post("/", response_model=SkillResponse)
 def create_skill(req: SkillCreate, db: Session = Depends(get_db)):
     """Create a new skill."""

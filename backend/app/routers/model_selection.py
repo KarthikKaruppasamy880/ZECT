@@ -95,6 +95,7 @@ def _find_model(model_id: str) -> dict:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@router.get("", response_model=list[ModelInfo])
 @router.get("/", response_model=list[ModelInfo])
 def list_models():
     """List all available models with their pricing and capabilities."""

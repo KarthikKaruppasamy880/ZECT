@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { askQuestion } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
+import ModelSelector from "@/components/ModelSelector";
 import {
   MessageSquare,
   Send,
@@ -8,22 +9,55 @@ import {
   AlertCircle,
   Bot,
   User,
-  Zap,
+  Paperclip,
+  Plus,
+  X,
+  FileText,
+  FolderGit2,
+  FileCode,
 } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
   tokens?: number;
+  model?: string;
+}
+
+interface AttachedFile {
+  id: string;
+  name: string;
+  type: "file" | "repo" | "snippet";
+  content: string;
 }
 
 export default function AskMode() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [repoContext, setRepoContext] = useState("");
+  const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showContext, setShowContext] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [newFileName, setNewFileName] = useState("");
+  const [newFileContent, setNewFileContent] = useState("");
+  const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
+
+  const handleAddFile = () => {
+    if (!newFileName.trim() || !newFileContent.trim()) return;
+    setAttachedFiles((prev) => [
+      ...prev,
+      { id: Date.now().toString(), name: newFileName.trim(), type: newFileType, content: newFileContent.trim() },
+    ]);
+    setNewFileName("");
+    setNewFileContent("");
+    setShowAddPanel(false);
+  };
+
+  const handleRemoveFile = (id: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  };
 
   const handleSend = async () => {
     const question = input.trim();
@@ -35,10 +69,15 @@ export default function AskMode() {
     setError(null);
 
     try {
-      const res = await askQuestion(question, repoContext || undefined);
+      // Build context from attached files
+      let context = repoContext || "";
+      if (attachedFiles.length > 0) {
+        context += "\n\nAttached files:\n" + attachedFiles.map((f) => `--- ${f.name} (${f.type}) ---\n${f.content}`).join("\n\n");
+      }
+      const res = await askQuestion(question, context || undefined);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: res.answer, tokens: res.tokens_used },
+        { role: "assistant", content: res.answer, tokens: res.tokens_used, model: res.model || selectedModel },
       ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to get response.";
@@ -58,35 +97,85 @@ export default function AskMode() {
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       {/* Header */}
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <MessageSquare size={24} className="text-blue-600" />
-          Ask Mode
-        </h1>
-        <p className="text-gray-500 mt-1">
-          Ask any engineering question — architecture, debugging, code review, best practices.
-          Powered by OpenAI GPT-4o-mini.
-        </p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <MessageSquare size={24} className="text-blue-600" />
+            Ask Mode
+          </h1>
+          <p className="text-gray-500 mt-1">
+            Ask any engineering question — architecture, debugging, code review, best practices.
+          </p>
+        </div>
+        <ModelSelector value={selectedModel} onChange={setSelectedModel} compact />
       </div>
 
-      {/* Repo Context Toggle */}
-      <div className="mb-3">
+      {/* Context Files Bar */}
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
         <button
-          onClick={() => setShowContext(!showContext)}
-          className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+          onClick={() => setShowAddPanel(!showAddPanel)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition"
         >
-          <Zap size={14} />
-          {showContext ? "Hide" : "Add"} repo context for smarter answers
+          <Plus size={12} />
+          Add files, repos, snippets
         </button>
-        {showContext && (
-          <textarea
-            value={repoContext}
-            onChange={(e) => setRepoContext(e.target.value)}
-            placeholder="Paste repo analysis output, README content, or architecture notes here to give the AI context about your project..."
-            className="mt-2 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 h-24 resize-none"
-          />
-        )}
+        {attachedFiles.map((file) => (
+          <div key={file.id} className="flex items-center gap-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs">
+            {file.type === "file" && <FileText className="h-3 w-3 text-blue-500" />}
+            {file.type === "repo" && <FolderGit2 className="h-3 w-3 text-green-500" />}
+            {file.type === "snippet" && <FileCode className="h-3 w-3 text-purple-500" />}
+            <span className="text-slate-700 max-w-[100px] truncate">{file.name}</span>
+            <button onClick={() => handleRemoveFile(file.id)} className="text-slate-400 hover:text-red-500">
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
       </div>
+
+      {/* Add File Panel */}
+      {showAddPanel && (
+        <div className="mb-3 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+          <div className="flex gap-2">
+            {(["file", "repo", "snippet"] as const).map((type) => (
+              <button
+                key={type}
+                onClick={() => setNewFileType(type)}
+                className={`px-3 py-1.5 text-xs rounded-lg font-medium transition flex items-center gap-1 ${
+                  newFileType === type
+                    ? "bg-blue-100 text-blue-700 border border-blue-300"
+                    : "bg-white text-slate-600 border border-slate-200 hover:border-blue-300"
+                }`}
+              >
+                {type === "file" && <FileText className="h-3 w-3" />}
+                {type === "repo" && <FolderGit2 className="h-3 w-3" />}
+                {type === "snippet" && <FileCode className="h-3 w-3" />}
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            placeholder={newFileType === "file" ? "File path (e.g., src/utils/auth.ts)" : newFileType === "repo" ? "Repo URL or owner/repo" : "Snippet name"}
+            className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500"
+          />
+          <textarea
+            value={newFileContent}
+            onChange={(e) => setNewFileContent(e.target.value)}
+            placeholder="Paste file content, code snippet, or repo description here..."
+            className="w-full h-24 p-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500 resize-none"
+          />
+          <div className="flex gap-2">
+            <button onClick={handleAddFile} disabled={!newFileName.trim() || !newFileContent.trim()} className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-lg font-medium hover:bg-blue-700 disabled:bg-slate-300 transition">
+              Add Context
+            </button>
+            <button onClick={() => setShowAddPanel(false)} className="px-3 py-1.5 bg-slate-200 text-slate-600 text-xs rounded-lg font-medium hover:bg-slate-300 transition">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto space-y-4 bg-gray-50 rounded-xl p-4 mb-4">
@@ -148,8 +237,10 @@ export default function AskMode() {
               ) : (
                 <pre className="text-sm whitespace-pre-wrap font-sans">{msg.content}</pre>
               )}
-              {msg.tokens && (
-                <p className="text-xs mt-2 opacity-60">{msg.tokens} tokens used</p>
+              {(msg.tokens || msg.model) && (
+                <p className="text-xs mt-2 opacity-60">
+                  {msg.tokens ? `${msg.tokens} tokens` : ""}{msg.model ? ` • ${msg.model}` : ""}
+                </p>
               )}
             </div>
             {msg.role === "user" && (

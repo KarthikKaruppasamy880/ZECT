@@ -21,6 +21,8 @@ import {
   ChevronRight,
   Menu,
   X,
+  Coins,
+  Shield,
 } from "lucide-react";
 
 const navItems = [
@@ -39,9 +41,11 @@ const navItems = [
 const stageItems = [
   { href: "/ask", label: "Ask Mode", icon: MessageSquare },
   { href: "/plan", label: "Plan Mode", icon: ClipboardList },
-  { href: "/stages/build", label: "Build Phase", icon: Hammer },
-  { href: "/stages/review", label: "Review", icon: Search },
-  { href: "/stages/deploy", label: "Deployment", icon: Rocket },
+  { href: "/build", label: "Build Phase", icon: Hammer },
+  { href: "/review", label: "Review Phase", icon: Shield },
+  { href: "/deploy", label: "Deployment", icon: Rocket },
+  { href: "/skills", label: "Skill Library", icon: BookOpen },
+  { href: "/token-controls", label: "Token Controls", icon: Coins },
 ];
 
 interface SidebarProps {
@@ -68,22 +72,32 @@ export default function Sidebar({
 
   const sidebarContent = (
     <>
-      {/* Header */}
-      <div className={`border-b border-slate-700 ${collapsed ? "px-2 py-4" : "px-4 py-5"}`}>
-        {collapsed ? (
-          <div className="flex flex-col items-center">
-            <span className="text-lg font-bold text-white">Z</span>
-          </div>
-        ) : (
-          <>
-            <p className="text-xs uppercase tracking-wider text-slate-500">Zinnia</p>
-            <h1 className="text-base font-bold text-white leading-tight">
-              Engineering Delivery
-              <br />
-              Control Tower
-            </h1>
-          </>
-        )}
+      {/* Header with collapse toggle */}
+      <div className={`border-b border-slate-700 ${collapsed ? "px-2 py-3" : "px-4 py-4"}`}>
+        <div className="flex items-center justify-between">
+          {collapsed ? (
+            <div className="flex flex-col items-center w-full">
+              <span className="text-lg font-bold text-white">Z</span>
+            </div>
+          ) : (
+            <div className="flex-1 min-w-0">
+              <p className="text-xs uppercase tracking-wider text-slate-500">Zinnia</p>
+              <h1 className="text-sm font-bold text-white leading-tight">
+                Engineering Delivery
+                <br />
+                Control Tower
+              </h1>
+            </div>
+          )}
+          {/* Collapse toggle button - always visible on desktop */}
+          <button
+            onClick={onToggle}
+            className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
+            title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
 
       {/* Nav */}
@@ -167,14 +181,14 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Collapse Toggle (desktop only) */}
+      {/* Collapse Toggle (desktop only) — secondary toggle at bottom */}
       <div className="hidden md:block border-t border-slate-700 p-2">
         <button
           onClick={onToggle}
-          className="w-full flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-xs"
           title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {collapsed ? <ChevronRight className="h-4 w-4" /> : <><ChevronLeft className="h-4 w-4" /><span>Collapse</span></>}
         </button>
       </div>
     </>
@@ -184,8 +198,8 @@ export default function Sidebar({
     <>
       {/* Mobile hamburger button */}
       <button
-        onClick={() => (mobileOpen ? onMobileClose() : onMobileClose() || onToggle())}
-        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-slate-900 text-white rounded-lg shadow-lg"
+        onClick={onToggle}
+        className="md:hidden fixed top-3 left-3 z-50 p-2.5 bg-slate-900 text-white rounded-xl shadow-lg border border-slate-700"
         aria-label="Toggle navigation"
       >
         {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}

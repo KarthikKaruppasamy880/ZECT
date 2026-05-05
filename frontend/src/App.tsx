@@ -17,6 +17,11 @@ import DocGenerator from "@/pages/DocGenerator";
 import AskMode from "@/pages/AskMode";
 import PlanMode from "@/pages/PlanMode";
 import CodeReview from "@/pages/CodeReview";
+import BuildPhase from "@/pages/BuildPhase";
+import ReviewPhase from "@/pages/ReviewPhase";
+import DeployPhase from "@/pages/DeployPhase";
+import SkillLibrary from "@/pages/SkillLibrary";
+import TokenControls from "@/pages/TokenControls";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -84,6 +89,11 @@ export default function App() {
           <Route path="/plan" element={<PlanMode />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/code-review" element={<CodeReview />} />
+          <Route path="/build" element={<BuildPhase />} />
+          <Route path="/review" element={<ReviewPhase />} />
+          <Route path="/deploy" element={<DeployPhase />} />
+          <Route path="/skills" element={<SkillLibrary />} />
+          <Route path="/token-controls" element={<TokenControls />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

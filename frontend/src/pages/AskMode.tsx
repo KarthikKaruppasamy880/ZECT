@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { askQuestion } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
@@ -9,12 +9,14 @@ import {
   AlertCircle,
   Bot,
   User,
-  Paperclip,
   Plus,
   X,
   FileText,
   FolderGit2,
   FileCode,
+  Upload,
+  Copy,
+  Check,
 } from "lucide-react";
 
 interface Message {
@@ -34,15 +36,17 @@ interface AttachedFile {
 export default function AskMode() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [repoContext, setRepoContext] = useState("");
+  const [repoContext] = useState("");
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [newFileName, setNewFileName] = useState("");
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -53,6 +57,24 @@ export default function AskMode() {
     setNewFileName("");
     setNewFileContent("");
     setShowAddPanel(false);
+  };
+
+  const handleBrowseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const content = ev.target?.result as string;
+        setAttachedFiles((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${file.name}`, name: file.name, type: "file", content },
+        ]);
+      };
+      reader.readAsText(file);
+    });
+    // Reset input so the same file can be selected again
+    e.target.value = "";
   };
 
   const handleRemoveFile = (id: string) => {
@@ -135,6 +157,28 @@ export default function AskMode() {
       {/* Add File Panel */}
       {showAddPanel && (
         <div className="mb-3 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+          {/* Browse files from system */}
+          <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleBrowseFiles}
+              className="hidden"
+              accept="*/*"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-xs rounded-lg font-medium hover:bg-blue-700 transition"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Browse Files from System
+            </button>
+            <span className="text-[11px] text-slate-500">Select files from your local machine</span>
+          </div>
+
+          {/* Manual entry */}
+          <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Or add manually:</p>
           <div className="flex gap-2">
             {(["file", "repo", "snippet"] as const).map((type) => (
               <button
@@ -222,21 +266,37 @@ export default function AskMode() {
                   : "bg-white border border-gray-200 text-gray-800"
               }`}
             >
-              {msg.role === "assistant" ? (
-                <div className="space-y-3">
-                  {msg.content.split(/(```[\s\S]*?```)/g).map((part, i) => {
-                    if (part.startsWith("```")) {
-                      const lines = part.slice(3, -3).split("\n");
-                      const lang = lines[0]?.trim() || "text";
-                      const code = lines.slice(1).join("\n");
-                      return <CodeOutput key={i} code={code} language={lang} title={lang} maxHeight="300px" />;
-                    }
-                    return part ? <pre key={i} className="text-sm whitespace-pre-wrap font-sans">{part}</pre> : null;
-                  })}
-                </div>
-              ) : (
-                <pre className="text-sm whitespace-pre-wrap font-sans">{msg.content}</pre>
-              )}
+                {msg.role === "assistant" ? (
+                  <div className="space-y-3">
+                    {msg.content.split(/(```[\s\S]*?```)/g).map((part, i) => {
+                      if (part.startsWith("```")) {
+                        const lines = part.slice(3, -3).split("\n");
+                        const lang = lines[0]?.trim() || "text";
+                        const code = lines.slice(1).join("\n");
+                        return <CodeOutput key={i} code={code} language={lang} title={lang} maxHeight="300px" />;
+                      }
+                      return part ? <pre key={i} className="text-sm whitespace-pre-wrap font-sans">{part}</pre> : null;
+                    })}
+                    {/* Copy full response button */}
+                    <button
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(msg.content);
+                        setCopiedMsgIdx(idx);
+                        setTimeout(() => setCopiedMsgIdx(null), 2000);
+                      }}
+                      className={`mt-2 flex items-center gap-1 text-xs px-2 py-1 rounded transition ${
+                        copiedMsgIdx === idx
+                          ? "text-green-600 bg-green-50"
+                          : "text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                      }`}
+                    >
+                      {copiedMsgIdx === idx ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      {copiedMsgIdx === idx ? "Copied!" : "Copy full response"}
+                    </button>
+                  </div>
+                ) : (
+                  <pre className="text-sm whitespace-pre-wrap font-sans">{msg.content}</pre>
+                )}
               {(msg.tokens || msg.model) && (
                 <p className="text-xs mt-2 opacity-60">
                   {msg.tokens ? `${msg.tokens} tokens` : ""}{msg.model ? ` • ${msg.model}` : ""}

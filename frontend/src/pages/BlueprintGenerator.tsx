@@ -148,8 +148,17 @@ export default function BlueprintGenerator() {
                 <input
                   type="text"
                   value={r.owner}
-                  onChange={(e) => updateRepo(idx, "owner", e.target.value)}
-                  placeholder="e.g. KarthikKaruppasamy880"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const parsed = parseGitHubInput(val);
+                    if (parsed && parsed.owner && parsed.repo && parsed.repo !== val) {
+                      updateRepo(idx, "owner", parsed.owner);
+                      updateRepo(idx, "repo", parsed.repo);
+                    } else {
+                      updateRepo(idx, "owner", val);
+                    }
+                  }}
+                  placeholder="e.g. KarthikKaruppasamy880 or paste URL"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 />
               </div>
@@ -219,8 +228,17 @@ export default function BlueprintGenerator() {
               <input
                 type="text"
                 value={focusOwner}
-                onChange={(e) => setFocusOwner(e.target.value)}
-                placeholder="e.g. KarthikKaruppasamy880"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const parsed = parseGitHubInput(val);
+                  if (parsed && parsed.owner && parsed.repo && parsed.repo !== val) {
+                    setFocusOwner(parsed.owner);
+                    setFocusRepo(parsed.repo);
+                  } else {
+                    setFocusOwner(val);
+                  }
+                }}
+                placeholder="e.g. KarthikKaruppasamy880 or paste URL"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
               />
             </div>

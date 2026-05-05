@@ -10,7 +10,6 @@ import {
   MessageSquare,
   ClipboardList,
   Hammer,
-  Search,
   Rocket,
   Microscope,
   Sparkles,

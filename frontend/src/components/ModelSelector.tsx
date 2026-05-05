@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { Cpu, Zap, Crown, Gift } from "lucide-react";
 
 interface ModelInfo {

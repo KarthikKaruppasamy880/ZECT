@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+import traceback
 
 load_dotenv()
 
@@ -9,7 +11,7 @@ from app.models import Project, Repo
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
 
-app = FastAPI(title="ZECT API", version="1.0.0")
+app = FastAPI(title="ZECT API", version="1.0.0", redirect_slashes=False)
 
 # Disable CORS. Do not remove this for full-stack development.
 app.add_middleware(
@@ -19,6 +21,24 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled exceptions and return JSON with CORS headers.
+    
+    Without this, unhandled 500 errors skip CORS middleware and the browser
+    blocks the response entirely, showing a misleading 'CORS error'.
+    """
+    tb = traceback.format_exc()
+    print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": str(exc),
+            "error_type": type(exc).__name__,
+        },
+    )
 
 app.include_router(projects.router)
 app.include_router(github.router)

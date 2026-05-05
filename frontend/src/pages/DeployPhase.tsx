@@ -149,7 +149,7 @@ export default function DeployPhase() {
                     {item.category}
                   </span>
                   <span className="flex-1 text-sm text-slate-700">{item.task}</span>
-                  {item.critical && <AlertCircle className="h-4 w-4 text-red-500" title="Critical" />}
+                  {item.critical && <AlertCircle className="h-4 w-4 text-red-500" />}
                   {item.automated && <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Auto</span>}
                 </div>
               ))}

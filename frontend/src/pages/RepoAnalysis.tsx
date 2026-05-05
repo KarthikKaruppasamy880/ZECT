@@ -113,8 +113,17 @@ export default function RepoAnalysis() {
               <input
                 type="text"
                 value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                placeholder="e.g. facebook"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const parsed = parseGitHubInput(val);
+                  if (parsed && parsed.owner && parsed.repo && parsed.repo !== val) {
+                    setOwner(parsed.owner);
+                    setRepo(parsed.repo);
+                  } else {
+                    setOwner(val);
+                  }
+                }}
+                placeholder="e.g. facebook or paste full URL"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -157,8 +166,17 @@ export default function RepoAnalysis() {
                   <input
                     type="text"
                     value={r.owner}
-                    onChange={(e) => updateMultiRepo(idx, "owner", e.target.value)}
-                    placeholder="e.g. facebook"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const parsed = parseGitHubInput(val);
+                      if (parsed && parsed.owner && parsed.repo && parsed.repo !== val) {
+                        updateMultiRepo(idx, "owner", parsed.owner);
+                        updateMultiRepo(idx, "repo", parsed.repo);
+                      } else {
+                        updateMultiRepo(idx, "owner", val);
+                      }
+                    }}
+                    placeholder="e.g. facebook or paste URL"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>

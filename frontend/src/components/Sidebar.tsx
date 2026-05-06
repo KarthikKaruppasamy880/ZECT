@@ -30,6 +30,12 @@ import {
   MonitorPlay,
   FolderOpen,
   Activity,
+  Brain,
+  Repeat,
+  ShieldAlert,
+  ArrowRightLeft,
+  Layers,
+  Wrench,
 } from "lucide-react";
 
 const navItems = [
@@ -57,6 +63,16 @@ const stageItems = [
   { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
   { href: "/git-ops", label: "Git Operations", icon: GitBranch },
   { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
+];
+
+const zintelItems = [
+  { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/dream-engine", label: "Dream Engine", icon: Sparkles },
+  { href: "/data-layer", label: "Data Layer", icon: Layers },
+  { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },
+  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
+  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
+  { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
 ];
 
 const enterpriseItems = [
@@ -158,6 +174,36 @@ export default function Sidebar({
         )}
         <ul className="space-y-0.5">
           {stageItems.map((item) => {
+            const Icon = item.icon;
+            const active = location.pathname === item.href;
+            return (
+              <li key={item.href}>
+                <Link
+                  to={item.href}
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
+                    active
+                      ? "bg-slate-800 text-white font-medium"
+                      : "hover:bg-slate-800/60 hover:text-white"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && <span>{item.label}</span>}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!collapsed ? (
+          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Zinnia Intelligence
+          </p>
+        ) : (
+          <div className="my-4 border-t border-slate-700" />
+        )}
+        <ul className="space-y-0.5">
+          {zintelItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.href;
             return (

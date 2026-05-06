@@ -683,7 +683,7 @@ export default function CodeReview() {
                 </div>
               </div>
               <p className="text-xs text-slate-500 mb-3">
-                Copy this structured prompt and send it to any AI agent (Devin, Cursor, etc.) to automatically fix all issues found in this review.
+                Copy this structured prompt and send it to any AI agent to automatically fix all issues found in this review.
               </p>
               {showPrompt && (
                 <div className="rounded-lg bg-slate-900 p-4 overflow-x-auto max-h-96 overflow-y-auto">

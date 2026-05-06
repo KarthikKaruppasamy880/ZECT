@@ -1,7 +1,7 @@
 """File Explorer API — read, write, list, and search files in local repos.
 
-Closes the "File System Access" gap vs Devin: ZECT can now read/write
-files directly on disk instead of only via the GitHub API.
+ZECT can read, write, list, and search files directly on the server
+filesystem for full local development support.
 """
 
 import os

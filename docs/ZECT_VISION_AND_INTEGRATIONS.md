@@ -3,7 +3,7 @@
 ## Table of Contents
 1. [Database: SQLite vs PostgreSQL](#1-database-sqlite-vs-postgresql)
 2. [Jira Integration](#2-jira-integration)
-3. [ZECT Vision — Building a Devin-like Engineering Platform](#3-zect-vision--building-a-devin-like-engineering-platform)
+3. [ZECT Vision — Building an Autonomous Engineering Platform](#3-zect-vision--building-an-autonomous-engineering-platform)
 
 ---
 
@@ -216,12 +216,12 @@ jira.add_comment(issue, "PR created: https://github.com/...")
 
 ---
 
-## 3. ZECT Vision — Building a Devin-like Engineering Platform
+## 3. ZECT Vision — Building an Autonomous Engineering Platform
 
-### What Devin Does (and What ZECT Needs)
+### Autonomous Engineering Capabilities
 
-| Devin Capability | ZECT Current State | What's Needed |
-|-----------------|-------------------|---------------|
+| Capability | ZECT Current State | What's Needed |
+|-----------|-------------------|---------------|
 | **Understands codebase** | Repo Analysis + Blueprint | Already built |
 | **Generates code from tasks** | Ask Mode (Q&A only) | Need: Code Generation engine |
 | **Creates PRs automatically** | PR Viewer (read-only) | Need: PR Creation from AI output |
@@ -232,7 +232,7 @@ jira.add_comment(issue, "PR created: https://github.com/...")
 | **Tracks progress** | Dashboard + Analytics | Already built |
 | **Integrates with Jira** | Not available | Planned (see above) |
 
-### ZECT's Path to Devin-like Functionality
+### ZECT's Path to Full Autonomous Functionality
 
 #### Phase 1: Code Generation Engine (Next Priority)
 **What it does:** Takes a task description (from Jira or manual input) and generates code.
@@ -343,7 +343,7 @@ Dashboard shows completion + token cost
 |----------|---------|--------|--------|
 | **P0** | PostgreSQL migration | 1 day | Production readiness |
 | **P0** | Code Review Engine | Done | Bug/vuln detection |
-| **P1** | Code Generation from tasks | 1-2 weeks | Core Devin-like feature |
+| **P1** | Code Generation from tasks | 1-2 weeks | Core autonomous feature |
 | **P1** | Jira integration (basic) | 1 week | Task automation |
 | **P2** | PR auto-creation from generated code | 3-5 days | Workflow automation |
 | **P2** | Generated code diff viewer | 3-5 days | User sees changes before commit |
@@ -371,4 +371,4 @@ Dashboard shows completion + token cost
 2. Feedback loop for iterating on generated code
 3. Full autonomous pipeline (Jira → Code → Review → PR → Merge → Done)
 
-The path from current ZECT to a Devin-like platform is clear and achievable in phases. Each phase adds standalone value while building toward the full vision.
+The path from current ZECT to a fully autonomous engineering platform is clear and achievable in phases. Each phase adds standalone value while building toward the full vision.

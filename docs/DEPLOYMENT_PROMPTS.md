@@ -1,6 +1,6 @@
 # ZECT — Deployment Prompts for AI Agents
 
-Ready-to-use prompts for Cursor, Devin, or any AI agent to deploy ZECT to various environments.
+Ready-to-use prompts for any AI agent to deploy ZECT to various environments.
 
 ---
 

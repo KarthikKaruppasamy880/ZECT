@@ -128,7 +128,7 @@ def review_snippet(req: ReviewSnippetRequest):
 
 
 # ---------------------------------------------------------------------------
-# Inline PR Review Endpoints (closes gap vs Devin)
+# Inline PR Review Endpoints
 # ---------------------------------------------------------------------------
 
 class PostCommentRequest(BaseModel):
@@ -152,8 +152,8 @@ class PostReviewRequest(BaseModel):
 def review_pr_and_post_comments(req: PostReviewRequest):
     """Review a PR and post findings as inline comments on GitHub.
 
-    This closes the gap vs Devin: ZECT now reviews actual PRs and posts
-    inline comments directly on GitHub, not just reviewing pasted snippets.
+    ZECT reviews actual PRs and posts inline comments directly on GitHub,
+    not just reviewing pasted snippets.
     """
     # First, run the review
     review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)

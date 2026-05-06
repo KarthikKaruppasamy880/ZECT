@@ -134,14 +134,14 @@ GITHUB_TOKEN=ghp_your-github-token-here
 
 ---
 
-## Using Cursor's API Key
+## Using an Existing OpenAI API Key
 
-If you have a Cursor subscription, you can use the same API key:
-1. Open Cursor → Settings → API Keys
-2. Copy your OpenAI key from there
+If you already have an OpenAI API key from another tool or subscription:
+1. Locate your existing OpenAI API key
+2. Copy the key
 3. Paste into `backend/.env` as `OPENAI_API_KEY`
 
-Note: Cursor uses OpenAI under the hood, so the same key works in ZECT.
+Note: Any valid OpenAI API key works in ZECT regardless of where it was originally created.
 
 ---
 

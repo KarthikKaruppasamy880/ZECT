@@ -1,7 +1,7 @@
 """Git Operations API — autonomous git add, commit, push, branch, status, PR creation.
 
-Closes the "Git Operations" gap vs Devin: ZECT can now perform git
-operations autonomously instead of only via the GitHub API.
+ZECT can perform git operations autonomously including staging, committing,
+pushing, branching, and creating pull requests.
 """
 
 import os

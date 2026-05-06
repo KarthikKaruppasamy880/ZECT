@@ -1,7 +1,7 @@
 """Auto-Fix API — detect errors, AI-fix, re-run loop.
 
-Closes the "Auto-Fix Issues" gap vs Devin: ZECT can now detect errors
-from command output, generate AI fixes, and re-run automatically.
+ZECT can detect errors from command output, generate AI fixes,
+and re-run automatically.
 """
 
 import os
@@ -202,7 +202,7 @@ def analyze_error(req: AnalyzeErrorRequest):
 def run_and_fix(req: AutoFixRequest):
     """Run a command, detect errors, auto-fix, and retry (up to max_retries).
 
-    This is the core auto-fix loop that mimics Devin's behavior:
+    This is the core auto-fix loop:
     1. Run the command
     2. If it fails, analyze the error with AI
     3. Apply the suggested fix

@@ -261,7 +261,7 @@ Each file shows:
 ### Configuration Options (Select Dropdowns)
 | Option | Choices | Default |
 |--------|---------|---------|
-| Branch naming convention | `feature/`, `fix/`, `dev/`, `devin/` | `feature/` |
+| Branch naming convention | `feature/`, `fix/`, `dev/`, `release/` | `feature/` |
 | PR review workflow | `required`, `optional`, `auto-merge` | `required` |
 | Notification channel | `in-app`, `email`, `slack`, `teams` | `in-app` |
 

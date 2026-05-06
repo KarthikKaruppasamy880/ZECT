@@ -1,6 +1,5 @@
 """App Runner — execute shell commands, manage long-running processes, and
-stream output so users can configure, run, and test repos directly inside ZECT
-(similar to Devin AI's embedded terminal/browser)."""
+stream output so users can configure, run, and test repos directly inside ZECT."""
 
 from __future__ import annotations
 

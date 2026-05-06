@@ -4,7 +4,7 @@
 
 ## Overview
 
-The Blueprint Generator is ZECT's flagship feature. It analyzes one or more GitHub repositories and synthesizes a single copy-paste prompt that you can paste into any AI coding tool (Cursor, Claude Code, Codex, Windsurf, etc.) to recreate or extend the project from scratch.
+The Blueprint Generator is ZECT's flagship feature. It analyzes one or more GitHub repositories and synthesizes a single copy-paste prompt that you can paste into any AI coding tool to recreate or extend the project from scratch.
 
 ## How It Works
 
@@ -96,10 +96,7 @@ Click **Copy to Clipboard**. The button turns green with "Copied!" confirmation.
 
 Open your preferred AI coding tool and paste the blueprint:
 
-- **Cursor** — Open a new chat, paste the blueprint, add your request
-- **Claude Code** — Start a new conversation, paste, then describe what you want to build
-- **Codex** — Use as a system prompt or paste into the context
-- **Windsurf** — Paste into the AI assistant chat
+Open your preferred AI coding tool and paste the blueprint into the AI chat, composer, or task input. The blueprint works with any AI tool that accepts text input.
 
 ### Step 8: Start Vibe-Coding
 
@@ -164,12 +161,10 @@ Response:
 
 The blueprint shows an approximate token count. Use this to check if it fits within your AI tool's context window:
 
-| AI Tool | Context Window | Max Blueprint Size |
-|---------|---------------|-------------------|
-| Cursor | 128K tokens | ~500K chars |
-| Claude Code | 200K tokens | ~800K chars |
-| Codex | 128K tokens | ~500K chars |
-| Windsurf | 128K tokens | ~500K chars |
+| Context Window | Max Blueprint Size |
+|---------------|-------------------|
+| 128K tokens | ~500K chars |
+| 200K tokens | ~800K chars |
 
 A typical single-repo blueprint is 2,000-10,000 tokens.
 

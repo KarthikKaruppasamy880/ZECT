@@ -18,65 +18,23 @@ ZECT uses the **GitHub API** to fetch repository metadata, file structure, READM
 
 ## Using ZECT With Each AI Tool
 
-### Cursor
+### Any AI Coding Tool
 
 1. Generate a blueprint in ZECT (Standard or Focused mode)
 2. Click **Copy to Clipboard**
-3. Open Cursor, press `Cmd+L` (or `Ctrl+L`) to open the AI chat
-4. Paste the blueprint
+3. Open your preferred AI coding tool
+4. Paste the blueprint into the AI assistant's chat or prompt input
 5. Add your request: _"Recreate this project"_ or _"Add a new auth module following these patterns"_
-6. Cursor generates code with full project context
+6. The AI tool generates code with full project context
 
-**Best for:** New feature development, code generation with existing patterns
-
-### Claude Code
-
-1. Generate a blueprint in ZECT
-2. Click **Copy to Clipboard**
-3. Open Claude Code terminal
-4. Paste the blueprint as the initial prompt
-5. Claude Code creates files, installs dependencies, and implements the project
-
-**Best for:** Full project scaffolding, complex refactoring, architecture decisions
-
-### OpenAI Codex / ChatGPT
-
-1. Generate a blueprint in ZECT
-2. Click **Copy to Clipboard**
-3. Open ChatGPT or Codex
-4. Paste the blueprint
-5. Ask: _"Build this project step by step"_ or _"Explain the architecture and suggest improvements"_
-
-**Best for:** Understanding codebases, getting architecture explanations, learning patterns
-
-### Windsurf
-
-1. Generate a blueprint in ZECT
-2. Click **Copy to Clipboard**
-3. Open Windsurf's AI assistant (Cascade)
-4. Paste the blueprint
-5. Ask Windsurf to implement, extend, or analyze the project
-
-**Best for:** Collaborative coding, real-time code generation
-
-### Devin
-
-1. Generate a blueprint in ZECT
-2. Click **Copy to Clipboard**
-3. Start a new Devin session
-4. Paste the blueprint as the task description
-5. Devin autonomously builds the project, runs tests, and creates PRs
-
-**Best for:** Autonomous project creation, end-to-end implementation without manual coding
-
-### Any Other AI Tool
-
-The blueprint is plain markdown text. It works with:
-- **Amazon Q Developer** — paste into the chat
-- **GitHub Copilot Chat** — paste into the chat panel
-- **Cody (Sourcegraph)** — paste as context
-- **JetBrains AI** — paste into the AI assistant
+The blueprint is plain markdown text. It works with any AI tool that accepts text input:
+- **IDE-based AI assistants** — paste into the AI chat panel
+- **Terminal-based AI tools** — paste as the initial prompt
+- **Web-based AI platforms** — paste into the chat interface
+- **Autonomous AI agents** — paste as the task description
 - **Any LLM API** — send as the user message with a system prompt
+
+**Best for:** Code generation, project scaffolding, architecture decisions, understanding codebases
 
 ---
 

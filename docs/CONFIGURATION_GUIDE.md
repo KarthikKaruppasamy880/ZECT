@@ -23,7 +23,7 @@ If ANY check fails, you see a red X on the PR — preventing bad code from reach
 
 ### Current Status
 
-The CI workflow file exists at `.github/workflows/ci.yml` in the repo but **has NOT been pushed to GitHub** because the GitHub PAT (Personal Access Token) used by Devin doesn't have the `workflow` scope, which GitHub requires to push files that modify GitHub Actions workflows.
+The CI workflow file exists at `.github/workflows/ci.yml` in the repo but **has NOT been pushed to GitHub** because the GitHub PAT (Personal Access Token) doesn't have the `workflow` scope, which GitHub requires to push files that modify GitHub Actions workflows.
 
 ### Steps to Fix (Choose One)
 

@@ -6,7 +6,7 @@
 
 ## Overview
 
-ZECT's core value proposition is turning any GitHub repository into a **single copy-paste prompt** that you can feed into any AI coding tool (Cursor, Claude Code, Codex, Windsurf, Devin) to recreate, extend, or understand the project. This guide explains exactly how that process works.
+ZECT's core value proposition is turning any GitHub repository into a **single copy-paste prompt** that you can feed into any AI coding tool to recreate, extend, or understand the project. This guide explains exactly how that process works.
 
 ---
 
@@ -280,39 +280,14 @@ View token usage in:
 
 ## Using Generated Prompts
 
-### With Cursor
+### With Any AI Coding Tool
 1. Generate blueprint in ZECT
 2. Copy the prompt
-3. Open Cursor, create a new project
-4. Paste the prompt into the AI chat
-5. Cursor will scaffold the project structure
+3. Open your preferred AI coding tool
+4. Paste the prompt into the AI chat, composer, or task input
+5. The AI tool will scaffold and implement the project
 
-### With Claude Code
-1. Generate blueprint in ZECT
-2. Copy the prompt
-3. Start Claude Code session
-4. Paste as the initial prompt
-5. Claude will create the project files
-
-### With Codex / ChatGPT
-1. Generate blueprint in ZECT
-2. Copy the prompt
-3. Paste into ChatGPT or Codex
-4. Request step-by-step implementation
-
-### With Devin
-1. Generate blueprint in ZECT
-2. Copy the prompt
-3. Create a new Devin session
-4. Paste as the task description
-5. Devin will implement the full project
-
-### With Windsurf
-1. Generate blueprint in ZECT
-2. Copy the prompt
-3. Open Windsurf workspace
-4. Paste into the AI assistant
-5. Windsurf will generate the codebase
+The blueprint is plain text and works with any AI tool — IDE-based assistants, terminal-based tools, web-based platforms, or autonomous AI agents.
 
 ---
 

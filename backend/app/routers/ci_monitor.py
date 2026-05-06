@@ -1,7 +1,7 @@
 """CI/CD Monitor API — poll GitHub Actions, detect failures, suggest AI fixes.
 
-Closes the "CI/CD Monitoring" gap vs Devin: ZECT can now monitor CI
-pipelines and suggest AI-powered fixes for failures.
+ZECT monitors CI pipelines, detects failures, and provides
+AI-powered fix suggestions for broken builds.
 """
 
 import os

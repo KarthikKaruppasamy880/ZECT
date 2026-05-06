@@ -22,10 +22,9 @@
 - Context is sent to AI with the question/plan/build request
 
 ### 2. Model Selector (All AI Pages)
-- 9 models available across 3 providers:
+- 5 models available across 2 providers:
   - OpenAI: GPT-4o Mini, GPT-4o, GPT-3.5 Turbo
-  - Free (OpenRouter): Llama 3.1 8B, Mistral 7B, Gemma 2 9B, Qwen 2.5 7B
-  - Anthropic (OpenRouter): Claude 3.5 Sonnet, Claude 3 Haiku
+  - Anthropic: Claude 3.5 Sonnet, Claude 3 Haiku
 - Compact mode on Ask page, Full mode with pricing on Plan/Build/Review
 
 ### 3. New Backend Routers (8 total)

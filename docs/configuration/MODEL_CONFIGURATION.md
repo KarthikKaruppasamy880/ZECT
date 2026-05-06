@@ -45,27 +45,23 @@ OPENAI_API_KEY=sk-your-openai-key-here
 
 ---
 
-### Option B: OpenRouter (Free + Paid Models)
+### Option B: Anthropic (Claude Models)
 
-**Free Models Available:** Llama 3.1 8B, Mistral 7B, Gemma 2 9B, Qwen 2.5 7B
-**Paid Models Available:** Claude 3.5 Sonnet, Claude 3 Haiku, GPT-4o, and 100+ more
+**Models Available:** Claude 3.5 Sonnet, Claude 3 Haiku
 
-1. Go to https://openrouter.ai/keys
-2. Sign up (free account gives you access to free models)
-3. Create an API key
-4. Add to `backend/.env`:
+1. Go to https://console.anthropic.com/settings/keys
+2. Create an API key
+3. Add to `backend/.env`:
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
 ```
 
-**Free Models (no credit card needed):**
-| Model | Quality | Speed | Cost |
+**Anthropic Models:**
+| Model | Quality | Speed | Cost (per 1M tokens) |
 |-------|---------|-------|------|
-| Llama 3.1 8B | Good | Fast | FREE |
-| Mistral 7B | Good | Fast | FREE |
-| Gemma 2 9B | Good | Fast | FREE |
-| Qwen 2.5 7B | Good | Fast | FREE |
+| Claude 3.5 Sonnet | Best | Medium | $3.00 input / $15.00 output |
+| Claude 3 Haiku | Good | Fastest | $0.25 input / $1.25 output |
 
 ---
 
@@ -75,7 +71,7 @@ For maximum flexibility, configure both:
 
 ```env
 OPENAI_API_KEY=sk-your-openai-key-here
-OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
 DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/zect_db
 ```
 
@@ -91,9 +87,9 @@ After configuring keys, every AI page (Ask, Plan, Build, Review) has a **Model S
 2. Navigate to any AI page (Ask Mode, Plan Mode, Build Phase, Review Phase)
 3. Look for the "Model Selection" dropdown
 4. Choose your preferred model:
-   - **Free Models** — Use for exploration, planning, simple queries
    - **GPT-4o Mini** — Best value for most tasks
    - **GPT-4o / Claude 3.5 Sonnet** — Best quality for critical reviews
+   - **GPT-3.5 Turbo / Claude 3 Haiku** — Fastest for simple queries
 
 ---
 
@@ -123,7 +119,7 @@ Navigate to **Token Controls** in the sidebar to:
 
 # Required: At least one of these
 OPENAI_API_KEY=sk-your-openai-key-here
-OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
 
 # Database (PostgreSQL)
 DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/zect_db
@@ -150,8 +146,8 @@ Note: Any valid OpenAI API key works in ZECT regardless of where it was original
 | Error | Solution |
 |-------|----------|
 | "OpenAI API key not configured" | Add `OPENAI_API_KEY` to `backend/.env` |
-| "No API key configured" | Add either `OPENAI_API_KEY` or `OPENROUTER_API_KEY` |
-| Free models not working | Add `OPENROUTER_API_KEY` (get free at openrouter.ai/keys) |
+| "No API key configured" | Add either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` |
+| Anthropic models not working | Add `ANTHROPIC_API_KEY` (get at console.anthropic.com) |
 | 429 Rate Limit | Wait 60s or switch to a different model |
 | Model not available | Check your API key has access to that model |
 

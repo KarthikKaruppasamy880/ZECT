@@ -18,14 +18,9 @@ MODELS = [
     {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "cost_per_1k_input": 0.00015, "cost_per_1k_output": 0.0006, "free": False, "quality": "high", "speed": "fast"},
     {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "cost_per_1k_input": 0.005, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
     {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "openai", "cost_per_1k_input": 0.0005, "cost_per_1k_output": 0.0015, "free": False, "quality": "good", "speed": "fastest"},
-    # OpenRouter (free models)
-    {"id": "meta-llama/llama-3.1-8b-instruct:free", "name": "Llama 3.1 8B (Free)", "provider": "openrouter", "cost_per_1k_input": 0, "cost_per_1k_output": 0, "free": True, "quality": "good", "speed": "fast"},
-    {"id": "mistralai/mistral-7b-instruct:free", "name": "Mistral 7B (Free)", "provider": "openrouter", "cost_per_1k_input": 0, "cost_per_1k_output": 0, "free": True, "quality": "good", "speed": "fast"},
-    {"id": "google/gemma-2-9b-it:free", "name": "Gemma 2 9B (Free)", "provider": "openrouter", "cost_per_1k_input": 0, "cost_per_1k_output": 0, "free": True, "quality": "good", "speed": "fast"},
-    {"id": "qwen/qwen-2.5-7b-instruct:free", "name": "Qwen 2.5 7B (Free)", "provider": "openrouter", "cost_per_1k_input": 0, "cost_per_1k_output": 0, "free": True, "quality": "good", "speed": "fast"},
-    # Anthropic (via OpenRouter or direct)
-    {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "openrouter", "cost_per_1k_input": 0.003, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
-    {"id": "anthropic/claude-3-haiku", "name": "Claude 3 Haiku", "provider": "openrouter", "cost_per_1k_input": 0.00025, "cost_per_1k_output": 0.00125, "free": False, "quality": "good", "speed": "fastest"},
+    # Anthropic (direct)
+    {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "provider": "anthropic", "cost_per_1k_input": 0.003, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
+    {"id": "claude-3-haiku", "name": "Claude 3 Haiku", "provider": "anthropic", "cost_per_1k_input": 0.00025, "cost_per_1k_output": 0.00125, "free": False, "quality": "good", "speed": "fastest"},
 ]
 
 
@@ -73,11 +68,11 @@ def _get_client(provider: str) -> tuple[OpenAI, str]:
         if not key:
             raise HTTPException(status_code=503, detail="OpenAI API key not configured. Set OPENAI_API_KEY in backend/.env")
         return OpenAI(api_key=key), "openai"
-    elif provider == "openrouter":
-        key = os.getenv("OPENROUTER_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+    elif provider == "anthropic":
+        key = os.getenv("ANTHROPIC_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
         if not key:
-            raise HTTPException(status_code=503, detail="No API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY in backend/.env")
-        return OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1"), "openrouter"
+            raise HTTPException(status_code=503, detail="No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in backend/.env")
+        return OpenAI(api_key=key, base_url="https://api.anthropic.com/v1"), "anthropic"
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
@@ -106,12 +101,12 @@ def list_models():
 def get_model_status():
     """Check which providers are configured."""
     openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
-    openrouter_key = bool(os.getenv("OPENROUTER_API_KEY", ""))
+    anthropic_key = bool(os.getenv("ANTHROPIC_API_KEY", ""))
     return {
         "openai_configured": openai_key,
-        "openrouter_configured": openrouter_key or openai_key,
+        "anthropic_configured": anthropic_key or openai_key,
         "available_providers": [
-            p for p, configured in [("openai", openai_key), ("openrouter", openrouter_key or openai_key)]
+            p for p, configured in [("openai", openai_key), ("anthropic", anthropic_key or openai_key)]
             if configured
         ],
     }

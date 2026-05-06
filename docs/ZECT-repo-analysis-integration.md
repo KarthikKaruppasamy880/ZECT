@@ -109,8 +109,8 @@ owner/repo/
 ### 2.4 LLM Integration
 
 **Provider options (in priority order):**
-1. **OpenRouter** — multi-model gateway, recommended (supports Gemini, Claude, GPT-4, etc.)
-2. **Google AI Studio** — direct Gemini access
+1. **OpenAI** — GPT-4o, GPT-4o Mini, GPT-3.5 Turbo
+2. **Anthropic** — Claude 3.5 Sonnet, Claude 3 Haiku
 3. **Any OpenAI-compatible API** — same request format works
 
 **Request structure:**
@@ -337,12 +337,12 @@ interface RepoAnalysis {
 - [ ] Handle rate limiting and error states in UI
 
 ### Phase 3: LLM Integration (Backend)
-- [ ] Implement OpenRouter/Google AI Studio client
+- [ ] Implement OpenAI/Anthropic LLM client
 - [ ] Build context assembly (metadata + tree + README → user message)
 - [ ] Implement three scenario-specific system prompts
 - [ ] Add response caching (Supabase or database)
 - [ ] In-flight deduplication for concurrent requests
-- [ ] Add `OPENROUTER_API_KEY` environment variable support
+- [ ] Add `ANTHROPIC_API_KEY` environment variable support
 
 ### Phase 4: Workflow Integration
 - [ ] Wire analysis output into Ask Mode (pre-populate requirements)
@@ -367,8 +367,8 @@ interface RepoAnalysis {
 GITHUB_TOKEN=ghp_xxxxxxxxxxxx
 
 # LLM Provider (choose one)
-OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxx
-# OPENROUTER_MODEL=google/gemini-2.5-pro   (optional, defaults to gemini-2.5-pro)
+OPENAI_API_KEY=sk-xxxxxxxxxxxx
+# ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxx   (optional, for Claude models)
 
 # Or use Google AI Studio directly
 # GOOGLE_GENERATIVE_AI_API_KEY=xxxxxxxxxxxx
@@ -386,7 +386,7 @@ OPENROUTER_API_KEY=sk-or-xxxxxxxxxxxx
 |---|---|---|
 | File tree depth for LLM | Depth 1 for quick analysis, full for deep analysis | Keeps token costs manageable while providing enough context |
 | README truncation | 8,000 characters max | Prevents token overflow while capturing key information |
-| LLM model | Gemini 2.5 Pro via OpenRouter | Best cost/quality ratio for code understanding tasks |
+| LLM model | GPT-4o or Claude 3.5 Sonnet | Best cost/quality ratio for code understanding tasks |
 | Caching | Cache by owner/repo/scenario | Avoid redundant LLM calls; cache invalidation on re-analyze |
 | Auth | GitHub token optional but recommended | Unauthenticated: 60 req/hr; Authenticated: 5,000 req/hr |
 | Error handling | Graceful degradation | If GitHub API fails, show partial results. If LLM fails, show raw context |
@@ -421,7 +421,7 @@ The feature needs:
 
 3. File tree formatter — converts GitHub's flat file array into ASCII directory tree format. Supports depth filtering and path scoping.
 
-4. LLM integration via OpenRouter — assembles repo metadata + file tree + README into a structured message, sends to Gemini 2.5 Pro with scenario-specific system prompts, returns structured analysis with a generated Ask Mode prompt.
+4. LLM integration via OpenAI/Anthropic — assembles repo metadata + file tree + README into a structured message, sends to GPT-4o or Claude 3.5 Sonnet with scenario-specific system prompts, returns structured analysis with a generated Ask Mode prompt.
 
 5. Three scenario-specific system prompts that produce: current state assessment, risk analysis, recommended strategy, and a ready-to-use Ask Mode prompt.
 

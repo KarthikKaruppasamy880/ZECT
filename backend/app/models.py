@@ -46,7 +46,7 @@ class TokenLog(Base):
     action = Column(String, nullable=False)       # e.g. ask, plan, build, review, enhance_blueprint, repo_analysis
     feature = Column(String, default="")           # ask_mode, plan_mode, build_phase, review_phase, blueprint, doc_gen
     model = Column(String, default="")             # e.g. gpt-4o-mini, claude-3.5-sonnet, llama-3.1-8b
-    provider = Column(String, default="")          # openai, openrouter, anthropic, local
+    provider = Column(String, default="")          # openai, anthropic, local
     prompt_tokens = Column(Integer, default=0)
     completion_tokens = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)

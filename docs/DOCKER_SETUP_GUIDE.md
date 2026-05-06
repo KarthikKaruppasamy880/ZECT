@@ -47,8 +47,8 @@ GITHUB_TOKEN=ghp_your-github-token
 # Optional — AI features (code generation, review, planning)
 OPENAI_API_KEY=sk-your-openai-key
 
-# Optional — Free AI models via OpenRouter
-OPENROUTER_API_KEY=sk-or-your-key
+# Optional — Anthropic Claude models
+ANTHROPIC_API_KEY=sk-ant-your-key
 
 # Optional — Jira integration
 JIRA_BASE_URL=https://your-org.atlassian.net

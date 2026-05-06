@@ -60,7 +60,7 @@
 | Feature | ZECT | Industry Standard | Status |
 |---------|------|-------------------|--------|
 | Model selection | Yes (per-feature) | Fixed (single model) | **ZECT advantage** — user chooses model |
-| Free model support | Yes (OpenRouter) | No | **ZECT advantage** |
+| Multi-provider support | Yes (OpenAI + Anthropic) | Fixed (single model) | **ZECT advantage** |
 | Local LLM (Ollama) | Documented, configurable | No | **ZECT advantage** — potential |
 | Token tracking | Yes (detailed per-call) | Organization dashboard | **ZECT advantage** |
 

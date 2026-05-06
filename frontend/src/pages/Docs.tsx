@@ -44,10 +44,10 @@ const resources: DocSection[] = [
     color: "bg-indigo-100 text-indigo-600",
     url: "https://github.com/KarthikKaruppasamy880/ZEF",
     content: [
-      { heading: "What is ZEF?", body: "ZEF (Zinnia Engineering Foundation) is the tool-neutral layer that powers ZECT's AI capabilities. It defines playbooks, skills, and adapter interfaces that work with any LLM provider \u2014 OpenAI, Anthropic, local models via Ollama, or OpenRouter." },
+      { heading: "What is ZEF?", body: "ZEF (Zinnia Engineering Foundation) is the tool-neutral layer that powers ZECT's AI capabilities. It defines playbooks, skills, and adapter interfaces that work with any LLM provider \u2014 OpenAI, Anthropic, local models via Ollama, or custom endpoints." },
       { heading: "Playbooks", body: "Pre-built workflow templates for common engineering tasks: code review, migration planning, test generation, documentation, and deployment checklists. Each playbook is a structured prompt chain that guides the AI through multi-step processes." },
       { heading: "Skills & Templates", body: "Reusable AI skill templates stored in the Skill Library. Skills can be global (available to all projects) or scoped to specific repositories. Use Auto-Detect to analyze your code and discover patterns worth saving as skills." },
-      { heading: "Adapter Architecture", body: "ZEF uses an adapter pattern so you can swap LLM providers without changing application code. Supported providers: OpenAI, Anthropic Claude, Google Gemini, OpenRouter (100+ models), and local Ollama models." },
+      { heading: "Adapter Architecture", body: "ZEF uses an adapter pattern so you can swap LLM providers without changing application code. Supported providers: OpenAI, Anthropic Claude, Google Gemini, and local Ollama models." },
     ],
   },
   {
@@ -92,7 +92,7 @@ const resources: DocSection[] = [
     icon: Layers,
     color: "bg-cyan-100 text-cyan-600",
     content: [
-      { heading: "Ask Mode", body: "Ask questions about your codebase, architecture, or engineering best practices. Attach files or repo context for more specific answers. Supports model selection \u2014 choose between free (OpenRouter) and paid (OpenAI) models." },
+      { heading: "Ask Mode", body: "Ask questions about your codebase, architecture, or engineering best practices. Attach files or repo context for more specific answers. Supports model selection \u2014 choose between OpenAI and Anthropic models." },
       { heading: "Plan Mode", body: "Generate structured development plans with task breakdowns, dependencies, and effort estimates. Provide project description and constraints to get a step-by-step implementation plan with risk assessments." },
       { heading: "Build Phase", body: "Generate production-ready code from your plan steps. Attach context files, select the target language and framework, then generate code with a single click. Review the output and iterate." },
       { heading: "Review Phase", body: "Paste code or point to a GitHub PR for AI-powered code review. Get findings categorized by severity, with specific line references, fix suggestions, and auto-generated corrected code." },

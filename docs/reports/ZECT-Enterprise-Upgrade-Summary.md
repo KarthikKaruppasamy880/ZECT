@@ -44,7 +44,7 @@
 1. **GitHub Actions CI** — workflow file created locally (`.github/workflows/ci.yml`) but cannot be pushed due to PAT lacking `workflow` scope. You need to either:
    - Add `workflow` scope to your GitHub PAT
    - Push the file manually: `git add .github/ && git commit -m "ci: add GitHub Actions" && git push`
-2. **OpenAI/OpenRouter API key** — AI features (Ask, Plan, Build, Review) need an LLM API key in `.env`
+2. **OpenAI/Anthropic API key** — AI features (Ask, Plan, Build, Review) need an LLM API key in `.env`
 3. **PostgreSQL in production** — Currently using SQLite for dev. PostgreSQL is configured and ready
 
 ### Medium Priority

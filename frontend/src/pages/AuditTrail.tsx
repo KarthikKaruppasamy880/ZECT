@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ScrollText, Filter, RefreshCw, Info, ChevronDown, ChevronRight } from "lucide-react";
+import { ScrollText, Filter, RefreshCw, Info } from "lucide-react";
 
 interface AuditEntry {
   id: number;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { reviewPR, reviewSnippet } from "@/lib/api";
+import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments } from "@/lib/api";
 import type { ReviewResponse, ReviewFinding } from "@/types";
 import {
   Shield,
@@ -169,6 +169,15 @@ export default function CodeReview() {
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [promptCopied, setPromptCopied] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
+  // Inline PR review state
+  const [inlineReviewLoading, setInlineReviewLoading] = useState(false);
+  const [inlineComments, setInlineComments] = useState<any[]>([]);
+  const [showInlinePanel, setShowInlinePanel] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [commentPath, setCommentPath] = useState("");
+  const [commentLine, setCommentLine] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+  const [inlineSuccess, setInlineSuccess] = useState("");
 
   const runReview = async () => {
     setError(null);
@@ -210,6 +219,59 @@ export default function CodeReview() {
         return acc;
       }, {})
     : {};
+
+  // Inline PR review functions
+  const runInlineReview = async () => {
+    if (!owner || !repo || !prNumber) {
+      setError("Please fill in owner, repo, and PR number.");
+      return;
+    }
+    setInlineReviewLoading(true);
+    setError(null);
+    setInlineSuccess("");
+    try {
+      const result = await reviewPRInline(owner, repo, Number(prNumber), true);
+      setReview(result.review || result);
+      setShowInlinePanel(true);
+      setInlineSuccess(`Posted ${result.posted_comments?.length || 0} inline comments to PR #${prNumber}`);
+      // Load existing comments
+      loadPRComments();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Inline review failed");
+    } finally {
+      setInlineReviewLoading(false);
+    }
+  };
+
+  const loadPRComments = async () => {
+    if (!owner || !repo || !prNumber) return;
+    try {
+      const comments = await getPRComments(owner, repo, Number(prNumber));
+      setInlineComments(comments);
+    } catch { /* ignore */ }
+  };
+
+  const handlePostComment = async () => {
+    if (!newComment.trim() || !owner || !repo || !prNumber) return;
+    setPostingComment(true);
+    try {
+      await postPRComment(
+        owner, repo, Number(prNumber), newComment,
+        undefined,
+        commentPath || undefined,
+        commentLine ? Number(commentLine) : undefined
+      );
+      setNewComment("");
+      setCommentPath("");
+      setCommentLine("");
+      setInlineSuccess("Comment posted to GitHub!");
+      loadPRComments();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to post comment");
+    } finally {
+      setPostingComment(false);
+    }
+  };
 
   const generateFixPrompt = (r: ReviewResponse): string => {
     const lines: string[] = [];
@@ -390,9 +452,90 @@ export default function CodeReview() {
               </>
             )}
           </button>
+          {mode === "pr" && (
+            <button
+              onClick={runInlineReview}
+              disabled={inlineReviewLoading || !owner || !repo || !prNumber}
+              className="flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {inlineReviewLoading ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Posting Inline Review...</>
+              ) : (
+                <><FileCode className="h-4 w-4" /> Review &amp; Post to GitHub</>
+              )}
+            </button>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {inlineSuccess && <p className="text-sm text-green-600">{inlineSuccess}</p>}
         </div>
       </div>
+
+      {/* Inline PR Comments Panel */}
+      {showInlinePanel && mode === "pr" && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <FileCode className="h-4 w-4 text-green-600" />
+              Inline PR Comments ({inlineComments.length})
+            </h3>
+            <button onClick={loadPRComments} className="text-xs text-indigo-600 hover:text-indigo-700">Refresh</button>
+          </div>
+
+          {/* Post new comment */}
+          <div className="bg-slate-50 rounded-lg p-4 space-y-3">
+            <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Post a Comment to PR</p>
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="text"
+                placeholder="File path (optional, e.g. src/app.ts)"
+                value={commentPath}
+                onChange={(e) => setCommentPath(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-green-500 outline-none"
+              />
+              <input
+                type="text"
+                placeholder="Line number (optional)"
+                value={commentLine}
+                onChange={(e) => setCommentLine(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-green-500 outline-none"
+              />
+            </div>
+            <textarea
+              placeholder="Write your review comment..."
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-green-500 outline-none"
+            />
+            <button
+              onClick={handlePostComment}
+              disabled={postingComment || !newComment.trim()}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50"
+            >
+              {postingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Post Comment to GitHub
+            </button>
+          </div>
+
+          {/* Existing comments list */}
+          {inlineComments.length > 0 && (
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {inlineComments.map((comment: any, i: number) => (
+                <div key={i} className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-slate-700">{comment.user || "ZECT"}</span>
+                    <span className="text-xs text-slate-400">{comment.created_at}</span>
+                    {comment.path && (
+                      <span className="text-xs text-indigo-600 font-mono">{comment.path}:{comment.line}</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-700">{comment.body}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Loading state */}
       {loading && (

@@ -28,6 +28,8 @@ import {
   Download,
   History,
   MonitorPlay,
+  FolderOpen,
+  Activity,
 } from "lucide-react";
 
 const navItems = [
@@ -52,6 +54,9 @@ const stageItems = [
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/token-controls", label: "Token Controls", icon: Coins },
   { href: "/app-runner", label: "App Runner", icon: MonitorPlay },
+  { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
+  { href: "/git-ops", label: "Git Operations", icon: GitBranch },
+  { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
 ];
 
 const enterpriseItems = [

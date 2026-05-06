@@ -7,8 +7,6 @@ import {
   FolderOpen,
   Settings,
   MonitorPlay,
-  ChevronDown,
-  ChevronUp,
   RefreshCw,
   Info,
   Loader2,

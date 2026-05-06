@@ -240,6 +240,147 @@ export const runnerConfigure = (repo_path: string, opts?: { env_vars?: Record<st
     body: JSON.stringify({ repo_path, ...opts }),
   });
 
+// File Explorer
+export const fileList = (path: string, showHidden = false) =>
+  request<any[]>(`/api/files/list?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`);
+export const fileRead = (path: string) =>
+  request<any>(`/api/files/read?path=${encodeURIComponent(path)}`);
+export const fileWrite = (path: string, content: string, createDirs = true) =>
+  request<any>("/api/files/write", {
+    method: "POST",
+    body: JSON.stringify({ path, content, create_dirs: createDirs }),
+  });
+export const fileCreate = (path: string, content = "", createDirs = true) =>
+  request<any>("/api/files/create", {
+    method: "POST",
+    body: JSON.stringify({ path, content, create_dirs: createDirs }),
+  });
+export const fileDelete = (path: string) =>
+  request<any>(`/api/files/delete?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+export const fileRename = (oldPath: string, newPath: string) =>
+  request<any>("/api/files/rename", {
+    method: "POST",
+    body: JSON.stringify({ old_path: oldPath, new_path: newPath }),
+  });
+export const fileSearch = (directory: string, pattern: string, fileExtensions?: string[], maxResults = 50) =>
+  request<any[]>("/api/files/search", {
+    method: "POST",
+    body: JSON.stringify({ directory, pattern, ...(fileExtensions ? { file_extensions: fileExtensions } : {}), max_results: maxResults }),
+  });
+export const fileTree = (path: string, depth = 3) =>
+  request<any[]>(`/api/files/tree?path=${encodeURIComponent(path)}&depth=${depth}`);
+
+// Git Operations
+export const gitStatus = (repoPath: string) =>
+  request<any>(`/api/git/status?repo_path=${encodeURIComponent(repoPath)}`);
+export const gitAdd = (repoPath: string, files?: string[]) =>
+  request<any>(`/api/git/add?repo_path=${encodeURIComponent(repoPath)}`, {
+    method: "POST",
+    ...(files ? { body: JSON.stringify(files) } : {}),
+  });
+export const gitCommit = (repoPath: string, message: string, files?: string[]) =>
+  request<any>("/api/git/commit", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, message, ...(files ? { files } : {}) }),
+  });
+export const gitPush = (repoPath: string, remote = "origin", branch?: string) =>
+  request<any>("/api/git/push", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, remote, ...(branch ? { branch } : {}) }),
+  });
+export const gitBranch = (repoPath: string, branchName: string, checkout = true, fromBranch?: string) =>
+  request<any>("/api/git/branch", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, branch_name: branchName, checkout, ...(fromBranch ? { from_branch: fromBranch } : {}) }),
+  });
+export const gitCheckout = (repoPath: string, branch: string) =>
+  request<any>("/api/git/checkout", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, branch }),
+  });
+export const gitDiff = (repoPath: string, staged = false) =>
+  request<any>(`/api/git/diff?repo_path=${encodeURIComponent(repoPath)}&staged=${staged}`);
+export const gitLog = (repoPath: string, limit = 20) =>
+  request<any[]>(`/api/git/log?repo_path=${encodeURIComponent(repoPath)}&limit=${limit}`);
+export const gitBranches = (repoPath: string) =>
+  request<any>(`/api/git/branches?repo_path=${encodeURIComponent(repoPath)}`);
+export const gitPull = (repoPath: string) =>
+  request<any>(`/api/git/pull?repo_path=${encodeURIComponent(repoPath)}`, { method: "POST" });
+export const gitCreatePR = (repoPath: string, title: string, body = "", baseBranch = "main", headBranch?: string) =>
+  request<any>("/api/git/create-pr", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, title, body, base_branch: baseBranch, ...(headBranch ? { head_branch: headBranch } : {}) }),
+  });
+
+// CI/CD Monitor
+export const ciRuns = (owner: string, repo: string, branch?: string, limit = 10) =>
+  request<any[]>(`/api/ci/runs/${owner}/${repo}?limit=${limit}${branch ? `&branch=${branch}` : ""}`);
+export const ciJobs = (owner: string, repo: string, runId: number) =>
+  request<any[]>(`/api/ci/runs/${owner}/${repo}/${runId}/jobs`);
+export const ciLogs = (owner: string, repo: string, runId: number) =>
+  request<any>(`/api/ci/runs/${owner}/${repo}/${runId}/logs`);
+export const ciAnalyzeFailure = (owner: string, repo: string, runId: number) =>
+  request<any[]>("/api/ci/analyze-failure", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, run_id: runId }),
+  });
+export const ciStatusBadge = (owner: string, repo: string, branch = "main") =>
+  request<any>(`/api/ci/status/${owner}/${repo}?branch=${branch}`);
+
+// Auto-Fix
+export const autofixAnalyze = (errorOutput: string, command?: string, filePath?: string, fileContent?: string, language?: string) =>
+  request<any>("/api/autofix/analyze", {
+    method: "POST",
+    body: JSON.stringify({
+      error_output: errorOutput,
+      ...(command ? { command } : {}),
+      ...(filePath ? { file_path: filePath } : {}),
+      ...(fileContent ? { file_content: fileContent } : {}),
+      ...(language ? { language } : {}),
+    }),
+  });
+export const autofixRunAndFix = (command: string, cwd?: string, errorOutput?: string, filePath?: string, maxRetries = 3) =>
+  request<any>("/api/autofix/run-and-fix", {
+    method: "POST",
+    body: JSON.stringify({
+      command,
+      ...(cwd ? { cwd } : {}),
+      ...(errorOutput ? { error_output: errorOutput } : {}),
+      ...(filePath ? { file_path: filePath } : {}),
+      max_retries: maxRetries,
+    }),
+  });
+export const autofixApply = (filePath: string, originalContent: string, fixCode: string, fixType: string, lineNumber?: number) =>
+  request<any>("/api/autofix/apply-fix", {
+    method: "POST",
+    body: JSON.stringify({
+      file_path: filePath,
+      original_content: originalContent,
+      fix_code: fixCode,
+      fix_type: fixType,
+      ...(lineNumber ? { line_number: lineNumber } : {}),
+    }),
+  });
+
+// Inline PR Review
+export const reviewPRInline = (owner: string, repo: string, prNumber: number, autoComment = true) =>
+  request<any>("/api/review/pr/inline", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, pr_number: prNumber, auto_comment: autoComment }),
+  });
+export const postPRComment = (owner: string, repo: string, prNumber: number, body: string, commitSha?: string, path?: string, line?: number) =>
+  request<any>("/api/review/pr/comment", {
+    method: "POST",
+    body: JSON.stringify({
+      owner, repo, pr_number: prNumber, body,
+      ...(commitSha ? { commit_sha: commitSha } : {}),
+      ...(path ? { path } : {}),
+      ...(line ? { line } : {}),
+    }),
+  });
+export const getPRComments = (owner: string, repo: string, prNumber: number) =>
+  request<any[]>(`/api/review/pr/${owner}/${repo}/${prNumber}/comments`);
+
 // Auth
 export const login = (username: string, password: string) =>
   request<{ token: string; username: string }>("/api/auth/login", {

@@ -15,7 +15,7 @@ from app.models import Project, Repo
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
 from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
-from app.routers import mcp, app_runner
+from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
 from app.middleware.rate_limiter import RateLimitMiddleware
 
 app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
@@ -87,6 +87,10 @@ app.include_router(user_sessions.router)
 app.include_router(generated_outputs.router)
 app.include_router(mcp.router)
 app.include_router(app_runner.router)
+app.include_router(file_explorer.router)
+app.include_router(git_ops.router)
+app.include_router(ci_monitor.router)
+app.include_router(autofix.router)
 
 
 @app.get("/healthz")

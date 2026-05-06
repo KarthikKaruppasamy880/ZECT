@@ -149,6 +149,71 @@ def list_commits(owner: str, repo_name: str, limit: int = 20) -> list[GitHubComm
     return result
 
 
+def _get_github() -> Github:
+    """Internal accessor for raw Github client (used by CI monitor etc.)."""
+    return get_github()
+
+
+def create_pull_request(owner: str, repo: str, title: str, body: str, head: str, base: str) -> dict:
+    """Create a pull request on GitHub."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    pr = repo_obj.create_pull(title=title, body=body, head=head, base=base)
+    return {
+        "number": pr.number,
+        "html_url": pr.html_url,
+        "title": pr.title,
+        "state": pr.state,
+    }
+
+
+def post_pr_review_comment(owner: str, repo: str, pr_number: int, body: str, commit_sha: str | None = None, path: str | None = None, line: int | None = None) -> dict:
+    """Post a review comment on a PR (inline or general)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    pr = repo_obj.get_pull(pr_number)
+
+    if path and line and commit_sha:
+        # Inline comment on a specific file/line
+        commit = repo_obj.get_commit(commit_sha)
+        comment = pr.create_review_comment(body=body, commit=commit, path=path, line=line)
+        return {"id": comment.id, "body": comment.body, "path": path, "line": line, "type": "inline"}
+    else:
+        # General PR comment
+        comment = pr.create_issue_comment(body=body)
+        return {"id": comment.id, "body": comment.body, "type": "general"}
+
+
+def get_pr_review_comments(owner: str, repo: str, pr_number: int) -> list[dict]:
+    """Get all review comments on a PR."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    pr = repo_obj.get_pull(pr_number)
+
+    comments = []
+    # Get general comments
+    for c in pr.get_issue_comments():
+        comments.append({
+            "id": c.id,
+            "body": c.body,
+            "author": c.user.login if c.user else "unknown",
+            "created_at": c.created_at.isoformat() if c.created_at else "",
+            "type": "general",
+        })
+    # Get inline review comments
+    for c in pr.get_review_comments():
+        comments.append({
+            "id": c.id,
+            "body": c.body,
+            "author": c.user.login if c.user else "unknown",
+            "path": c.path,
+            "line": c.line,
+            "created_at": c.created_at.isoformat() if c.created_at else "",
+            "type": "inline",
+        })
+    return comments
+
+
 def list_workflow_runs(owner: str, repo_name: str, limit: int = 10) -> list[GitHubWorkflowRun]:
     gh = get_github()
     repo = gh.get_repo(f"{owner}/{repo_name}")

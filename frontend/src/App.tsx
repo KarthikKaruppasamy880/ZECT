@@ -31,6 +31,13 @@ import AppRunner from "@/pages/AppRunner";
 import FileExplorer from "@/pages/FileExplorer";
 import GitOps from "@/pages/GitOps";
 import CIMonitor from "@/pages/CIMonitor";
+import MemoryDashboard from "@/pages/MemoryDashboard";
+import DreamEngine from "@/pages/DreamEngine";
+import DataLayer from "@/pages/DataLayer";
+import DataFlywheel from "@/pages/DataFlywheel";
+import Permissions from "@/pages/Permissions";
+import TransferOnboarding from "@/pages/TransferOnboarding";
+import SkillsEngine from "@/pages/SkillsEngine";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -112,6 +119,13 @@ export default function App() {
           <Route path="/file-explorer" element={<FileExplorer />} />
           <Route path="/git-ops" element={<GitOps />} />
           <Route path="/ci-monitor" element={<CIMonitor />} />
+          <Route path="/memory" element={<MemoryDashboard />} />
+          <Route path="/dream-engine" element={<DreamEngine />} />
+          <Route path="/data-layer" element={<DataLayer />} />
+          <Route path="/data-flywheel" element={<DataFlywheel />} />
+          <Route path="/permissions" element={<Permissions />} />
+          <Route path="/transfer" element={<TransferOnboarding />} />
+          <Route path="/skills-engine" element={<SkillsEngine />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

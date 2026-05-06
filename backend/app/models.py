@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -403,3 +403,364 @@ class ExportJob(Base):
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
+
+
+# ===========================================================================
+# ZINNIA AGENTIC INTELLIGENCE SYSTEM
+# Memory (4 layers), Dream Engine, Data Layer, Skills Engine,
+# Permissions Protocol, Transfer & Onboarding
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Layer 1: Working Memory — live task state, auto-archived after 2 days
+# ---------------------------------------------------------------------------
+
+class WorkingMemory(Base):
+    """Live task state — volatile, auto-archived after inactivity."""
+    __tablename__ = "working_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    task_name = Column(String, default="")
+    open_files = Column(JSON, default=list)  # list of file paths
+    hypotheses = Column(JSON, default=list)  # list of active hypotheses
+    checkpoints = Column(JSON, default=list)  # list of checkpoint descriptions
+    next_step = Column(Text, default="")
+    status = Column(String, default="active")  # active, archived
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    archived_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", backref="working_memories")
+    user = relationship("User", backref="working_memories")
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: Episodic Memory — what happened in prior runs, scored by salience
+# ---------------------------------------------------------------------------
+
+class EpisodicMemory(Base):
+    """Raw experience log — what happened, scored by salience, decayed over time."""
+    __tablename__ = "episodic_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    skill_name = Column(String, default="")  # which skill was used
+    action = Column(String, nullable=False)  # what was done
+    outcome = Column(Text, default="")  # what happened
+    success = Column(Boolean, default=True)
+    importance = Column(Integer, default=5)  # 1-10, higher = more important
+    salience = Column(Float, default=0.5)  # 0.0-1.0, decayed over time
+    confidence = Column(Float, default=0.5)  # 0.0-1.0
+    pain_score = Column(Integer, default=2)  # 1-5, how painful was this
+    evidence_ids = Column(JSON, default=list)  # related episodic IDs
+    reflection = Column(Text, default="")  # post-action reflection
+    harness = Column(String, default="zect")  # which AI tool was used
+    tokens_in = Column(Integer, default=0)
+    tokens_out = Column(Integer, default=0)
+    cost_estimate_usd = Column(Float, default=0.0)
+    is_decayed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="episodic_memories")
+    user = relationship("User", backref="episodic_memories")
+
+
+# ---------------------------------------------------------------------------
+# Layer 3: Semantic Memory — distilled patterns (lessons + decisions)
+# ---------------------------------------------------------------------------
+
+class Lesson(Base):
+    """Graduated lessons — distilled patterns that outlive episodes."""
+    __tablename__ = "lessons"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    claim = Column(Text, nullable=False)  # what was learned
+    conditions = Column(JSON, default=list)  # when this applies (list of strings)
+    rationale = Column(Text, default="")  # why this was graduated
+    status = Column(String, default="staged")  # staged, accepted, rejected, provisional
+    confidence = Column(Float, default=0.5)  # 0.0-1.0
+    evidence_count = Column(Integer, default=1)
+    cluster_size = Column(Integer, default=1)
+    canonical_salience = Column(Float, default=0.5)
+    reviewer = Column(String, default="")  # who graduated/rejected
+    rejection_reason = Column(Text, nullable=True)
+    rejection_count = Column(Integer, default=0)
+    decision_history = Column(JSON, default=list)  # [{action, rationale, reviewer, at}]
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    accepted_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", backref="lessons")
+    user = relationship("User", backref="lessons")
+
+
+class Decision(Base):
+    """Architectural decisions with rationale and status tracking."""
+    __tablename__ = "decisions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    decision = Column(Text, nullable=False)
+    rationale = Column(Text, default="")
+    alternatives = Column(Text, default="")  # what else was considered
+    status = Column(String, default="active")  # active, revisited, superseded
+    superseded_by = Column(Integer, nullable=True)  # ID of replacing decision
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="decisions")
+    user = relationship("User", backref="decisions")
+
+
+# ---------------------------------------------------------------------------
+# Layer 4: Personal Memory — user preferences, never merged into semantic
+# ---------------------------------------------------------------------------
+
+class UserPreference(Base):
+    """User-specific preferences — never merged into semantic memory."""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    code_style = Column(JSON, default=dict)  # {indent, quotes, semicolons, etc.}
+    workflow = Column(JSON, default=dict)  # {prefer_tdd, branch_strategy, etc.}
+    constraints = Column(JSON, default=dict)  # {no_force_push, require_tests, etc.}
+    communication = Column(JSON, default=dict)  # {verbosity, format, etc.}
+    feature_flags = Column(JSON, default=dict)  # {dream_cycle, data_flywheel, etc.}
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="preferences")
+
+
+# ---------------------------------------------------------------------------
+# Dream Engine — automated pattern extraction + candidate staging
+# ---------------------------------------------------------------------------
+
+class DreamCycleRun(Base):
+    """Track each dream cycle execution and its results."""
+    __tablename__ = "dream_cycle_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    status = Column(String, default="running")  # running, completed, failed
+    episodes_processed = Column(Integer, default=0)
+    clusters_found = Column(Integer, default=0)
+    candidates_staged = Column(Integer, default=0)
+    candidates_prefiltered = Column(Integer, default=0)
+    episodes_decayed = Column(Integer, default=0)
+    workspaces_archived = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    project = relationship("Project", backref="dream_cycle_runs")
+
+
+# ---------------------------------------------------------------------------
+# Data Layer — cross-agent monitoring, KPIs, dashboards
+# ---------------------------------------------------------------------------
+
+class AgentEvent(Base):
+    """Cross-harness agent event tracking for monitoring dashboards."""
+    __tablename__ = "agent_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    harness = Column(String, default="zect")  # zect, devin, cursor, etc.
+    event_type = Column(String, nullable=False)  # task_start, task_end, error, review, deploy, commit, etc.
+    category = Column(String, default="general")  # coding, review, deploy, planning, debugging
+    description = Column(Text, default="")
+    tokens_used = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    model = Column(String, default="")
+    duration_seconds = Column(Integer, default=0)
+    success = Column(Boolean, default=True)
+    metadata = Column(JSON, default=dict)  # extra event-specific data
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="agent_events")
+    user = relationship("User", backref="agent_events")
+
+
+class DailyReport(Base):
+    """Auto-generated daily summary reports."""
+    __tablename__ = "daily_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    report_date = Column(DateTime, nullable=False)
+    total_events = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    total_cost_usd = Column(Float, default=0.0)
+    success_rate = Column(Float, default=0.0)  # 0.0-100.0
+    harness_breakdown = Column(JSON, default=dict)  # {harness: {count, tokens, cost}}
+    category_breakdown = Column(JSON, default=dict)  # {category: {count, tokens, cost}}
+    model_breakdown = Column(JSON, default=dict)  # {model: {count, tokens, cost}}
+    top_skills = Column(JSON, default=list)  # [{name, count, success_rate}]
+    kpi_summary = Column(JSON, default=dict)  # {throughput, reliability, avg_cost, etc.}
+    report_markdown = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="daily_reports")
+
+
+# ---------------------------------------------------------------------------
+# Data Flywheel — approved runs → training-ready artifacts
+# ---------------------------------------------------------------------------
+
+class FlywheelTrace(Base):
+    """Redacted traces from approved runs — first flywheel stage."""
+    __tablename__ = "flywheel_traces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    source_type = Column(String, nullable=False)  # review, build, plan, ask, deploy
+    source_id = Column(Integer, nullable=True)  # ID from source table
+    input_redacted = Column(Text, default="")  # redacted input
+    output_redacted = Column(Text, default="")  # redacted output
+    model_used = Column(String, default="")
+    tokens_used = Column(Integer, default=0)
+    quality_score = Column(Float, nullable=True)  # 1-5 user rating
+    is_approved = Column(Boolean, default=False)  # human approved for training
+    approved_by = Column(String, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="flywheel_traces")
+    user = relationship("User", backref="flywheel_traces")
+
+
+class FlywheelContextCard(Base):
+    """Context cards generated from clustered traces."""
+    __tablename__ = "flywheel_context_cards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    pattern_description = Column(Text, default="")
+    trace_ids = Column(JSON, default=list)  # IDs of source traces
+    frequency = Column(Integer, default=1)
+    avg_quality = Column(Float, default=0.0)
+    status = Column(String, default="draft")  # draft, reviewed, approved
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="flywheel_context_cards")
+
+
+class FlywheelEvalCase(Base):
+    """Eval cases for testing AI quality — input/expected/actual."""
+    __tablename__ = "flywheel_eval_cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    context_card_id = Column(Integer, ForeignKey("flywheel_context_cards.id"), nullable=True)
+    input_text = Column(Text, nullable=False)
+    expected_output = Column(Text, nullable=False)
+    actual_output = Column(Text, nullable=True)
+    pass_fail = Column(String, nullable=True)  # pass, fail, untested
+    model_tested = Column(String, default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="flywheel_eval_cases")
+    context_card = relationship("FlywheelContextCard", backref="eval_cases")
+
+
+# ---------------------------------------------------------------------------
+# Permissions Protocol — allow/require-approval/never-allowed
+# ---------------------------------------------------------------------------
+
+class PermissionRule(Base):
+    """Permission rules for agent operations — security enforcement."""
+    __tablename__ = "permission_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    action_pattern = Column(String, nullable=False)  # regex or exact action name
+    permission_level = Column(String, nullable=False)  # allow, require_approval, never
+    category = Column(String, default="general")  # git, deploy, file, network, memory, admin
+    description = Column(Text, default="")
+    requires_mfa = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="permission_rules")
+
+
+class PermissionAudit(Base):
+    """Audit log for every permission check — full traceability."""
+    __tablename__ = "permission_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    action = Column(String, nullable=False)
+    permission_level = Column(String, nullable=False)  # allow, require_approval, never
+    result = Column(String, nullable=False)  # granted, denied, pending_approval
+    rule_id = Column(Integer, ForeignKey("permission_rules.id"), nullable=True)
+    approval_status = Column(String, nullable=True)  # pending, approved, rejected
+    approved_by = Column(String, nullable=True)
+    reason = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="permission_audits")
+    project = relationship("Project", backref="permission_audits")
+
+
+# ---------------------------------------------------------------------------
+# Transfer & Onboarding
+# ---------------------------------------------------------------------------
+
+class TransferBundle(Base):
+    """Brain state export/import bundles for project transfer."""
+    __tablename__ = "transfer_bundles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    source_project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    target_project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    bundle_type = Column(String, default="full")  # full, memory_only, skills_only, lessons_only
+    direction = Column(String, nullable=False)  # export, import
+    status = Column(String, default="pending")  # pending, processing, completed, failed
+    lessons_count = Column(Integer, default=0)
+    decisions_count = Column(Integer, default=0)
+    episodes_count = Column(Integer, default=0)
+    skills_count = Column(Integer, default=0)
+    preferences_included = Column(Boolean, default=False)
+    checksum = Column(String, nullable=True)  # SHA-256 of bundle content
+    bundle_data = Column(JSON, default=dict)  # serialized bundle
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="transfer_bundles")
+    source_project = relationship("Project", foreign_keys=[source_project_id], backref="export_bundles")
+    target_project = relationship("Project", foreign_keys=[target_project_id], backref="import_bundles")
+
+
+class OnboardingResponse(Base):
+    """User onboarding wizard responses — preferences + feature toggles."""
+    __tablename__ = "onboarding_responses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    question_key = Column(String, nullable=False)  # code_style, workflow, constraints, etc.
+    answer = Column(JSON, default=dict)
+    completed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="onboarding_responses")
+    project = relationship("Project", backref="onboarding_responses")

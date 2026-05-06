@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments } from "@/lib/api";
+import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments, reviewRepo, reviewAutoFixLoop, reviewEvaluateRules, configureWebhook, getWebhookConfig } from "@/lib/api";
 import type { ReviewResponse, ReviewFinding } from "@/types";
 import {
   Shield,
@@ -23,6 +23,13 @@ import {
   Copy,
   Wand2,
   Check,
+  GitBranch,
+  Globe,
+  Settings,
+  RotateCcw,
+  FolderSearch,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -157,7 +164,7 @@ function FindingCard({ finding, index }: { finding: ReviewFinding; index: number
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
 export default function CodeReview() {
-  const [mode, setMode] = useState<"pr" | "snippet">("pr");
+  const [mode, setMode] = useState<"pr" | "snippet" | "repo" | "autofix" | "webhook">("pr");
   const [owner, setOwner] = useState("KarthikKaruppasamy880");
   const [repo, setRepo] = useState("ZECT");
   const [prNumber, setPrNumber] = useState("");
@@ -178,33 +185,120 @@ export default function CodeReview() {
   const [commentLine, setCommentLine] = useState("");
   const [postingComment, setPostingComment] = useState(false);
   const [inlineSuccess, setInlineSuccess] = useState("");
+  // Full repo scan state
+  const [repoBranch, setRepoBranch] = useState("");
+  const [filePatterns, setFilePatterns] = useState("");
+  const [repoScanResult, setRepoScanResult] = useState<any>(null);
+  // Auto-fix loop state
+  const [maxIterations, setMaxIterations] = useState(3);
+  const [autoComment, setAutoComment] = useState(true);
+  const [autoFixResult, setAutoFixResult] = useState<any>(null);
+  const [useRulesEngine, setUseRulesEngine] = useState(false);
+  const [rulesResult, setRulesResult] = useState<any>(null);
+  // Webhook config state
+  const [webhookEnabled, setWebhookEnabled] = useState(false);
+  const [webhookAutoReview, setWebhookAutoReview] = useState(true);
+  const [webhookAutoComment, setWebhookAutoComment] = useState(true);
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookSaved, setWebhookSaved] = useState(false);
+  const [webhookLoading, setWebhookLoading] = useState(false);
 
   const runReview = async () => {
     setError(null);
     setLoading(true);
     setReview(null);
     setActiveFilter(null);
+    setRepoScanResult(null);
+    setAutoFixResult(null);
+    setRulesResult(null);
     try {
       if (mode === "pr") {
         if (!owner || !repo || !prNumber) {
           setError("Please fill in owner, repo, and PR number.");
           return;
         }
-        const result = await reviewPR(owner, repo, Number(prNumber));
-        setReview(result);
-      } else {
+        if (useRulesEngine) {
+          const result = await reviewEvaluateRules(owner, repo, Number(prNumber));
+          setRulesResult(result);
+          if (result.review) setReview(result.review);
+        } else {
+          const result = await reviewPR(owner, repo, Number(prNumber));
+          setReview(result);
+        }
+      } else if (mode === "snippet") {
         if (!snippetCode.trim()) {
           setError("Please paste some code to review.");
           return;
         }
         const result = await reviewSnippet(snippetCode, snippetLang || undefined);
         setReview(result);
+      } else if (mode === "repo") {
+        if (!owner || !repo) {
+          setError("Please fill in owner and repo.");
+          return;
+        }
+        const patterns = filePatterns.trim() ? filePatterns.split(",").map((p) => p.trim()) : undefined;
+        const result = await reviewRepo(owner, repo, repoBranch || undefined, patterns);
+        setReview(result);
+        setRepoScanResult(result);
+      } else if (mode === "autofix") {
+        if (!owner || !repo || !prNumber) {
+          setError("Please fill in owner, repo, and PR number.");
+          return;
+        }
+        const result = await reviewAutoFixLoop(owner, repo, Number(prNumber), maxIterations, autoComment);
+        setAutoFixResult(result);
+        // Set last iteration's review if available
+        const lastIter = result.iterations?.[result.iterations.length - 1];
+        if (lastIter?.findings) {
+          setReview({
+            summary: `Auto-fix loop completed: ${result.total_iterations} iteration(s)`,
+            quality_score: lastIter.quality_score || 0,
+            total_issues: lastIter.total_issues || 0,
+            categories: {},
+            findings: lastIter.findings || [],
+            strengths: [],
+            recommendations: [],
+            tokens_used: result.total_tokens_used || 0,
+            model: "gpt-4o-mini",
+          });
+        }
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Review failed");
     } finally {
       setLoading(false);
     }
+  };
+
+  const saveWebhookConfig = async () => {
+    if (!owner || !repo) {
+      setError("Please fill in owner and repo.");
+      return;
+    }
+    setWebhookLoading(true);
+    setError(null);
+    setWebhookSaved(false);
+    try {
+      await configureWebhook(owner, repo, webhookEnabled, webhookAutoReview, webhookAutoComment, webhookSecret);
+      setWebhookSaved(true);
+      setTimeout(() => setWebhookSaved(false), 3000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save webhook config");
+    } finally {
+      setWebhookLoading(false);
+    }
+  };
+
+  const loadWebhookConfig = async () => {
+    if (!owner || !repo) return;
+    try {
+      const config = await getWebhookConfig(owner, repo);
+      setWebhookEnabled(config.enabled || false);
+      setWebhookAutoReview(config.auto_review !== false);
+      setWebhookAutoComment(config.auto_comment !== false);
+      setWebhookSecret(config.webhook_secret || "");
+    } catch { /* ignore */ }
   };
 
   const filteredFindings = review
@@ -350,67 +444,89 @@ export default function CodeReview() {
       {/* Input Panel */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
         {/* Mode tabs */}
-        <div className="flex gap-1 mb-5 bg-slate-100 rounded-lg p-1 w-fit">
+        <div className="flex gap-1 mb-5 bg-slate-100 rounded-lg p-1 w-fit flex-wrap">
           <button
             onClick={() => setMode("pr")}
-            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors ${
               mode === "pr" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
           >
+            <GitBranch className="h-3.5 w-3.5" />
             PR Review
           </button>
           <button
             onClick={() => setMode("snippet")}
-            className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors ${
               mode === "snippet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            Code Snippet
+            <Code2 className="h-3.5 w-3.5" />
+            Snippet
+          </button>
+          <button
+            onClick={() => setMode("repo")}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+              mode === "repo" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <FolderSearch className="h-3.5 w-3.5" />
+            Full Repo Scan
+          </button>
+          <button
+            onClick={() => setMode("autofix")}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+              mode === "autofix" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Auto-Fix Loop
+          </button>
+          <button
+            onClick={() => { setMode("webhook"); loadWebhookConfig(); }}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded text-sm font-medium transition-colors ${
+              mode === "webhook" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Globe className="h-3.5 w-3.5" />
+            Webhook
           </button>
         </div>
 
-        {mode === "pr" ? (
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Repository Owner</label>
-              <input
-                type="text"
-                value={owner}
-                onChange={(e) => setOwner(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="KarthikKaruppasamy880"
-              />
+        {/* --- PR Review Mode --- */}
+        {mode === "pr" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Owner</label>
+                <input type="text" value={owner} onChange={(e) => setOwner(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="KarthikKaruppasamy880" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Name</label>
+                <input type="text" value={repo} onChange={(e) => setRepo(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ZECT" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">PR Number</label>
+                <input type="text" value={prNumber} onChange={(e) => setPrNumber(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="10" />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Repository Name</label>
-              <input
-                type="text"
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="ZECT"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">PR Number</label>
-              <input
-                type="text"
-                value={prNumber}
-                onChange={(e) => setPrNumber(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="10"
-              />
-            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={useRulesEngine} onChange={(e) => setUseRulesEngine(e.target.checked)} className="rounded border-slate-300" />
+              <Shield className="h-3.5 w-3.5 text-indigo-500" />
+              Also evaluate Rules Engine rules
+            </label>
           </div>
-        ) : (
+        )}
+
+        {/* --- Snippet Mode --- */}
+        {mode === "snippet" && (
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Language</label>
-              <select
-                value={snippetLang}
-                onChange={(e) => setSnippetLang(e.target.value)}
-                className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
+              <select value={snippetLang} onChange={(e) => setSnippetLang(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="typescript">TypeScript</option>
                 <option value="python">Python</option>
                 <option value="javascript">JavaScript</option>
@@ -423,18 +539,150 @@ export default function CodeReview() {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Code</label>
-              <textarea
-                value={snippetCode}
-                onChange={(e) => setSnippetCode(e.target.value)}
-                rows={10}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Paste your code here..."
-              />
+              <textarea value={snippetCode} onChange={(e) => setSnippetCode(e.target.value)} rows={10}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Paste your code here..." />
+            </div>
+          </div>
+        )}
+
+        {/* --- Full Repo Scan Mode --- */}
+        {mode === "repo" && (
+          <div className="space-y-4">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex items-start gap-2">
+              <FolderSearch className="h-4 w-4 text-indigo-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-indigo-700">
+                Scans ALL source files in the repository — not just PR changes. Ideal for new repos, legacy code audits, and full security reviews.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Owner</label>
+                <input type="text" value={owner} onChange={(e) => setOwner(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="KarthikKaruppasamy880" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Name</label>
+                <input type="text" value={repo} onChange={(e) => setRepo(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ZECT" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Branch (optional)</label>
+                <input type="text" value={repoBranch} onChange={(e) => setRepoBranch(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="main" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">File Patterns (optional, comma-separated)</label>
+              <input type="text" value={filePatterns} onChange={(e) => setFilePatterns(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="*.py, src/**/*.ts, backend/**" />
+            </div>
+          </div>
+        )}
+
+        {/* --- Auto-Fix Loop Mode --- */}
+        {mode === "autofix" && (
+          <div className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+              <RotateCcw className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-700">
+                Automatically reviews a PR, generates fix suggestions, and posts them as inline comments. Repeats up to max iterations until quality improves.
+              </p>
+            </div>
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Owner</label>
+                <input type="text" value={owner} onChange={(e) => setOwner(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="KarthikKaruppasamy880" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Name</label>
+                <input type="text" value={repo} onChange={(e) => setRepo(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ZECT" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">PR Number</label>
+                <input type="text" value={prNumber} onChange={(e) => setPrNumber(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="10" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Max Iterations</label>
+                <input type="number" min={1} max={10} value={maxIterations} onChange={(e) => setMaxIterations(Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={autoComment} onChange={(e) => setAutoComment(e.target.checked)} className="rounded border-slate-300" />
+              Auto-post fix suggestions as PR comments
+            </label>
+          </div>
+        )}
+
+        {/* --- Webhook Config Mode --- */}
+        {mode === "webhook" && (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2">
+              <Globe className="h-4 w-4 text-green-600 mt-0.5 shrink-0" />
+              <div className="text-xs text-green-700">
+                <p className="font-medium mb-1">Auto-trigger code review on new PRs</p>
+                <p>Configure a GitHub webhook to automatically run ZECT Code Review when PRs are opened or updated. Use Rules Engine to control when auto-review runs.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Owner</label>
+                <input type="text" value={owner} onChange={(e) => setOwner(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="KarthikKaruppasamy880" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Repository Name</label>
+                <input type="text" value={repo} onChange={(e) => setRepo(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ZECT" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <button onClick={() => setWebhookEnabled(!webhookEnabled)}
+                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm font-medium transition-colors ${webhookEnabled ? "border-green-300 bg-green-50 text-green-700" : "border-slate-200 text-slate-500"}`}>
+                {webhookEnabled ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                {webhookEnabled ? "Enabled" : "Disabled"}
+              </button>
+              <button onClick={() => setWebhookAutoReview(!webhookAutoReview)}
+                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm font-medium transition-colors ${webhookAutoReview ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500"}`}>
+                <Sparkles className="h-4 w-4" />
+                {webhookAutoReview ? "Auto-Review On" : "Auto-Review Off"}
+              </button>
+              <button onClick={() => setWebhookAutoComment(!webhookAutoComment)}
+                className={`flex items-center justify-center gap-2 p-3 rounded-lg border text-sm font-medium transition-colors ${webhookAutoComment ? "border-purple-300 bg-purple-50 text-purple-700" : "border-slate-200 text-slate-500"}`}>
+                <FileCode className="h-4 w-4" />
+                {webhookAutoComment ? "Auto-Comment On" : "Auto-Comment Off"}
+              </button>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Webhook Secret (optional)</label>
+              <input type="password" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="your-webhook-secret" />
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <p className="text-xs font-medium text-slate-700 mb-2">GitHub Webhook Setup</p>
+              <p className="text-xs text-slate-500 mb-2">Point your GitHub webhook to this URL:</p>
+              <code className="block bg-slate-900 text-green-400 text-xs p-2 rounded font-mono">{`POST ${window.location.origin}/api/review/webhook/github`}</code>
+              <p className="text-xs text-slate-500 mt-2">Events: <strong>Pull requests</strong> (opened, synchronize, reopened)</p>
+              <p className="text-xs text-slate-500 mt-1">Content type: <strong>application/json</strong></p>
             </div>
           </div>
         )}
 
         <div className="mt-5 flex items-center gap-3">
+          {mode === "webhook" ? (
+            <button
+              onClick={saveWebhookConfig}
+              disabled={webhookLoading}
+              className="flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {webhookLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+              Save Webhook Config
+            </button>
+          ) : (
+          <>
           <button
             onClick={runReview}
             disabled={loading}
@@ -443,12 +691,12 @@ export default function CodeReview() {
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Analysing...
+                {mode === "repo" ? "Scanning Repo..." : mode === "autofix" ? "Running Auto-Fix..." : "Analysing..."}
               </>
             ) : (
               <>
-                <Sparkles className="h-4 w-4" />
-                Run ZECT Review
+                {mode === "repo" ? <FolderSearch className="h-4 w-4" /> : mode === "autofix" ? <RotateCcw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                {mode === "repo" ? "Scan Full Repository" : mode === "autofix" ? "Run Auto-Fix Loop" : "Run ZECT Review"}
               </>
             )}
           </button>
@@ -465,10 +713,115 @@ export default function CodeReview() {
               )}
             </button>
           )}
+          </>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           {inlineSuccess && <p className="text-sm text-green-600">{inlineSuccess}</p>}
+          {webhookSaved && <p className="text-sm text-green-600">Webhook configuration saved!</p>}
         </div>
       </div>
+
+      {/* Auto-Fix Results Panel */}
+      {autoFixResult && !loading && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+          <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <RotateCcw className="h-4 w-4 text-amber-600" />
+            Auto-Fix Loop Results
+          </h3>
+          <div className="grid grid-cols-4 gap-4 mb-4">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{autoFixResult.total_iterations}</p>
+              <p className="text-xs text-slate-500">Iterations</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{autoFixResult.final_quality_score}</p>
+              <p className="text-xs text-slate-500">Final Score</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{autoFixResult.total_fixes_posted}</p>
+              <p className="text-xs text-slate-500">Fixes Posted</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{autoFixResult.total_tokens_used?.toLocaleString()}</p>
+              <p className="text-xs text-slate-500">Tokens Used</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {autoFixResult.iterations?.map((iter: any, i: number) => (
+              <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                <span className="text-xs font-mono text-slate-400 w-6">#{iter.iteration}</span>
+                <span className={`px-2 py-0.5 rounded text-xs font-medium ${iter.action === "clean" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                  {iter.action === "clean" ? "Clean" : "Review & Fix"}
+                </span>
+                <span className="text-sm text-slate-700 flex-1">{iter.message || `${iter.total_issues} issues, score ${iter.quality_score}/100`}</span>
+                {iter.fixes_posted > 0 && <span className="text-xs text-indigo-600">{iter.fixes_posted} fixes posted</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rules Engine Results Panel */}
+      {rulesResult && !loading && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+          <h3 className="text-sm font-semibold text-slate-900 mb-4 flex items-center gap-2">
+            <Shield className="h-4 w-4 text-indigo-600" />
+            Rules Engine Evaluation
+          </h3>
+          {rulesResult.is_blocked && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+              <XCircle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-800">PR Blocked by Rules</p>
+                <p className="text-xs text-red-600">{rulesResult.blocked_by_rules?.join(", ")}</p>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{rulesResult.total_rule_matches}</p>
+              <p className="text-xs text-slate-500">Rule Matches</p>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3 text-center">
+              <p className="text-2xl font-bold text-slate-900">{rulesResult.merged_total_issues}</p>
+              <p className="text-xs text-slate-500">Total Issues (AI + Rules)</p>
+            </div>
+            <div className={`rounded-lg p-3 text-center ${rulesResult.is_blocked ? "bg-red-50" : "bg-green-50"}`}>
+              <p className={`text-2xl font-bold ${rulesResult.is_blocked ? "text-red-700" : "text-green-700"}`}>
+                {rulesResult.is_blocked ? "BLOCKED" : "PASS"}
+              </p>
+              <p className="text-xs text-slate-500">Gate Status</p>
+            </div>
+          </div>
+          {rulesResult.rule_findings?.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-slate-600 uppercase tracking-wide">Rule Findings</p>
+              {rulesResult.rule_findings.map((rf: any, i: number) => (
+                <div key={i} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                  <SeverityBadge severity={rf.severity} />
+                  <span className="text-sm text-slate-700 flex-1">{rf.title}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${rf.rule_action === "block" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                    {rf.rule_action}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Repo Scan Info Banner */}
+      {repoScanResult && !loading && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-6 flex items-center gap-4">
+          <FolderSearch className="h-5 w-5 text-indigo-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-indigo-900">Full Repository Scan Complete</p>
+            <p className="text-xs text-indigo-700">
+              {repoScanResult.files_scanned} files scanned &middot; {repoScanResult.total_lines?.toLocaleString()} lines &middot; Branch: {repoScanResult.branch}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Inline PR Comments Panel */}
       {showInlinePanel && mode === "pr" && (

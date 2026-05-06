@@ -9,6 +9,8 @@ import {
   Zap,
   Clock,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
+import Pagination from "@/components/Pagination";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -38,6 +40,8 @@ export default function SkillsEngine() {
   const [execLogs, setExecLogs] = useState<any[]>([]);
   const [filterCategory, setFilterCategory] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
+  const [skillsPage, setSkillsPage] = useState(1);
+  const skillsPerPage = 10;
 
   // New skill form
   const [newSkill, setNewSkill] = useState({
@@ -50,28 +54,32 @@ export default function SkillsEngine() {
       if (filterCategory) params.set("category", filterCategory);
       const res = await fetch(`${API}/api/skills-engine/skills?${params}`);
       if (res.ok) setSkills(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load skills (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading skills"); }
   };
 
   const fetchStats = async () => {
     try {
       const res = await fetch(`${API}/api/skills-engine/stats`);
       if (res.ok) setStats(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load stats (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading stats"); }
   };
 
   const fetchCategories = async () => {
     try {
       const res = await fetch(`${API}/api/skills-engine/categories`);
       if (res.ok) setCategories(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load categories (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading categories"); }
   };
 
   const fetchLogs = async () => {
     try {
       const res = await fetch(`${API}/api/skills-engine/executions?limit=50`);
       if (res.ok) setExecLogs(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load logs (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading logs"); }
   };
 
   useEffect(() => {
@@ -89,7 +97,8 @@ export default function SkillsEngine() {
         body: JSON.stringify({ intent: matchIntent }),
       });
       if (res.ok) setMatchResults(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Match failed (${res.status})`);
+    } catch (err) { showToast("error", "Network error during match"); }
   };
 
   const handleCreateSkill = async () => {
@@ -105,17 +114,21 @@ export default function SkillsEngine() {
         setActiveTab("registry");
         fetchSkills();
         fetchStats();
+        showToast("success", "Skill created successfully");
         fetchCategories();
+      } else {
+        showToast("error", `Failed to create skill (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error creating skill"); }
   };
 
   const handleDeactivate = async (skillId: number) => {
     try {
       await fetch(`${API}/api/skills-engine/skills/${skillId}`, { method: "DELETE" });
+      showToast("info", "Skill deactivated");
       fetchSkills();
       fetchStats();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to deactivate skill"); }
   };
 
   if (loading) {
@@ -185,8 +198,9 @@ export default function SkillsEngine() {
             ))}
           </div>
 
+          <>
           <div className="space-y-3">
-            {skills.map((s) => (
+            {skills.slice((skillsPage - 1) * skillsPerPage, skillsPage * skillsPerPage).map((s) => (
               <div key={s.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:border-emerald-300 transition-colors cursor-pointer" onClick={() => setSelectedSkill(selectedSkill?.id === s.id ? null : s)}>
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
@@ -243,6 +257,8 @@ export default function SkillsEngine() {
               </div>
             ))}
           </div>
+          <Pagination currentPage={skillsPage} totalItems={skills.length} pageSize={skillsPerPage} onPageChange={setSkillsPage} />
+          </>
         </div>
       )}
 

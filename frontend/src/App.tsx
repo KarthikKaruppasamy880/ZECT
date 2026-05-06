@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
+import ToastContainer from "@/components/Toast";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
@@ -16,11 +17,6 @@ import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
 import AskMode from "@/pages/AskMode";
 import PlanMode from "@/pages/PlanMode";
-import CodeReview from "@/pages/CodeReview";
-import BuildPhase from "@/pages/BuildPhase";
-import ReviewPhase from "@/pages/ReviewPhase";
-import DeployPhase from "@/pages/DeployPhase";
-import SkillLibrary from "@/pages/SkillLibrary";
 import TokenControls from "@/pages/TokenControls";
 import AuditTrail from "@/pages/AuditTrail";
 import RulesEngine from "@/pages/RulesEngine";
@@ -40,6 +36,21 @@ import TransferOnboarding from "@/pages/TransferOnboarding";
 import SkillsEngine from "@/pages/SkillsEngine";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
+
+/* Gap 5: Code-split heavy pages with React.lazy() */
+const LazyCodeReview = lazy(() => import("@/pages/CodeReview"));
+const LazyBuildPhase = lazy(() => import("@/pages/BuildPhase"));
+const LazyReviewPhase = lazy(() => import("@/pages/ReviewPhase"));
+const LazyDeployPhase = lazy(() => import("@/pages/DeployPhase"));
+const LazySkillLibrary = lazy(() => import("@/pages/SkillLibrary"));
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+    </div>
+  );
+}
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -88,6 +99,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ToastContainer />
       <Routes>
         <Route element={<Layout onLogout={handleLogout} />}>
           <Route path="/" element={<Dashboard />} />
@@ -104,11 +116,11 @@ export default function App() {
           <Route path="/ask" element={<AskMode />} />
           <Route path="/plan" element={<PlanMode />} />
           <Route path="/docs" element={<Docs />} />
-          <Route path="/code-review" element={<CodeReview />} />
-          <Route path="/build" element={<BuildPhase />} />
-          <Route path="/review" element={<ReviewPhase />} />
-          <Route path="/deploy" element={<DeployPhase />} />
-          <Route path="/skills" element={<SkillLibrary />} />
+          <Route path="/code-review" element={<Suspense fallback={<PageLoader />}><LazyCodeReview /></Suspense>} />
+          <Route path="/build" element={<Suspense fallback={<PageLoader />}><LazyBuildPhase /></Suspense>} />
+          <Route path="/review" element={<Suspense fallback={<PageLoader />}><LazyReviewPhase /></Suspense>} />
+          <Route path="/deploy" element={<Suspense fallback={<PageLoader />}><LazyDeployPhase /></Suspense>} />
+          <Route path="/skills" element={<Suspense fallback={<PageLoader />}><LazySkillLibrary /></Suspense>} />
           <Route path="/token-controls" element={<TokenControls />} />
           <Route path="/audit-trail" element={<AuditTrail />} />
           <Route path="/rules" element={<RulesEngine />} />

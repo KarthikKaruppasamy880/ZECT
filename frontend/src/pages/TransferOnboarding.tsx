@@ -9,6 +9,7 @@ import {
   Brain,
   BookOpen,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -34,21 +35,23 @@ export default function TransferOnboarding() {
         setQuestions(data.questions || []);
         setToggles(data.feature_toggles || []);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to load onboarding questions"); }
   };
 
   const fetchOnboardingStatus = async () => {
     try {
       const res = await fetch(`${API}/api/transfer/onboarding/status/${userId}`);
       if (res.ok) setOnboardingStatus(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load onboarding status (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading status"); }
   };
 
   const fetchBundles = async () => {
     try {
       const res = await fetch(`${API}/api/transfer/bundles?limit=20`);
       if (res.ok) setBundles(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load bundles (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading bundles"); }
   };
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export default function TransferOnboarding() {
         body: JSON.stringify({ user_id: userId, project_id: projectId, question_key: key, answer: value }),
       });
       fetchOnboardingStatus();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to save answer"); }
   };
 
   const handleCompleteOnboarding = async () => {
@@ -78,9 +81,11 @@ export default function TransferOnboarding() {
       });
       if (res.ok) {
         fetchOnboardingStatus();
-        alert("Onboarding complete! Preferences saved.");
+        showToast("success", "Onboarding complete! Preferences saved.");
+      } else {
+        showToast("error", `Onboarding failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to complete onboarding"); }
   };
 
   const handleExport = async (bundleType: string) => {
@@ -93,12 +98,13 @@ export default function TransferOnboarding() {
       if (res.ok) {
         const data = await res.json();
         setExportResult(data);
+        showToast("success", `${bundleType} export successful`);
         fetchBundles();
       } else {
-        const err = await res.json();
-        alert(err.detail || "Export failed");
+        const errData = await res.json().catch(() => ({}));
+        showToast("error", errData.detail || `Export failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error during export"); }
   };
 
   const handleImport = async () => {
@@ -116,7 +122,7 @@ export default function TransferOnboarding() {
         fetchBundles();
       }
     } catch (err) {
-      alert("Invalid JSON bundle data");
+      showToast("error", "Invalid JSON bundle data");
     }
   };
 

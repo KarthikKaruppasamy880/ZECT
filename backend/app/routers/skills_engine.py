@@ -1,14 +1,15 @@
 """Zinnia Skills Engine — skill registry, trigger matching, and seed skills."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models import SkillDefinition, SkillExecutionLog
 
 router = APIRouter(prefix="/api/skills-engine", tags=["skills-engine"])
 
@@ -51,17 +52,7 @@ class SkillExecLog(BaseModel):
     error_message: Optional[str] = None
 
 
-# ── In-memory skill store (backed by DB when available) ─────────────
-
-# We keep an in-memory registry so skills work even without the
-# SkillDefinition / SkillExecutionLog models being present in models.py.
-# If they exist we persist; otherwise we use this dict.
-
-_skill_registry: list[dict] = []
-_exec_logs: list[dict] = []
-_next_id = 1
-_next_log_id = 1
-
+# ── Seed skill definitions ─────────────────────────────────────────
 
 SEED_SKILLS = [
     {
@@ -171,30 +162,67 @@ SEED_SKILLS = [
 ]
 
 
-def _seed_if_empty():
-    """Seed the in-memory registry with default skills if empty."""
-    global _next_id
-    if len(_skill_registry) > 0:
+def _seed_if_empty(db: Session):
+    """Seed the database with default skills if empty."""
+    count = db.query(func.count(SkillDefinition.id)).scalar()
+    if count > 0:
         return
+    now = datetime.now(timezone.utc)
     for s in SEED_SKILLS:
-        _skill_registry.append({
-            "id": _next_id,
-            "name": s["name"],
-            "version": s["version"],
-            "description": s["description"],
-            "category": s["category"],
-            "trigger_pattern": s["trigger_pattern"],
-            "manifest": s["manifest"],
-            "script_body": "",
-            "project_id": None,
-            "is_seed": s["is_seed"],
-            "is_active": True,
-            "execution_count": 0,
-            "last_executed_at": None,
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-        })
-        _next_id += 1
+        skill = SkillDefinition(
+            name=s["name"],
+            version=s["version"],
+            description=s["description"],
+            category=s["category"],
+            trigger_pattern=s["trigger_pattern"],
+            manifest=s["manifest"],
+            script_body="",
+            project_id=None,
+            is_seed=s["is_seed"],
+            is_active=True,
+            execution_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(skill)
+    db.commit()
+
+
+def _skill_to_dict(skill: SkillDefinition) -> dict:
+    """Convert a SkillDefinition ORM object to a JSON-friendly dict."""
+    return {
+        "id": skill.id,
+        "name": skill.name,
+        "version": skill.version,
+        "description": skill.description,
+        "category": skill.category,
+        "trigger_pattern": skill.trigger_pattern,
+        "manifest": skill.manifest or {},
+        "script_body": skill.script_body or "",
+        "project_id": skill.project_id,
+        "is_seed": skill.is_seed,
+        "is_active": skill.is_active,
+        "execution_count": skill.execution_count,
+        "last_executed_at": skill.last_executed_at.isoformat() if skill.last_executed_at else None,
+        "created_at": skill.created_at.isoformat() if skill.created_at else None,
+        "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
+    }
+
+
+def _log_to_dict(log: SkillExecutionLog) -> dict:
+    """Convert a SkillExecutionLog ORM object to a JSON-friendly dict."""
+    return {
+        "id": log.id,
+        "skill_id": log.skill_id,
+        "skill_name": log.skill_name,
+        "project_id": log.project_id,
+        "input_data": log.input_data or {},
+        "output_data": log.output_data or {},
+        "success": log.success,
+        "duration_seconds": log.duration_seconds,
+        "error_message": log.error_message,
+        "created_at": log.created_at.isoformat() if log.created_at else None,
+    }
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -204,112 +232,123 @@ def list_skills(
     category: Optional[str] = None,
     active_only: bool = True,
     project_id: Optional[int] = None,
+    db: Session = Depends(get_db),
 ):
     """List all registered skills with optional filters."""
-    _seed_if_empty()
-    results = _skill_registry
+    _seed_if_empty(db)
+    query = db.query(SkillDefinition)
     if active_only:
-        results = [s for s in results if s["is_active"]]
+        query = query.filter(SkillDefinition.is_active == True)
     if category:
-        results = [s for s in results if s["category"] == category]
+        query = query.filter(SkillDefinition.category == category)
     if project_id is not None:
-        results = [s for s in results if s["project_id"] is None or s["project_id"] == project_id]
-    return results
+        query = query.filter(
+            (SkillDefinition.project_id == None) | (SkillDefinition.project_id == project_id)
+        )
+    skills = query.order_by(SkillDefinition.id).all()
+    return [_skill_to_dict(s) for s in skills]
 
 
 @router.get("/skills/{skill_id}")
-def get_skill(skill_id: int):
+def get_skill(skill_id: int, db: Session = Depends(get_db)):
     """Get a specific skill by ID."""
-    _seed_if_empty()
-    for s in _skill_registry:
-        if s["id"] == skill_id:
-            return s
-    raise HTTPException(status_code=404, detail="Skill not found")
+    _seed_if_empty(db)
+    skill = db.query(SkillDefinition).filter(SkillDefinition.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return _skill_to_dict(skill)
 
 
 @router.post("/skills")
-def create_skill(body: SkillCreate):
+def create_skill(body: SkillCreate, db: Session = Depends(get_db)):
     """Register a new skill."""
-    global _next_id
-    _seed_if_empty()
-    # Check duplicate name
-    for s in _skill_registry:
-        if s["name"] == body.name and s["is_active"]:
-            raise HTTPException(status_code=409, detail=f"Skill '{body.name}' already exists")
+    _seed_if_empty(db)
+    existing = db.query(SkillDefinition).filter(
+        SkillDefinition.name == body.name,
+        SkillDefinition.is_active == True,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Skill '{body.name}' already exists")
 
-    skill = {
-        "id": _next_id,
-        "name": body.name,
-        "version": body.version,
-        "description": body.description,
-        "category": body.category,
-        "trigger_pattern": body.trigger_pattern,
-        "manifest": body.manifest,
-        "script_body": body.script_body,
-        "project_id": body.project_id,
-        "is_seed": body.is_seed,
-        "is_active": True,
-        "execution_count": 0,
-        "last_executed_at": None,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat(),
-    }
-    _next_id += 1
-    _skill_registry.append(skill)
-    return skill
+    now = datetime.now(timezone.utc)
+    skill = SkillDefinition(
+        name=body.name,
+        version=body.version,
+        description=body.description,
+        category=body.category,
+        trigger_pattern=body.trigger_pattern,
+        manifest=body.manifest,
+        script_body=body.script_body,
+        project_id=body.project_id,
+        is_seed=body.is_seed,
+        is_active=True,
+        execution_count=0,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
+    return _skill_to_dict(skill)
 
 
 @router.put("/skills/{skill_id}")
-def update_skill(skill_id: int, body: SkillUpdate):
+def update_skill(skill_id: int, body: SkillUpdate, db: Session = Depends(get_db)):
     """Update an existing skill."""
-    _seed_if_empty()
-    for s in _skill_registry:
-        if s["id"] == skill_id:
-            if body.description is not None:
-                s["description"] = body.description
-            if body.version is not None:
-                s["version"] = body.version
-            if body.trigger_pattern is not None:
-                s["trigger_pattern"] = body.trigger_pattern
-            if body.manifest is not None:
-                s["manifest"] = body.manifest
-            if body.script_body is not None:
-                s["script_body"] = body.script_body
-            if body.is_active is not None:
-                s["is_active"] = body.is_active
-            s["updated_at"] = datetime.utcnow().isoformat()
-            return s
-    raise HTTPException(status_code=404, detail="Skill not found")
+    _seed_if_empty(db)
+    skill = db.query(SkillDefinition).filter(SkillDefinition.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    if body.description is not None:
+        skill.description = body.description
+    if body.version is not None:
+        skill.version = body.version
+    if body.trigger_pattern is not None:
+        skill.trigger_pattern = body.trigger_pattern
+    if body.manifest is not None:
+        skill.manifest = body.manifest
+    if body.script_body is not None:
+        skill.script_body = body.script_body
+    if body.is_active is not None:
+        skill.is_active = body.is_active
+    skill.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(skill)
+    return _skill_to_dict(skill)
 
 
 @router.delete("/skills/{skill_id}")
-def deactivate_skill(skill_id: int):
+def deactivate_skill(skill_id: int, db: Session = Depends(get_db)):
     """Deactivate a skill (soft delete)."""
-    _seed_if_empty()
-    for s in _skill_registry:
-        if s["id"] == skill_id:
-            s["is_active"] = False
-            s["updated_at"] = datetime.utcnow().isoformat()
-            return {"status": "deactivated", "skill_id": skill_id}
-    raise HTTPException(status_code=404, detail="Skill not found")
+    _seed_if_empty(db)
+    skill = db.query(SkillDefinition).filter(SkillDefinition.id == skill_id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    skill.is_active = False
+    skill.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "deactivated", "skill_id": skill_id}
 
 
 @router.post("/match")
-def match_skills(body: TriggerMatch):
+def match_skills(body: TriggerMatch, db: Session = Depends(get_db)):
     """Match skills by intent against trigger patterns."""
-    import re
-    _seed_if_empty()
+    _seed_if_empty(db)
+    query = db.query(SkillDefinition).filter(
+        SkillDefinition.is_active == True,
+        SkillDefinition.trigger_pattern != "",
+    )
+    if body.project_id is not None:
+        query = query.filter(
+            (SkillDefinition.project_id == None) | (SkillDefinition.project_id == body.project_id)
+        )
+    all_skills = query.all()
+
     intent_lower = body.intent.lower()
     matches = []
-    for s in _skill_registry:
-        if not s["is_active"]:
-            continue
-        if body.project_id is not None and s["project_id"] is not None and s["project_id"] != body.project_id:
-            continue
-        if not s["trigger_pattern"]:
-            continue
-        # Check if any trigger pattern word matches
-        patterns = s["trigger_pattern"].split("|")
+    for s in all_skills:
+        patterns = s.trigger_pattern.split("|")
         score = 0
         for p in patterns:
             p_clean = p.strip().replace(".", " ").lower()
@@ -318,7 +357,11 @@ def match_skills(body: TriggerMatch):
             elif any(w in intent_lower for w in p_clean.split()):
                 score += 1
         if score > 0:
-            matches.append({"skill": s, "score": score, "trigger_pattern": s["trigger_pattern"]})
+            matches.append({
+                "skill": _skill_to_dict(s),
+                "score": score,
+                "trigger_pattern": s.trigger_pattern,
+            })
 
     matches.sort(key=lambda x: x["score"], reverse=True)
     return {
@@ -329,39 +372,32 @@ def match_skills(body: TriggerMatch):
 
 
 @router.post("/execute/{skill_id}")
-def log_execution(skill_id: int, body: SkillExecLog):
+def log_execution(skill_id: int, body: SkillExecLog, db: Session = Depends(get_db)):
     """Log a skill execution result."""
-    global _next_log_id
-    _seed_if_empty()
-
-    # Find skill
-    skill = None
-    for s in _skill_registry:
-        if s["id"] == skill_id:
-            skill = s
-            break
+    _seed_if_empty(db)
+    skill = db.query(SkillDefinition).filter(SkillDefinition.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
-    # Update skill stats
-    skill["execution_count"] = skill.get("execution_count", 0) + 1
-    skill["last_executed_at"] = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc)
+    skill.execution_count = (skill.execution_count or 0) + 1
+    skill.last_executed_at = now
 
-    log_entry = {
-        "id": _next_log_id,
-        "skill_id": skill_id,
-        "skill_name": skill["name"],
-        "project_id": body.project_id,
-        "input_data": body.input_data,
-        "output_data": body.output_data,
-        "success": body.success,
-        "duration_seconds": body.duration_seconds,
-        "error_message": body.error_message,
-        "created_at": datetime.utcnow().isoformat(),
-    }
-    _next_log_id += 1
-    _exec_logs.append(log_entry)
-    return log_entry
+    log_entry = SkillExecutionLog(
+        skill_id=skill_id,
+        skill_name=skill.name,
+        project_id=body.project_id,
+        input_data=body.input_data,
+        output_data=body.output_data,
+        success=body.success,
+        duration_seconds=body.duration_seconds,
+        error_message=body.error_message,
+        created_at=now,
+    )
+    db.add(log_entry)
+    db.commit()
+    db.refresh(log_entry)
+    return _log_to_dict(log_entry)
 
 
 @router.get("/executions")
@@ -369,37 +405,46 @@ def list_executions(
     skill_id: Optional[int] = None,
     project_id: Optional[int] = None,
     limit: int = 50,
+    db: Session = Depends(get_db),
 ):
     """List skill execution logs."""
-    results = _exec_logs
+    query = db.query(SkillExecutionLog)
     if skill_id is not None:
-        results = [l for l in results if l["skill_id"] == skill_id]
+        query = query.filter(SkillExecutionLog.skill_id == skill_id)
     if project_id is not None:
-        results = [l for l in results if l.get("project_id") == project_id]
-    return sorted(results, key=lambda x: x["id"], reverse=True)[:limit]
+        query = query.filter(SkillExecutionLog.project_id == project_id)
+    logs = query.order_by(desc(SkillExecutionLog.id)).limit(limit).all()
+    return [_log_to_dict(l) for l in logs]
 
 
 @router.get("/categories")
-def list_categories():
+def list_categories(db: Session = Depends(get_db)):
     """List all skill categories with counts."""
-    _seed_if_empty()
-    cats: dict[str, int] = {}
-    for s in _skill_registry:
-        if s["is_active"]:
-            cats[s["category"]] = cats.get(s["category"], 0) + 1
-    return [{"category": k, "count": v} for k, v in sorted(cats.items())]
+    _seed_if_empty(db)
+    rows = (
+        db.query(SkillDefinition.category, func.count(SkillDefinition.id))
+        .filter(SkillDefinition.is_active == True)
+        .group_by(SkillDefinition.category)
+        .order_by(SkillDefinition.category)
+        .all()
+    )
+    return [{"category": cat, "count": cnt} for cat, cnt in rows]
 
 
 @router.get("/stats")
-def skill_stats():
+def skill_stats(db: Session = Depends(get_db)):
     """Get skills engine statistics."""
-    _seed_if_empty()
-    active = [s for s in _skill_registry if s["is_active"]]
+    _seed_if_empty(db)
+    total = db.query(func.count(SkillDefinition.id)).filter(SkillDefinition.is_active == True).scalar() or 0
+    seeds = db.query(func.count(SkillDefinition.id)).filter(SkillDefinition.is_active == True, SkillDefinition.is_seed == True).scalar() or 0
+    total_execs = db.query(func.count(SkillExecutionLog.id)).scalar() or 0
+    success_execs = db.query(func.count(SkillExecutionLog.id)).filter(SkillExecutionLog.success == True).scalar() or 0
+    cat_count = db.query(func.count(func.distinct(SkillDefinition.category))).filter(SkillDefinition.is_active == True).scalar() or 0
     return {
-        "total_skills": len(active),
-        "seed_skills": len([s for s in active if s.get("is_seed")]),
-        "custom_skills": len([s for s in active if not s.get("is_seed")]),
-        "total_executions": len(_exec_logs),
-        "successful_executions": len([l for l in _exec_logs if l["success"]]),
-        "categories": len(set(s["category"] for s in active)),
+        "total_skills": total,
+        "seed_skills": seeds,
+        "custom_skills": total - seeds,
+        "total_executions": total_execs,
+        "successful_executions": success_execs,
+        "categories": cat_count,
     }

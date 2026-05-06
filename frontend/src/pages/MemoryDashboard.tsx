@@ -13,6 +13,7 @@ import {
   FileText,
   AlertTriangle,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -48,28 +49,32 @@ export default function MemoryDashboard() {
     try {
       const res = await fetch(`${API}/api/memory/brain-state/${projectId}`);
       if (res.ok) setBrainState(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load brain state (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading brain state"); }
   };
 
   const fetchEpisodes = async () => {
     try {
       const res = await fetch(`${API}/api/memory/episodic/${projectId}?limit=50`);
       if (res.ok) setEpisodes(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load episodes (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading episodes"); }
   };
 
   const fetchLessons = async () => {
     try {
       const res = await fetch(`${API}/api/memory/lessons/${projectId}`);
       if (res.ok) setLessons(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load lessons (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading lessons"); }
   };
 
   const fetchDecisions = async () => {
     try {
       const res = await fetch(`${API}/api/memory/decisions/${projectId}`);
       if (res.ok) setDecisions(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load decisions (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading decisions"); }
   };
 
   useEffect(() => {
@@ -87,7 +92,8 @@ export default function MemoryDashboard() {
         body: JSON.stringify({ query: searchQuery, project_id: projectId }),
       });
       if (res.ok) setSearchResults(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Search failed (${res.status})`);
+    } catch (err) { showToast("error", "Network error during search"); }
   };
 
   const handleLearn = async () => {
@@ -106,9 +112,10 @@ export default function MemoryDashboard() {
       });
       setLearnClaim("");
       setLearnConditions("");
+      showToast("success", "Lesson taught successfully");
       fetchLessons();
       fetchBrainState();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to teach lesson"); }
   };
 
   const handleGraduate = async (lessonId: number) => {
@@ -118,9 +125,10 @@ export default function MemoryDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rationale: "Graduated via dashboard", reviewer: "user" }),
       });
+      showToast("success", "Lesson graduated");
       fetchLessons();
       fetchBrainState();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to graduate lesson"); }
   };
 
   const handleReject = async (lessonId: number) => {
@@ -130,9 +138,10 @@ export default function MemoryDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: "Rejected via dashboard", reviewer: "user" }),
       });
+      showToast("info", "Lesson rejected");
       fetchLessons();
       fetchBrainState();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to reject lesson"); }
   };
 
   if (loading) {

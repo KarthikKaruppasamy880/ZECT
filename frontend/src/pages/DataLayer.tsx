@@ -24,6 +24,8 @@ import {
   FileText,
   RefreshCw,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
+import Pagination from "@/components/Pagination";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -53,6 +55,8 @@ export default function DataLayer() {
   const [events, setEvents] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<"dashboard" | "events" | "reports">("dashboard");
   const [reports, setReports] = useState<any[]>([]);
+  const [eventsPage, setEventsPage] = useState(1);
+  const eventsPerPage = 15;
 
   const fetchDashboard = async () => {
     try {
@@ -62,7 +66,8 @@ export default function DataLayer() {
         body: JSON.stringify({ project_id: projectId, days }),
       });
       if (res.ok) setDashboard(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load dashboard (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading dashboard"); }
   };
 
   const fetchEvents = async () => {
@@ -71,7 +76,8 @@ export default function DataLayer() {
       if (projectId) params.set("project_id", String(projectId));
       const res = await fetch(`${API}/api/data-layer/events?${params}`);
       if (res.ok) setEvents(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load events (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading events"); }
   };
 
   const fetchReports = async () => {
@@ -80,7 +86,8 @@ export default function DataLayer() {
       if (projectId) params.set("project_id", String(projectId));
       const res = await fetch(`${API}/api/data-layer/daily-reports?${params}`);
       if (res.ok) setReports(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load reports (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading reports"); }
   };
 
   useEffect(() => {
@@ -104,8 +111,10 @@ export default function DataLayer() {
         a.download = "agent-events.csv";
         a.click();
         URL.revokeObjectURL(url);
+      } else {
+        showToast("error", `Export failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error during export"); }
   };
 
   if (loading) {
@@ -247,36 +256,39 @@ export default function DataLayer() {
           {events.length === 0 ? (
             <p className="text-slate-400 text-sm py-8 text-center">No events recorded yet.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left py-2 px-2 text-slate-500 font-medium">Harness</th>
-                    <th className="text-left py-2 px-2 text-slate-500 font-medium">Type</th>
-                    <th className="text-left py-2 px-2 text-slate-500 font-medium">Category</th>
-                    <th className="text-left py-2 px-2 text-slate-500 font-medium">Description</th>
-                    <th className="text-right py-2 px-2 text-slate-500 font-medium">Tokens</th>
-                    <th className="text-right py-2 px-2 text-slate-500 font-medium">Cost</th>
-                    <th className="text-center py-2 px-2 text-slate-500 font-medium">Status</th>
-                    <th className="text-left py-2 px-2 text-slate-500 font-medium">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.map((e) => (
-                    <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="py-2 px-2"><span className="text-xs font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{e.harness}</span></td>
-                      <td className="py-2 px-2 text-slate-700">{e.event_type}</td>
-                      <td className="py-2 px-2 text-slate-500">{e.category}</td>
-                      <td className="py-2 px-2 text-slate-600 truncate max-w-[200px]">{e.description}</td>
-                      <td className="py-2 px-2 text-right font-mono text-slate-600">{e.tokens_used.toLocaleString()}</td>
-                      <td className="py-2 px-2 text-right font-mono text-green-600">${e.cost_usd.toFixed(4)}</td>
-                      <td className="py-2 px-2 text-center">{e.success ? <CheckCircle className="h-4 w-4 text-green-500 mx-auto" /> : <span className="text-red-500 text-xs">FAIL</span>}</td>
-                      <td className="py-2 px-2 text-xs text-slate-400">{e.created_at?.split("T")[0]}</td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Harness</th>
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Type</th>
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Category</th>
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Description</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">Tokens</th>
+                      <th className="text-right py-2 px-2 text-slate-500 font-medium">Cost</th>
+                      <th className="text-center py-2 px-2 text-slate-500 font-medium">Status</th>
+                      <th className="text-left py-2 px-2 text-slate-500 font-medium">Time</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {events.slice((eventsPage - 1) * eventsPerPage, eventsPage * eventsPerPage).map((e) => (
+                      <tr key={e.id} className="border-b border-slate-50 hover:bg-slate-50">
+                        <td className="py-2 px-2"><span className="text-xs font-medium px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">{e.harness}</span></td>
+                        <td className="py-2 px-2 text-slate-700">{e.event_type}</td>
+                        <td className="py-2 px-2 text-slate-500">{e.category}</td>
+                        <td className="py-2 px-2 text-slate-600 truncate max-w-[200px]">{e.description}</td>
+                        <td className="py-2 px-2 text-right font-mono text-slate-600">{e.tokens_used.toLocaleString()}</td>
+                        <td className="py-2 px-2 text-right font-mono text-green-600">${e.cost_usd.toFixed(4)}</td>
+                        <td className="py-2 px-2 text-center">{e.success ? <CheckCircle className="h-4 w-4 text-green-500 mx-auto" /> : <span className="text-red-500 text-xs">FAIL</span>}</td>
+                        <td className="py-2 px-2 text-xs text-slate-400">{e.created_at?.split("T")[0]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination currentPage={eventsPage} totalItems={events.length} pageSize={eventsPerPage} onPageChange={setEventsPage} />
+            </>
           )}
         </div>
       )}

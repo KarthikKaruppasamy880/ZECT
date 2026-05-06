@@ -764,3 +764,50 @@ class OnboardingResponse(Base):
 
     user = relationship("User", backref="onboarding_responses")
     project = relationship("Project", backref="onboarding_responses")
+
+
+# ---------------------------------------------------------------------------
+# Zinnia Skills Engine — DB-backed skill registry & execution logs
+# ---------------------------------------------------------------------------
+
+class SkillDefinition(Base):
+    """Registered skill in the Zinnia Skills Engine."""
+    __tablename__ = "skill_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    version = Column(String, default="1.0.0")
+    description = Column(Text, default="")
+    category = Column(String, default="general", index=True)
+    trigger_pattern = Column(String, default="")
+    manifest = Column(JSON, default=dict)
+    script_body = Column(Text, default="")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    is_seed = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    execution_count = Column(Integer, default=0)
+    last_executed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="skill_definitions")
+    execution_logs = relationship("SkillExecutionLog", back_populates="skill")
+
+
+class SkillExecutionLog(Base):
+    """Execution log entry for a skill run."""
+    __tablename__ = "skill_execution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    skill_id = Column(Integer, ForeignKey("skill_definitions.id"), nullable=False, index=True)
+    skill_name = Column(String, nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    input_data = Column(JSON, default=dict)
+    output_data = Column(JSON, default=dict)
+    success = Column(Boolean, default=True)
+    duration_seconds = Column(Float, default=0.0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    skill = relationship("SkillDefinition", back_populates="execution_logs")
+    project = relationship("Project", backref="skill_execution_logs")

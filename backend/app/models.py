@@ -584,7 +584,7 @@ class AgentEvent(Base):
     model = Column(String, default="")
     duration_seconds = Column(Integer, default=0)
     success = Column(Boolean, default=True)
-    metadata = Column(JSON, default=dict)  # extra event-specific data
+    event_metadata = Column("metadata", JSON, default=dict)  # extra event-specific data
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project", backref="agent_events")

@@ -52,7 +52,9 @@ class DailyReportRequest(BaseModel):
 
 @router.post("/events")
 def log_event(data: AgentEventCreate, db: Session = Depends(get_db)):
-    event = AgentEvent(**data.model_dump())
+    payload = data.model_dump()
+    payload["event_metadata"] = payload.pop("metadata", {})
+    event = AgentEvent(**payload)
     db.add(event)
     db.commit()
     db.refresh(event)
@@ -304,7 +306,7 @@ def _serialize_event(e: AgentEvent) -> dict:
         "description": e.description, "tokens_used": e.tokens_used,
         "cost_usd": e.cost_usd, "model": e.model,
         "duration_seconds": e.duration_seconds, "success": e.success,
-        "metadata": e.metadata or {},
+        "metadata": e.event_metadata or {},
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 

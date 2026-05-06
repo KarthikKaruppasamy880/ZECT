@@ -128,6 +128,38 @@ export const reviewSnippet = (code: string, language?: string) =>
     body: JSON.stringify({ code, ...(language ? { language } : {}) }),
   });
 
+// Full Repo Scan
+export const reviewRepo = (owner: string, repo: string, branch?: string, filePatterns?: string[]) =>
+  request<any>("/api/review/repo", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, ...(branch ? { branch } : {}), ...(filePatterns ? { file_patterns: filePatterns } : {}) }),
+  });
+
+// Auto-Fix Loop
+export const reviewAutoFixLoop = (owner: string, repo: string, prNumber: number, maxIterations = 3, autoComment = true) =>
+  request<any>("/api/review/auto-fix-loop", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, pr_number: prNumber, max_iterations: maxIterations, auto_comment: autoComment }),
+  });
+
+// Review + Rules Engine
+export const reviewEvaluateRules = (owner: string, repo: string, prNumber: number) =>
+  request<any>("/api/review/evaluate-rules", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, pr_number: prNumber }),
+  });
+
+// Webhook Config
+export const configureWebhook = (owner: string, repo: string, enabled: boolean, autoReview: boolean, autoComment: boolean, webhookSecret = "") =>
+  request<any>("/api/review/webhook/configure", {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, enabled, auto_review: autoReview, auto_comment: autoComment, webhook_secret: webhookSecret }),
+  });
+export const getWebhookConfig = (owner: string, repo: string) =>
+  request<any>(`/api/review/webhook/configure/${owner}/${repo}`);
+export const listWebhookConfigs = () =>
+  request<any[]>("/api/review/webhook/configs");
+
 // Build Phase
 export const buildGenerate = (plan_step: string, tech_stack?: string, project_context?: string, file_path?: string) =>
   request<any>("/api/build/generate", {

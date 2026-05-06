@@ -106,8 +106,8 @@ export default function BlueprintGenerator() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Blueprint Generator</h1>
         <p className="text-gray-500 mt-1">
-          Synthesize a GitHub repository into a single copy-paste prompt for AI tools (Cursor,
-          Claude Code, Codex, Windsurf, etc.) to vibe-code the project from scratch.
+          Synthesize a GitHub repository into a single copy-paste prompt for any AI coding tool
+          to vibe-code the project from scratch.
         </p>
       </div>
 
@@ -406,7 +406,7 @@ export default function BlueprintGenerator() {
               </pre>
             </div>
             <p className="text-xs text-gray-400 mt-3">
-              This AI-enhanced prompt is optimized for maximum comprehension by Cursor, Claude Code, Codex, Windsurf, etc.
+              This AI-enhanced prompt is optimized for maximum comprehension by any AI coding tool.
             </p>
           </div>
         </div>
@@ -445,7 +445,7 @@ export default function BlueprintGenerator() {
             </div>
             <p className="text-xs text-gray-400 mt-3">
               This prompt is scoped to &quot;{focusedResult.focus_area}&quot; — paste it into any AI tool
-              (Cursor, Claude Code, Codex, Windsurf, etc.) for targeted analysis and implementation guidance.
+              for targeted analysis and implementation guidance.
             </p>
           </div>
         </div>
@@ -470,7 +470,7 @@ export default function BlueprintGenerator() {
           <div className="mt-4 pt-4 border-t border-gray-200">
             <p className="text-xs text-gray-500">
               <strong>AI-Agnostic:</strong> Generated prompts work with any AI coding tool —
-              Cursor, Claude Code, Codex, Windsurf, ChatGPT, Devin, or any other.
+              paste into any AI coding tool of your choice.
             </p>
           </div>
         </div>

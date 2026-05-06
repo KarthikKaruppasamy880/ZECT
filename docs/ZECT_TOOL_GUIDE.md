@@ -10,7 +10,7 @@
 | **Repo Analysis** | Analyze any GitHub repo structure | Working | Needs deeper analysis (dependencies, patterns) |
 | **Blueprint** | AI-generated architecture blueprint from repo | Working | Auto-save as Skill template |
 | **Doc Generator** | Generate documentation from code | Working | — |
-| **Code Review** | AI-powered PR review (like CodeRabbit) | Working | Needs auto-fix prompt generation |
+| **Code Review** | AI-powered PR review engine | Working | Needs auto-fix prompt generation |
 | **Analytics** | Usage analytics, cost breakdown | Working | Per-model breakdown |
 | **Docs Center** | Internal docs viewer | Working | — |
 | **Settings** | LLM config, API keys, model selection | Working | Rate limit controls |
@@ -173,7 +173,7 @@ Each agent:
 | **What** | Reviews existing PRs on GitHub | Reviews code you just built with AI |
 | **Input** | GitHub PR (diff) | Code generated in Build Phase |
 | **Output** | Issues + Fix Prompts | Approve / Request Changes |
-| **Like** | CodeRabbit (external review) | Pull Request Review (internal QA) |
+| **Like** | External AI review tool | Pull Request Review (internal QA) |
 
 ### Code Review (sidebar nav):
 - Connects to GitHub repo

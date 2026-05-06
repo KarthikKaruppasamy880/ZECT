@@ -27,6 +27,10 @@ import RulesEngine from "@/pages/RulesEngine";
 import Integrations from "@/pages/Integrations";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
+import AppRunner from "@/pages/AppRunner";
+import FileExplorer from "@/pages/FileExplorer";
+import GitOps from "@/pages/GitOps";
+import CIMonitor from "@/pages/CIMonitor";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -104,6 +108,10 @@ export default function App() {
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/export" element={<ExportShare />} />
           <Route path="/output-history" element={<OutputHistory />} />
+          <Route path="/app-runner" element={<AppRunner />} />
+          <Route path="/file-explorer" element={<FileExplorer />} />
+          <Route path="/git-ops" element={<GitOps />} />
+          <Route path="/ci-monitor" element={<CIMonitor />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

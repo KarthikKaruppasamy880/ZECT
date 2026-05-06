@@ -177,7 +177,7 @@ The Blueprint Generator has two modes: **Standard** and **Focused**. Switch betw
 4. ZECT analyzes each repo (structure, README, dependencies, architecture)
 5. Synthesizes a single copy-paste prompt
 6. Click **Copy to Clipboard**
-7. Paste into any AI tool (Cursor, Claude Code, Codex, Windsurf, etc.)
+7. Paste into any AI coding tool
 
 **What the Standard Blueprint Contains:**
 

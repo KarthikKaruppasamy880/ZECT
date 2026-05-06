@@ -51,5 +51,5 @@ Each of the 6 projects has unique stage data in `src/data/project-stages.ts`. To
 - Settings toggles use local `useState` — no persistence across refreshes (expected for prototype phase).
 - Analytics charts are pure CSS bars, not D3/Chart.js. Bar widths are percentage-based.
 
-## Devin Secrets Needed
+## Secrets Needed
 None — this is a frontend-only prototype with no authentication or API keys required.

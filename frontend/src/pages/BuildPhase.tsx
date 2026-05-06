@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { buildGenerate } from "@/lib/api";
+import { buildGenerate, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
@@ -18,6 +18,12 @@ import {
   Copy,
   Check,
   Upload,
+  GitPullRequest,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Wrench,
+  ArrowUpRight,
 } from "lucide-react";
 
 interface AttachedFile {
@@ -43,6 +49,23 @@ export default function BuildPhase() {
   const [copied, setCopied] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-fix state
+  const [autoFixRunning, setAutoFixRunning] = useState(false);
+  const [autoFixResult, setAutoFixResult] = useState<any>(null);
+  const [autoFixCommand, setAutoFixCommand] = useState("");
+  const [autoFixCwd, setAutoFixCwd] = useState("");
+  const [autoFixRetries, setAutoFixRetries] = useState(3);
+
+  // Create PR state
+  const [prRepoPath, setPrRepoPath] = useState("");
+  const [prTitle, setPrTitle] = useState("");
+  const [prBody, setPrBody] = useState("");
+  const [prBase, setPrBase] = useState("main");
+  const [prCreating, setPrCreating] = useState(false);
+  const [prResult, setPrResult] = useState<any>(null);
+  const [showPrPanel, setShowPrPanel] = useState(false);
+  const [showAutoFix, setShowAutoFix] = useState(false);
 
   const handleGenerate = async () => {
     if (!planStep.trim()) return;
@@ -122,6 +145,45 @@ export default function BuildPhase() {
     await navigator.clipboard.writeText(allCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Auto-fix loop
+  const handleAutoFix = async () => {
+    if (!autoFixCommand.trim()) return;
+    setAutoFixRunning(true);
+    setAutoFixResult(null);
+    try {
+      const result = await autofixRunAndFix(
+        autoFixCommand,
+        autoFixCwd || undefined,
+        undefined,
+        undefined,
+        autoFixRetries
+      );
+      setAutoFixResult(result);
+    } catch (e: any) {
+      setAutoFixResult({ success: false, error: e.message, iterations: [] });
+    } finally {
+      setAutoFixRunning(false);
+    }
+  };
+
+  // Create PR
+  const handleCreatePR = async () => {
+    if (!prRepoPath.trim() || !prTitle.trim()) return;
+    setPrCreating(true);
+    try {
+      // Stage, commit, push, then create PR
+      await gitAdd(prRepoPath);
+      await gitCommit(prRepoPath, prTitle);
+      await gitPush(prRepoPath);
+      const result = await gitCreatePR(prRepoPath, prTitle, prBody, prBase);
+      setPrResult(result);
+    } catch (e: any) {
+      setPrResult({ error: e.message });
+    } finally {
+      setPrCreating(false);
+    }
   };
 
   const handleDownloadAll = () => {
@@ -413,6 +475,143 @@ export default function BuildPhase() {
               </div>
             </div>
           )}
+
+          {/* Auto-Fix Panel */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setShowAutoFix(!showAutoFix)}
+              className="w-full p-4 border-b border-slate-100 flex items-center justify-between text-left"
+            >
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-orange-500" />
+                Auto-Fix Loop
+              </h3>
+              <span className="text-xs text-slate-400">{showAutoFix ? "Hide" : "Show"}</span>
+            </button>
+            {showAutoFix && (
+              <div className="p-4 space-y-3">
+                <p className="text-xs text-slate-500">Run a command, detect errors, fix them automatically, and retry.</p>
+                <input
+                  type="text"
+                  placeholder="Command to run (e.g., npm run build)"
+                  value={autoFixCommand}
+                  onChange={(e) => setAutoFixCommand(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-orange-500"
+                />
+                <input
+                  type="text"
+                  placeholder="Working directory (optional)"
+                  value={autoFixCwd}
+                  onChange={(e) => setAutoFixCwd(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-orange-500"
+                />
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-600">Max retries:</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={autoFixRetries}
+                    onChange={(e) => setAutoFixRetries(Number(e.target.value))}
+                    className="w-16 p-1.5 border border-slate-300 rounded text-xs"
+                  />
+                </div>
+                <button
+                  onClick={handleAutoFix}
+                  disabled={autoFixRunning || !autoFixCommand.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white text-xs rounded-lg font-medium hover:bg-orange-700 disabled:bg-slate-300 transition"
+                >
+                  {autoFixRunning ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Running...</> : <><RefreshCw className="h-3.5 w-3.5" /> Run & Auto-Fix</>}
+                </button>
+                {autoFixResult && (
+                  <div className={`p-3 rounded-lg text-xs ${autoFixResult.success ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {autoFixResult.success ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                      <span className="font-medium">{autoFixResult.success ? "Fixed!" : "Failed"}</span>
+                    </div>
+                    {autoFixResult.iterations?.map((iter: any, i: number) => (
+                      <div key={i} className="mt-1 pl-4 border-l-2 border-slate-200">
+                        <p className="font-mono">Attempt {i + 1}: {iter.success ? "Success" : "Error detected"}</p>
+                        {iter.error_summary && <p className="text-slate-500 mt-0.5">{iter.error_summary}</p>}
+                        {iter.fix_applied && <p className="text-green-600 mt-0.5">Fix: {iter.fix_applied}</p>}
+                      </div>
+                    ))}
+                    {autoFixResult.error && <p>{autoFixResult.error}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Create PR Panel */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setShowPrPanel(!showPrPanel)}
+              className="w-full p-4 border-b border-slate-100 flex items-center justify-between text-left"
+            >
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                <GitPullRequest className="h-4 w-4 text-violet-500" />
+                Create PR
+              </h3>
+              <span className="text-xs text-slate-400">{showPrPanel ? "Hide" : "Show"}</span>
+            </button>
+            {showPrPanel && (
+              <div className="p-4 space-y-3">
+                <p className="text-xs text-slate-500">Commit generated code, push, and create a GitHub PR — all from here.</p>
+                <input
+                  type="text"
+                  placeholder="Repo path (e.g., /home/user/project)"
+                  value={prRepoPath}
+                  onChange={(e) => setPrRepoPath(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-500"
+                />
+                <input
+                  type="text"
+                  placeholder="PR title"
+                  value={prTitle}
+                  onChange={(e) => setPrTitle(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-500"
+                />
+                <textarea
+                  placeholder="PR description (optional)"
+                  value={prBody}
+                  onChange={(e) => setPrBody(e.target.value)}
+                  rows={3}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-500 resize-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Base branch (default: main)"
+                  value={prBase}
+                  onChange={(e) => setPrBase(e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-500"
+                />
+                <button
+                  onClick={handleCreatePR}
+                  disabled={prCreating || !prRepoPath.trim() || !prTitle.trim()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-violet-600 text-white text-xs rounded-lg font-medium hover:bg-violet-700 disabled:bg-slate-300 transition"
+                >
+                  {prCreating ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating PR...</> : <><GitPullRequest className="h-3.5 w-3.5" /> Commit, Push & Create PR</>}
+                </button>
+                {prResult && (
+                  <div className={`p-3 rounded-lg text-xs ${prResult.error ? "bg-red-50 border border-red-200 text-red-700" : "bg-green-50 border border-green-200 text-green-700"}`}>
+                    {prResult.error ? (
+                      <p>{prResult.error}</p>
+                    ) : (
+                      <div>
+                        <p className="font-medium">PR #{prResult.pr_number} created!</p>
+                        {prResult.pr_url && (
+                          <a href={prResult.pr_url} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:text-green-700 underline flex items-center gap-1 mt-1">
+                            <ArrowUpRight className="h-3 w-3" /> View on GitHub
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Quick Build Templates */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm">

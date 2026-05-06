@@ -185,7 +185,7 @@ def enhance_blueprint(req: EnhanceBlueprintRequest):
     system_prompt = (
         "You are ZECT AI — a prompt engineering expert. Take the raw repository blueprint "
         "and enhance it into a production-grade prompt that can be pasted into any AI coding "
-        "tool (Cursor, Claude Code, Codex, Windsurf) to recreate or extend the project. "
+        "tool to recreate or extend the project. "
         "Improve clarity, add implementation priorities, suggest architecture patterns, "
         "and organize the information for maximum AI comprehension. "
         "Keep the output as a single self-contained prompt."

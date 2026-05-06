@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,15 +10,31 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 _backend_root = Path(__file__).resolve().parents[1]
 load_dotenv(_backend_root / ".env")
 
-# Default to PostgreSQL; fall back to SQLite only if DATABASE_URL is not set
-_default_db = "postgresql+psycopg://postgres:postgres@localhost:5432/zect_db"
+# Default to SQLite for zero-config local development.
+# Set DATABASE_URL in .env to use PostgreSQL in production.
+_default_db = "sqlite:///./zect.db"
 DATABASE_URL = os.getenv("DATABASE_URL", _default_db)
 # Ensure the psycopg (v3) driver prefix is present for PostgreSQL URLs
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
+# Try to connect; if PostgreSQL fails, fall back to SQLite automatically
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+try:
+    engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+    # Test the connection immediately
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    print(f"[ZECT DB] Connected to: {DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else DATABASE_URL}")
+except Exception as exc:
+    print(f"[ZECT DB] Could not connect to {DATABASE_URL}: {exc}")
+    if not DATABASE_URL.startswith("sqlite"):
+        print("[ZECT DB] Falling back to SQLite (zect.db)")
+        DATABASE_URL = "sqlite:///./zect.db"
+        connect_args = {"check_same_thread": False}
+        engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
+    else:
+        raise
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -69,5 +86,12 @@ def _add_missing_columns():
 
 
 def init_db():
-    Base.metadata.create_all(bind=engine)
-    _add_missing_columns()
+    try:
+        # Import models so they are registered with Base.metadata before create_all
+        import app.models  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        _add_missing_columns()
+        print("[ZECT DB] All tables created/verified successfully")
+    except Exception as exc:
+        print(f"[ZECT DB] Error during init_db: {exc}")
+        print("[ZECT DB] The app will start but some features may not work until the database is fixed.")

@@ -113,15 +113,19 @@ def _skill_to_response(s: Skill) -> SkillResponse:
 @router.get("/", response_model=list[SkillResponse])
 def list_skills(category: str | None = None, repo_id: int | None = None, scope: str | None = None, db: Session = Depends(get_db)):
     """List all skills, optionally filtered by category, repo_id, or scope."""
-    query = db.query(Skill)
-    if category:
-        query = query.filter(Skill.category == category)
-    if repo_id is not None:
-        query = query.filter(Skill.repo_id == repo_id)
-    if scope:
-        query = query.filter(Skill.scope == scope)
-    skills = query.order_by(Skill.usage_count.desc()).all()
-    return [_skill_to_response(s) for s in skills]
+    try:
+        query = db.query(Skill)
+        if category:
+            query = query.filter(Skill.category == category)
+        if repo_id is not None:
+            query = query.filter(Skill.repo_id == repo_id)
+        if scope:
+            query = query.filter(Skill.scope == scope)
+        skills = query.order_by(Skill.usage_count.desc()).all()
+        return [_skill_to_response(s) for s in skills]
+    except Exception as exc:
+        print(f"[ZECT SKILLS] Error listing skills: {exc}")
+        return []
 
 
 @router.post("", response_model=SkillResponse)

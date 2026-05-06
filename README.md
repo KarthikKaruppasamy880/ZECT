@@ -249,7 +249,7 @@ Backend:            All endpoints tested and passing
 | [Blueprint Generation Guide](docs/BLUEPRINT_GENERATION_GUIDE.md) | How to generate AI-ready vibe-coding prompts |
 | [Ask/Plan/Development Workflow](docs/ASK_PLAN_DEVELOPMENT_WORKFLOW.md) | 5-stage engineering delivery workflow |
 | [Architecture & Usage Guide](docs/ARCHITECTURE_USAGE_GUIDE.md) | Technical architecture and usage patterns |
-| [AI-Agnostic Usage Guide](docs/AI_AGNOSTIC_USAGE.md) | How to use ZECT with any AI tool (Cursor, Claude Code, Codex, etc.) |
+| [AI-Agnostic Usage Guide](docs/AI_AGNOSTIC_USAGE.md) | How to use ZECT with any AI coding tool |
 | [Features Reference](docs/FEATURES_REFERENCE.md) | Granular reference for every feature, endpoint, and data type |
 | [Environment Setup Guide](docs/ENV_SETUP_GUIDE.md) | Step-by-step .env configuration with exact commands |
 | [ZECT Usage Guide](docs/ZECT_USAGE_GUIDE.md) | Screen-by-screen feature usage guide |

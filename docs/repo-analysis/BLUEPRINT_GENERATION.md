@@ -2,7 +2,7 @@
 
 ## Overview
 
-Blueprint Generation synthesizes a GitHub repository into a single, copy-paste-ready prompt for AI coding tools. The output enables any AI tool (Cursor, Claude Code, Codex, Windsurf, Devin, etc.) to recreate or extend the project from scratch.
+Blueprint Generation synthesizes a GitHub repository into a single, copy-paste-ready prompt for AI coding tools. The output enables any AI coding tool to recreate or extend the project from scratch.
 
 ---
 
@@ -98,15 +98,13 @@ sequenceDiagram
 
 Generated blueprints work with **any** AI coding tool:
 
-| Tool | How to Use Blueprint |
-|------|---------------------|
-| Cursor | Paste into Composer or chat |
-| Claude Code | Paste as initial prompt |
-| GitHub Copilot | Paste into chat panel |
-| ChatGPT/GPT-4 | Paste as system/user prompt |
-| Windsurf | Paste into Cascade |
-| Devin | Paste as task description |
-| Codex CLI | Pipe as input |
+| Tool Type | How to Use Blueprint |
+|-----------|---------------------|
+| IDE-based AI assistants | Paste into AI chat or composer panel |
+| Terminal-based AI tools | Paste as initial prompt |
+| Web-based AI platforms | Paste as system/user prompt |
+| Autonomous AI agents | Paste as task description |
+| CLI-based AI tools | Pipe as input |
 
 ---
 

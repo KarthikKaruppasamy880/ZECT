@@ -136,7 +136,7 @@ npm run dev
 | **Build Phase** | Generate code from plans with file attachments |
 | **Review Phase** | AI code review with severity ratings |
 | **Deploy Phase** | Deployment checklists and runbooks |
-| **Code Review** | Full PR review engine (like CodeRabbit) |
+| **Code Review** | Full AI-powered PR review engine |
 | **Skill Library** | Save/reuse AI skill templates (global or per-repo) |
 | **Token Controls** | Monitor token usage, set budgets, per-user tracking |
 | **Audit Trail** | Full audit log of all operations |

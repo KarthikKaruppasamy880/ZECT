@@ -30,16 +30,15 @@
    - Context Manager, Session Resume, Task Planner, Test-Driven Dev, PR Workflow, Token Efficiency
    - **Repo Analyzer** (new)
 5. **Templates** — starter files for projects, decisions, sessions, tasks, and **prompt templates for repo analysis**
-6. **Tool Adapters** (5) — Devin, Cursor, Windsurf, Claude Code, Codex
+6. **Tool Adapters** (5) — adapters for popular AI coding tools
 
 ### Supported Tools
 | Tool | Adapter | Status |
 |------|---------|--------|
-| Devin | `adapters/devin/` | Supported |
-| Cursor | `adapters/cursor/` | Supported |
-| Windsurf | `adapters/windsurf/` | Supported |
-| Claude Code | `adapters/claude-code/` | Supported |
-| Codex | `adapters/codex/` | Supported |
+| IDE-based AI tools | `adapters/ide/` | Supported |
+| Terminal-based AI tools | `adapters/terminal/` | Supported |
+| Web-based AI platforms | `adapters/web/` | Supported |
+| Autonomous AI agents | `adapters/agent/` | Supported |
 | No AI tool | Core docs only | Supported |
 
 ### Repository Structure
@@ -59,7 +58,7 @@ ZEF/
 │   ├── project/                 # Pointers, domain-context, session-log, backlog
 │   ├── workflow/                # Task-brief, decision-record, post-mortem, repo-analysis-brief, migration-plan
 │   └── prompts/                 # 4 prompt templates for repo analysis
-└── adapters/                    # 5 tool adapters (devin, cursor, windsurf, claude-code, codex)
+└── adapters/                    # Tool adapters for AI coding tools
 ```
 
 ### Repo Analysis Workflow (Key Feature)
@@ -71,7 +70,7 @@ ZEF includes ready-to-use **prompt templates** that you copy, fill in, and paste
    - `analyze-for-enhancement.md` — Enhance existing
    - `multi-repo-orchestration.md` — Multi-repo coordination
 2. **Fill in brackets** (`[PASTE_REPO_URL_HERE]`, `[DESCRIBE_REASON]`, etc.)
-3. **Paste into any AI tool** (Devin, Cursor, Claude Code, etc.)
+3. **Paste into any AI coding tool**
 4. **Review output** (tech stack, architecture, risks, implementation plan)
 5. **Fill in the brief** (`templates/workflow/repo-analysis-brief.md`)
 6. **Follow the playbook** for next steps

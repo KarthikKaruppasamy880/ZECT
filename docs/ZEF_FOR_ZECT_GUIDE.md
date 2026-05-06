@@ -33,7 +33,7 @@ ZEF provides ready-to-use prompt templates in `templates/prompts/` that ZECT's B
 **How to use:**
 1. Open the ZEF template from `templates/prompts/`
 2. Fill in the `[REPO_URL]`, `[TECH_STACK]`, and other bracketed placeholders
-3. Paste into any AI tool (Cursor, Claude, Codex) for instant analysis
+3. Paste into any AI coding tool for instant analysis
 
 ### 2. Coding Standards
 

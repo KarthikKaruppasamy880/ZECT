@@ -39,7 +39,7 @@
 
 ```mermaid
 sequenceDiagram
-    participant AI as AI Tool (ZECT/Cursor/Devin)
+    participant AI as AI Tool (ZECT)
     participant GitHub
     participant Dev as Developer
     participant Lead as Tech Lead

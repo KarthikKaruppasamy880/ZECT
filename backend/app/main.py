@@ -15,12 +15,17 @@ from app.models import Project, Repo
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
 from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
-from app.routers import mcp
+from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
 from app.middleware.rate_limiter import RateLimitMiddleware
 
 app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
 
-# Disable CORS. Do not remove this for full-stack development.
+# Rate limiting: 120 requests/minute per IP, burst of 20
+# NOTE: added BEFORE CORS so CORS wraps everything (middleware order is LIFO)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
+
+# CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.
+# This ensures CORS headers are present on ALL responses including 500 errors.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allows all origins
@@ -29,24 +34,28 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Rate limiting: 120 requests/minute per IP, burst of 20
-app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch all unhandled exceptions and return JSON with CORS headers.
+    """Catch all unhandled exceptions and return JSON with explicit CORS headers.
     
-    Without this, unhandled 500 errors skip CORS middleware and the browser
+    Without this, unhandled 500 errors may skip CORS middleware and the browser
     blocks the response entirely, showing a misleading 'CORS error'.
     """
     tb = traceback.format_exc()
     print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
+    origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
         content={
             "detail": str(exc),
             "error_type": type(exc).__name__,
+        },
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
         },
     )
 
@@ -77,6 +86,11 @@ app.include_router(export_share.router)
 app.include_router(user_sessions.router)
 app.include_router(generated_outputs.router)
 app.include_router(mcp.router)
+app.include_router(app_runner.router)
+app.include_router(file_explorer.router)
+app.include_router(git_ops.router)
+app.include_router(ci_monitor.router)
+app.include_router(autofix.router)
 
 
 @app.get("/healthz")

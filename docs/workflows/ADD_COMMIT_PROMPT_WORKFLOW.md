@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines how ZECT generates prompts from repository analysis and code review findings. The output is a copy-paste-ready prompt that can be sent to any AI coding tool (Cursor, Claude Code, Codex, Windsurf, Devin, etc.) to implement fixes or build features.
+This document defines how ZECT generates prompts from repository analysis and code review findings. The output is a copy-paste-ready prompt that can be sent to any AI coding tool to implement fixes or build features.
 
 ---
 
@@ -136,7 +136,7 @@ sequenceDiagram
     ZECT-->>User: Display findings (bugs, vulnerabilities, etc.)
     User->>ZECT: Click "Generate Fix Prompt"
     ZECT-->>User: Copy-paste-ready prompt
-    User->>AI_Tool: Paste prompt into Cursor/Claude/etc.
+    User->>AI_Tool: Paste prompt into AI coding tool
     AI_Tool-->>User: Implements fixes
     User->>User: Review and commit changes
 ```

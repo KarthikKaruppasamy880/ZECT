@@ -90,7 +90,7 @@ Analyze any GitHub repository's structure, tech stack, and architecture.
 
 **URL:** `/blueprint`
 
-Generate a single copy-paste prompt from a GitHub repository that you can use in any AI tool (Cursor, Claude, Codex, etc.) to vibe-code the project from scratch.
+Generate a single copy-paste prompt from a GitHub repository that you can use in any AI coding tool to vibe-code the project from scratch.
 
 **How to use:**
 1. Enter the repository (same formats as Repo Analysis)
@@ -261,4 +261,4 @@ Configure API keys and application settings.
 2. **Configure keys first** — Go to Settings before using Repo Analysis or Ask Mode
 3. **Use Ask Mode for learning** — Ask about architecture patterns, best practices, or debugging help
 4. **Use Plan Mode for kickoff** — Generate implementation plans before starting any new feature
-5. **Blueprint + AI Enhancement** — Generate a base blueprint, then enhance with AI for a polished prompt ready for Cursor/Claude/Codex
+5. **Blueprint + AI Enhancement** — Generate a base blueprint, then enhance with AI for a polished prompt ready for any AI coding tool

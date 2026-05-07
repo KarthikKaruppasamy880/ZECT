@@ -8,6 +8,7 @@ import {
   Layers,
   FlaskConical,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -25,7 +26,8 @@ export default function DataFlywheel() {
       const params = projectId ? `?project_id=${projectId}` : "";
       const res = await fetch(`${API}/api/flywheel/stats${params}`);
       if (res.ok) setStats(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load flywheel stats (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading stats"); }
   };
 
   const fetchTraces = async () => {
@@ -34,7 +36,8 @@ export default function DataFlywheel() {
       if (projectId) params.set("project_id", String(projectId));
       const res = await fetch(`${API}/api/flywheel/traces?${params}`);
       if (res.ok) setTraces(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load traces (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading traces"); }
   };
 
   const fetchCards = async () => {
@@ -43,7 +46,8 @@ export default function DataFlywheel() {
       if (projectId) params.set("project_id", String(projectId));
       const res = await fetch(`${API}/api/flywheel/context-cards?${params}`);
       if (res.ok) setCards(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load context cards (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading cards"); }
   };
 
   const fetchEvals = async () => {
@@ -52,7 +56,8 @@ export default function DataFlywheel() {
       if (projectId) params.set("project_id", String(projectId));
       const res = await fetch(`${API}/api/flywheel/eval-cases?${params}`);
       if (res.ok) setEvals(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load eval cases (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading eval cases"); }
   };
 
   useEffect(() => {
@@ -68,24 +73,26 @@ export default function DataFlywheel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved_by: "user" }),
       });
+      showToast("success", "Trace approved");
       fetchTraces();
       fetchStats();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to approve trace"); }
   };
 
   const handleRateTrace = async (traceId: number, score: number) => {
     try {
       await fetch(`${API}/api/flywheel/traces/${traceId}/rate?score=${score}`, { method: "POST" });
       fetchTraces();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to rate trace"); }
   };
 
   const handleApproveCard = async (cardId: number) => {
     try {
       await fetch(`${API}/api/flywheel/context-cards/${cardId}/approve`, { method: "POST" });
+      showToast("success", "Context card approved");
       fetchCards();
       fetchStats();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to approve card"); }
   };
 
   if (loading) {

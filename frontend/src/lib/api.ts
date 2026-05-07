@@ -413,6 +413,149 @@ export const postPRComment = (owner: string, repo: string, prNumber: number, bod
 export const getPRComments = (owner: string, repo: string, prNumber: number) =>
   request<any[]>(`/api/review/pr/${owner}/${repo}/${prNumber}/comments`);
 
+// Conversations
+export const getConversations = (mode?: string, isArchived = false, skip = 0, limit = 50) => {
+  const params = new URLSearchParams();
+  if (mode) params.set("mode", mode);
+  params.set("is_archived", String(isArchived));
+  params.set("skip", String(skip));
+  params.set("limit", String(limit));
+  return request<any>(`/api/conversations?${params}`);
+};
+export const createConversation = (title: string, mode = "ask", projectId?: number) =>
+  request<any>("/api/conversations", {
+    method: "POST",
+    body: JSON.stringify({ title, mode, ...(projectId ? { project_id: projectId } : {}) }),
+  });
+export const getConversation = (id: number) => request<any>(`/api/conversations/${id}`);
+export const updateConversation = (id: number, data: { title?: string; is_pinned?: boolean; is_archived?: boolean }) =>
+  request<any>(`/api/conversations/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteConversation = (id: number) =>
+  request<void>(`/api/conversations/${id}`, { method: "DELETE" });
+export const addConversationMessage = (conversationId: number, role: string, content: string, model = "", tokensUsed = 0, costUsd = 0) =>
+  request<any>(`/api/conversations/${conversationId}/messages`, {
+    method: "POST",
+    body: JSON.stringify({ role, content, model, tokens_used: tokensUsed, cost_usd: costUsd }),
+  });
+export const getConversationMessages = (conversationId: number, skip = 0, limit = 100) =>
+  request<any>(`/api/conversations/${conversationId}/messages?skip=${skip}&limit=${limit}`);
+
+// Knowledge Base
+export const getKnowledgeEntries = (category?: string, search?: string, skip = 0, limit = 50) => {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (search) params.set("search", search);
+  params.set("skip", String(skip));
+  params.set("limit", String(limit));
+  return request<any>(`/api/knowledge?${params}`);
+};
+export const createKnowledgeEntry = (data: { title: string; content: string; category?: string; tags?: string[] }) =>
+  request<any>("/api/knowledge", { method: "POST", body: JSON.stringify(data) });
+export const getKnowledgeEntry = (id: number) => request<any>(`/api/knowledge/${id}`);
+export const updateKnowledgeEntry = (id: number, data: { title?: string; content?: string; category?: string; tags?: string[]; is_active?: boolean }) =>
+  request<any>(`/api/knowledge/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteKnowledgeEntry = (id: number) =>
+  request<void>(`/api/knowledge/${id}`, { method: "DELETE" });
+export const getKnowledgeCategories = () => request<any[]>("/api/knowledge/categories");
+export const searchKnowledge = (query: string, category?: string) =>
+  request<any[]>(`/api/knowledge/search?query=${encodeURIComponent(query)}${category ? `&category=${category}` : ""}`);
+
+// Playbooks
+export const getPlaybooks = (category?: string, skip = 0, limit = 50) => {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  params.set("skip", String(skip));
+  params.set("limit", String(limit));
+  return request<any>(`/api/playbooks?${params}`);
+};
+export const createPlaybook = (data: { name: string; description?: string; category?: string; steps?: any[]; variables?: any[] }) =>
+  request<any>("/api/playbooks", { method: "POST", body: JSON.stringify(data) });
+export const getPlaybook = (id: number) => request<any>(`/api/playbooks/${id}`);
+export const updatePlaybook = (id: number, data: { name?: string; description?: string; category?: string; steps?: any[]; variables?: any[]; is_active?: boolean }) =>
+  request<any>(`/api/playbooks/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deletePlaybook = (id: number) =>
+  request<void>(`/api/playbooks/${id}`, { method: "DELETE" });
+export const runPlaybook = (id: number, variablesUsed: Record<string, string> = {}) =>
+  request<any>(`/api/playbooks/${id}/run`, { method: "POST", body: JSON.stringify({ variables_used: variablesUsed }) });
+export const getPlaybookRuns = (id: number) => request<any>(`/api/playbooks/${id}/runs`);
+export const getPlaybookCategories = () => request<any[]>("/api/playbooks/categories");
+
+// Schedules
+export const getSchedules = (taskType?: string, isActive?: boolean, skip = 0, limit = 50) => {
+  const params = new URLSearchParams();
+  if (taskType) params.set("task_type", taskType);
+  if (isActive !== undefined) params.set("is_active", String(isActive));
+  params.set("skip", String(skip));
+  params.set("limit", String(limit));
+  return request<any>(`/api/schedules?${params}`);
+};
+export const createSchedule = (data: { name: string; description?: string; schedule_type?: string; cron_expression?: string; interval_minutes?: number; task_type?: string; task_config?: Record<string, any> }) =>
+  request<any>("/api/schedules", { method: "POST", body: JSON.stringify(data) });
+export const getSchedule = (id: number) => request<any>(`/api/schedules/${id}`);
+export const updateSchedule = (id: number, data: { name?: string; description?: string; cron_expression?: string; task_config?: Record<string, any>; is_active?: boolean }) =>
+  request<any>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteSchedule = (id: number) =>
+  request<void>(`/api/schedules/${id}`, { method: "DELETE" });
+export const toggleSchedule = (id: number) =>
+  request<any>(`/api/schedules/${id}/toggle`, { method: "POST" });
+export const triggerSchedule = (id: number) =>
+  request<any>(`/api/schedules/${id}/trigger`, { method: "POST" });
+export const getScheduleRuns = (id: number) => request<any>(`/api/schedules/${id}/runs`);
+
+// Secrets
+export const getSecrets = (scope?: string, projectId?: number) => {
+  const params = new URLSearchParams();
+  if (scope) params.set("scope", scope);
+  if (projectId) params.set("project_id", String(projectId));
+  return request<any[]>(`/api/secrets?${params}`);
+};
+export const createSecret = (data: { name: string; value: string; description?: string; secret_type?: string; scope?: string }) =>
+  request<any>("/api/secrets", { method: "POST", body: JSON.stringify(data) });
+export const getSecret = (id: number, reveal = false) =>
+  request<any>(`/api/secrets/${id}?reveal=${reveal}`);
+export const updateSecret = (id: number, data: { value?: string; description?: string; is_active?: boolean }) =>
+  request<any>(`/api/secrets/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteSecret = (id: number) =>
+  request<void>(`/api/secrets/${id}`, { method: "DELETE" });
+export const rotateSecret = (id: number, newValue: string) =>
+  request<any>(`/api/secrets/${id}/rotate?new_value=${encodeURIComponent(newValue)}`, { method: "POST" });
+
+// Code Index
+export const searchCodeSymbols = (query: string, symbolType?: string, language?: string, repoId?: number, limit = 50) => {
+  const params = new URLSearchParams();
+  params.set("query", query);
+  if (symbolType) params.set("symbol_type", symbolType);
+  if (language) params.set("language", language);
+  if (repoId) params.set("repo_id", String(repoId));
+  params.set("limit", String(limit));
+  return request<any[]>(`/api/code-index/search?${params}`);
+};
+export const indexRepo = (repoPath: string, repoId?: number, fileExtensions?: string[]) =>
+  request<any>("/api/code-index/index", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, ...(repoId ? { repo_id: repoId } : {}), ...(fileExtensions ? { file_extensions: fileExtensions } : {}) }),
+  });
+export const getCodeIndexStats = (repoId?: number) =>
+  request<any>(`/api/code-index/stats${repoId ? `?repo_id=${repoId}` : ""}`);
+
+// Session Insights
+export const getSessionInsightsOverview = (days = 30) =>
+  request<any>(`/api/session-insights/overview?days=${days}`);
+export const getSessionDailyBreakdown = (days = 14) =>
+  request<any[]>(`/api/session-insights/daily-breakdown?days=${days}`);
+export const getSessionModelUsage = (days = 30) =>
+  request<any[]>(`/api/session-insights/model-usage?days=${days}`);
+export const getSessionFeatureUsage = (days = 30) =>
+  request<any[]>(`/api/session-insights/feature-usage?days=${days}`);
+export const getSessionList = (status?: string, sessionType?: string, skip = 0, limit = 50) => {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (sessionType) params.set("session_type", sessionType);
+  params.set("skip", String(skip));
+  params.set("limit", String(limit));
+  return request<any>(`/api/session-insights/sessions?${params}`);
+};
+
 // Auth
 export const login = (username: string, password: string) =>
   request<{ token: string; username: string }>("/api/auth/login", {

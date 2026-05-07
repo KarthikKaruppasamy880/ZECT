@@ -3,6 +3,7 @@ import { generatePlan } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
+import ConversationHistory from "@/components/ConversationHistory";
 import {
   ClipboardList,
   Loader2,
@@ -115,7 +116,11 @@ export default function PlanMode() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex gap-4">
+      {/* Conversation History Sidebar */}
+      <ConversationHistory mode="plan" className="hidden lg:flex shrink-0" />
+
+      <div className="flex-1 space-y-6 min-w-0">
       <div>
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <ClipboardList size={24} className="text-indigo-600" />
@@ -335,6 +340,7 @@ export default function PlanMode() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   Archive,
   RefreshCw,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -39,7 +40,8 @@ export default function DreamEngine() {
     try {
       const res = await fetch(`${API}/api/dream/runs/${projectId}?limit=20`);
       if (res.ok) setRuns(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load dream runs (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading dream runs"); }
   };
 
   useEffect(() => {
@@ -63,9 +65,12 @@ export default function DreamEngine() {
       if (res.ok) {
         const result = await res.json();
         setLastResult(result);
+        showToast("success", "Dream cycle completed");
         fetchRuns();
+      } else {
+        showToast("error", `Dream cycle failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error running dream cycle"); }
     setRunning(false);
   };
 
@@ -78,9 +83,11 @@ export default function DreamEngine() {
       });
       if (res.ok) {
         const data = await res.json();
-        alert(`Decayed ${data.decayed} old episodes`);
+        showToast("success", `Decayed ${data.decayed} old episodes`);
+      } else {
+        showToast("error", `Decay failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error during decay"); }
   };
 
   if (loading) {

@@ -3,6 +3,7 @@ import { buildGenerate, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPus
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
+import ConversationHistory from "@/components/ConversationHistory";
 import {
   Hammer,
   Play,
@@ -200,7 +201,11 @@ export default function BuildPhase() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="flex gap-4">
+      {/* Conversation History Sidebar */}
+      <ConversationHistory mode="build" className="hidden lg:flex shrink-0" />
+
+      <div className="flex-1 max-w-6xl space-y-6 min-w-0">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -638,6 +643,7 @@ export default function BuildPhase() {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

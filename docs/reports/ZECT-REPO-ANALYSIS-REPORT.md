@@ -28,7 +28,7 @@ ZECT (Engineering Delivery Control Tower) is a full-stack AI-governed engineerin
 | **DB Driver** | psycopg 3.3.3 (binary) | `backend/pyproject.toml` |
 | **GitHub Integration** | PyGithub 2.9.1 | `backend/app/github_service.py` |
 | **LLM Provider** | OpenAI SDK 2.33 (gpt-4o-mini default) | `backend/app/routers/llm.py` |
-| **Multi-LLM Routing** | OpenRouter (via OpenAI-compatible API) | `backend/app/routers/model_selection.py` |
+| **Multi-LLM Routing** | OpenAI + Anthropic (multi-provider) | `backend/app/routers/model_selection.py` |
 | **Auth Model** | Simple token-based (env-var credentials, in-memory sessions) | `backend/app/routers/auth.py` |
 | **HTTP Client** | httpx 0.28 | `backend/pyproject.toml` |
 
@@ -75,7 +75,7 @@ graph TD
     subgraph External ["External APIs"]
         GitHub_API["GitHub API (repos, PRs, commits, CI)"]
         OpenAI_API["OpenAI API (gpt-4o-mini)"]
-        OpenRouter["OpenRouter API (free models)"]
+        Anthropic_API["Anthropic API (Claude models)"]
     end
 
     subgraph Database ["PostgreSQL / SQLite"]
@@ -92,7 +92,7 @@ graph TD
     LLM --> OpenAI_API
     Build --> OpenAI_API
     Review --> OpenAI_API
-    Models --> OpenRouter
+    Models --> Anthropic_API
     Models --> OpenAI_API
     Routers --> DB
     TokenTracker --> DB
@@ -148,7 +148,7 @@ Source: `backend/app/main.py` (16 router modules registered)
 | 9 | `deploy_phase.py` | `/api/deploy` | `POST /checklist`, `POST /runbook` | Deployment checklist + runbook generation | OpenAI SDK, `token_tracker` |
 | 10 | `skills.py` | `/api/skills` | CRUD: `GET /`, `POST /`, `GET /{id}`, `PUT /{id}`, `DELETE /{id}`, `POST /{id}/use`, `POST /detect` | Skill library with AI pattern detection | SQLAlchemy `Skill`, OpenAI SDK |
 | 11 | `token_controls.py` | `/api/tokens` | `GET /usage`, `GET /budget`, `PUT /budget`, `GET /models`, `GET /users`, `GET /users/{id}`, `GET /teams`, `GET /trends`, `GET /check-limit` | Token governance: budgets, per-user tracking, team analytics, trends, limit enforcement | SQLAlchemy `TokenLog`, `TokenBudget`, `User`, `UserSession` |
-| 12 | `model_selection.py` | `/api/models` | `GET /`, `GET /status`, `POST /chat` | Multi-provider model routing (OpenAI + OpenRouter) | OpenAI SDK (both providers) |
+| 12 | `model_selection.py` | `/api/models` | `GET /`, `GET /status`, `POST /chat` | Multi-provider model routing (OpenAI + Anthropic) | OpenAI SDK (both providers) |
 | 13 | `orchestration.py` | `/api/orchestration` | `POST /dispatch`, `GET /agents` | Multi-agent task dispatch and workflow management | OpenAI SDK, `token_tracker` |
 | 14 | `context_management.py` | `/api/context` | `POST /save`, `POST /load`, `DELETE /clear/{page}`, `GET /pages`, `GET /recommendations/{page}` | Per-page context store (in-memory, per-session) | In-memory dict |
 | 15 | `analytics.py` | `/api/analytics` | `GET /overview`, `GET /token-dashboard` | Project analytics + token usage dashboard | SQLAlchemy `Project`, `Repo`, `token_tracker` |
@@ -391,7 +391,7 @@ Source: `backend/app/models.py` — 10 SQLAlchemy models
 | `DATABASE_URL` | No | `postgresql://postgres:postgres@localhost:5432/zect_db` | Database connection string | `database.py:6-7` |
 | `GITHUB_TOKEN` | No | `""` (60 req/hr unauthenticated) | GitHub API access | `github_service.py:13` |
 | `OPENAI_API_KEY` | For AI features | `""` | OpenAI API (Ask, Plan, Build, Review, Deploy, Blueprint enhance) | `llm.py:13`, `build_phase.py:13`, etc. |
-| `OPENROUTER_API_KEY` | No | Falls back to `OPENAI_API_KEY` | OpenRouter multi-model access (free models) | `model_selection.py:77` |
+| `ANTHROPIC_API_KEY` | No | Falls back to `OPENAI_API_KEY` | Anthropic Claude model access | `model_selection.py:72` |
 | `ZECT_USERNAME` | For auth | `""` | Login credential | `auth.py:13` |
 | `ZECT_PASSWORD` | For auth | `""` | Login credential | `auth.py:14` |
 
@@ -429,7 +429,7 @@ Source: `backend/app/models.py` — 10 SQLAlchemy models
 | **Authentication** | **Partially implemented** | Simple env-var username/password with in-memory token set (`auth.py`). SSO fields exist in `User` model (`sso_provider`, `sso_id`) but SSO flow is **NOT implemented** — documented vision only. |
 | **RBAC** | **Schema only** | `User.role` field exists (admin/lead/developer/viewer) but **no authorization middleware** checks roles. Any authenticated user can access all endpoints. |
 | **Database Migrations** | **NOT implemented** | Uses `create_all()` on startup. No Alembic. Schema changes require manual DB drops or migration scripts. **Critical gap for production.** |
-| **Multi-LLM Providers** | **Implemented** | `model_selection.py` supports OpenAI + OpenRouter (Llama, Mistral, Gemma, Qwen, Claude). Model selector dropdown is on AI pages. |
+| **Multi-LLM Providers** | **Implemented** | `model_selection.py` supports OpenAI + Anthropic (Claude 3.5 Sonnet, Claude 3 Haiku). Model selector dropdown is on AI pages. |
 | **Jira Integration** | **Documented vision only** | `ZECT_VISION_AND_INTEGRATIONS.md` describes Jira integration plans. **Zero implemented code.** |
 | **Slack Integration** | **Documented vision only** | Mentioned in vision docs. **Not implemented.** |
 | **PostgreSQL Production** | **Implemented** | `database.py` defaults to PostgreSQL. `pool_pre_ping=True` for connection health checks. SQLite fallback available. |

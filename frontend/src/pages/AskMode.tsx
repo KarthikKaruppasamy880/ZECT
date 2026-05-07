@@ -3,6 +3,7 @@ import { askQuestion } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
+import ConversationHistory from "@/components/ConversationHistory";
 import {
   MessageSquare,
   Send,
@@ -118,7 +119,11 @@ export default function AskMode() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
+    <div className="flex gap-4 h-[calc(100vh-8rem)]">
+      {/* Conversation History Sidebar */}
+      <ConversationHistory mode="ask" className="hidden lg:flex shrink-0" />
+
+      <div className="flex-1 flex flex-col min-w-0">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div>
@@ -352,6 +357,7 @@ export default function AskMode() {
         >
           <Send size={16} />
         </button>
+      </div>
       </div>
     </div>
   );

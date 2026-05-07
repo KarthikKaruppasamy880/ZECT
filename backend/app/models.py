@@ -46,7 +46,7 @@ class TokenLog(Base):
     action = Column(String, nullable=False)       # e.g. ask, plan, build, review, enhance_blueprint, repo_analysis
     feature = Column(String, default="")           # ask_mode, plan_mode, build_phase, review_phase, blueprint, doc_gen
     model = Column(String, default="")             # e.g. gpt-4o-mini, claude-3.5-sonnet, llama-3.1-8b
-    provider = Column(String, default="")          # openai, openrouter, anthropic, local
+    provider = Column(String, default="")          # openai, anthropic, local
     prompt_tokens = Column(Integer, default=0)
     completion_tokens = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
@@ -764,3 +764,310 @@ class OnboardingResponse(Base):
 
     user = relationship("User", backref="onboarding_responses")
     project = relationship("Project", backref="onboarding_responses")
+
+
+# ---------------------------------------------------------------------------
+# Zinnia Skills Engine — DB-backed skill registry & execution logs
+# ---------------------------------------------------------------------------
+
+class SkillDefinition(Base):
+    """Registered skill in the Zinnia Skills Engine."""
+    __tablename__ = "skill_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    version = Column(String, default="1.0.0")
+    description = Column(Text, default="")
+    category = Column(String, default="general", index=True)
+    trigger_pattern = Column(String, default="")
+    manifest = Column(JSON, default=dict)
+    script_body = Column(Text, default="")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    is_seed = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    execution_count = Column(Integer, default=0)
+    last_executed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="skill_definitions")
+    execution_logs = relationship("SkillExecutionLog", back_populates="skill")
+
+
+class SkillExecutionLog(Base):
+    """Execution log entry for a skill run."""
+    __tablename__ = "skill_execution_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    skill_id = Column(Integer, ForeignKey("skill_definitions.id"), nullable=False, index=True)
+    skill_name = Column(String, nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    input_data = Column(JSON, default=dict)
+    output_data = Column(JSON, default=dict)
+    success = Column(Boolean, default=True)
+    duration_seconds = Column(Float, default=0.0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    skill = relationship("SkillDefinition", back_populates="execution_logs")
+    project = relationship("Project", backref="skill_execution_logs")
+
+
+# ===========================================================================
+# CATEGORY C: NEW FEATURES — Conversations, Knowledge Base, Playbooks,
+# Session Insights, Scheduled Tasks, Secrets, Code Index
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Conversation History — persistent chat threads across sessions
+# ---------------------------------------------------------------------------
+
+class Conversation(Base):
+    """A named conversation thread — persists across sessions."""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    title = Column(String, default="New Conversation")
+    mode = Column(String, default="ask")  # ask, plan, build, review, general
+    model_used = Column(String, default="")
+    total_tokens = Column(Integer, default=0)
+    total_cost_usd = Column(Float, default=0.0)
+    message_count = Column(Integer, default=0)
+    is_pinned = Column(Boolean, default=False)
+    is_archived = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="conversations")
+    project = relationship("Project", backref="conversations")
+    messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
+
+
+class ConversationMessage(Base):
+    """Individual message in a conversation thread."""
+    __tablename__ = "conversation_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    model = Column(String, default="")
+    tokens_used = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    attachments = Column(JSON, default=list)  # [{name, type, content}]
+    metadata_extra = Column(JSON, default=dict)  # extra info (e.g. tool calls, context files)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base — persistent tips, instructions, notes
+# ---------------------------------------------------------------------------
+
+class KnowledgeEntry(Base):
+    """Persistent knowledge entry — tips, instructions, project notes."""
+    __tablename__ = "knowledge_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    category = Column(String, default="general")  # general, coding, review, deploy, architecture, testing, debug
+    tags = Column(JSON, default=list)  # ["python", "fastapi", "security"]
+    source = Column(String, default="manual")  # manual, auto-extracted, imported
+    is_active = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)
+    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="knowledge_entries")
+    project = relationship("Project", backref="knowledge_entries")
+
+
+# ---------------------------------------------------------------------------
+# Playbooks — reusable prompt templates and workflows
+# ---------------------------------------------------------------------------
+
+class Playbook(Base):
+    """Reusable playbook template — predefined prompts/workflows."""
+    __tablename__ = "playbooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    category = Column(String, default="general")  # general, onboarding, review, deploy, debug, migration, testing
+    steps = Column(JSON, default=list)  # [{order, title, prompt, model, expected_output}]
+    variables = Column(JSON, default=list)  # [{name, description, default_value, required}]
+    trigger_pattern = Column(String, nullable=True)  # auto-trigger regex
+    is_public = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)
+    avg_rating = Column(Float, default=0.0)
+    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="playbooks")
+    project = relationship("Project", backref="playbooks")
+    runs = relationship("PlaybookRun", back_populates="playbook", cascade="all, delete-orphan")
+
+
+class PlaybookRun(Base):
+    """Execution record for a playbook run."""
+    __tablename__ = "playbook_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    playbook_id = Column(Integer, ForeignKey("playbooks.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String, default="running")  # running, completed, failed, cancelled
+    variables_used = Column(JSON, default=dict)
+    steps_completed = Column(Integer, default=0)
+    total_steps = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    total_cost_usd = Column(Float, default=0.0)
+    output_summary = Column(Text, default="")
+    rating = Column(Float, nullable=True)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    playbook = relationship("Playbook", back_populates="runs")
+    user = relationship("User", backref="playbook_runs")
+
+
+# ---------------------------------------------------------------------------
+# Scheduled Tasks — cron-based recurring sessions
+# ---------------------------------------------------------------------------
+
+class Schedule(Base):
+    """Scheduled task definition — cron-based recurring jobs."""
+    __tablename__ = "schedules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    schedule_type = Column(String, default="cron")  # cron, interval, once
+    cron_expression = Column(String, nullable=True)  # e.g. "0 9 * * 1-5"
+    interval_minutes = Column(Integer, nullable=True)  # for interval type
+    scheduled_time = Column(DateTime, nullable=True)  # for once type
+    task_type = Column(String, default="review")  # review, build, deploy, report, custom
+    task_config = Column(JSON, default=dict)  # {owner, repo, branch, prompt, etc.}
+    playbook_id = Column(Integer, ForeignKey("playbooks.id"), nullable=True)
+    is_active = Column(Boolean, default=True)
+    last_run_at = Column(DateTime, nullable=True)
+    next_run_at = Column(DateTime, nullable=True)
+    run_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="schedules")
+    project = relationship("Project", backref="schedules")
+    playbook = relationship("Playbook", backref="schedules")
+    runs = relationship("ScheduleRun", back_populates="schedule", cascade="all, delete-orphan")
+
+
+class ScheduleRun(Base):
+    """Execution record for a scheduled task run."""
+    __tablename__ = "schedule_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_id = Column(Integer, ForeignKey("schedules.id"), nullable=False, index=True)
+    status = Column(String, default="running")  # running, completed, failed
+    trigger_type = Column(String, default="scheduled")  # scheduled, manual
+    output_summary = Column(Text, default="")
+    tokens_used = Column(Integer, default=0)
+    cost_usd = Column(Float, default=0.0)
+    error_message = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    schedule = relationship("Schedule", back_populates="runs")
+
+
+# ---------------------------------------------------------------------------
+# Secrets Management — encrypted credential storage
+# ---------------------------------------------------------------------------
+
+class SecretEntry(Base):
+    """Encrypted secret storage — API keys, tokens, credentials."""
+    __tablename__ = "secret_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(String, default="")
+    encrypted_value = Column(Text, nullable=False)  # Fernet-encrypted
+    secret_type = Column(String, default="api_key")  # api_key, token, password, certificate, other
+    scope = Column(String, default="project")  # global, project, user
+    is_active = Column(Boolean, default=True)
+    last_rotated_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="secrets")
+    project = relationship("Project", backref="secrets")
+
+
+# ---------------------------------------------------------------------------
+# Code Index — symbol search and codebase indexing
+# ---------------------------------------------------------------------------
+
+class CodeSymbol(Base):
+    """Indexed code symbol — function, class, variable for fast search."""
+    __tablename__ = "code_symbols"
+
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)
+    file_path = Column(String, nullable=False, index=True)
+    symbol_name = Column(String, nullable=False, index=True)
+    symbol_type = Column(String, nullable=False)  # function, class, method, variable, import, interface, type
+    language = Column(String, default="")
+    line_start = Column(Integer, default=0)
+    line_end = Column(Integer, default=0)
+    signature = Column(Text, default="")  # full function/class signature
+    docstring = Column(Text, default="")
+    parent_symbol = Column(String, nullable=True)  # parent class/module
+    is_exported = Column(Boolean, default=True)
+    indexed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    repo = relationship("Repo", backref="code_symbols")
+
+
+# ---------------------------------------------------------------------------
+# Recordings — video test recordings for session proof
+# ---------------------------------------------------------------------------
+
+class Recording(Base):
+    """Video recording of a test/demo session."""
+    __tablename__ = "recordings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    session_id = Column(Integer, ForeignKey("user_sessions.id"), nullable=True)
+    title = Column(String, default="")
+    description = Column(Text, default="")
+    file_path = Column(String, nullable=True)
+    file_size_bytes = Column(Integer, default=0)
+    duration_seconds = Column(Integer, default=0)
+    recording_type = Column(String, default="test")  # test, demo, review, debug
+    status = Column(String, default="pending")  # pending, recording, completed, failed
+    annotations = Column(JSON, default=list)  # [{timestamp, type, description}]
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", backref="recordings")
+    project = relationship("Project", backref="recordings")

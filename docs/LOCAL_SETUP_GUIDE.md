@@ -60,8 +60,8 @@ Create a `.env` file in the `backend/` folder:
 # Required: OpenAI API Key (for AI features)
 OPENAI_API_KEY=sk-your-openai-api-key-here
 
-# Optional: OpenRouter API Key (for free models like Llama, Mistral)
-OPENROUTER_API_KEY=sk-or-your-openrouter-key-here
+# Optional: Anthropic API Key (for Claude models)
+ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
 
 # Optional: GitHub Token (for repo analysis, orchestration)
 GITHUB_TOKEN=ghp_your-github-token-here
@@ -193,19 +193,15 @@ Use these default credentials:
 | GPT-4o Mini | OpenAI | No | High |
 | GPT-4o | OpenAI | No | Best |
 | GPT-3.5 Turbo | OpenAI | No | Good |
-| Llama 3.1 8B | OpenRouter | Yes | Good |
-| Mistral 7B | OpenRouter | Yes | Good |
-| Gemma 2 9B | OpenRouter | Yes | Good |
-| Qwen 2.5 7B | OpenRouter | Yes | Good |
-| Claude 3.5 Sonnet | OpenRouter | No | Best |
-| Claude 3 Haiku | OpenRouter | No | Good |
+| Claude 3.5 Sonnet | Anthropic | No | Best |
+| Claude 3 Haiku | Anthropic | No | Good |
 
 ### Environment Variables Reference
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes (for AI features) | OpenAI API key |
-| `OPENROUTER_API_KEY` | Optional | For free models via OpenRouter |
+| `ANTHROPIC_API_KEY` | Optional | For Anthropic Claude models |
 | `GITHUB_TOKEN` | Optional | GitHub PAT for repo analysis |
 | `DATABASE_URL` | Optional | PostgreSQL connection string |
 

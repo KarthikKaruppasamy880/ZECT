@@ -11,6 +11,8 @@ import {
   Search,
   RefreshCw,
 } from "lucide-react";
+import { showToast } from "@/components/Toast";
+import Pagination from "@/components/Pagination";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -50,26 +52,31 @@ export default function Permissions() {
   const [checkResult, setCheckResult] = useState<any>(null);
   const [showAddRule, setShowAddRule] = useState(false);
   const [newRule, setNewRule] = useState({ action_pattern: "", permission_level: "require_approval", category: "general", description: "" });
+  const [rulesPage, setRulesPage] = useState(1);
+  const rulesPerPage = 10;
 
   const fetchRules = async () => {
     try {
       const res = await fetch(`${API}/api/permissions/rules`);
       if (res.ok) setRules(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load rules (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading rules"); }
   };
 
   const fetchAudits = async () => {
     try {
       const res = await fetch(`${API}/api/permissions/audits?limit=50`);
       if (res.ok) setAudits(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load audits (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading audits"); }
   };
 
   const fetchPending = async () => {
     try {
       const res = await fetch(`${API}/api/permissions/audits/pending`);
       if (res.ok) setPending(await res.json());
-    } catch { /* ignore */ }
+      else showToast("error", `Failed to load pending (${res.status})`);
+    } catch (err) { showToast("error", "Network error loading pending"); }
   };
 
   useEffect(() => {
@@ -89,8 +96,10 @@ export default function Permissions() {
         setCheckResult(await res.json());
         fetchAudits();
         fetchPending();
+      } else {
+        showToast("error", `Permission check failed (${res.status})`);
       }
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Network error checking permission"); }
   };
 
   const handleAddRule = async () => {
@@ -103,8 +112,9 @@ export default function Permissions() {
       });
       setShowAddRule(false);
       setNewRule({ action_pattern: "", permission_level: "require_approval", category: "general", description: "" });
+      showToast("success", "Rule added successfully");
       fetchRules();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to add rule"); }
   };
 
   const handleApproval = async (auditId: number, approved: boolean) => {
@@ -114,16 +124,18 @@ export default function Permissions() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved, approved_by: "admin", reason: approved ? "Approved via dashboard" : "Rejected via dashboard" }),
       });
+      showToast("success", approved ? "Action approved" : "Action rejected");
       fetchAudits();
       fetchPending();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to process approval"); }
   };
 
   const handleDeleteRule = async (ruleId: number) => {
     try {
       await fetch(`${API}/api/permissions/rules/${ruleId}`, { method: "DELETE" });
+      showToast("info", "Rule deleted");
       fetchRules();
-    } catch { /* ignore */ }
+    } catch (err) { showToast("error", "Failed to delete rule"); }
   };
 
   if (loading) {
@@ -222,26 +234,29 @@ export default function Permissions() {
             {rules.length === 0 ? (
               <p className="text-slate-400 text-sm py-8 text-center">No rules configured. Default rules will be seeded on first access.</p>
             ) : (
-              <div className="space-y-2">
-                {rules.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      {levelIcon(r.permission_level)}
-                      <div className="min-w-0">
-                        <p className="text-sm font-mono text-slate-800 truncate">{r.action_pattern}</p>
-                        <p className="text-xs text-slate-500">{r.description}</p>
+              <>
+                <div className="space-y-2">
+                  {rules.slice((rulesPage - 1) * rulesPerPage, rulesPage * rulesPerPage).map((r) => (
+                    <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        {levelIcon(r.permission_level)}
+                        <div className="min-w-0">
+                          <p className="text-sm font-mono text-slate-800 truncate">{r.action_pattern}</p>
+                          <p className="text-xs text-slate-500">{r.description}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-3">
+                        <span className="text-xs px-1.5 py-0.5 bg-slate-200 rounded text-slate-600">{r.category}</span>
+                        {levelBadge(r.permission_level)}
+                        <button onClick={() => handleDeleteRule(r.id)} className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600" title="Deactivate">
+                          <XCircle className="h-4 w-4" />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-3">
-                      <span className="text-xs px-1.5 py-0.5 bg-slate-200 rounded text-slate-600">{r.category}</span>
-                      {levelBadge(r.permission_level)}
-                      <button onClick={() => handleDeleteRule(r.id)} className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600" title="Deactivate">
-                        <XCircle className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+                <Pagination currentPage={rulesPage} totalItems={rules.length} pageSize={rulesPerPage} onPageChange={setRulesPage} />
+              </>
             )}
           </div>
         </div>

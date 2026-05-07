@@ -188,7 +188,7 @@ npm run dev
 ## FAQ
 
 **Q: Can I use both Ollama and cloud APIs?**
-A: Yes! ZECT's model selector lets you switch between local (Ollama) and cloud (OpenAI/OpenRouter) per-request.
+A: Yes! ZECT's model selector lets you switch between local (Ollama) and cloud (OpenAI/Anthropic) per-request.
 
 **Q: Do I need admin rights to install?**
 A: No, Ollama installs to your user directory. No admin needed.

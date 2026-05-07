@@ -34,6 +34,13 @@ import DataFlywheel from "@/pages/DataFlywheel";
 import Permissions from "@/pages/Permissions";
 import TransferOnboarding from "@/pages/TransferOnboarding";
 import SkillsEngine from "@/pages/SkillsEngine";
+import KnowledgeBase from "@/pages/KnowledgeBase";
+import Playbooks from "@/pages/Playbooks";
+import ScheduledTasks from "@/pages/ScheduledTasks";
+import SecretsManager from "@/pages/SecretsManager";
+import CodeIndex from "@/pages/CodeIndex";
+import SessionInsights from "@/pages/SessionInsights";
+import Conversations from "@/pages/Conversations";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 
@@ -138,6 +145,13 @@ export default function App() {
           <Route path="/permissions" element={<Permissions />} />
           <Route path="/transfer" element={<TransferOnboarding />} />
           <Route path="/skills-engine" element={<SkillsEngine />} />
+          <Route path="/knowledge-base" element={<KnowledgeBase />} />
+          <Route path="/playbooks" element={<Playbooks />} />
+          <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+          <Route path="/secrets" element={<SecretsManager />} />
+          <Route path="/code-index" element={<CodeIndex />} />
+          <Route path="/session-insights" element={<SessionInsights />} />
+          <Route path="/conversations" element={<Conversations />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

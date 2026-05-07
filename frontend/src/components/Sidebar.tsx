@@ -36,6 +36,12 @@ import {
   ArrowRightLeft,
   Layers,
   Wrench,
+  BookMarked,
+  Calendar,
+  KeyRound,
+  Code2,
+  TrendingUp,
+  MessageCircle,
 } from "lucide-react";
 
 const navItems = [
@@ -73,6 +79,16 @@ const zintelItems = [
   { href: "/permissions", label: "Permissions", icon: ShieldAlert },
   { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
+];
+
+const featureItems = [
+  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
+  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
+  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
+  { href: "/code-index", label: "Code Index", icon: Code2 },
+  { href: "/session-insights", label: "Session Insights", icon: TrendingUp },
+  { href: "/conversations", label: "Conversations", icon: MessageCircle },
 ];
 
 const enterpriseItems = [
@@ -204,6 +220,36 @@ export default function Sidebar({
         )}
         <ul className="space-y-0.5">
           {zintelItems.map((item) => {
+            const Icon = item.icon;
+            const active = location.pathname === item.href;
+            return (
+              <li key={item.href}>
+                <Link
+                  to={item.href}
+                  title={collapsed ? item.label : undefined}
+                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
+                    active
+                      ? "bg-slate-800 text-white font-medium"
+                      : "hover:bg-slate-800/60 hover:text-white"
+                  }`}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && <span>{item.label}</span>}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+
+        {!collapsed ? (
+          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Features
+          </p>
+        ) : (
+          <div className="my-4 border-t border-slate-700" />
+        )}
+        <ul className="space-y-0.5">
+          {featureItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.href;
             return (

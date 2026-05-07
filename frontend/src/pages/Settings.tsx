@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus } from "@/lib/api";
 import type { Setting, ApiKeyStatus, TokenUsage, LLMKeyStatus } from "@/types";
+import { Link } from "react-router-dom";
 import {
   Settings as SettingsIcon,
   ToggleLeft,
@@ -12,6 +13,8 @@ import {
   Check,
   AlertCircle,
   Loader2,
+  KeyRound,
+  ArrowRight,
 } from "lucide-react";
 
 export default function Settings() {
@@ -223,6 +226,27 @@ export default function Settings() {
               View Log
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Secrets Manager Link */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-rose-50 rounded-lg">
+              <KeyRound size={18} className="text-rose-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Secrets Manager</h3>
+              <p className="text-xs text-slate-500">Manage encrypted API keys, tokens, and credentials</p>
+            </div>
+          </div>
+          <Link
+            to="/secrets"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 text-white rounded-lg text-xs font-medium hover:bg-rose-700"
+          >
+            Manage Secrets <ArrowRight size={12} />
+          </Link>
         </div>
       </div>
 

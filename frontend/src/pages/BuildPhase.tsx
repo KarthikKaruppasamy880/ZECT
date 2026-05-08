@@ -4,6 +4,7 @@ import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   Hammer,
   Play,
@@ -35,6 +36,7 @@ interface AttachedFile {
 }
 
 export default function BuildPhase() {
+  const { activeProject, activeRepo, repoContextString } = useActiveProject();
   const [planStep, setPlanStep] = useState("");
   const [techStack, setTechStack] = useState("");
   const [filePath, setFilePath] = useState("");
@@ -75,6 +77,13 @@ export default function BuildPhase() {
     setResult(null);
     try {
       const contextParts: string[] = [];
+      // Auto-inject active project/repo context
+      if (activeProject) {
+        contextParts.push(`Project: ${activeProject.name}`);
+      }
+      if (repoContextString) {
+        contextParts.push(repoContextString);
+      }
       if (attachedFiles.length > 0) {
         contextParts.push(
           "Referenced files:\n" +
@@ -229,6 +238,20 @@ export default function BuildPhase() {
           </div>
         )}
       </div>
+
+      {/* Active Repo Context Banner */}
+      {activeRepo && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <FolderGit2 className="h-4 w-4 text-emerald-600" />
+          <span className="text-xs text-emerald-800 font-medium">
+            Connected to: {activeRepo.owner}/{activeRepo.repo_name}
+          </span>
+          <span className="text-[10px] text-emerald-600 ml-1">({activeRepo.default_branch})</span>
+          {activeProject && (
+            <span className="ml-auto text-[10px] text-emerald-600">Project: {activeProject.name}</span>
+          )}
+        </div>
+      )}
 
       {/* Prompt Hygiene Tips */}
       <PromptHygieneTips mode="build" />

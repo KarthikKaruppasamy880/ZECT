@@ -4,6 +4,7 @@ import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   MessageSquare,
   Send,
@@ -36,9 +37,9 @@ interface AttachedFile {
 }
 
 export default function AskMode() {
+  const { activeProject, activeRepo, repoContextString } = useActiveProject();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [repoContext] = useState("");
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,8 +94,11 @@ export default function AskMode() {
     setError(null);
 
     try {
-      // Build context from attached files
-      let context = repoContext || "";
+      // Build context from active project repo + attached files
+      let context = repoContextString || "";
+      if (activeProject) {
+        context = `Project: ${activeProject.name}\n${context}`;
+      }
       if (attachedFiles.length > 0) {
         context += "\n\nAttached files:\n" + attachedFiles.map((f) => `--- ${f.name} (${f.type}) ---\n${f.content}`).join("\n\n");
       }
@@ -137,6 +141,20 @@ export default function AskMode() {
         </div>
         <ModelSelector value={selectedModel} onChange={setSelectedModel} compact />
       </div>
+
+      {/* Active Repo Context Banner */}
+      {activeRepo && (
+        <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <FolderGit2 className="h-4 w-4 text-emerald-600" />
+          <span className="text-xs text-emerald-800 font-medium">
+            Connected to: {activeRepo.owner}/{activeRepo.repo_name}
+          </span>
+          <span className="text-[10px] text-emerald-600 ml-1">({activeRepo.default_branch})</span>
+          {activeProject && (
+            <span className="ml-auto text-[10px] text-emerald-600">Project: {activeProject.name}</span>
+          )}
+        </div>
+      )}
 
       {/* Context Files Bar */}
       <div className="mb-3 flex items-center gap-2 flex-wrap">

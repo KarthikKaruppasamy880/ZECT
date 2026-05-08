@@ -4,6 +4,7 @@ import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   ClipboardList,
   Loader2,
@@ -27,6 +28,7 @@ interface AttachedFile {
 }
 
 export default function PlanMode() {
+  const { activeProject, activeRepo, repoContextString } = useActiveProject();
   const [description, setDescription] = useState("");
   const [repoContext, setRepoContext] = useState("");
   const [constraints, setConstraints] = useState("");
@@ -87,8 +89,11 @@ export default function PlanMode() {
     setError(null);
     setPlan(null);
     try {
-      // Build context from attached files
-      let context = repoContext.trim() || "";
+      // Build context from active project repo + attached files
+      let context = repoContextString || repoContext.trim() || "";
+      if (activeProject) {
+        context = `Project: ${activeProject.name}\n${context}`;
+      }
       if (attachedFiles.length > 0) {
         context += "\n\nAttached files:\n" + attachedFiles.map((f) => `--- ${f.name} (${f.type}) ---\n${f.content}`).join("\n\n");
       }
@@ -130,6 +135,20 @@ export default function PlanMode() {
           Generate a detailed, phased engineering plan for any project or feature.
         </p>
       </div>
+
+      {/* Active Repo Context Banner */}
+      {activeRepo && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+          <FolderGit2 className="h-4 w-4 text-emerald-600" />
+          <span className="text-xs text-emerald-800 font-medium">
+            Connected to: {activeRepo.owner}/{activeRepo.repo_name}
+          </span>
+          <span className="text-[10px] text-emerald-600 ml-1">({activeRepo.default_branch})</span>
+          {activeProject && (
+            <span className="ml-auto text-[10px] text-emerald-600">Project: {activeProject.name}</span>
+          )}
+        </div>
+      )}
 
       {/* Prompt Hygiene Tips */}
       <PromptHygieneTips mode="plan" />

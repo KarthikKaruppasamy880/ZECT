@@ -2,6 +2,7 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
 import ToastContainer from "@/components/Toast";
+import { ActiveProjectProvider } from "@/contexts/ActiveProjectContext";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
@@ -106,6 +107,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ActiveProjectProvider>
       <ToastContainer />
       <Routes>
         <Route element={<Layout onLogout={handleLogout} />}>
@@ -155,6 +157,7 @@ export default function App() {
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>
+      </ActiveProjectProvider>
     </BrowserRouter>
   );
 }

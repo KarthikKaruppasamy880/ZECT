@@ -1,9 +1,12 @@
 """Build Phase — Full AI code generation from plan steps."""
 
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
+from app.database import get_db
+from app.models import Repo
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/build", tags=["build"])
@@ -25,6 +28,8 @@ class BuildRequest(BaseModel):
     project_context: str | None = None
     tech_stack: str | None = None
     file_path: str | None = None
+    repo_id: int | None = None  # auto-inject context from cloned repo
+    write_to_repo: bool = False  # write generated code to the cloned repo
 
 
 class BuildResponse(BaseModel):
@@ -59,9 +64,16 @@ class BuildFromPlanResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/generate", response_model=BuildResponse)
-def generate_code(req: BuildRequest):
+def generate_code(req: BuildRequest, db: Session = Depends(get_db)):
     """Generate code for a single plan step."""
     client = _get_client()
+
+    # Auto-inject repo context if repo_id provided
+    if req.repo_id and not req.project_context:
+        repo = db.query(Repo).filter(Repo.id == req.repo_id).first()
+        if repo and repo.clone_status == "cloned" and repo.local_path:
+            from app.routers.llm import _build_repo_context
+            req.project_context = _build_repo_context(db, req.repo_id, max_chars=4000)
 
     system_prompt = (
         "You are ZECT AI Build Agent — an expert code generator. Given a plan step, "
@@ -132,6 +144,15 @@ def generate_code(req: BuildRequest):
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
         )
+
+        # Phase 5: Write generated code to cloned repo if requested
+        if req.write_to_repo and req.repo_id and file_path:
+            repo = db.query(Repo).filter(Repo.id == req.repo_id).first()
+            if repo and repo.clone_status == "cloned" and repo.local_path:
+                import pathlib
+                target = pathlib.Path(repo.local_path) / file_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(code)
 
         return BuildResponse(
             generated_code=code,

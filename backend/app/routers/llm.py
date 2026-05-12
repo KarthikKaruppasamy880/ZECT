@@ -1,9 +1,16 @@
 """LLM-powered endpoints for Ask Mode, Plan Mode, and enhanced Blueprint."""
 
 import os
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
+
+from app.database import get_db
+from app.models import Repo
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -26,6 +33,7 @@ def _get_client() -> OpenAI:
 class AskRequest(BaseModel):
     question: str
     repo_context: str | None = None  # optional repo analysis context
+    repo_id: int | None = None  # auto-inject context from cloned repo
 
 
 class AskResponse(BaseModel):
@@ -37,6 +45,7 @@ class AskResponse(BaseModel):
 class PlanRequest(BaseModel):
     project_description: str
     repo_context: str | None = None
+    repo_id: int | None = None  # auto-inject context from cloned repo
     constraints: str | None = None
 
 
@@ -71,8 +80,72 @@ class LLMKeyStatus(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+def _build_repo_context(db: Session, repo_id: int, max_chars: int = 8000) -> str:
+    """Build a context string from a cloned repo for AI injection."""
+    repo = db.query(Repo).filter(Repo.id == repo_id).first()
+    if not repo or repo.clone_status != "cloned" or not repo.local_path:
+        return ""
+    root = Path(repo.local_path)
+    if not root.is_dir():
+        return ""
+
+    parts = [f"Repository: {repo.owner}/{repo.repo_name} (branch: {repo.clone_branch or repo.default_branch})"]
+
+    # Add README if present
+    for readme_name in ["README.md", "readme.md", "README.rst", "README.txt"]:
+        readme = root / readme_name
+        if readme.exists():
+            try:
+                content = readme.read_text(errors="replace")[:3000]
+                parts.append(f"\n--- README ---\n{content}")
+            except OSError:
+                pass
+            break
+
+    # Add file tree (top 2 levels)
+    skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next", ".cache"}
+    tree_lines = []
+    for item in sorted(root.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        if item.name in skip or item.name.startswith("."):
+            continue
+        prefix = "📁 " if item.is_dir() else "📄 "
+        tree_lines.append(f"  {prefix}{item.name}")
+        if item.is_dir():
+            try:
+                for sub in sorted(item.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))[:15]:
+                    if sub.name in skip or sub.name.startswith("."):
+                        continue
+                    sp = "📁 " if sub.is_dir() else "📄 "
+                    tree_lines.append(f"    {sp}{sub.name}")
+            except PermissionError:
+                pass
+    if tree_lines:
+        parts.append(f"\n--- File Structure ---\n" + "\n".join(tree_lines[:80]))
+
+    # Add stats
+    stats = repo.index_stats or {}
+    if stats.get("languages"):
+        lang_str = ", ".join(f"{k}: {v} lines" for k, v in sorted(stats["languages"].items(), key=lambda x: -x[1])[:8])
+        parts.append(f"\n--- Languages ---\n{lang_str}")
+        parts.append(f"Total files: {repo.total_files}, Total lines: {repo.total_lines}")
+
+    # Add key config files if they exist
+    for cfg_name in ["package.json", "pyproject.toml", "requirements.txt", "Cargo.toml", "go.mod", "pom.xml"]:
+        cfg = root / cfg_name
+        if cfg.exists():
+            try:
+                content = cfg.read_text(errors="replace")[:1500]
+                parts.append(f"\n--- {cfg_name} ---\n{content}")
+            except OSError:
+                pass
+            break
+
+    full = "\n".join(parts)
+    return full[:max_chars]
+
+
 @router.post("/ask", response_model=AskResponse)
-def ask_question(req: AskRequest):
+def ask_question(req: AskRequest, db: Session = Depends(get_db)):
     """Ask any engineering question, optionally with repo context."""
     client = _get_client()
 
@@ -85,10 +158,15 @@ def ask_question(req: AskRequest):
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    if req.repo_context:
+    # Auto-inject repo context if repo_id provided
+    context = req.repo_context or ""
+    if req.repo_id and not context:
+        context = _build_repo_context(db, req.repo_id)
+
+    if context:
         messages.append({
             "role": "user",
-            "content": f"Here is the repository context for reference:\n\n{req.repo_context[:8000]}",
+            "content": f"Here is the repository context for reference:\n\n{context[:8000]}",
         })
 
     messages.append({"role": "user", "content": req.question})
@@ -118,7 +196,7 @@ def ask_question(req: AskRequest):
 
 
 @router.post("/plan", response_model=PlanResponse)
-def generate_plan(req: PlanRequest):
+def generate_plan(req: PlanRequest, db: Session = Depends(get_db)):
     """Generate a structured engineering plan for a project."""
     client = _get_client()
 
@@ -133,9 +211,14 @@ def generate_plan(req: PlanRequest):
         "Format with clear markdown headers and bullet points."
     )
 
+    # Auto-inject repo context if repo_id provided
+    context = req.repo_context or ""
+    if req.repo_id and not context:
+        context = _build_repo_context(db, req.repo_id)
+
     user_content = f"Project Description:\n{req.project_description}"
-    if req.repo_context:
-        user_content += f"\n\nExisting Repository Context:\n{req.repo_context[:6000]}"
+    if context:
+        user_content += f"\n\nExisting Repository Context:\n{context[:6000]}"
     if req.constraints:
         user_content += f"\n\nConstraints:\n{req.constraints}"
 

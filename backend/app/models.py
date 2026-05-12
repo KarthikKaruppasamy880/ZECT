@@ -92,6 +92,19 @@ class Repo(Base):
     coverage_percent = Column(Float, default=0.0)
     last_synced = Column(DateTime, nullable=True)
 
+    # Deep repo integration — clone tracking
+    clone_status = Column(String, default="not_cloned")  # not_cloned, cloning, cloned, error, outdated
+    local_path = Column(String, nullable=True)  # absolute path to cloned workspace
+    clone_branch = Column(String, nullable=True)  # currently checked-out branch
+    clone_depth = Column(Integer, nullable=True)  # 1 for shallow, null for full
+    disk_usage_mb = Column(Float, default=0.0)
+    last_pulled_at = Column(DateTime, nullable=True)
+    indexed_at = Column(DateTime, nullable=True)
+    index_stats = Column(JSON, default=dict)  # {total_files, total_lines, languages: {py: 120, ts: 80}}
+    clone_error = Column(String, nullable=True)
+    total_files = Column(Integer, default=0)
+    total_lines = Column(Integer, default=0)
+
     project = relationship("Project", back_populates="repos")
 
 

@@ -556,6 +556,50 @@ export const getSessionList = (status?: string, sessionType?: string, skip = 0, 
   return request<any>(`/api/session-insights/sessions?${params}`);
 };
 
+// =========================================================================
+// Deep Repo Integration — Clone, Browse, Index
+// =========================================================================
+
+// Repo Clone
+export const cloneRepo = (repoId: number, branch?: string, shallow = true) =>
+  request<any>("/api/repos/clone", {
+    method: "POST",
+    body: JSON.stringify({ repo_id: repoId, branch, shallow }),
+  });
+export const pullRepo = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/pull`, { method: "POST" });
+export const getRepoCloneStatus = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/status`);
+export const getRepoBranches = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/branches`);
+export const checkoutRepoBranch = (repoId: number, branch: string) =>
+  request<any>(`/api/repos/${repoId}/checkout`, {
+    method: "POST",
+    body: JSON.stringify({ branch }),
+  });
+export const deleteRepoClone = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/clone`, { method: "DELETE" });
+export const getClonedRepos = () =>
+  request<any[]>("/api/repos/cloned");
+
+// Repo Browser
+export const getRepoTree = (repoId: number, path = "", depth = 3) =>
+  request<any[]>(`/api/repos/${repoId}/tree?path=${encodeURIComponent(path)}&depth=${depth}`);
+export const getRepoFile = (repoId: number, path: string) =>
+  request<any>(`/api/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
+export const searchRepoFiles = (repoId: number, pattern: string, fileExtensions?: string[], maxResults = 100) =>
+  request<any[]>(`/api/repos/${repoId}/search`, {
+    method: "POST",
+    body: JSON.stringify({ pattern, file_extensions: fileExtensions, max_results: maxResults }),
+  });
+export const getRepoFileStats = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/file-stats`);
+export const writeRepoFile = (repoId: number, path: string, content: string) =>
+  request<any>(`/api/repos/${repoId}/write-file`, {
+    method: "POST",
+    body: JSON.stringify({ path, content }),
+  });
+
 // Auth
 export const login = (username: string, password: string) =>
   request<{ token: string; username: string }>("/api/auth/login", {

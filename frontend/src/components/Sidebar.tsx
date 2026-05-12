@@ -42,6 +42,7 @@ import {
   Code2,
   TrendingUp,
   MessageCircle,
+  HardDrive,
 } from "lucide-react";
 
 const navItems = [
@@ -69,6 +70,7 @@ const stageItems = [
   { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
   { href: "/git-ops", label: "Git Operations", icon: GitBranch },
   { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
+  { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
 ];
 
 const zintelItems = [

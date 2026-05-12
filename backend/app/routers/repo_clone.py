@@ -12,12 +12,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Repo, Setting
 from app.services.repo_clone import (
-    clone_repo,
-    pull_repo,
     checkout_branch,
-    list_branches,
+    clone_repo,
     delete_clone,
     get_clone_status,
+    list_branches,
+    pull_repo,
 )
 
 router = APIRouter(prefix="/api/repos", tags=["repo-clone"])

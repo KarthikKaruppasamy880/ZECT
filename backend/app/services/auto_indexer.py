@@ -9,7 +9,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import Repo, CodeSymbol
+from app.models import CodeSymbol, Repo
 
 SKIP_DIRS = {
     ".git", "node_modules", "__pycache__", ".venv", "venv",

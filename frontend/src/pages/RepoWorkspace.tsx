@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import {
   GitBranch, Download, RefreshCw, Trash2, Search, FileCode, FolderOpen,
   ChevronRight, ChevronDown, File, Folder, Loader2, AlertCircle,
-  HardDrive, Clock, Code2, Eye, Copy, Check, X,
+  HardDrive, Clock, Code2, Eye, Copy, Check,
 } from "lucide-react";
 import {
-  cloneRepo, pullRepo, getRepoCloneStatus, deleteRepoClone,
+  cloneRepo, pullRepo, deleteRepoClone,
   getRepoBranches, checkoutRepoBranch, getClonedRepos,
-  getRepoTree, getRepoFile, searchRepoFiles, getRepoFileStats,
+  getRepoTree, getRepoFile, searchRepoFiles,
 } from "@/lib/api";
 import { getProjects } from "@/lib/api";
 import { showToast } from "@/components/Toast";

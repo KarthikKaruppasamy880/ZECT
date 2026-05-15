@@ -5,13 +5,12 @@ limits, timeout controls, and output capture.
 """
 
 import os
-import subprocess
-import tempfile
 import shutil
+import subprocess
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/sandbox", tags=["sandbox"])

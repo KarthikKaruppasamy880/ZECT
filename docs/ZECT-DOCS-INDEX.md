@@ -2,7 +2,7 @@
 
 ## Complete Guide to All Repository Documentation
 
-**Version:** 2.0 | **Date:** May 2026 | **Total Docs:** 85+ markdown files | **Screenshots:** 42
+**Version:** 3.0 | **Date:** May 2026 | **Total Docs:** 90+ markdown files | **Screenshots:** 46
 
 ---
 
@@ -14,7 +14,7 @@
 | Full technical white paper | `ZECT-WHITE-PAPER.md` |
 | Demo/presentation content | `ZECT-DEMO-PPT-CONTENT.md` |
 | How to use every screen | `ZECT_USER_MANUAL.md` |
-| What's still to be built | `ZECT-GAP-ANALYSIS.md` |
+| Gap analysis (all gaps closed) | `ZECT-GAP-ANALYSIS.md` |
 | How to deploy to AWS | `AWS_DEPLOYMENT_GUIDE.md` |
 | Management-level feature overview | `ZECT_MANAGEMENT_GUIDE_v2.md` |
 | AI-agnostic architecture | `architecture/AI_AGNOSTIC_ARCHITECTURE.md` |
@@ -31,7 +31,7 @@
 | **White Paper** | `docs/ZECT-WHITE-PAPER.md` | Technical white paper for stakeholders — architecture, capabilities, competitive positioning, ROI |
 | **One-Sheet** | `docs/ZECT-ONE-SHEET.md` | Single-page executive summary — at-a-glance metrics, differentiators, roadmap |
 | **Demo PPT Content** | `docs/ZECT-DEMO-PPT-CONTENT.md` | Slide-by-slide content for live demo presentations with speaker notes |
-| **Gap Analysis** | `docs/ZECT-GAP-ANALYSIS.md` | Feature-by-feature comparison with industry tools, all gaps identified with effort estimates |
+| **Gap Analysis v3.0** | `docs/ZECT-GAP-ANALYSIS.md` | Feature-by-feature comparison with industry tools — all gaps CLOSED (except 2.7 Integrations) |
 | **Feature Roadmap** | `docs/ZECT_FEATURE_ROADMAP_AND_GAP_ANALYSIS.md` | Earlier roadmap with phase-by-phase feature plan |
 | **Vision & Integrations** | `docs/ZECT_VISION_AND_INTEGRATIONS.md` | Long-term vision and integration strategy |
 | **ZEF/SEF Alignment** | `docs/ZECT_ZEF_SEF_ALIGNMENT.md` | How ZECT aligns with ZEF and SEF platforms |
@@ -40,7 +40,7 @@
 
 | File | Path | Purpose |
 |------|------|---------|
-| **User Manual (Full)** | `docs/ZECT_USER_MANUAL.md` | Complete user guide — every sidebar section, every screen, every button (976 lines) |
+| **User Manual v3.0** | `docs/ZECT_USER_MANUAL.md` | Complete user guide — every sidebar section, every screen, every button including v3.0 gap fixes |
 | **User Manual (Earlier)** | `docs/USER_MANUAL.md` | Earlier version of user manual |
 | **Management Guide v2** | `docs/ZECT_MANAGEMENT_GUIDE_v2.md` | Management-oriented guide — all 33 screens explained for leadership |
 | **Management Guide v1** | `docs/ZECT_MANAGEMENT_GUIDE.md` | Earlier management guide version |
@@ -194,6 +194,7 @@
 |------|---------|
 | `APP-RUNNER-TEST-REPORT.md` | App Runner test with recording |
 | `ZECT-DEEP-REPO-INTEGRATION-E2E-TEST-REPORT.md` | Deep repo integration E2E test with recording |
+| `ZECT-GAP-FIX-E2E-TEST-REPORT.md` | v3.0 gap fix E2E test — Agent Mode, Sessions, Sandbox, CI Remediation, Collaboration, Diff Viewer, File Watcher |
 
 ---
 

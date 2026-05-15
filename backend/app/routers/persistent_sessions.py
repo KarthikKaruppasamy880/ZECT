@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import PersistentSession, SessionMessage
 
-router = APIRouter(prefix="/api/sessions", tags=["persistent-sessions"])
+router = APIRouter(prefix="/api/persistent-sessions", tags=["persistent-sessions"])
 
 
 def get_db():

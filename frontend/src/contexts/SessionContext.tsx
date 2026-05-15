@@ -71,7 +71,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const fetchSession = async (id: number) => {
     try {
-      const res = await fetch(`${API}/api/sessions/${id}`);
+      const res = await fetch(`${API}/api/persistent-sessions/${id}`);
       if (res.ok) {
         const data = await res.json();
         setSession(data);
@@ -83,7 +83,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const fetchActiveSession = async () => {
     try {
-      const res = await fetch(`${API}/api/sessions/active`);
+      const res = await fetch(`${API}/api/persistent-sessions/active`);
       if (res.ok) {
         const data = await res.json();
         if (data.id) {
@@ -97,7 +97,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const createSession = useCallback(async (projectId?: number, repoId?: number, title?: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/sessions/create`, {
+      const res = await fetch(`${API}/api/persistent-sessions/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId || null, repo_id: repoId || null, title: title || "" }),
@@ -115,7 +115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const addMessage = useCallback(async (role: string, content: string, page: string, model = "", tokens = 0) => {
     if (!session) return;
     try {
-      const res = await fetch(`${API}/api/sessions/${session.id}/message`, {
+      const res = await fetch(`${API}/api/persistent-sessions/${session.id}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role, content, page, model, tokens_used: tokens }),
@@ -133,7 +133,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const params = new URLSearchParams({ max_messages: "10" });
       if (page) params.set("page", page);
-      const res = await fetch(`${API}/api/sessions/${session.id}/context?${params}`);
+      const res = await fetch(`${API}/api/persistent-sessions/${session.id}/context?${params}`);
       if (res.ok) {
         const data = await res.json();
         setContextSummary(data.context_summary || "");
@@ -146,7 +146,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const closeSession = useCallback(async () => {
     if (!session) return;
     try {
-      await fetch(`${API}/api/sessions/${session.id}/close`, { method: "PATCH" });
+      await fetch(`${API}/api/persistent-sessions/${session.id}/close`, { method: "PATCH" });
       setSession(null);
       setMessages([]);
       setContextSummary("");

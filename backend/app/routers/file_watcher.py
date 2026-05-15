@@ -4,11 +4,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.services.file_watcher import (
-    start_watching,
-    stop_watching,
     get_changes,
     get_watcher_status,
     list_watchers,
+    start_watching,
+    stop_watching,
 )
 
 router = APIRouter(prefix="/api/file-watcher", tags=["file-watcher"])

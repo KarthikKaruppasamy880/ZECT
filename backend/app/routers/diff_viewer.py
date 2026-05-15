@@ -6,8 +6,8 @@ Provides unified and side-by-side diffs for:
 - PR file changes
 """
 
-import os
 import difflib
+import os
 import subprocess
 
 from fastapi import APIRouter, HTTPException

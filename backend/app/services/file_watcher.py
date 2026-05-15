@@ -6,13 +6,11 @@ to detect changes in cloned repositories and notify the frontend.
 
 from __future__ import annotations
 
-import os
 import hashlib
-import json
-import time
+import os
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Thread, Event
+from threading import Event, Thread
 
 SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "dist", "build", ".next"}
 

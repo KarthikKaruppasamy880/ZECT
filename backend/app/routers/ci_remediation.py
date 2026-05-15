@@ -1,7 +1,7 @@
 """CI/CD Auto-Remediation — detect CI failures, analyze, suggest/apply fixes."""
 
-import os
 import json
+import os
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel

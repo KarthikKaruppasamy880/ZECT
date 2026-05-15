@@ -7,13 +7,9 @@ Provides WebSocket connections for:
 - Collaborative editing signals
 """
 
-import json
-import asyncio
 from datetime import datetime, timezone
-from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 router = APIRouter(tags=["realtime"])
 
@@ -76,7 +72,6 @@ class ConnectionManager:
 
     def get_presence(self, room: str) -> list[dict]:
         """Get current presence info for a room."""
-        count = len(self.active_connections.get(room, []))
         users = [
             info for info in self.user_info.values()
             if info["room"] == room

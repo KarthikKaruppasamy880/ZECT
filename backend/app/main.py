@@ -19,6 +19,7 @@ from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, aut
 from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
 from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights
 from app.routers import repo_clone, repo_browser
+from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, realtime, file_watcher, diff_viewer
 from app.middleware.rate_limiter import RateLimitMiddleware
 
 app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
@@ -116,6 +117,15 @@ app.include_router(session_insights.router)
 # Deep Repo Integration
 app.include_router(repo_clone.router)
 app.include_router(repo_browser.router)
+
+# Gap Fixes — v2.0 features
+app.include_router(agent_mode.router)
+app.include_router(persistent_sessions.router)
+app.include_router(ci_remediation.router)
+app.include_router(sandbox.router)
+app.include_router(realtime.router)
+app.include_router(file_watcher.router)
+app.include_router(diff_viewer.router)
 
 
 @app.get("/healthz")

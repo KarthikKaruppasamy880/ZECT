@@ -13,13 +13,6 @@ import {
   Layers,
   Users,
   Map,
-  Key,
-  Clock,
-  BarChart3,
-  MessageSquare,
-  Play,
-  Search,
-  Settings,
 } from "lucide-react";
 
 interface DocSection {

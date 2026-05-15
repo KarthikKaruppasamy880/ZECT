@@ -72,6 +72,40 @@ PATTERNS: dict[str, dict[str, re.Pattern]] = {
         "class": re.compile(r"class\s+(\w+)", re.MULTILINE),
         "interface": re.compile(r"interface\s+(\w+)", re.MULTILINE),
     },
+    "c": {
+        "function": re.compile(r"^[\w\s\*]+\s+(\w+)\s*\([^)]*\)\s*\{", re.MULTILINE),
+        "type": re.compile(r"typedef\s+(?:struct|enum|union)\s+\w*\s*\{[^}]*\}\s*(\w+)", re.MULTILINE),
+        "variable": re.compile(r"^#define\s+(\w+)", re.MULTILINE),
+        "import": re.compile(r'^#include\s+[<"](.+?)[>"]', re.MULTILINE),
+    },
+    "cpp": {
+        "function": re.compile(r"^[\w\s\*:&<>]+\s+(\w+)\s*\([^)]*\)\s*(?:const\s*)?\{", re.MULTILINE),
+        "class": re.compile(r"(?:class|struct)\s+(\w+)", re.MULTILINE),
+        "type": re.compile(r"(?:enum\s+(?:class\s+)?|using\s+)(\w+)", re.MULTILINE),
+        "variable": re.compile(r"^(?:constexpr|const|static)\s+\w+\s+(\w+)\s*=", re.MULTILINE),
+        "import": re.compile(r'^#include\s+[<"](.+?)[>"]', re.MULTILINE),
+    },
+    "csharp": {
+        "function": re.compile(r"(?:public|private|protected|internal|static|async)\s+[\w<>\[\]]+\s+(\w+)\s*\(", re.MULTILINE),
+        "class": re.compile(r"(?:public|private|internal|abstract|sealed)?\s*class\s+(\w+)", re.MULTILINE),
+        "interface": re.compile(r"(?:public|internal)?\s*interface\s+(\w+)", re.MULTILINE),
+        "type": re.compile(r"(?:public|internal)?\s*(?:enum|struct|record)\s+(\w+)", re.MULTILINE),
+        "import": re.compile(r"using\s+([\w.]+);", re.MULTILINE),
+    },
+    "kotlin": {
+        "function": re.compile(r"(?:fun|suspend\s+fun)\s+(\w+)\s*\(", re.MULTILINE),
+        "class": re.compile(r"(?:open|abstract|data|sealed|enum)?\s*class\s+(\w+)", re.MULTILINE),
+        "interface": re.compile(r"interface\s+(\w+)", re.MULTILINE),
+        "variable": re.compile(r"(?:val|var|const\s+val)\s+(\w+)", re.MULTILINE),
+        "import": re.compile(r"import\s+([\w.]+)", re.MULTILINE),
+    },
+    "swift": {
+        "function": re.compile(r"func\s+(\w+)\s*[\(<]", re.MULTILINE),
+        "class": re.compile(r"class\s+(\w+)", re.MULTILINE),
+        "type": re.compile(r"(?:struct|enum|protocol)\s+(\w+)", re.MULTILINE),
+        "variable": re.compile(r"(?:let|var)\s+(\w+)\s*[=:]", re.MULTILINE),
+        "import": re.compile(r"import\s+(\w+)", re.MULTILINE),
+    },
 }
 
 EXT_TO_LANG = {
@@ -80,6 +114,11 @@ EXT_TO_LANG = {
     ".js": "javascript", ".jsx": "javascript",
     ".java": "java", ".go": "go", ".rs": "rust",
     ".rb": "ruby", ".php": "php",
+    ".c": "c", ".h": "c",
+    ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+    ".cs": "csharp",
+    ".kt": "kotlin", ".kts": "kotlin",
+    ".swift": "swift",
 }
 
 

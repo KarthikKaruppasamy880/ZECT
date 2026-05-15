@@ -2,8 +2,8 @@
 
 ## Zinnia Engineering Control Tower - Complete User Guide
 
-**Version:** 2.0
-**Last Updated:** April 2026
+**Version:** 2.1
+**Last Updated:** May 2026
 **Audience:** Zinnia Engineering Teams
 
 ---
@@ -16,10 +16,11 @@
 4. [Navigation Section](#4-navigation-section)
 5. [Workflow Stages Section](#5-workflow-stages-section)
 6. [Zinnia Intelligence Section](#6-zinnia-intelligence-section)
-7. [Enterprise Section](#7-enterprise-section)
-8. [Keyboard Shortcuts & Tips](#8-keyboard-shortcuts--tips)
-9. [API Configuration](#9-api-configuration)
-10. [Troubleshooting](#10-troubleshooting)
+7. [Features Section](#7-features-section)
+8. [Enterprise Section](#8-enterprise-section)
+9. [Keyboard Shortcuts & Tips](#9-keyboard-shortcuts--tips)
+10. [API Configuration](#10-api-configuration)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -101,13 +102,14 @@ On each page load, ZECT verifies your token with the backend. If the token is ex
 
 ## 3. Sidebar Navigation Overview
 
-The ZECT sidebar is divided into **4 sections** with a total of **33 navigation items**:
+The ZECT sidebar is divided into **5 sections** with a total of **41 navigation items**:
 
 | Section | Items | Purpose |
 |---|---|---|
 | **Navigation** | 10 items | Core platform features |
-| **Workflow Stages** | 11 items | Software delivery lifecycle |
+| **Workflow Stages** | 12 items | Software delivery lifecycle (includes Repo Workspace) |
 | **Zinnia Intelligence** | 7 items | AI memory, learning, and governance |
+| **Features** | 7 items | Knowledge Base, Playbooks, Secrets, Code Index, etc. |
 | **Enterprise** | 5 items | Audit, compliance, and integrations |
 
 ### Sidebar Controls
@@ -702,11 +704,129 @@ Database-backed skill registry with trigger matching:
 - Each log shows: Skill Name, Agent, Input, Output, Duration, Timestamp
 - Track which skills are used most frequently
 
+### 5.12 Repo Workspace
+
+**Path:** `/repo-workspace` | **Icon:** HardDrive
+
+Full repository management with 3 tabs:
+
+#### Clone & Manage Tab
+1. Enter **Owner** and **Repository** name
+2. Click **Clone** to clone the repository locally
+3. View clone status: pending, cloning, ready, error
+4. **Pull**: Update the local clone from remote
+5. **Branch Selector**: Switch between branches
+6. **Delete**: Remove the local clone to free disk space
+7. Clone status persists — revisit to see previously cloned repos
+
+#### File Browser Tab
+1. Select a cloned repository from the dropdown
+2. Navigate the full file tree (expandable folders)
+3. Click any file to view with syntax highlighting (30+ languages)
+4. Binary files are detected and labeled
+5. File metadata: size, language, line count
+
+#### Code Search Tab
+1. Enter a **regex pattern** to search
+2. Optionally filter by **file extension** (e.g., `.py`, `.tsx`)
+3. Click **Search** to scan the entire repository
+4. Results show: file path, line number, matching line, and context
+5. Click any result to jump to the file in the File Browser
+
 ---
 
-## 7. Enterprise Section
+## 7. Features Section
 
-### 7.1 Audit Trail
+### 7.1 Knowledge Base
+
+**Path:** `/knowledge-base` | **Icon:** BookMarked
+
+Store and retrieve organizational knowledge:
+
+- **Knowledge Entries**: Browse all stored knowledge items
+- **Create**: Add new knowledge entries with title, content, tags
+- **Search**: Full-text search across all knowledge entries
+- **Categories**: Filter by category or tag
+- **Usage Tracking**: See which knowledge items are referenced most
+
+### 7.2 Playbooks
+
+**Path:** `/playbooks` | **Icon:** BookOpen
+
+Reusable workflow templates:
+
+- **Playbook List**: All available playbooks with name, description, and step count
+- **Create**: Define new playbooks with ordered steps
+- **Execute**: Run a playbook to execute its steps in sequence
+- **Templates**: Pre-built playbooks for common workflows (deployment, code review, incident response)
+- **Version History**: Track playbook changes over time
+
+### 7.3 Scheduled Tasks
+
+**Path:** `/scheduled-tasks` | **Icon:** Calendar
+
+Automate recurring operations:
+
+- **Task List**: All scheduled tasks with name, frequency, next run time, and status
+- **Create**: Define a new scheduled task with cron expression or interval
+- **Enable/Disable**: Toggle tasks on/off
+- **Run History**: View past executions with outcomes
+- **Notifications**: Configure alerts for task failures
+
+### 7.4 Secrets Manager
+
+**Path:** `/secrets` | **Icon:** KeyRound
+
+Secure credential storage:
+
+- **Secrets List**: All stored secrets (values hidden) with name, type, and last updated
+- **Add Secret**: Store new API keys, tokens, or credentials
+- **Update**: Rotate secret values
+- **Delete**: Remove secrets securely
+- **Access Control**: Restrict which features can access each secret
+- **Audit**: View secret access log
+
+### 7.5 Code Index
+
+**Path:** `/code-index` | **Icon:** Code2
+
+Auto-indexed repository catalog:
+
+- **Index Overview**: Total indexed files, functions, classes, and exports
+- **Browse**: Navigate indexed symbols by repository
+- **Search**: Find functions, classes, or variables across all indexed repos
+- **Languages**: Python, TypeScript, JavaScript, Java, Go, Rust, Ruby, PHP
+- **Auto-Index**: Repositories are automatically indexed on clone
+- **Re-Index**: Manually trigger re-indexing for updated repos
+
+### 7.6 Session Insights
+
+**Path:** `/session-insights` | **Icon:** TrendingUp
+
+Analytics on development sessions:
+
+- **Session Overview**: Total sessions, average duration, active users
+- **Trends**: Session activity over time
+- **Feature Usage**: Which ZECT features are used most
+- **Productivity Metrics**: Tasks completed, code generated, reviews done
+
+### 7.7 Conversations
+
+**Path:** `/conversations` | **Icon:** MessageCircle
+
+Chat history and context management:
+
+- **Conversation List**: All AI conversations with timestamp and topic
+- **View**: Click to see full conversation history
+- **Continue**: Resume a previous conversation with context
+- **Export**: Download conversations as markdown
+- **Delete**: Remove conversation history
+
+---
+
+## 8. Enterprise Section
+
+### 8.1 Audit Trail
 
 **Path:** `/audit-trail` | **Icon:** ScrollText
 
@@ -718,7 +838,7 @@ Complete audit log of all platform activities:
 - **Export**: Download audit log as CSV or JSON
 - **Compliance**: Meets SOC 2 and ISO 27001 audit requirements
 
-### 7.2 Rules Engine
+### 8.2 Rules Engine
 
 **Path:** `/rules` | **Icon:** Scale
 
@@ -731,7 +851,7 @@ Define and manage automation rules:
 - **Rule History**: View rule execution history
 - **Enable/Disable**: Toggle rules on/off without deleting
 
-### 7.3 Integrations
+### 8.3 Integrations
 
 **Path:** `/integrations` | **Icon:** Plug
 
@@ -743,7 +863,7 @@ Connect ZECT to external services:
 - **Webhooks**: Manage incoming and outgoing webhook configurations
 - **SSO**: Configure Single Sign-On providers (SAML, OIDC)
 
-### 7.4 Export/Share
+### 8.4 Export/Share
 
 **Path:** `/export` | **Icon:** Download
 
@@ -755,7 +875,7 @@ Export and share platform data:
 - **Share Links**: Generate shareable links for reports and dashboards
 - **API Export**: Programmatic data export via REST API
 
-### 7.5 Output History
+### 8.5 Output History
 
 **Path:** `/output-history` | **Icon:** History
 
@@ -769,7 +889,7 @@ View all AI-generated outputs:
 
 ---
 
-## 8. Keyboard Shortcuts & Tips
+## 9. Keyboard Shortcuts & Tips
 
 | Shortcut | Action |
 |---|---|
@@ -788,7 +908,7 @@ View all AI-generated outputs:
 
 ---
 
-## 9. API Configuration
+## 10. API Configuration
 
 ### Setting Up LLM API Key
 
@@ -830,7 +950,7 @@ For AI-powered features (Ask Mode, Plan Mode, Blueprint, Code Review, Doc Genera
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### Common Issues
 

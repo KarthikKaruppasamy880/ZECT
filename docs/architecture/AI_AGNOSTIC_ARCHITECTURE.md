@@ -276,3 +276,35 @@ MODEL_DOCS=gpt-4o-mini
 4. **Response content is sanitized** — strip any leaked credentials from AI output
 5. **User data is not sent to providers unnecessarily** — minimal context principle
 6. **Provider compliance** — teams can restrict to specific providers for data residency
+
+---
+
+## Deep Repository Integration (v2.0)
+
+The repository integration layer is fully provider-agnostic:
+
+### Clone & Browse
+- Repository cloning uses standard `git clone` — no provider dependency
+- File browsing operates on the local filesystem — no AI calls needed
+- Code search uses regex on local files — no provider dependency
+
+### Auto-Indexing
+- The indexer uses AST parsing per language (not AI) — fully offline
+- Supported: Python, TypeScript, JavaScript, Java, Go, Rust, Ruby, PHP
+- Index data stored in PostgreSQL — provider-independent
+
+### Context Injection
+- When AI features (Ask, Plan, Build) are used with a repo context:
+  - The active repo's indexed symbols are injected into the prompt
+  - This works identically regardless of which LLM provider processes the prompt
+  - The context format is standard text — no provider-specific formatting
+
+### Write-Back
+- Build Phase writes code to local repo files — no provider dependency
+- Git operations (commit, push, PR) use standard Git/GitHub API — no AI involvement
+
+### Portability
+All repo integration features can be used with:
+- Any LLM provider (OpenAI, Anthropic, local Ollama, etc.)
+- Any AI coding tool that reads the same markdown documentation
+- Complete offline usage (clone, browse, search, index work without any API keys)

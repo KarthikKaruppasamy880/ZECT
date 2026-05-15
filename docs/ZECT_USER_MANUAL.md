@@ -2,40 +2,84 @@
 
 ## Zinnia Engineering Control Tower - Complete User Guide
 
-**Version:** 3.0
+**Version:** 3.1
 **Last Updated:** May 2026
-**Audience:** Zinnia Engineering Teams
+**Audience:** Zinnia Engineering Teams, Engineering Managers
+**Document Purpose:** End-to-end reference for every ZECT screen, feature, and API endpoint. Suitable for manager handoff, team onboarding, and user training.
 
 ---
 
 ## Table of Contents
 
-1. [Getting Started](#1-getting-started)
-2. [Login & Authentication](#2-login--authentication)
-3. [Sidebar Navigation Overview](#3-sidebar-navigation-overview)
-4. [Navigation Section](#4-navigation-section)
-5. [Workflow Stages Section](#5-workflow-stages-section)
-6. [Zinnia Intelligence Section](#6-zinnia-intelligence-section)
-7. [Features Section](#7-features-section)
-8. [Enterprise Section](#8-enterprise-section)
-9. [Keyboard Shortcuts & Tips](#9-keyboard-shortcuts--tips)
-10. [API Configuration](#10-api-configuration)
-11. [Troubleshooting](#11-troubleshooting)
-12. [New Features (v3.0 Gap Fixes)](#12-new-features-v30-gap-fixes)
+1. [What is ZECT?](#1-what-is-zect)
+2. [Getting Started](#2-getting-started)
+3. [Login & Authentication](#3-login--authentication)
+4. [Sidebar Navigation Overview](#4-sidebar-navigation-overview)
+5. [Navigation Section (10 screens)](#5-navigation-section-10-screens)
+6. [Workflow Stages Section (13 screens)](#6-workflow-stages-section-13-screens)
+7. [Zinnia Intelligence Section (7 screens)](#7-zinnia-intelligence-section-7-screens)
+8. [Features Section (7 screens)](#8-features-section-7-screens)
+9. [Enterprise Section (5 screens)](#9-enterprise-section-5-screens)
+10. [Keyboard Shortcuts & Tips](#10-keyboard-shortcuts--tips)
+11. [API Configuration](#11-api-configuration)
+12. [Troubleshooting](#12-troubleshooting)
+13. [v3.0 Gap-Fix Features (Technical Detail)](#13-v30-gap-fix-features-technical-detail)
 
 ---
 
-## 1. Getting Started
+## 1. What is ZECT?
 
-### What is ZECT?
+### Overview
 
-ZECT (Zinnia Engineering Control Tower) is a web-based internal platform that provides:
+ZECT (Zinnia Engineering Control Tower) is a self-hosted, web-based engineering platform that gives Zinnia engineering teams a single pane of glass for the entire software delivery lifecycle.
 
-- **Code review** with AI-powered analysis (bugs, vulnerabilities, performance, architecture)
-- **Project orchestration** across the full software delivery lifecycle (Ask, Plan, Build, Review, Deploy)
-- **Token/cost tracking** for all AI-powered features with per-user budgets
-- **Zinnia Intelligence** -- a 4-layer memory system, dream engine, data flywheel, permissions protocol, and skills engine
-- **Enterprise controls** -- audit trail, rules engine, integrations, and export/share
+It combines AI-powered code assistance (Ask, Plan, Build, Review, Deploy) with enterprise governance (audit trail, token budgets, rules engine) and team intelligence (memory system, knowledge base, skills engine) in one unified tool.
+
+### Who is it for?
+
+| Role | How they use ZECT |
+|------|-------------------|
+| **Developers** | Ask questions about code, generate plans, write code, run code in sandbox, review PRs |
+| **Tech Leads** | Orchestrate projects across stages, monitor CI/CD, track team token usage |
+| **Engineering Managers** | View dashboards, analytics, audit trails, and cost reports |
+| **Platform Engineers** | Configure rules engine, manage secrets, set up integrations |
+| **QA Engineers** | Use App Runner to test apps, review code, check CI monitor |
+
+### Key Capabilities
+
+| Capability | Description |
+|------------|-------------|
+| **AI Code Assistance** | 5 workflow stages (Ask, Plan, Build, Review, Deploy) with LLM-powered features |
+| **Agent Mode** | Autonomous multi-step execution that chains all 5 stages automatically |
+| **Code Review** | 5 review modes: PR review, snippet review, full-repo scan, inline GitHub review, auto-fix loop |
+| **Repository Integration** | Clone repos, browse files, search code, auto-index 13 languages, write code back to repo |
+| **Sandboxed Execution** | Run Python, Node.js, Bash, Ruby, Go code in isolated environments with timeout controls |
+| **CI/CD Monitoring** | View GitHub Actions workflows and auto-remediate failures with AI |
+| **Real-time Collaboration** | WebSocket-based presence tracking, see who is on which page |
+| **Enterprise Governance** | Audit trail, rules engine with kill switch, per-user token budgets, secrets manager |
+| **Zinnia Intelligence** | 4-layer memory system, dream engine, data flywheel, skills engine |
+| **42 Screens** | Every feature has a dedicated UI screen accessible from the sidebar |
+
+### Architecture
+
+```
+Browser (React + TypeScript + Vite)
+  |
+  v
+Backend API (Python + FastAPI, port 8001)
+  |
+  v
+Database (SQLite default / PostgreSQL)
+  |
+  v
+External APIs (GitHub, OpenAI/Anthropic for AI features)
+```
+
+**Screenshot:** See `docs/screenshots/01-dashboard.png` for the main dashboard view after login.
+
+---
+
+## 2. Getting Started
 
 ### Prerequisites
 
@@ -48,6 +92,8 @@ ZECT (Zinnia Engineering Control Tower) is a web-based internal platform that pr
 | Browser | Chrome, Firefox, Edge, or Safari (latest) |
 
 ### Installation
+
+**Screenshot:** See `docs/screenshots/00-login.png` for the login page you see after installation.
 
 ```bash
 # Clone the repository
@@ -79,7 +125,9 @@ Open `http://localhost:5173` in your browser.
 
 ---
 
-## 2. Login & Authentication
+## 3. Login & Authentication
+
+**Screenshot:** `docs/screenshots/00-login.png`
 
 ### Login Screen
 
@@ -101,7 +149,9 @@ On each page load, ZECT verifies your token with the backend. If the token is ex
 
 ---
 
-## 3. Sidebar Navigation Overview
+## 4. Sidebar Navigation Overview
+
+**Screenshot:** `docs/screenshots/01-dashboard.png` (sidebar visible on left)
 
 The ZECT sidebar is divided into **5 sections** with a total of **42 navigation items**:
 
@@ -122,11 +172,11 @@ The ZECT sidebar is divided into **5 sections** with a total of **42 navigation 
 
 ---
 
-## 4. Navigation Section
+## 5. Navigation Section (10 screens)
 
-### 4.1 Dashboard
+### 5.1 Dashboard
 
-**Path:** `/` | **Icon:** LayoutDashboard
+**Path:** `/` | **Screenshot:** `docs/screenshots/01-dashboard.png`
 
 The Dashboard is your home screen. It shows:
 
@@ -137,9 +187,9 @@ The Dashboard is your home screen. It shows:
 - **Projects Grid**: The 6 most recent projects with name, stage badge, team, repo count, and completion percentage
   - Click **View all** to go to the Projects page
 
-### 4.2 Projects
+### 5.2 Projects
 
-**Path:** `/projects` | **Icon:** FolderKanban
+**Path:** `/projects` | **Screenshot:** `docs/screenshots/02-projects.png`
 
 Manage all your engineering projects:
 
@@ -152,9 +202,9 @@ Manage all your engineering projects:
   - PR viewer for linked repositories
   - Risk alerts and action items
 
-### 4.3 Orchestration
+### 5.3 Orchestration
 
-**Path:** `/orchestration` | **Icon:** GitBranch
+**Path:** `/orchestration` | **Screenshot:** `docs/screenshots/03-orchestration.png`
 
 Visualize and manage the project delivery pipeline:
 
@@ -163,9 +213,9 @@ Visualize and manage the project delivery pipeline:
 - **Dependencies**: View cross-project dependencies
 - **Timeline**: Gantt-style view of project timelines
 
-### 4.4 Repo Analysis
+### 5.4 Repo Analysis
 
-**Path:** `/repo-analysis` | **Icon:** Microscope
+**Path:** `/repo-analysis` | **Screenshot:** `docs/screenshots/04-repo-analysis.png`
 
 Analyze any GitHub repository:
 
@@ -178,9 +228,9 @@ Analyze any GitHub repository:
    - Dependency analysis
    - Security scan results
 
-### 4.5 Blueprint
+### 5.5 Blueprint
 
-**Path:** `/blueprint` | **Icon:** Sparkles
+**Path:** `/blueprint` | **Screenshot:** `docs/screenshots/05-blueprint.png`
 
 AI-powered project blueprint generator:
 
@@ -197,9 +247,9 @@ AI-powered project blueprint generator:
 
 **Token Usage**: Each blueprint generation uses tokens. The cost is tracked in Token Controls.
 
-### 4.6 Doc Generator
+### 5.6 Doc Generator
 
-**Path:** `/doc-generator` | **Icon:** BookOpen
+**Path:** `/doc-generator` | **Screenshot:** `docs/screenshots/06-doc-generator.png`
 
 Generate documentation from your codebase:
 
@@ -212,9 +262,9 @@ Generate documentation from your codebase:
 3. Click **Generate**
 4. View, copy, or download the generated documentation
 
-### 4.7 Code Review
+### 5.7 Code Review
 
-**Path:** `/code-review` | **Icon:** ShieldCheck
+**Path:** `/code-review` | **Screenshot:** `docs/screenshots/07-code-review.png`
 
 AI-powered code review engine with 5 modes:
 
@@ -259,9 +309,9 @@ AI-powered code review engine with 5 modes:
 - **Post Custom Comment**: Add your own comments with optional file path and line number
 - **View Comments**: See all existing PR comments
 
-### 4.8 Analytics
+### 5.8 Analytics
 
-**Path:** `/analytics` | **Icon:** BarChart3
+**Path:** `/analytics` | **Screenshot:** `docs/screenshots/08-analytics.png`
 
 View engineering analytics:
 
@@ -271,9 +321,9 @@ View engineering analytics:
 - **Risk Alerts**: Outstanding risk alerts across projects
 - **Trend Charts**: Project velocity over time
 
-### 4.9 Docs Center
+### 5.9 Docs Center
 
-**Path:** `/docs` | **Icon:** FileText
+**Path:** `/docs` | **Screenshot:** `docs/screenshots/09-docs-center.png`
 
 Central documentation hub:
 
@@ -282,9 +332,9 @@ Central documentation hub:
 - View auto-generated API docs
 - Access team runbooks and guides
 
-### 4.10 Settings
+### 5.10 Settings
 
-**Path:** `/settings` | **Icon:** Settings
+**Path:** `/settings` | **Screenshot:** `docs/screenshots/10-settings.png`
 
 Platform configuration:
 
@@ -296,11 +346,11 @@ Platform configuration:
 
 ---
 
-## 5. Workflow Stages Section
+## 6. Workflow Stages Section (13 screens)
 
-### 5.1 Ask Mode
+### 6.1 Ask Mode
 
-**Path:** `/ask` | **Icon:** MessageSquare
+**Path:** `/ask` | **Screenshot:** `docs/screenshots/11-ask-mode.png`
 
 Chat-based interface for asking questions about your codebase:
 
@@ -318,9 +368,9 @@ Chat-based interface for asking questions about your codebase:
 - Copy response to clipboard
 - Token usage displayed per message
 
-### 5.2 Plan Mode
+### 6.2 Plan Mode
 
-**Path:** `/plan` | **Icon:** ClipboardList
+**Path:** `/plan` | **Screenshot:** `docs/screenshots/12-plan-mode.png`
 
 Generate implementation plans from requirements:
 
@@ -335,9 +385,9 @@ Generate implementation plans from requirements:
    - Risk assessment
    - Suggested architecture
 
-### 5.3 Build Phase
+### 6.3 Build Phase
 
-**Path:** `/build` | **Icon:** Hammer
+**Path:** `/build` | **Screenshot:** `docs/screenshots/13-build-phase.png`
 
 Track and manage active builds:
 
@@ -348,9 +398,9 @@ Track and manage active builds:
 - Model selector for AI-assisted builds
 - Token usage tracking per build
 
-### 5.4 Review Phase
+### 6.4 Review Phase
 
-**Path:** `/review` | **Icon:** Shield
+**Path:** `/review` | **Screenshot:** `docs/screenshots/14-review-phase.png`
 
 Manage code reviews:
 
@@ -359,9 +409,9 @@ Manage code reviews:
 - **Completed**: Past reviews with quality scores
 - Quick-link to the full Code Review engine
 
-### 5.5 Deployment
+### 6.5 Deployment
 
-**Path:** `/deploy` | **Icon:** Rocket
+**Path:** `/deploy` | **Screenshot:** `docs/screenshots/15-deployment.png`
 
 Deployment management:
 
@@ -370,9 +420,9 @@ Deployment management:
 - **Deployment History**: Past deployments with status
 - **Rollback**: One-click rollback to previous versions
 
-### 5.6 Skill Library
+### 6.6 Skill Library
 
-**Path:** `/skills` | **Icon:** BookOpen
+**Path:** `/skills` | **Screenshot:** `docs/screenshots/16-skill-library.png`
 
 Browse and manage AI skills:
 
@@ -381,9 +431,9 @@ Browse and manage AI skills:
 - **Categories**: Filter by category (development, testing, security, documentation)
 - **Usage Stats**: How often each skill has been invoked
 
-### 5.7 Token Controls
+### 6.7 Token Controls
 
-**Path:** `/token-controls` | **Icon:** Coins
+**Path:** `/token-controls` | **Screenshot:** `docs/screenshots/17-token-controls.png`
 
 Comprehensive token and cost management with 5 tabs:
 
@@ -421,9 +471,9 @@ Comprehensive token and cost management with 5 tabs:
 - **Cost Trends**: Daily cost breakdown
 - **Feature Trends**: Which features are consuming the most tokens over time
 
-### 5.8 App Runner
+### 6.8 App Runner
 
-**Path:** `/app-runner` | **Icon:** MonitorPlay
+**Path:** `/app-runner` | **Screenshot:** `docs/screenshots/18-app-runner.png`
 
 Run and test applications directly inside ZECT with 3 tabs:
 
@@ -454,9 +504,9 @@ Run and test applications directly inside ZECT with 3 tabs:
 - Set the correct port in the Configure tab
 - Click the external link icon to open in a new browser tab
 
-### 5.9 File Explorer
+### 6.9 File Explorer
 
-**Path:** `/file-explorer` | **Icon:** FolderOpen
+**Path:** `/file-explorer` | **Screenshot:** `docs/screenshots/19-file-explorer.png`
 
 Browse repository files:
 
@@ -465,9 +515,9 @@ Browse repository files:
 - **Search**: Search for files by name
 - **File Info**: Size, last modified, permissions
 
-### 5.10 Git Operations
+### 6.10 Git Operations
 
-**Path:** `/git-ops` | **Icon:** GitBranch
+**Path:** `/git-ops` | **Screenshot:** `docs/screenshots/20-git-operations.png`
 
 Git management interface:
 
@@ -477,9 +527,9 @@ Git management interface:
 - **Pull/Push**: Sync with remote
 - **Stash**: Manage stashed changes
 
-### 5.11 CI Monitor
+### 6.11 CI Monitor
 
-**Path:** `/ci-monitor` | **Icon:** Activity
+**Path:** `/ci-monitor` | **Screenshot:** `docs/screenshots/21-ci-monitor.png`
 
 Monitor CI/CD pipelines:
 
@@ -491,11 +541,11 @@ Monitor CI/CD pipelines:
 
 ---
 
-## 6. Zinnia Intelligence Section
+## 7. Zinnia Intelligence Section (7 screens)
 
-### 6.1 Memory System
+### 7.1 Memory System
 
-**Path:** `/memory` | **Icon:** Brain
+**Path:** `/memory` | **Screenshot:** `docs/screenshots/23-memory-system.png`
 
 4-layer memory architecture for persistent AI context:
 
@@ -538,9 +588,9 @@ User preferences and behavioral patterns:
 
 **Toast Notifications**: All API errors show a red toast notification in the top-right corner with the error message. Success operations show a green toast.
 
-### 6.2 Dream Engine
+### 7.2 Dream Engine
 
-**Path:** `/dream-engine` | **Icon:** Sparkles
+**Path:** `/dream-engine` | **Screenshot:** `docs/screenshots/24-dream-engine.png`
 
 Offline consolidation process that strengthens useful memories and decays old ones:
 
@@ -564,9 +614,9 @@ Offline consolidation process that strengthens useful memories and decays old on
 - View all past dream runs with: run ID, timestamp, consolidated count, new facts
 - Track consolidation effectiveness over time
 
-### 6.3 Data Layer
+### 7.3 Data Layer
 
-**Path:** `/data-layer` | **Icon:** Layers
+**Path:** `/data-layer` | **Screenshot:** `docs/screenshots/25-data-layer.png`
 
 Cross-agent event tracking and KPI dashboard:
 
@@ -586,9 +636,9 @@ Cross-agent event tracking and KPI dashboard:
 - **Add Event**: Click to log a new event manually
   - Fill in: Agent, Event Type, Duration (ms), Metadata (JSON)
 
-### 6.4 Data Flywheel
+### 7.4 Data Flywheel
 
-**Path:** `/data-flywheel` | **Icon:** Repeat
+**Path:** `/data-flywheel` | **Screenshot:** `docs/screenshots/26-data-flywheel.png`
 
 Continuous improvement loop that turns approved runs into training data:
 
@@ -617,9 +667,9 @@ The flywheel has 4 stages:
 
 **Toast Notifications**: "Trace approved", "Context card approved", etc. on success. Error toasts on failure.
 
-### 6.5 Permissions
+### 7.5 Permissions
 
-**Path:** `/permissions` | **Icon:** ShieldAlert
+**Path:** `/permissions` | **Screenshot:** `docs/screenshots/27-permissions.png`
 
 3-tier action enforcement protocol:
 
@@ -640,9 +690,9 @@ The flywheel has 4 stages:
 5. **Pending Approvals**: View actions waiting for human approval
    - Click **Approve** or **Deny** for each pending action
 
-### 6.6 Transfer & Onboarding
+### 7.6 Transfer & Onboarding
 
-**Path:** `/transfer` | **Icon:** ArrowRightLeft
+**Path:** `/transfer` | **Screenshot:** `docs/screenshots/28-transfer-onboard.png`
 
 Brain state export/import with onboarding wizard:
 
@@ -674,9 +724,9 @@ For new agents/users, the 6-question wizard collects:
 Click **Complete Onboarding** to save all preferences.
 Success toast: "Onboarding complete! Preferences saved."
 
-### 6.7 Skills Engine
+### 7.7 Skills Engine
 
-**Path:** `/skills-engine` | **Icon:** Wrench
+**Path:** `/skills-engine` | **Screenshot:** `docs/screenshots/29-skills-engine.png`
 
 Database-backed skill registry with trigger matching:
 
@@ -705,9 +755,9 @@ Database-backed skill registry with trigger matching:
 - Each log shows: Skill Name, Agent, Input, Output, Duration, Timestamp
 - Track which skills are used most frequently
 
-### 5.12 Repo Workspace
+### 6.12 Repo Workspace
 
-**Path:** `/repo-workspace` | **Icon:** HardDrive
+**Path:** `/repo-workspace` | **Screenshot:** `docs/screenshots/22-repo-workspace.png`
 
 Full repository management with 3 tabs:
 
@@ -734,9 +784,9 @@ Full repository management with 3 tabs:
 4. Results show: file path, line number, matching line, and context
 5. Click any result to jump to the file in the File Browser
 
-### 5.13 Agent Mode
+### 6.13 Agent Mode
 
-**Path:** `/agent-mode` | **Icon:** Bot
+**Path:** `/agent-mode` | **Screenshot:** `docs/screenshots/gap-fix-01-agent-mode.png`
 
 Autonomous multi-step execution engine that chains Ask, Plan, Build, Review, and Deploy stages into a single pipeline run:
 
@@ -774,11 +824,11 @@ Autonomous multi-step execution engine that chains Ask, Plan, Build, Review, and
 
 ---
 
-## 7. Features Section
+## 8. Features Section (7 screens)
 
-### 7.1 Knowledge Base
+### 8.1 Knowledge Base
 
-**Path:** `/knowledge-base` | **Icon:** BookMarked
+**Path:** `/knowledge-base` | **Screenshot:** `docs/screenshots/30-knowledge-base.png`
 
 Store and retrieve organizational knowledge:
 
@@ -788,9 +838,9 @@ Store and retrieve organizational knowledge:
 - **Categories**: Filter by category or tag
 - **Usage Tracking**: See which knowledge items are referenced most
 
-### 7.2 Playbooks
+### 8.2 Playbooks
 
-**Path:** `/playbooks` | **Icon:** BookOpen
+**Path:** `/playbooks` | **Screenshot:** `docs/screenshots/31-playbooks.png`
 
 Reusable workflow templates:
 
@@ -800,9 +850,9 @@ Reusable workflow templates:
 - **Templates**: Pre-built playbooks for common workflows (deployment, code review, incident response)
 - **Version History**: Track playbook changes over time
 
-### 7.3 Scheduled Tasks
+### 8.3 Scheduled Tasks
 
-**Path:** `/scheduled-tasks` | **Icon:** Calendar
+**Path:** `/scheduled-tasks` | **Screenshot:** `docs/screenshots/32-scheduled-tasks.png`
 
 Automate recurring operations:
 
@@ -812,9 +862,9 @@ Automate recurring operations:
 - **Run History**: View past executions with outcomes
 - **Notifications**: Configure alerts for task failures
 
-### 7.4 Secrets Manager
+### 8.4 Secrets Manager
 
-**Path:** `/secrets` | **Icon:** KeyRound
+**Path:** `/secrets` | **Screenshot:** `docs/screenshots/33-secrets-manager.png`
 
 Secure credential storage:
 
@@ -825,9 +875,9 @@ Secure credential storage:
 - **Access Control**: Restrict which features can access each secret
 - **Audit**: View secret access log
 
-### 7.5 Code Index
+### 8.5 Code Index
 
-**Path:** `/code-index` | **Icon:** Code2
+**Path:** `/code-index` | **Screenshot:** `docs/screenshots/34-code-index.png`
 
 Auto-indexed repository catalog:
 
@@ -838,9 +888,9 @@ Auto-indexed repository catalog:
 - **Auto-Index**: Repositories are automatically indexed on clone
 - **Re-Index**: Manually trigger re-indexing for updated repos
 
-### 7.6 Session Insights
+### 8.6 Session Insights
 
-**Path:** `/session-insights` | **Icon:** TrendingUp
+**Path:** `/session-insights` | **Screenshot:** `docs/screenshots/35-session-insights.png`
 
 Analytics on development sessions:
 
@@ -849,9 +899,9 @@ Analytics on development sessions:
 - **Feature Usage**: Which ZECT features are used most
 - **Productivity Metrics**: Tasks completed, code generated, reviews done
 
-### 7.7 Conversations
+### 8.7 Conversations
 
-**Path:** `/conversations` | **Icon:** MessageCircle
+**Path:** `/conversations` | **Screenshot:** `docs/screenshots/36-conversations.png`
 
 Chat history and context management:
 
@@ -863,11 +913,11 @@ Chat history and context management:
 
 ---
 
-## 8. Enterprise Section
+## 9. Enterprise Section (5 screens)
 
-### 8.1 Audit Trail
+### 9.1 Audit Trail
 
-**Path:** `/audit-trail` | **Icon:** ScrollText
+**Path:** `/audit-trail` | **Screenshot:** `docs/screenshots/37-audit-trail.png`
 
 Complete audit log of all platform activities:
 
@@ -877,9 +927,9 @@ Complete audit log of all platform activities:
 - **Export**: Download audit log as CSV or JSON
 - **Compliance**: Meets SOC 2 and ISO 27001 audit requirements
 
-### 8.2 Rules Engine
+### 9.2 Rules Engine
 
-**Path:** `/rules` | **Icon:** Scale
+**Path:** `/rules` | **Screenshot:** `docs/screenshots/38-rules-engine.png`
 
 Define and manage automation rules:
 
@@ -890,9 +940,9 @@ Define and manage automation rules:
 - **Rule History**: View rule execution history
 - **Enable/Disable**: Toggle rules on/off without deleting
 
-### 8.3 Integrations
+### 9.3 Integrations
 
-**Path:** `/integrations` | **Icon:** Plug
+**Path:** `/integrations` | **Screenshot:** `docs/screenshots/39-integrations.png`
 
 Connect ZECT to external services:
 
@@ -902,9 +952,9 @@ Connect ZECT to external services:
 - **Webhooks**: Manage incoming and outgoing webhook configurations
 - **SSO**: Configure Single Sign-On providers (SAML, OIDC)
 
-### 8.4 Export/Share
+### 9.4 Export/Share
 
-**Path:** `/export` | **Icon:** Download
+**Path:** `/export` | **Screenshot:** `docs/screenshots/40-export-share.png`
 
 Export and share platform data:
 
@@ -914,9 +964,9 @@ Export and share platform data:
 - **Share Links**: Generate shareable links for reports and dashboards
 - **API Export**: Programmatic data export via REST API
 
-### 8.5 Output History
+### 9.5 Output History
 
-**Path:** `/output-history` | **Icon:** History
+**Path:** `/output-history` | **Screenshot:** `docs/screenshots/41-output-history.png`
 
 View all AI-generated outputs:
 
@@ -928,7 +978,7 @@ View all AI-generated outputs:
 
 ---
 
-## 9. Keyboard Shortcuts & Tips
+## 10. Keyboard Shortcuts & Tips
 
 | Shortcut | Action |
 |---|---|
@@ -947,7 +997,7 @@ View all AI-generated outputs:
 
 ---
 
-## 10. API Configuration
+## 11. API Configuration
 
 ### Setting Up LLM API Key
 
@@ -989,7 +1039,7 @@ For AI-powered features (Ask Mode, Plan Mode, Blueprint, Code Review, Doc Genera
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### Common Issues
 
@@ -1013,11 +1063,11 @@ For AI-powered features (Ask Mode, Plan Mode, Blueprint, Code Review, Doc Genera
 
 ---
 
-## 12. New Features (v3.0 Gap Fixes)
+## 13. v3.0 Gap-Fix Features (Technical Detail)
 
 This section covers all features added in the v3.0 gap-fix release. These close every gap identified in the ZECT Gap Analysis (except 2.7 Integrations, which is deferred).
 
-### 12.1 Agent Mode — Autonomous Multi-Step Execution
+### 13.1 Agent Mode — Autonomous Multi-Step Execution
 
 **Sidebar Location:** Workflow Stages > Agent Mode (`/agent-mode`)
 
@@ -1044,7 +1094,7 @@ Agent Mode is ZECT's flagship autonomous execution engine. It chains the Ask →
 | Full delivery pipeline | Yes — select all 5 stages |
 | Code review only | No — use Code Review directly |
 
-### 12.2 Session Persistence
+### 13.2 Session Persistence
 
 **How it works:** Sessions now persist across page navigations. When you switch from Ask Mode to Plan Mode to Build Phase, your conversation context carries forward.
 
@@ -1064,7 +1114,7 @@ Agent Mode is ZECT's flagship autonomous execution engine. It chains the Ask →
 | `/api/persistent-sessions/list` | GET | List all sessions |
 | `/api/persistent-sessions/{id}/close` | POST | Close a session |
 
-### 12.3 Sandboxed Code Execution
+### 13.3 Sandboxed Code Execution
 
 **Sidebar Location:** Used internally by Build Phase and App Runner
 
@@ -1101,7 +1151,7 @@ Execute code safely in isolated sandbox environments. Supports Python, Node.js, 
 | `/api/sandbox/languages` | GET | List supported languages |
 | `/api/sandbox/{id}/cleanup` | POST | Clean up sandbox resources |
 
-### 12.4 CI/CD Auto-Remediation
+### 13.4 CI/CD Auto-Remediation
 
 **Purpose:** Automatically detect CI pipeline failures, analyze logs, and suggest or apply fixes.
 
@@ -1122,7 +1172,7 @@ Execute code safely in isolated sandbox environments. Supports Python, Node.js, 
 - `GITHUB_TOKEN` environment variable for accessing GitHub Actions logs
 - LLM API key for AI-powered diagnosis
 
-### 12.5 Real-time Collaboration (WebSocket)
+### 13.5 Real-time Collaboration (WebSocket)
 
 **Purpose:** Track who is working on what, in real-time, across the ZECT platform.
 
@@ -1143,7 +1193,7 @@ Execute code safely in isolated sandbox environments. Supports Python, Node.js, 
 | `/api/realtime/rooms` | GET | List all active rooms with user counts |
 | `/api/realtime/presence/{room}` | GET | Get users in a specific room |
 
-### 12.6 Diff Viewer
+### 13.6 Diff Viewer
 
 **Sidebar Location:** Used within Code Review and as a standalone API
 
@@ -1170,7 +1220,7 @@ Compare two text blocks and view differences in unified or side-by-side format.
 }
 ```
 
-### 12.7 Live File Watching
+### 13.7 Live File Watching
 
 **Purpose:** Monitor cloned repositories for external file changes (e.g., edits made outside ZECT in VS Code or terminal).
 
@@ -1189,7 +1239,7 @@ Compare two text blocks and view differences in unified or side-by-side format.
 | `/api/file-watcher/status/{repo_id}` | GET | Get watcher status |
 | `/api/file-watcher/list` | GET | List all active watchers |
 
-### 12.8 Broader Language Indexing
+### 13.8 Broader Language Indexing
 
 **Purpose:** The auto-indexer now supports 13 languages (up from 8) for code intelligence across cloned repositories.
 
@@ -1212,7 +1262,7 @@ Compare two text blocks and view differences in unified or side-by-side format.
 
 Languages in **bold** are new in v3.0.
 
-### 12.9 Desktop Application (Electron)
+### 13.9 Desktop Application (Electron)
 
 **Purpose:** Package ZECT as a standalone desktop application for Windows, macOS, and Linux.
 

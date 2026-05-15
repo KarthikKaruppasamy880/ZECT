@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  MessageCircle, Clock, Pin, Plus, ChevronRight, ChevronLeft, X,
+  MessageCircle, Clock, Pin, Plus, ChevronRight, ChevronLeft,
 } from "lucide-react";
 import { getConversations, createConversation, updateConversation } from "@/lib/api";
 

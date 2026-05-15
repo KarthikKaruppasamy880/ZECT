@@ -104,11 +104,11 @@ export default function RepoWorkspace() {
   // --- Clone handler ---
   const handleClone = async () => {
     if (!cloneOwner.trim() || !cloneRepoName.trim()) {
-      showToast("Enter owner and repo name", "error");
+      showToast("error", "Enter owner and repo name");
       return;
     }
     if (!selectedProjectId) {
-      showToast("Select a project first", "error");
+      showToast("error", "Select a project first");
       return;
     }
     setCloning(true);
@@ -138,18 +138,18 @@ export default function RepoWorkspace() {
         }
       }
       if (!repo) {
-        showToast("Could not create/find repo", "error");
+        showToast("error", "Could not create/find repo");
         return;
       }
 
       const result = await cloneRepo(repo.id, cloneBranch || undefined, cloneShallow);
-      showToast(`Cloned ${cloneOwner}/${cloneRepoName}: ${result.stats?.total_files || 0} files`, "success");
+      showToast("success", `Cloned ${cloneOwner}/${cloneRepoName}: ${result.stats?.total_files || 0} files`);
       setCloneOwner("");
       setCloneRepoName("");
       setCloneBranch("");
       await loadData();
     } catch (e: any) {
-      showToast(e.message || "Clone failed", "error");
+      showToast("error", e.message || "Clone failed");
     } finally {
       setCloning(false);
     }
@@ -160,10 +160,10 @@ export default function RepoWorkspace() {
     setPulling(repoId);
     try {
       const result = await pullRepo(repoId);
-      showToast(`Pulled latest: ${result.stats?.total_files || 0} files`, "success");
+      showToast("success", `Pulled latest: ${result.stats?.total_files || 0} files`);
       await loadData();
     } catch (e: any) {
-      showToast(e.message || "Pull failed", "error");
+      showToast("error", e.message || "Pull failed");
     } finally {
       setPulling(null);
     }
@@ -174,7 +174,7 @@ export default function RepoWorkspace() {
     if (!confirm("Delete this local clone? The remote repo is not affected.")) return;
     try {
       await deleteRepoClone(repoId);
-      showToast("Clone deleted", "success");
+      showToast("success", "Clone deleted");
       await loadData();
       if (browseRepoId === repoId) {
         setBrowseRepoId(null);
@@ -182,7 +182,7 @@ export default function RepoWorkspace() {
         setSelectedFile(null);
       }
     } catch (e: any) {
-      showToast(e.message || "Delete failed", "error");
+      showToast("error", e.message || "Delete failed");
     }
   };
 
@@ -200,7 +200,7 @@ export default function RepoWorkspace() {
       setTree(treeData);
       setBranches(branchData);
     } catch (e: any) {
-      showToast(e.message || "Failed to load tree", "error");
+      showToast("error", e.message || "Failed to load tree");
     } finally {
       setLoadingTree(false);
     }
@@ -239,7 +239,7 @@ export default function RepoWorkspace() {
       const file = await getRepoFile(browseRepoId, path);
       setSelectedFile(file);
     } catch (e: any) {
-      showToast(e.message || "Failed to read file", "error");
+      showToast("error", e.message || "Failed to read file");
     } finally {
       setLoadingFile(false);
     }
@@ -251,11 +251,11 @@ export default function RepoWorkspace() {
     setCheckingOut(true);
     try {
       await checkoutRepoBranch(browseRepoId, branch);
-      showToast(`Checked out ${branch}`, "success");
+      showToast("success", `Checked out ${branch}`);
       await loadTree(browseRepoId);
       await loadData();
     } catch (e: any) {
-      showToast(e.message || "Checkout failed", "error");
+      showToast("error", e.message || "Checkout failed");
     } finally {
       setCheckingOut(false);
     }
@@ -264,16 +264,16 @@ export default function RepoWorkspace() {
   // --- Search ---
   const handleSearch = async () => {
     if (!searchRepoId || !searchPattern.trim()) {
-      showToast("Select a repo and enter a search pattern", "error");
+      showToast("error", "Select a repo and enter a search pattern");
       return;
     }
     setSearching(true);
     try {
       const results = await searchRepoFiles(searchRepoId, searchPattern);
       setSearchResults(results);
-      if (results.length === 0) showToast("No matches found", "info");
+      if (results.length === 0) showToast("info", "No matches found");
     } catch (e: any) {
-      showToast(e.message || "Search failed", "error");
+      showToast("error", e.message || "Search failed");
     } finally {
       setSearching(false);
     }

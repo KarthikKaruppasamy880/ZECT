@@ -42,9 +42,11 @@ import CodeIndex from "@/pages/CodeIndex";
 import SessionInsights from "@/pages/SessionInsights";
 import Conversations from "@/pages/Conversations";
 import RepoWorkspace from "@/pages/RepoWorkspace";
+import AgentMode from "@/pages/AgentMode";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 import { ActiveProjectProvider } from "@/contexts/ActiveProjectContext";
+import { SessionProvider } from "@/contexts/SessionContext";
 
 /* Gap 5: Code-split heavy pages with React.lazy() */
 const LazyCodeReview = lazy(() => import("@/pages/CodeReview"));
@@ -108,6 +110,7 @@ export default function App() {
 
   return (
     <ActiveProjectProvider>
+    <SessionProvider>
     <BrowserRouter>
       <ToastContainer />
       <Routes>
@@ -156,10 +159,12 @@ export default function App() {
           <Route path="/session-insights" element={<SessionInsights />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/repo-workspace" element={<RepoWorkspace />} />
+          <Route path="/agent-mode" element={<AgentMode />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </SessionProvider>
     </ActiveProjectProvider>
   );
 }

@@ -1084,3 +1084,87 @@ class Recording(Base):
 
     user = relationship("User", backref="recordings")
     project = relationship("Project", backref="recordings")
+
+
+# ---------------------------------------------------------------------------
+# Agent Mode — autonomous multi-step execution
+# ---------------------------------------------------------------------------
+
+class AgentRun(Base):
+    """An autonomous agent run that chains multiple stages."""
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String, unique=True, nullable=False, index=True)
+    task = Column(Text, nullable=False)
+    stages = Column(Text, default="[]")  # JSON array of stage names
+    model = Column(String, default="gpt-4o-mini")
+    repo_context = Column(Text, default="")
+    auto_advance = Column(Boolean, default=True)
+    status = Column(String, default="pending")  # pending, running, paused, completed, cancelled, failed
+    current_stage_index = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+    steps = relationship("AgentStep", back_populates="agent_run", cascade="all, delete-orphan")
+
+
+class AgentStep(Base):
+    """A single step within an agent run."""
+    __tablename__ = "agent_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_run_id = Column(Integer, ForeignKey("agent_runs.id"), nullable=False, index=True)
+    stage = Column(String, nullable=False)  # ask, plan, build, review, deploy
+    step_index = Column(Integer, default=0)
+    input_context = Column(Text, default="")
+    output = Column(Text, default="")
+    tokens_used = Column(Integer, default=0)
+    duration_ms = Column(Integer, default=0)
+    status = Column(String, default="pending")  # pending, running, completed, failed, skipped
+    model = Column(String, default="")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    agent_run = relationship("AgentRun", back_populates="steps")
+
+
+# ---------------------------------------------------------------------------
+# Persistent Sessions — maintain context across pages
+# ---------------------------------------------------------------------------
+
+class PersistentSession(Base):
+    """Cross-page session that preserves AI context."""
+    __tablename__ = "persistent_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)
+    title = Column(String, default="")
+    status = Column(String, default="active")  # active, completed, abandoned
+    messages_count = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    pages_visited = Column(String, default="")  # comma-separated
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_activity = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    ended_at = Column(DateTime, nullable=True)
+
+    messages = relationship("SessionMessage", back_populates="persistent_session", cascade="all, delete-orphan")
+
+
+class SessionMessage(Base):
+    """A message within a persistent session."""
+    __tablename__ = "session_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("persistent_sessions.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    page = Column(String, default="")  # ask, plan, build, review, deploy
+    model = Column(String, default="")
+    tokens_used = Column(Integer, default=0)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    persistent_session = relationship("PersistentSession", back_populates="messages")

@@ -11,7 +11,6 @@ const CATEGORIES = ["general", "onboarding", "review", "deploy", "debug", "migra
 
 export default function Playbooks() {
   const [playbooks, setPlaybooks] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -34,7 +33,7 @@ export default function Playbooks() {
       ]);
       setPlaybooks(res.items || []);
       setTotal(res.total || 0);
-      setCategories(cats || []);
+      void cats;
     } catch (e: any) {
       setError(e.message || "Failed to load playbooks");
     } finally {

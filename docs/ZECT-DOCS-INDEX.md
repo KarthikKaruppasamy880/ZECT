@@ -2,7 +2,7 @@
 
 ## Complete Guide to All Repository Documentation
 
-**Version:** 3.1 | **Date:** May 2026 | **Total Docs:** 90+ markdown files | **Screenshots:** 46
+**Version:** 3.2 | **Date:** May 2026 | **Total Docs:** 90+ markdown files | **Screenshots:** 49
 
 ---
 
@@ -10,6 +10,7 @@
 
 | If You Need... | Read This |
 |----------------|-----------|
+| Full tech details (one-page) | `ZECT-TECH-DETAILS-ONE-PAGE.md` |
 | Executive overview for management | `ZECT-ONE-SHEET.md` |
 | Full technical white paper | `ZECT-WHITE-PAPER.md` |
 | Demo/presentation content | `ZECT-DEMO-PPT-CONTENT.md` |
@@ -29,6 +30,7 @@
 | File | Path | Purpose |
 |------|------|---------|
 | **White Paper** | `docs/ZECT-WHITE-PAPER.md` | Technical white paper for stakeholders — architecture, capabilities, competitive positioning, ROI |
+| **Tech Details** | `docs/ZECT-TECH-DETAILS-ONE-PAGE.md` | Complete tech stack, all gaps fixed, data integrity, deployment, usefulness to Zinnia |
 | **One-Sheet** | `docs/ZECT-ONE-SHEET.md` | Single-page executive summary — at-a-glance metrics, differentiators, roadmap |
 | **Demo PPT Content** | `docs/ZECT-DEMO-PPT-CONTENT.md` | Slide-by-slide content for live demo presentations with speaker notes |
 | **Gap Analysis v3.0** | `docs/ZECT-GAP-ANALYSIS.md` | Feature-by-feature comparison with industry tools — all gaps CLOSED (except 2.7 Integrations) |

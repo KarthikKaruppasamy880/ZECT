@@ -43,6 +43,9 @@ import SessionInsights from "@/pages/SessionInsights";
 import Conversations from "@/pages/Conversations";
 import RepoWorkspace from "@/pages/RepoWorkspace";
 import AgentMode from "@/pages/AgentMode";
+import LatticeGraph from "@/pages/LatticeGraph";
+import Mentrix from "@/pages/Mentrix";
+import SandboxGate from "@/pages/SandboxGate";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 import { ActiveProjectProvider } from "@/contexts/ActiveProjectContext";
@@ -160,6 +163,9 @@ export default function App() {
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/repo-workspace" element={<RepoWorkspace />} />
           <Route path="/agent-mode" element={<AgentMode />} />
+          <Route path="/lattice" element={<LatticeGraph />} />
+          <Route path="/mentrix" element={<Mentrix />} />
+          <Route path="/sandbox" element={<SandboxGate />} />
           <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>

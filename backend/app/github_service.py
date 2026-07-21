@@ -167,6 +167,38 @@ def create_pull_request(owner: str, repo: str, title: str, body: str, head: str,
     }
 
 
+def create_check_run(
+    owner: str,
+    repo: str,
+    name: str,
+    head_sha: str,
+    conclusion: str,
+    title: str,
+    summary: str,
+    details_url: str | None = None,
+) -> dict:
+    """Create a GitHub Check Run for Mentrix / ZECT review status."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    output = {"title": title, "summary": summary}
+    kwargs: dict = {
+        "name": name,
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+        "output": output,
+    }
+    if details_url:
+        kwargs["details_url"] = details_url
+    check = repo_obj.create_check_run(**kwargs)
+    return {
+        "id": check.id,
+        "name": check.name,
+        "conclusion": check.conclusion,
+        "html_url": getattr(check, "html_url", None),
+    }
+
+
 def post_pr_review_comment(owner: str, repo: str, pr_number: int, body: str, commit_sha: str | None = None, path: str | None = None, line: int | None = None) -> dict:
     """Post a review comment on a PR (inline or general)."""
     gh = get_github()

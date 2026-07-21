@@ -349,3 +349,56 @@ def apply_fix(req: ApplyFixRequest):
         return {"status": "applied", "fix_type": "delete_line", "line": req.line_number}
     else:
         raise HTTPException(status_code=400, detail=f"Unknown fix_type: {req.fix_type}")
+
+
+class CarryForwardRequest(BaseModel):
+    """Scoped Mentrix Fixer loop — only regenerate failed files with prior review context."""
+    failed_files: list[str]
+    prior_review_findings: list[dict] = []
+    prior_error_output: str = ""
+    language: str = "python"
+    file_contents: dict[str, str] = {}
+    max_retries: int = 2
+
+
+@router.post("/carry-forward")
+def mentrix_fixer_carry_forward(req: CarryForwardRequest):
+    """Mentrix Fixer: carry prior review/sandbox context into scoped regen of failed files."""
+    if not req.failed_files:
+        raise HTTPException(status_code=400, detail="failed_files is required")
+
+    scoped_findings = [
+        f
+        for f in req.prior_review_findings
+        if isinstance(f, dict) and (f.get("file") or f.get("path") or "") in req.failed_files
+    ]
+    results = []
+    for path in req.failed_files:
+        content = req.file_contents.get(path, "")
+        context_error = req.prior_error_output or ""
+        if scoped_findings:
+            context_error += "\n\nPrior review findings for this file:\n"
+            for f in scoped_findings:
+                if (f.get("file") or f.get("path")) == path:
+                    context_error += f"- [{f.get('severity')}] {f.get('title') or f.get('message')}\n"
+        analysis = _ai_analyze_error(
+            error_output=context_error or "Scoped Mentrix Fixer regeneration",
+            command="",
+            file_path=path,
+            file_content=content,
+            language=req.language,
+        )
+        results.append({
+            "file": path,
+            "analysis": analysis,
+            "use_prior_review_context": True,
+            "scoped": True,
+        })
+
+    return {
+        "engine": "mentrix-fixer",
+        "failed_files": req.failed_files,
+        "results": results,
+        "max_retries": req.max_retries,
+        "note": "Apply suggested fixes then re-run /api/sandbox/pr-readiness before PR.",
+    }

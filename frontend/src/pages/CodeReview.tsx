@@ -434,7 +434,7 @@ export default function CodeReview() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
           <Shield className="h-6 w-6 text-indigo-600" />
-          ZECT Code Review Engine
+          Mentrix Ultra Review
         </h1>
         <p className="text-sm text-slate-500 mt-1">
           AI-powered code analysis — identifies bugs, vulnerabilities, performance issues, and architectural problems
@@ -696,7 +696,7 @@ export default function CodeReview() {
             ) : (
               <>
                 {mode === "repo" ? <FolderSearch className="h-4 w-4" /> : mode === "autofix" ? <RotateCcw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                {mode === "repo" ? "Scan Full Repository" : mode === "autofix" ? "Run Auto-Fix Loop" : "Run ZECT Review"}
+                {mode === "repo" ? "Scan Full Repository" : mode === "autofix" ? "Run Auto-Fix Loop" : "Run Mentrix Ultra Review"}
               </>
             )}
           </button>
@@ -894,7 +894,7 @@ export default function CodeReview() {
       {loading && (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center mb-6">
           <Loader2 className="h-10 w-10 animate-spin text-indigo-500 mx-auto mb-4" />
-          <p className="text-sm font-medium text-slate-700">ZECT Review Engine is analysing...</p>
+          <p className="text-sm font-medium text-slate-700">Mentrix Ultra Review is analysing...</p>
           <p className="text-xs text-slate-500 mt-1">Scanning for bugs, vulnerabilities, and code quality issues</p>
         </div>
       )}

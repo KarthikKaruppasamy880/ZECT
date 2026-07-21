@@ -11,7 +11,7 @@ _backend_root = Path(__file__).resolve().parents[1]
 load_dotenv(_backend_root / ".env")
 
 from app.database import init_db, SessionLocal
-from app.models import Project, Repo
+from app.models import Project, Repo, Rule
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
 from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
@@ -21,12 +21,17 @@ from app.routers import conversations, knowledge_base, playbooks, scheduler, sec
 from app.routers import repo_clone, repo_browser
 from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, realtime, file_watcher, diff_viewer
 from app.middleware.rate_limiter import RateLimitMiddleware
+from app.middleware.auth_middleware import AuthMiddleware
+from app.routers import lattice as lattice_router
+from app.routers import mentrix as mentrix_router
+from app.routers import confluence_integration, datadog_integration, email_integration
 
-app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
+app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 
 # Rate limiting: 120 requests/minute per IP, burst of 20
 # NOTE: added BEFORE CORS so CORS wraps everything (middleware order is LIFO)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
+app.add_middleware(AuthMiddleware)
 
 # CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.
 # This ensures CORS headers are present on ALL responses including 500 errors.
@@ -127,10 +132,17 @@ app.include_router(realtime.router)
 app.include_router(file_watcher.router)
 app.include_router(diff_viewer.router)
 
+# Mentrix platform
+app.include_router(lattice_router.router)
+app.include_router(mentrix_router.router)
+app.include_router(confluence_integration.router)
+app.include_router(datadog_integration.router)
+app.include_router(email_integration.router)
+
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    return {"status": "ok", "product": "ZECT", "agent": "Mentrix"}
 
 
 def seed_demo_projects():
@@ -221,7 +233,56 @@ def seed_demo_projects():
     db.close()
 
 
+def seed_default_rules():
+    """Seed Mentrix default Rules Engine policies (idempotent by name)."""
+    db = SessionLocal()
+    defaults = [
+        {
+            "name": "mentrix-no-secrets-in-slack",
+            "description": "Block MCP Slack posts that look like secrets",
+            "rule_type": "security",
+            "condition": r"(api[_-]?key|secret|password|token)\s*[:=]",
+            "action": "block",
+            "severity": "critical",
+        },
+        {
+            "name": "mentrix-no-eval",
+            "description": "Flag dangerous eval usage in review",
+            "rule_type": "review",
+            "condition": r"\beval\s*\(",
+            "action": "warn",
+            "severity": "high",
+        },
+        {
+            "name": "mentrix-auto-review-kill-switch",
+            "description": "Example block pattern for auto-review (inactive by default)",
+            "rule_type": "review",
+            "condition": r"^__never_match_mentrix_kill_switch__$",
+            "action": "block",
+            "severity": "medium",
+        },
+        {
+            "name": "mentrix-sandbox-before-pr",
+            "description": "Quality gate reminder — sandbox required before PR",
+            "rule_type": "quality_gate",
+            "condition": r"create.?pr|open.?pull.?request",
+            "action": "warn",
+            "severity": "high",
+        },
+    ]
+    try:
+        for d in defaults:
+            exists = db.query(Rule).filter(Rule.name == d["name"]).first()
+            if exists:
+                continue
+            db.add(Rule(is_active=d["name"] != "mentrix-auto-review-kill-switch", **d))
+        db.commit()
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
     seed_demo_projects()
+    seed_default_rules()

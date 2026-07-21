@@ -6,10 +6,15 @@ Provides endpoints for:
 - Managing MCP server connections
 """
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.core.auth.deps import CurrentUser, get_current_user
+from app.database import get_db
 
 router = APIRouter(prefix="/api/mcp", tags=["MCP"])
 
@@ -75,18 +80,25 @@ BUILTIN_SERVERS: list[MCPServer] = [
         tools_count=5,
     ),
     MCPServer(
-        id="postgres",
-        name="PostgreSQL",
-        description="Database operations — query, schema inspection, migrations",
+        id="confluence",
+        name="Confluence",
+        description="Confluence pages — search and read for Mentrix Scout/Integrator",
         status="available",
-        tools_count=7,
+        tools_count=4,
     ),
     MCPServer(
-        id="playwright",
-        name="Playwright",
-        description="Browser automation — navigate, click, type, screenshot, test",
+        id="datadog",
+        name="Datadog",
+        description="Datadog metrics and monitors for Mentrix Ops",
         status="available",
-        tools_count=10,
+        tools_count=4,
+    ),
+    MCPServer(
+        id="email",
+        name="Email",
+        description="SMTP outbound email for Mentrix Integrator (Wave 1; inbox poll is Wave 2)",
+        status="available",
+        tools_count=2,
     ),
 ]
 
@@ -131,6 +143,18 @@ BUILTIN_TOOLS: dict[str, list[MCPTool]] = {
         MCPTool(name="search_files", description="Search for files by pattern", server_id="filesystem", parameters={"pattern": "string", "path": "string"}),
         MCPTool(name="file_info", description="Get file metadata", server_id="filesystem", parameters={"path": "string"}),
     ],
+    "email": [
+        MCPTool(name="send_email", description="Send email via SMTP", server_id="email", parameters={"to": "string", "subject": "string", "body": "string"}),
+        MCPTool(name="status", description="SMTP configuration status", server_id="email"),
+    ],
+    "datadog": [
+        MCPTool(name="query_logs", description="Query Datadog logs", server_id="datadog", parameters={"query": "string"}),
+        MCPTool(name="query_metrics", description="Query Datadog metrics", server_id="datadog", parameters={"query": "string"}),
+    ],
+    "confluence": [
+        MCPTool(name="search", description="Search Confluence", server_id="confluence", parameters={"query": "string"}),
+        MCPTool(name="get_page", description="Get Confluence page", server_id="confluence", parameters={"page_id": "string"}),
+    ],
     "postgres": [
         MCPTool(name="query", description="Execute a SQL query", server_id="postgres", parameters={"sql": "string"}),
         MCPTool(name="list_tables", description="List all tables in the database", server_id="postgres"),
@@ -140,18 +164,7 @@ BUILTIN_TOOLS: dict[str, list[MCPTool]] = {
         MCPTool(name="export_data", description="Export table data as CSV", server_id="postgres", parameters={"table": "string", "format": "string"}),
         MCPTool(name="connection_info", description="Get database connection details", server_id="postgres"),
     ],
-    "playwright": [
-        MCPTool(name="navigate", description="Navigate to a URL", server_id="playwright", parameters={"url": "string"}),
-        MCPTool(name="click", description="Click an element", server_id="playwright", parameters={"selector": "string"}),
-        MCPTool(name="type", description="Type text into an input", server_id="playwright", parameters={"selector": "string", "text": "string"}),
-        MCPTool(name="screenshot", description="Take a screenshot", server_id="playwright", parameters={"path": "string"}),
-        MCPTool(name="wait_for", description="Wait for an element", server_id="playwright", parameters={"selector": "string", "timeout": "number"}),
-        MCPTool(name="evaluate", description="Evaluate JavaScript in the page", server_id="playwright", parameters={"script": "string"}),
-        MCPTool(name="select_option", description="Select option from dropdown", server_id="playwright", parameters={"selector": "string", "value": "string"}),
-        MCPTool(name="get_text", description="Get text content of an element", server_id="playwright", parameters={"selector": "string"}),
-        MCPTool(name="fill_form", description="Fill a form with field values", server_id="playwright", parameters={"fields": "object"}),
-        MCPTool(name="assert_visible", description="Assert element is visible", server_id="playwright", parameters={"selector": "string"}),
-    ],
+    # Browser E2E is via frontend Playwright Test / Cursor Playwright MCP — not Mentrix hub adapters.
 }
 
 
@@ -180,26 +193,90 @@ async def list_tools(server_id: str):
 
 
 @router.post("/servers/{server_id}/tools/{tool_name}/call")
-async def call_tool(server_id: str, tool_name: str, body: MCPToolCall):
-    """Execute a tool call on an MCP server.
-    
-    Note: This is a stub that returns mock results.
-    In production, this would proxy to actual MCP server connections.
-    """
-    if server_id not in BUILTIN_TOOLS:
+def call_tool(
+    server_id: str,
+    tool_name: str,
+    body: MCPToolCall,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Execute a Mentrix MCP tool via live adapters (rules-gated + audited)."""
+    from app.services.mcp.hub import execute_tool
+
+    if server_id not in BUILTIN_TOOLS and server_id not in {
+        "github", "jira", "confluence", "slack", "datadog", "filesystem", "email",
+    }:
         raise HTTPException(status_code=404, detail=f"MCP server '{server_id}' not found")
-    
-    tool = next((t for t in BUILTIN_TOOLS[server_id] if t.name == tool_name), None)
-    if not tool:
-        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found on server '{server_id}'")
-    
+
+    try:
+        out = execute_tool(
+            db,
+            server_id=server_id,
+            tool_name=tool_name,
+            arguments=body.arguments or {},
+            user_email=user.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     return MCPToolResult(
         server_id=server_id,
         tool_name=tool_name,
-        result={"status": "success", "message": f"Tool '{tool_name}' executed (stub). Configure MCP server connection to enable live execution.", "arguments": body.arguments},
-        execution_time_ms=0.0,
+        result=out.get("result") or {},
+        execution_time_ms=float(out.get("execution_time_ms") or 0),
         timestamp=datetime.utcnow().isoformat(),
-    ).model_dump()
+    ).model_dump() | {"status": out.get("status")}
+
+
+class MCPConfigBody(BaseModel):
+    server_id: str
+    name: str
+    enabled: bool = False
+    base_url: str = ""
+    config: dict = {}
+
+
+@router.get("/configs")
+def get_configs(db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mcp.hub import list_server_configs
+    return {"configs": list_server_configs(db)}
+
+
+@router.post("/configs")
+def save_config(
+    body: MCPConfigBody,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mcp.hub import upsert_server_config
+    row = upsert_server_config(
+        db,
+        server_id=body.server_id,
+        name=body.name,
+        enabled=body.enabled,
+        base_url=body.base_url,
+        config=body.config,
+    )
+    return {"server_id": row.server_id, "enabled": row.enabled, "last_health": row.last_health}
+
+
+@router.post("/execute")
+def execute(
+    body: MCPToolCall,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mcp.hub import execute_tool
+    try:
+        return execute_tool(
+            db,
+            server_id=body.server_id,
+            tool_name=body.tool_name,
+            arguments=body.arguments or {},
+            user_email=user.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/status")
@@ -209,5 +286,8 @@ async def mcp_status():
         "status": "operational",
         "servers_available": len(BUILTIN_SERVERS),
         "total_tools": sum(len(tools) for tools in BUILTIN_TOOLS.values()),
-        "version": "1.0.0",
+        "version": "2.0.0-mentrix",
+        "live_adapters": ["github", "jira", "confluence", "slack", "datadog", "filesystem", "email"],
+        "outbound_wave1": ["slack.send_message", "email.send_email", "datadog.query_logs"],
+        "wave2": ["slack_events_inbound", "email_inbox_poll"],
     }

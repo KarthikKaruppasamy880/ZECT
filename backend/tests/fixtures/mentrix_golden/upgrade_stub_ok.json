@@ -1,0 +1,14 @@
+{
+  "id": "upgrade_stub_ok",
+  "language": "python",
+  "files_expected": ["generated/upgrade_stub.py"],
+  "files_written": ["generated/upgrade_stub.py"],
+  "generated_code": "# Mentrix offline build stub\ndef mentrix_upgrade_placeholder():\n    return True\n",
+  "blueprint_prompt": "Mentrix upgrade blueprint for port modules",
+  "design_contract": {
+    "required_files": ["generated/upgrade_stub.py"],
+    "required_mentions": ["Mentrix"],
+    "acceptance_criteria": ["Mentrix upgrade placeholder or ported module present"]
+  },
+  "scout": {"graph_hits": [{"name": "mentrix_upgrade_placeholder", "path": "generated/upgrade_stub.py"}]}
+}

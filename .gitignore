@@ -19,6 +19,7 @@ frontend/.env
 # Python
 .venv/
 *.egg-info/
+backend/.wheels/
 
 # IDE
 .vscode/
@@ -28,3 +29,9 @@ frontend/.env
 # Misc
 *.pem
 *.log
+
+# Playwright
+frontend/e2e/.auth/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/

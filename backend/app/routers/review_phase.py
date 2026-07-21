@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from openai import OpenAI, APIError
 from app.token_tracker import log_tokens
 
-router = APIRouter(prefix="/api/review", tags=["review"])
+router = APIRouter(prefix="/api/review-phase", tags=["review-phase"])
 
 
 def _get_client() -> OpenAI:
@@ -68,7 +68,7 @@ def analyze_code(req: ReviewRequest):
     client = _get_client()
 
     system_prompt = (
-        "You are ZECT AI Code Reviewer — a senior code quality expert. "
+        "You are Mentrix Ultra Review — ZECT's best-in-class code quality expert. "
         "Analyze the provided code for:\n"
         "1. Security vulnerabilities (SQL injection, XSS, secrets exposure)\n"
         "2. Performance issues (N+1 queries, memory leaks, inefficient algorithms)\n"

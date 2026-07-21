@@ -99,17 +99,21 @@ def generate_code(req: BuildRequest, db: Session = Depends(get_db)):
         user_content += f"\nTarget File: {req.file_path}"
 
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+        from app.services.quality.truncation import complete_with_continuations
+
+        completed = complete_with_continuations(
+            client,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
+            model="gpt-4o-mini",
             max_tokens=4000,
             temperature=0.2,
+            language_hint="python",
         )
-        content = resp.choices[0].message.content or ""
-        tokens = resp.usage.total_tokens if resp.usage else 0
+        content = completed["content"]
+        tokens = completed["tokens_used"]
 
         # Parse response
         file_path = "generated/output.ts"
@@ -140,8 +144,8 @@ def generate_code(req: BuildRequest, db: Session = Depends(get_db)):
             action="build_generate",
             feature="build_phase",
             model="gpt-4o-mini",
-            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
-            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
+            prompt_tokens=completed.get("prompt_tokens") or 0,
+            completion_tokens=completed.get("completion_tokens") or 0,
             total_tokens=tokens,
         )
 

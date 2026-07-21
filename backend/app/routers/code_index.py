@@ -80,7 +80,7 @@ def search_symbols(
 
 @router.post("/index")
 def index_repo(data: IndexRequest, db: Session = Depends(get_db)):
-    """Index a repository's code symbols."""
+    """Index a repository's code symbols (Lattice-first, regex fallback)."""
     try:
         if not os.path.isdir(data.repo_path):
             raise HTTPException(status_code=400, detail=f"Directory not found: {data.repo_path}")
@@ -88,6 +88,45 @@ def index_repo(data: IndexRequest, db: Session = Depends(get_db)):
         # Clear previous index for this repo
         if data.repo_id:
             db.query(CodeSymbol).filter(CodeSymbol.repo_id == data.repo_id).delete()
+
+        # Prefer Lattice AST graph symbols when enabled
+        if os.getenv("LATTICE_ENABLED", "true").lower() not in ("0", "false"):
+            try:
+                from app.services.lattice.indexer import ingest_path
+
+                graph = ingest_path(
+                    data.repo_path,
+                    project_key=data.repo_path,
+                    max_files=data.max_files,
+                )
+                indexed_count = 0
+                for node in graph.nodes:
+                    if node.kind in ("file",):
+                        continue
+                    symbol = CodeSymbol(
+                        repo_id=data.repo_id,
+                        file_path=node.path,
+                        symbol_name=node.name,
+                        symbol_type=node.kind,
+                        language=node.language or "",
+                        line_start=node.line or 0,
+                        signature=f"{node.kind} {node.name}",
+                        is_exported=True,
+                    )
+                    db.add(symbol)
+                    indexed_count += 1
+                db.commit()
+                return {
+                    "status": "indexed",
+                    "engine": "lattice",
+                    "files_processed": graph.files_indexed,
+                    "symbols_indexed": indexed_count,
+                    "repo_path": data.repo_path,
+                    "languages": graph.languages,
+                }
+            except Exception:
+                db.rollback()
+                # Fall through to legacy regex indexer
 
         indexed_count = 0
         files_processed = 0

@@ -2,16 +2,18 @@
  * ZECT Desktop App — Electron main process.
  *
  * Wraps the ZECT web application in a native desktop window.
- * Supports both local dev server and production build.
+ * Mentrix wake: global shortcut + STT stub listening for "Hey Mentrix".
  */
 
-const { app, BrowserWindow, Menu, shell } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut } = require("electron");
 const path = require("path");
 
 const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
 const DEV_URL = process.env.ZECT_DEV_URL || "http://localhost:5173";
+const WAKE_PHRASE = (process.env.WAKE_PHRASE || "Hey Mentrix").toLowerCase();
 
 let mainWindow;
+let wakeEnabled = true;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -19,7 +21,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: "ZECT — Engineering Control Tower",
+    title: "ZECT — Mentrix Control Tower",
     icon: path.join(__dirname, "icons", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -47,7 +49,6 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // Open external links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http")) {
       shell.openExternal(url);
@@ -56,16 +57,78 @@ function createWindow() {
   });
 }
 
-// Application menu
+function emitWake(phrase, source) {
+  if (!wakeEnabled || !mainWindow) return;
+  mainWindow.webContents.send("mentrix-wake", {
+    phrase,
+    source,
+    ts: new Date().toISOString(),
+  });
+  mainWindow.webContents.executeJavaScript(
+    "window.location.hash = '/mentrix'; window.dispatchEvent(new CustomEvent('mentrix-wake', { detail: { phrase: '" +
+      phrase.replace(/'/g, "") +
+      "' } }));"
+  ).catch(() => {});
+}
+
+/** STT wake stub — replace with OS speech recognition later. */
+function matchesWakePhrase(transcript) {
+  const t = (transcript || "").toLowerCase();
+  return (
+    t.includes(WAKE_PHRASE) ||
+    t.includes("hey mentrix") ||
+    t.includes("mentrix engage") ||
+    t.trim() === "mentrix"
+  );
+}
+
+ipcMain.handle("get-app-path", () => app.getAppPath());
+ipcMain.handle("mentrix-engage", (_e, goal) => {
+  emitWake("Mentrix engage", "ipc");
+  return { ok: true, goal: goal || "", agent: "Mentrix" };
+});
+ipcMain.handle("mentrix-wake-enabled", (_e, enabled) => {
+  wakeEnabled = Boolean(enabled);
+  return { wakeEnabled };
+});
+ipcMain.handle("mentrix-stt-transcript", (_e, transcript) => {
+  if (matchesWakePhrase(transcript)) {
+    emitWake(WAKE_PHRASE, "stt");
+    return { matched: true };
+  }
+  return { matched: false };
+});
+
 const menuTemplate = [
   {
     label: "ZECT",
     submenu: [
       { label: "About ZECT", role: "about" },
       { type: "separator" },
-      { label: "Settings", accelerator: "CmdOrCtrl+,", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/settings'") },
+      {
+        label: "Settings",
+        accelerator: "CmdOrCtrl+,",
+        click: () =>
+          mainWindow?.webContents.executeJavaScript("window.location.hash = '/settings'"),
+      },
       { type: "separator" },
       { label: "Quit", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
+    ],
+  },
+  {
+    label: "Mentrix",
+    submenu: [
+      {
+        label: "Open Mentrix",
+        accelerator: "CmdOrCtrl+Shift+M",
+        click: () => emitWake("Mentrix engage", "menu"),
+      },
+      {
+        label: "Toggle wake listening",
+        click: () => {
+          wakeEnabled = !wakeEnabled;
+        },
+      },
     ],
   },
   {
@@ -97,17 +160,44 @@ const menuTemplate = [
   {
     label: "Navigate",
     submenu: [
-      { label: "Dashboard", accelerator: "CmdOrCtrl+1", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/'") },
-      { label: "Projects", accelerator: "CmdOrCtrl+2", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/projects'") },
-      { label: "Ask Mode", accelerator: "CmdOrCtrl+3", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/ask'") },
-      { label: "Build Phase", accelerator: "CmdOrCtrl+4", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/build'") },
-      { label: "Agent Mode", accelerator: "CmdOrCtrl+5", click: () => mainWindow?.webContents.executeJavaScript("window.location.hash = '/agent-mode'") },
+      {
+        label: "Dashboard",
+        accelerator: "CmdOrCtrl+1",
+        click: () =>
+          mainWindow?.webContents.executeJavaScript("window.location.hash = '/'"),
+      },
+      {
+        label: "Lattice",
+        accelerator: "CmdOrCtrl+2",
+        click: () =>
+          mainWindow?.webContents.executeJavaScript("window.location.hash = '/lattice'"),
+      },
+      {
+        label: "Mentrix",
+        accelerator: "CmdOrCtrl+3",
+        click: () => emitWake("Mentrix", "nav"),
+      },
+      {
+        label: "Build",
+        accelerator: "CmdOrCtrl+4",
+        click: () =>
+          mainWindow?.webContents.executeJavaScript("window.location.hash = '/build'"),
+      },
+      {
+        label: "Sandbox Gate",
+        accelerator: "CmdOrCtrl+5",
+        click: () =>
+          mainWindow?.webContents.executeJavaScript("window.location.hash = '/sandbox'"),
+      },
     ],
   },
   {
     label: "Help",
     submenu: [
-      { label: "Documentation", click: () => shell.openExternal("https://github.com/KarthikKaruppasamy880/ZECT") },
+      {
+        label: "Documentation",
+        click: () => shell.openExternal("https://github.com/KarthikKaruppasamy880/ZECT"),
+      },
     ],
   },
 ];
@@ -116,6 +206,15 @@ app.whenReady().then(() => {
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
   createWindow();
+
+  // Hotkey fallback for Hey Mentrix when STT unavailable
+  globalShortcut.register("CommandOrControl+Shift+Space", () => {
+    emitWake(WAKE_PHRASE, "hotkey");
+  });
+});
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on("window-all-closed", () => {

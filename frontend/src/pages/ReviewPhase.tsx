@@ -62,8 +62,8 @@ export default function ReviewPhase() {
           <Shield className="h-6 w-6 text-purple-600" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Review Phase</h1>
-          <p className="text-slate-500">AI code quality gate — analyze code for security, performance, and maintainability</p>
+          <h1 className="text-2xl font-bold text-slate-900">Mentrix Ultra Review</h1>
+          <p className="text-slate-500">Best-in-class Mentrix code quality gate — security, performance, maintainability, and actionable fixes</p>
         </div>
       </div>
 

@@ -1,7 +1,15 @@
 import { useState, useEffect } from "react";
 import { Bot, Play, Pause, Trash2, CheckCircle, Clock, AlertCircle, Loader2 } from "lucide-react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8001";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+function authHeaders(): HeadersInit {
+  const token = localStorage.getItem("zect_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 interface AgentStep {
   id: number;
@@ -57,6 +65,7 @@ export default function AgentMode() {
   const [repoContext, setRepoContext] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  // Mentrix powers /api/agent/run when MENTRIX_ENABLED=true
 
   useEffect(() => {
     fetchRuns();
@@ -64,7 +73,7 @@ export default function AgentMode() {
 
   const fetchRuns = async () => {
     try {
-      const res = await fetch(`${API}/api/agent/runs`);
+      const res = await fetch(`${API}/api/agent/runs`, { headers: authHeaders() });
       if (res.ok) setRuns(await res.json());
     } catch { /* ignore */ }
   };
@@ -75,7 +84,7 @@ export default function AgentMode() {
     try {
       const res = await fetch(`${API}/api/agent/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({
           task: task.trim(),
           stages: selectedStages,
@@ -99,7 +108,7 @@ export default function AgentMode() {
     try {
       const res = await fetch(`${API}/api/agent/run/${runId}/resume`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ model }),
       });
       if (res.ok) {
@@ -113,7 +122,7 @@ export default function AgentMode() {
 
   const cancelRun = async (runId: string) => {
     try {
-      await fetch(`${API}/api/agent/run/${runId}`, { method: "DELETE" });
+      await fetch(`${API}/api/agent/run/${runId}`, { method: "DELETE", headers: authHeaders() });
       setActiveRun(null);
       fetchRuns();
     } catch { /* ignore */ }
@@ -121,7 +130,7 @@ export default function AgentMode() {
 
   const viewRun = async (runId: string) => {
     try {
-      const res = await fetch(`${API}/api/agent/run/${runId}`);
+      const res = await fetch(`${API}/api/agent/run/${runId}`, { headers: authHeaders() });
       if (res.ok) setActiveRun(await res.json());
     } catch { /* ignore */ }
   };
@@ -135,10 +144,10 @@ export default function AgentMode() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <Bot className="w-8 h-8 text-indigo-400" />
+        <Bot className="w-8 h-8 text-teal-500" />
         <div>
-          <h1 className="text-2xl font-bold text-white">Agent Mode</h1>
-          <p className="text-sm text-slate-400">Autonomous multi-step execution — Ask → Plan → Build → Review → Deploy</p>
+          <h1 className="text-2xl font-bold text-white">Agent Mode · Mentrix</h1>
+          <p className="text-sm text-slate-400">Mentrix-powered delivery — Ask → Plan → Build → Review → Deploy</p>
         </div>
       </div>
 

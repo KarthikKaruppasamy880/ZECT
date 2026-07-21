@@ -103,71 +103,92 @@ def review_pr_diff(
     """
     client = _get_client()
 
-    # Build the diff context
-    diff_parts: list[str] = []
-    for f in files:
-        patch = f.get("patch") or ""
-        if patch:
-            diff_parts.append(f"--- {f['filename']} ({f['status']}) +{f.get('additions', 0)}/-{f.get('deletions', 0)} ---\n{patch}")
+    from app.services.diff_line_mapper import chunk_files_for_review, clamp_finding_line
 
-    diff_text = "\n\n".join(diff_parts)
+    chunks = chunk_files_for_review(files, max_chars=12000)
+    merged_findings: list[dict] = []
+    strengths: list[str] = []
+    recommendations: list[str] = []
+    summaries: list[str] = []
+    categories: dict[str, int] = {}
+    total_tokens = 0
+    scores: list[int] = []
 
-    # Truncate if too long (keep within context window)
-    if len(diff_text) > 30000:
-        diff_text = diff_text[:30000] + "\n\n... [diff truncated for length]"
-
-    user_content = f"""Review this Pull Request:
+    try:
+        for idx, chunk in enumerate(chunks):
+            diff_parts: list[str] = []
+            for f in chunk:
+                patch = f.get("patch") or ""
+                if patch:
+                    diff_parts.append(
+                        f"--- {f['filename']} ({f['status']}) "
+                        f"+{f.get('additions', 0)}/-{f.get('deletions', 0)} ---\n{patch}"
+                    )
+            diff_text = "\n\n".join(diff_parts)
+            user_content = f"""Review this Pull Request (chunk {idx + 1}/{len(chunks)}):
 
 **PR #{pr_number}: {pr_title}**
 Repository: {owner}/{repo}
 {f"Description: {pr_body}" if pr_body else ""}
 
-**Changed Files ({len(files)}):**
+**Changed Files in this chunk ({len(chunk)}):**
 {diff_text}
 
 Provide your review as valid JSON following the specified structure."""
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            max_tokens=4000,
-            temperature=0.2,
-            response_format={"type": "json_object"},
-        )
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                max_tokens=4000,
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            content = resp.choices[0].message.content or "{}"
+            tokens = resp.usage.total_tokens if resp.usage else 0
+            prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
+            completion_tok = resp.usage.completion_tokens if resp.usage else 0
+            total_tokens += tokens
+            log_tokens(
+                action="code_review",
+                feature="code_review",
+                model="gpt-4o-mini",
+                prompt_tokens=prompt_tok,
+                completion_tokens=completion_tok,
+                total_tokens=tokens,
+            )
+            part = json.loads(content)
+            summaries.append(part.get("summary", ""))
+            scores.append(int(part.get("quality_score", 50)))
+            strengths.extend(part.get("strengths") or [])
+            recommendations.extend(part.get("recommendations") or [])
+            for k, v in (part.get("categories") or {}).items():
+                categories[k] = categories.get(k, 0) + int(v or 0)
+            for finding in part.get("findings") or []:
+                if isinstance(finding, dict):
+                    finding["line"] = clamp_finding_line(
+                        finding.get("file") or "",
+                        finding.get("line"),
+                        files,
+                    )
+                    merged_findings.append(finding)
 
-        content = resp.choices[0].message.content or "{}"
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
-        completion_tok = resp.usage.completion_tokens if resp.usage else 0
-
-        log_tokens(
-            action="code_review",
-            feature="code_review",
-            model="gpt-4o-mini",
-            prompt_tokens=prompt_tok,
-            completion_tokens=completion_tok,
-            total_tokens=tokens,
-        )
-
-        review = json.loads(content)
-
-        # Ensure required fields exist with defaults
-        review.setdefault("summary", "Review completed.")
-        review.setdefault("quality_score", 50)
-        review.setdefault("total_issues", len(review.get("findings", [])))
-        review.setdefault("categories", {})
-        review.setdefault("findings", [])
-        review.setdefault("strengths", [])
-        review.setdefault("recommendations", [])
-        review["tokens_used"] = tokens
-        review["model"] = "gpt-4o-mini"
-        review["pr_number"] = pr_number
-        review["repo"] = f"{owner}/{repo}"
-
+        review = {
+            "summary": " ".join(s for s in summaries if s) or "Review completed.",
+            "quality_score": int(sum(scores) / len(scores)) if scores else 50,
+            "total_issues": len(merged_findings),
+            "categories": categories,
+            "findings": merged_findings,
+            "strengths": strengths[:20],
+            "recommendations": recommendations[:20],
+            "tokens_used": total_tokens,
+            "model": "gpt-4o-mini",
+            "pr_number": pr_number,
+            "repo": f"{owner}/{repo}",
+            "chunks_reviewed": len(chunks),
+        }
         return review
 
     except APIError as e:
@@ -181,7 +202,7 @@ Provide your review as valid JSON following the specified structure."""
             "findings": [],
             "strengths": [],
             "recommendations": [],
-            "tokens_used": 0,
+            "tokens_used": total_tokens,
             "model": "gpt-4o-mini",
             "pr_number": pr_number,
             "repo": f"{owner}/{repo}",

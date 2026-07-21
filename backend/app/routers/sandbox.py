@@ -216,3 +216,42 @@ def sandbox_status():
         "max_timeout": MAX_TIMEOUT,
         "supported_languages": list(LANG_CONFIG.keys()),
     }
+
+
+class PRReadinessRequest(BaseModel):
+    code: str = ""
+    language: str = "python"
+    quality_score: int = 100
+    critical_findings: int = 0
+    acknowledge_issues: bool = False
+    prefer_docker: bool = True
+
+
+@router.post("/pr-readiness")
+def pr_readiness(req: PRReadinessRequest):
+    """Hard gate before PR: sandbox + review severity policy."""
+    blockers: list[str] = []
+    sandbox_result = None
+    if req.code.strip():
+        if req.prefer_docker and shutil.which("docker"):
+            sandbox_result = _run_docker_sandbox(
+                SandboxDockerRequest(
+                    image=LANG_CONFIG.get(req.language, {}).get("image", "python:3.11-slim"),
+                    command=f"{LANG_CONFIG.get(req.language, {}).get('cmd', 'python3')} main{LANG_CONFIG.get(req.language, {}).get('ext', '.py')}",
+                    files={f"main{LANG_CONFIG.get(req.language, {}).get('ext', '.py')}": req.code},
+                )
+            )
+        else:
+            sandbox_result = _run_local_sandbox(req.code, req.language, 30, "", None)
+        if not sandbox_result.get("success"):
+            blockers.append("Sandbox execution failed")
+    if req.critical_findings > 0 and not req.acknowledge_issues:
+        blockers.append(f"{req.critical_findings} critical review finding(s) require acknowledge_issues=true")
+    if req.quality_score < 60 and not req.acknowledge_issues:
+        blockers.append(f"Quality score {req.quality_score} below threshold 60")
+    return {
+        "ready": len(blockers) == 0,
+        "blockers": blockers,
+        "sandbox": sandbox_result,
+        "create_pr_hard_blocked": len(blockers) > 0,
+    }

@@ -1,13 +1,22 @@
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(opts?.headers as Record<string, string> | undefined),
+  };
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  if (token && !headers.Authorization) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || res.statusText);
+    const detail = err.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || res.statusText);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -174,15 +183,92 @@ export const buildFromPlan = (full_plan: string, step_index: number, tech_stack?
 
 // Review Phase
 export const reviewAnalyze = (code: string, language?: string, severity_threshold?: string) =>
-  request<any>("/api/review/analyze", {
+  request<any>("/api/review-phase/analyze", {
     method: "POST",
     body: JSON.stringify({ code, language: language || "typescript", severity_threshold: severity_threshold || "medium" }),
   });
 export const reviewFixPrompt = (code: string, findings: any[], language?: string) =>
-  request<any>("/api/review/fix-prompt", {
+  request<any>("/api/review-phase/fix-prompt", {
     method: "POST",
     body: JSON.stringify({ code, findings, language: language || "typescript" }),
   });
+
+// Lattice
+export const latticeIngest = (path: string, project_key?: string, index_rag = true) =>
+  request<any>("/api/lattice/ingest", {
+    method: "POST",
+    body: JSON.stringify({ path, project_key: project_key || path, index_rag }),
+  });
+export const latticeGraph = (project_key: string) =>
+  request<any>(`/api/lattice/graph?project_key=${encodeURIComponent(project_key)}`);
+export const latticeQuery = (project_key: string, q: string, limit = 50) =>
+  request<any>("/api/lattice/query", {
+    method: "POST",
+    body: JSON.stringify({ project_key, q, limit }),
+  });
+export const latticeRagSearch = (query: string, project_key?: string, top_k = 8) =>
+  request<any>("/api/lattice/rag/search", {
+    method: "POST",
+    body: JSON.stringify({ q: query, project_key: project_key || "", limit: top_k }),
+  });
+
+// Mentrix
+export const mentrixAgents = () => request<any>("/api/mentrix/agents");
+export const mentrixStartRun = (
+  goal: string,
+  mode = "upgrade",
+  project_key = "",
+  workspace = "",
+  opts?: { source_lang?: string; target_lang?: string; repo_id?: number }
+) =>
+  request<any>("/api/mentrix/runs", {
+    method: "POST",
+    body: JSON.stringify({
+      goal,
+      mode,
+      project_key,
+      workspace,
+      source_lang: opts?.source_lang || "",
+      target_lang: opts?.target_lang || "",
+      repo_id: opts?.repo_id ?? null,
+    }),
+  });
+export const mentrixGetRun = (runId: number) => request<any>(`/api/mentrix/runs/${runId}`);
+export const mentrixListRuns = (limit = 20) =>
+  request<any[]>(`/api/mentrix/runs?limit=${limit}`);
+export const mentrixApproveRun = (runId: number, acknowledge_issues = false) =>
+  request<any>(`/api/mentrix/runs/${runId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ acknowledge_issues }),
+  });
+export const mentrixCreatePr = (
+  runId: number,
+  data?: { title?: string; body?: string; dry_run?: boolean; repo_path?: string }
+) =>
+  request<any>(`/api/mentrix/runs/${runId}/create-pr`, {
+    method: "POST",
+    body: JSON.stringify({ dry_run: true, ...data }),
+  });
+export const mentrixFineTuneExport = () =>
+  request<any>("/api/mentrix/fine-tune/export");
+
+// Sandbox PR readiness
+export const sandboxPrReadiness = (data: {
+  code?: string;
+  language?: string;
+  quality_score?: number;
+  critical_findings?: number;
+  acknowledge_issues?: boolean;
+}) =>
+  request<any>("/api/sandbox/pr-readiness", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const getAuthConfig = () =>
+  request<{ auth_mode: string; local_enabled: boolean; oidc_enabled: boolean; oidc_configured: boolean }>(
+    "/api/auth/config"
+  );
 
 // Deploy Phase
 export const deployChecklist = (project_name: string, tech_stack?: string, environment?: string, deployment_type?: string) =>

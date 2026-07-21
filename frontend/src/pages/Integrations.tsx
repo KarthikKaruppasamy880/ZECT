@@ -21,25 +21,60 @@ interface SlackStatus {
 
 const API = import.meta.env.VITE_API_URL ?? "";
 
+function authHeaders(): HeadersInit {
+  const token = localStorage.getItem("zect_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 export default function Integrations() {
   const [jiraStatus, setJiraStatus] = useState<JiraStatus | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
+  const [mcpServers, setMcpServers] = useState<any[]>([]);
+  const [mcpConfigs, setMcpConfigs] = useState<any[]>([]);
   const [showJiraForm, setShowJiraForm] = useState(false);
   const [showSlackForm, setShowSlackForm] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [toggling, setToggling] = useState("");
   const [jiraForm, setJiraForm] = useState({ base_url: "", email: "", api_token: "", default_project_key: "" });
   const [slackForm, setSlackForm] = useState({ bot_token: "", workspace_name: "", default_channel: "#zect-notifications" });
   const [testMsg, setTestMsg] = useState("");
 
   const fetchStatus = async () => {
     try {
-      const [jRes, sRes] = await Promise.all([
-        fetch(`${API}/api/jira/status`),
-        fetch(`${API}/api/slack/status`),
+      const headers = authHeaders();
+      const [jRes, sRes, mRes, cRes] = await Promise.all([
+        fetch(`${API}/api/jira/status`, { headers }),
+        fetch(`${API}/api/slack/status`, { headers }),
+        fetch(`${API}/api/mcp/servers`, { headers }),
+        fetch(`${API}/api/mcp/configs`, { headers }),
       ]);
       if (jRes.ok) setJiraStatus(await jRes.json());
       if (sRes.ok) setSlackStatus(await sRes.json());
+      if (mRes.ok) {
+        const data = await mRes.json();
+        setMcpServers(Array.isArray(data) ? data : data.servers || []);
+      }
+      if (cRes.ok) {
+        const data = await cRes.json();
+        setMcpConfigs(Array.isArray(data) ? data : data.configs || []);
+      }
     } catch { /* API not available */ }
+  };
+
+  const toggleMcp = async (serverId: string, name: string, enabled: boolean) => {
+    setToggling(serverId);
+    try {
+      await fetch(`${API}/api/mcp/configs`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ server_id: serverId, name, enabled }),
+      });
+      await fetchStatus();
+    } catch { /* ignore */ }
+    setToggling("");
   };
 
   useEffect(() => { fetchStatus(); }, []);
@@ -47,7 +82,7 @@ export default function Integrations() {
   const configureJira = async () => {
     try {
       const res = await fetch(`${API}/api/jira/config`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: authHeaders(),
         body: JSON.stringify(jiraForm),
       });
       if (res.ok) { setShowJiraForm(false); fetchStatus(); }
@@ -57,7 +92,7 @@ export default function Integrations() {
   const configureSlack = async () => {
     try {
       const res = await fetch(`${API}/api/slack/config`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: authHeaders(),
         body: JSON.stringify(slackForm),
       });
       if (res.ok) { setShowSlackForm(false); fetchStatus(); }
@@ -68,7 +103,7 @@ export default function Integrations() {
     if (!testMsg.trim()) return;
     try {
       await fetch(`${API}/api/slack/notify`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: authHeaders(),
         body: JSON.stringify({ message: testMsg }),
       });
       setTestMsg("");
@@ -76,7 +111,7 @@ export default function Integrations() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6" data-testid="integrations-page">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-indigo-100 rounded-xl">
@@ -84,7 +119,7 @@ export default function Integrations() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Integrations</h1>
-            <p className="text-sm text-slate-500">Connect ZECT with Jira, Slack, and other services</p>
+            <p className="text-sm text-slate-500">Mentrix MCP hub — GitHub, Jira, Confluence, Slack, Datadog, Filesystem</p>
           </div>
         </div>
         <button onClick={() => setShowGuide(!showGuide)} className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 text-sm">
@@ -101,7 +136,49 @@ export default function Integrations() {
             <li><strong>Slack</strong> — Get notifications when reviews complete, deployments happen, or budget alerts trigger. Create a Slack bot at api.slack.com/apps.</li>
             <li><strong>Test notifications</strong> — After configuring Slack, use the test message box to verify the connection works.</li>
             <li><strong>GitHub</strong> — Set GITHUB_TOKEN in your backend .env file for repo analysis and PR review features.</li>
+            <li><strong>MCP hub</strong> — Mentrix Integrator/Ops <em>execute</em> outbound tools via <code>/api/mcp</code> (Rules Engine gates every call).</li>
+            <li><strong>Slack / Email / Datadog (Wave 1 outbound)</strong> — Enable below; set <code>SLACK_BOT_TOKEN</code>, <code>SMTP_*</code>, <code>DATADOG_*</code> in backend <code>.env</code>.</li>
+            <li><strong>Wave 2</strong> — Slack Events inbound reply bot and email inbox poll (not in this ship).</li>
           </ul>
+        </div>
+      )}
+
+      {mcpServers.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="mcp-enable-panel">
+          <h3 className="font-semibold text-slate-900 mb-1">MCP adapters — enable for Mentrix</h3>
+          <p className="text-xs text-slate-500 mb-3">
+            Outbound-first: Slack send, email send, Datadog query_logs. Env: SLACK_BOT_TOKEN, SMTP_HOST/USER/PASSWORD, DATADOG_API_KEY / APP_KEY.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {mcpServers.map((s) => {
+              const id = s.id || s.server_id || s.name;
+              const cfg = mcpConfigs.find((c) => c.server_id === id);
+              const enabled = Boolean(cfg?.enabled);
+              return (
+                <div key={id} className="rounded-lg border border-slate-200 px-3 py-2 text-sm flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-slate-800">{s.name || id}</div>
+                    <div className="text-xs text-slate-500">
+                      {s.status || "available"} · {s.tools_count ?? "—"} tools
+                      {cfg?.last_health ? ` · ${cfg.last_health}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    data-testid={`mcp-toggle-${id}`}
+                    disabled={toggling === id}
+                    onClick={() => toggleMcp(id, s.name || id, !enabled)}
+                    className={`px-3 py-1 rounded-md text-xs font-medium border ${
+                      enabled
+                        ? "bg-teal-50 text-teal-800 border-teal-200"
+                        : "bg-slate-50 text-slate-600 border-slate-200"
+                    }`}
+                  >
+                    {enabled ? "Enabled" : "Enable"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

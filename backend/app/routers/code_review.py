@@ -16,8 +16,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app import github_service
 from app.review_service import review_pr_diff, review_code_snippet, review_repo_files
-from app.database import SessionLocal
-from app.models import Rule
+from app.database import SessionLocal, get_db
+from app.models import ReviewWebhookConfig, Rule
+from app.core.auth.deps import CurrentUser, get_current_user
 
 # Import for inline PR review
 try:
@@ -114,6 +115,7 @@ class ReviewResponse(BaseModel):
     files_scanned: int | None = None
     total_lines: int | None = None
     scanned_files: list[str] | None = None
+    chunks_reviewed: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -473,42 +475,60 @@ def auto_fix_loop(req: AutoFixLoopRequest):
 
 
 # ---------------------------------------------------------------------------
-# GitHub Webhook — Auto-trigger review on new PRs
+# GitHub Webhook — Auto-trigger review on new PRs (DB-persisted)
 # ---------------------------------------------------------------------------
 
-# In-memory webhook config store (persists per server restart)
-# Production would use the database, but this keeps it simple
-_webhook_configs: dict[str, dict] = {}
+
+def _webhook_to_dict(row: ReviewWebhookConfig) -> dict:
+    return {
+        "owner": row.owner,
+        "repo": row.repo,
+        "enabled": row.enabled,
+        "auto_review": row.auto_review,
+        "auto_comment": row.auto_comment,
+        "webhook_secret": row.webhook_secret or "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
 
 
 @router.post("/webhook/configure")
-def configure_webhook(req: WebhookConfigRequest):
-    """Configure auto-review webhook for a repository.
-
-    When enabled, any incoming GitHub webhook events for pull_request
-    (opened/synchronize) will auto-trigger a ZECT code review.
-    
-    If disabled via this endpoint or via Rules Engine, the auto-review
-    stops — this is the kill switch.
-    """
-    key = f"{req.owner}/{req.repo}"
-    _webhook_configs[key] = {
-        "owner": req.owner,
-        "repo": req.repo,
-        "enabled": req.enabled,
-        "auto_review": req.auto_review,
-        "auto_comment": req.auto_comment,
-        "webhook_secret": req.webhook_secret,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    return {"status": "configured", "config": _webhook_configs[key]}
+def configure_webhook(
+    req: WebhookConfigRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Configure auto-review webhook for a repository (persisted)."""
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == req.owner, ReviewWebhookConfig.repo == req.repo)
+        .first()
+    )
+    if not row:
+        row = ReviewWebhookConfig(owner=req.owner, repo=req.repo)
+        db.add(row)
+    row.enabled = req.enabled
+    row.auto_review = req.auto_review
+    row.auto_comment = req.auto_comment
+    row.webhook_secret = req.webhook_secret
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return {"status": "configured", "config": _webhook_to_dict(row)}
 
 
 @router.get("/webhook/configure/{owner}/{repo}")
-def get_webhook_config(owner: str, repo: str):
-    """Get the current webhook configuration for a repository."""
-    key = f"{owner}/{repo}"
-    if key not in _webhook_configs:
+def get_webhook_config(
+    owner: str,
+    repo: str,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == owner, ReviewWebhookConfig.repo == repo)
+        .first()
+    )
+    if not row:
         return {
             "owner": owner,
             "repo": repo,
@@ -517,13 +537,15 @@ def get_webhook_config(owner: str, repo: str):
             "auto_comment": False,
             "webhook_secret": "",
         }
-    return _webhook_configs[key]
+    return _webhook_to_dict(row)
 
 
 @router.get("/webhook/configs")
-def list_webhook_configs():
-    """List all configured webhook repositories."""
-    return list(_webhook_configs.values())
+def list_webhook_configs(
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return [_webhook_to_dict(r) for r in db.query(ReviewWebhookConfig).all()]
 
 
 @router.post("/webhook/github")
@@ -561,12 +583,15 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid repository format")
 
     owner, repo_name = parts[0], parts[1]
-    key = f"{owner}/{repo_name}"
 
-    # Check webhook config — kill switch
-    config = _webhook_configs.get(key, {})
-    if not config.get("enabled", False) or not config.get("auto_review", False):
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == owner, ReviewWebhookConfig.repo == repo_name)
+        .first()
+    )
+    if not row or not row.enabled or not row.auto_review:
         return {"status": "skipped", "reason": "Auto-review not enabled for this repo"}
+    config = _webhook_to_dict(row)
 
     # Verify signature if secret is configured
     secret = config.get("webhook_secret", "")
@@ -603,7 +628,7 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
         posted_comments = []
         if config.get("auto_comment", False) and post_pr_review_comment:
             # Post summary
-            summary = f"## ZECT Auto-Review\n\n"
+            summary = f"## Mentrix Auto-Review\n\n"
             summary += f"**Triggered by:** PR #{pr_number} {action}\n"
             summary += f"**Quality Score:** {review_result.quality_score}/100\n"
             summary += f"**Issues Found:** {review_result.total_issues}\n\n"
@@ -629,6 +654,35 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
             except Exception as e:
                 posted_comments.append({"error": str(e)})
 
+        check_run = None
+        head_sha = pr.get("head", {}).get("sha") or ""
+        if head_sha:
+            try:
+                critical = sum(
+                    1 for f in (review_result.findings or [])
+                    if isinstance(f, dict) and f.get("severity") == "critical"
+                )
+                conclusion = "success"
+                if critical > 0 or review_result.quality_score < 60:
+                    conclusion = "failure"
+                elif review_result.total_issues > 0:
+                    conclusion = "neutral"
+                check_run = github_service.create_check_run(
+                    owner=owner,
+                    repo=repo_name,
+                    name="Mentrix Review",
+                    head_sha=head_sha,
+                    conclusion=conclusion,
+                    title=f"Quality {review_result.quality_score}/100",
+                    summary=(
+                        f"{review_result.summary}\n\n"
+                        f"Issues: {review_result.total_issues} | Critical: {critical}"
+                    ),
+                )
+            except Exception as e:
+                logger.warning("Failed to create Mentrix check run: %s", e)
+                check_run = {"error": str(e)}
+
         return {
             "status": "reviewed",
             "pr_number": pr_number,
@@ -636,6 +690,7 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
             "quality_score": review_result.quality_score,
             "total_issues": review_result.total_issues,
             "comments_posted": len([c for c in posted_comments if "error" not in c]),
+            "check_run": check_run,
         }
 
     except Exception as e:

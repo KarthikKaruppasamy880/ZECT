@@ -30,6 +30,24 @@ class User(Base):
     token_logs = relationship("TokenLog", back_populates="user")
     budgets = relationship("TokenBudget", back_populates="user")
     generated_outputs = relationship("GeneratedOutput", back_populates="user")
+    auth_tokens = relationship("AuthToken", back_populates="user", cascade="all, delete-orphan")
+
+
+class AuthToken(Base):
+    """Durable login/OIDC session tokens (replaces in-memory auth set)."""
+    __tablename__ = "auth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    username = Column(String, default="")
+    email = Column(String, default="")
+    auth_mode = Column(String, default="local")  # local | oidc
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="auth_tokens")
 
 
 # ---------------------------------------------------------------------------
@@ -1168,3 +1186,101 @@ class SessionMessage(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     persistent_session = relationship("PersistentSession", back_populates="messages")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix — Lattice / RAG / MCP / Runs
+# ---------------------------------------------------------------------------
+
+class EmbeddingChunk(Base):
+    """RAG chunk with embedding JSON (pgvector-ready; SQLite stores JSON vector)."""
+    __tablename__ = "embedding_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)
+    project_key = Column(String, default="", index=True)
+    path = Column(String, nullable=False, index=True)
+    source_type = Column(String, default="code")
+    language = Column(String, default="")
+    line_start = Column(Integer, default=1)
+    content = Column(Text, default="")
+    embedding_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MentrixRun(Base):
+    """Mentrix orchestrator run record."""
+    __tablename__ = "mentrix_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    mode = Column(String, default="chat")  # chat, understand, deliver, review_only, ops
+    goal = Column(Text, default="")
+    status = Column(String, default="running")  # running, completed, awaiting_approval, needs_human, approved, pr_created, failed, cancelled
+    current_agent = Column(String, default="orchestrator")
+    events_json = Column(Text, default="[]")
+    result_json = Column(Text, default="{}")
+    gates_json = Column(Text, default="{}")
+    next_step = Column(String, default="")
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(String, default="")
+    pr_url = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+
+class MCPServerConfig(Base):
+    """Persisted MCP / integration server configuration."""
+    __tablename__ = "mcp_server_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_id = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    enabled = Column(Boolean, default=False)
+    base_url = Column(String, default="")
+    config_json = Column(Text, default="{}")
+    last_health = Column(String, default="unknown")
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MCPToolAudit(Base):
+    """Audit log for Mentrix MCP tool calls."""
+    __tablename__ = "mcp_tool_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_id = Column(String, nullable=False, index=True)
+    tool_name = Column(String, nullable=False)
+    arguments_json = Column(Text, default="{}")
+    result_json = Column(Text, default="{}")
+    status = Column(String, default="success")
+    user_email = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReviewWebhookConfig(Base):
+    """Durable GitHub webhook auto-review config (replaces in-memory dict)."""
+    __tablename__ = "review_webhook_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner = Column(String, nullable=False)
+    repo = Column(String, nullable=False)
+    enabled = Column(Boolean, default=False)
+    auto_review = Column(Boolean, default=True)
+    auto_comment = Column(Boolean, default=True)
+    webhook_secret = Column(String, default="")
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class FineTuneSample(Base):
+    """Preference samples for Phase 9 Mentrix LoRA fine-tuning."""
+    __tablename__ = "fine_tune_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_role = Column(String, default="builder")
+    prompt_context = Column(Text, default="")
+    preferred_output = Column(Text, default="")
+    rejected_output = Column(Text, default="")
+    accepted = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

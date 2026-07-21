@@ -1,9 +1,9 @@
 {
   "name": "zect-desktop",
-  "version": "2.0.0",
-  "description": "ZECT Engineering Control Tower — Desktop Application",
+  "version": "3.0.0",
+  "description": "ZECT Mentrix Control Tower — Desktop Application",
   "main": "main.js",
-  "author": "Zinnia Engineering",
+  "author": "ZECT Engineering",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {

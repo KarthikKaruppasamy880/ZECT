@@ -405,6 +405,10 @@ export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, repl
     body: JSON.stringify({ pack, replace }),
   });
 export const mentrixCompanionTools = () => request<any>("/api/mentrix/companion/tools");
+export const mentrixCompanionIntegrations = () =>
+  request<{ slack: boolean; jira: boolean; openai: boolean; slack_channel?: string }>(
+    "/api/mentrix/companion/integrations",
+  );
 export const mentrixRealtimeSession = () =>
   request<{
     ok: boolean;

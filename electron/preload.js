@@ -11,6 +11,17 @@ contextBridge.exposeInMainWorld("zectDesktop", {
   platform: process.platform,
   version: process.env.npm_package_version || "3.0.0",
   getAppPath: () => ipcRenderer.invoke("get-app-path"),
+  launcher: {
+    getShortcutStatus: () => ipcRenderer.invoke("zect-shortcut-status"),
+    createShortcut: () => ipcRenderer.invoke("zect-shortcut-create"),
+    relaunch: () => ipcRenderer.invoke("zect-relaunch"),
+    pullUpdatesAndRelaunch: () => ipcRenderer.invoke("zect-pull-relaunch"),
+    onShortcutResult: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("zect-shortcut-result", handler);
+      return () => ipcRenderer.removeListener("zect-shortcut-result", handler);
+    },
+  },
   mentrix: {
     engage: (goal) => ipcRenderer.invoke("mentrix-engage", goal),
     onWake: (cb) => {
@@ -34,6 +45,9 @@ contextBridge.exposeInMainWorld("zectDesktop", {
     submitGoal: (goal) => ipcRenderer.invoke("mentrix-stt-goal", goal),
     setComputerMode: (enabled) => ipcRenderer.invoke("mentrix-computer-mode", enabled),
     setDictationEnabled: (enabled) => ipcRenderer.invoke("mentrix-dictation-enabled", enabled),
+    armDictation: (durationMs) => ipcRenderer.invoke("mentrix-dictation-arm", durationMs),
+    disarmDictation: () => ipcRenderer.invoke("mentrix-dictation-disarm"),
+    setDictationPaused: (paused) => ipcRenderer.invoke("mentrix-dictation-pause", paused),
     onComputerMode: (cb) => {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on("mentrix-computer-mode", handler);

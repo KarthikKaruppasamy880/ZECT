@@ -11,7 +11,19 @@ import httpx
 from app.services.mentrix.companion import NAV_MAP, _ensure_openai_env, _exec_tool
 from app.services.mentrix.permission_broker import ALWAYS_CONFIRM_TOOLS, check_tool_permission
 
-REALTIME_MODEL = os.getenv("MENTRIX_REALTIME_MODEL", "gpt-4o-realtime-preview")
+# GA Realtime uses /v1/realtime/client_secrets (legacy /v1/realtime/sessions returns 404).
+REALTIME_MODEL = os.getenv("MENTRIX_REALTIME_MODEL", "gpt-realtime")
+REALTIME_MODEL_FALLBACKS = [
+    m
+    for m in (
+        os.getenv("MENTRIX_REALTIME_MODEL"),
+        "gpt-realtime",
+        "gpt-realtime-mini",
+        "gpt-4o-mini-realtime-preview",
+        "gpt-4o-realtime-preview",
+    )
+    if m
+]
 
 
 def realtime_enabled() -> bool:
@@ -234,50 +246,83 @@ def mint_realtime_session() -> dict[str, Any]:
             "reason": "realtime_disabled_or_no_key",
         }
     key = _ensure_openai_env()
-    body = {
-        "model": REALTIME_MODEL,
-        "voice": os.getenv("MENTRIX_REALTIME_VOICE", "alloy"),
-        "instructions": mentrix_instructions(),
-        "tools": realtime_tool_schemas(),
-        "input_audio_transcription": {"model": "whisper-1"},
-    }
+    voice = os.getenv("MENTRIX_REALTIME_VOICE", "alloy")
+    last_error: dict[str, Any] | None = None
     try:
         with httpx.Client(timeout=20.0) as client:
-            resp = client.post(
-                "https://api.openai.com/v1/realtime/sessions",
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                    "OpenAI-Beta": "realtime=v1",
-                },
-                json=body,
-            )
-        if resp.status_code >= 400:
-            return {
-                "ok": False,
-                "realtime_enabled": False,
-                "fallback": "stt_sse",
-                "reason": f"openai_{resp.status_code}",
-                "detail": resp.text[:300],
-            }
-        data = resp.json()
-        secret = (data.get("client_secret") or {}).get("value") or ""
-        if not secret:
-            return {
-                "ok": False,
-                "realtime_enabled": False,
-                "fallback": "stt_sse",
-                "reason": "no_client_secret",
-            }
-        return {
-            "ok": True,
-            "realtime_enabled": True,
-            "model": data.get("model") or REALTIME_MODEL,
-            "client_secret": secret,
-            "expires_at": (data.get("client_secret") or {}).get("expires_at"),
-            "openai_ws_url": f"wss://api.openai.com/v1/realtime?model={data.get('model') or REALTIME_MODEL}",
-            "voice": body["voice"],
+            for model in REALTIME_MODEL_FALLBACKS:
+                body = {
+                    "session": {
+                        "type": "realtime",
+                        "model": model,
+                        "instructions": mentrix_instructions(),
+                        "tools": realtime_tool_schemas(),
+                        "audio": {
+                            "input": {
+                                "transcription": {"model": "whisper-1"},
+                                "turn_detection": {
+                                    "type": "server_vad",
+                                    "create_response": True,
+                                    "interrupt_response": True,
+                                },
+                            },
+                            "output": {"voice": voice},
+                        },
+                    }
+                }
+                resp = client.post(
+                    "https://api.openai.com/v1/realtime/client_secrets",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                )
+                if resp.status_code >= 400:
+                    last_error = {
+                        "ok": False,
+                        "realtime_enabled": False,
+                        "fallback": "stt_sse",
+                        "reason": f"openai_{resp.status_code}",
+                        "detail": resp.text[:300],
+                        "model": model,
+                        "api": "client_secrets",
+                    }
+                    if resp.status_code in (404, 400):
+                        continue
+                    return last_error
+                data = resp.json()
+                secret = data.get("value") or ""
+                sess = data.get("session") or {}
+                if not secret:
+                    last_error = {
+                        "ok": False,
+                        "realtime_enabled": False,
+                        "fallback": "stt_sse",
+                        "reason": "no_client_secret",
+                        "model": model,
+                        "api": "client_secrets",
+                    }
+                    continue
+                resolved = sess.get("model") or model
+                return {
+                    "ok": True,
+                    "realtime_enabled": True,
+                    "model": resolved,
+                    "client_secret": secret,
+                    "expires_at": data.get("expires_at") or sess.get("expires_at"),
+                    "openai_ws_url": f"wss://api.openai.com/v1/realtime?model={resolved}",
+                    "voice": voice,
+                    "api": "client_secrets",
+                }
+        err = last_error or {
+            "ok": False,
+            "realtime_enabled": False,
+            "fallback": "stt_sse",
+            "reason": "openai_mint_failed",
         }
+        err["api"] = "client_secrets"
+        return err
     except Exception as exc:  # noqa: BLE001
         return {
             "ok": False,
@@ -285,6 +330,7 @@ def mint_realtime_session() -> dict[str, Any]:
             "fallback": "stt_sse",
             "reason": type(exc).__name__,
             "detail": str(exc)[:200],
+            "api": "client_secrets",
         }
 
 

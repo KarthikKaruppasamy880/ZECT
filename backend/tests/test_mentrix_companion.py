@@ -143,11 +143,51 @@ def test_media_board_numbering(tmp_path, monkeypatch):
 def test_realtime_session_falls_back_without_key(monkeypatch):
     from app.services.mentrix import realtime
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("MENTRIX_REALTIME", "1")
+    monkeypatch.setattr(realtime, "_ensure_openai_env", lambda: "")
     out = realtime.mint_realtime_session()
     assert out.get("realtime_enabled") is False
     assert out.get("fallback") == "stt_sse"
+
+
+def test_realtime_mint_uses_client_secrets(monkeypatch):
+    """GA OpenAI Realtime mints via /v1/realtime/client_secrets (sessions URL is retired)."""
+    from app.services.mentrix import realtime
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {
+                "value": "ek_test_secret",
+                "expires_at": 9999999999,
+                "session": {"type": "realtime", "model": "gpt-realtime"},
+            }
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            assert url.endswith("/v1/realtime/client_secrets"), url
+            assert "session" in (json or {})
+            return _Resp()
+
+    monkeypatch.setenv("MENTRIX_REALTIME", "1")
+    monkeypatch.setenv("MENTRIX_REALTIME_MODEL", "gpt-realtime")
+    monkeypatch.setattr(realtime, "_ensure_openai_env", lambda: "sk-test")
+    monkeypatch.setattr(realtime.httpx, "Client", _Client)
+    out = realtime.mint_realtime_session()
+    assert out.get("realtime_enabled") is True
+    assert out.get("client_secret") == "ek_test_secret"
+    assert out.get("api") == "client_secrets"
+    assert out.get("model") == "gpt-realtime"
 
 
 def test_open_sandbox_intent():

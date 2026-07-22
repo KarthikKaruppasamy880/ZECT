@@ -4,6 +4,8 @@ import Sidebar from "./Sidebar";
 import ProjectRepoSelector from "./ProjectRepoSelector";
 import CollaborationPanel from "./CollaborationPanel";
 import MentrixWakeBridge from "./MentrixWakeBridge";
+import MentrixPersistentDock from "./MentrixPersistentDock";
+import { MentrixSessionProvider } from "@/mentrix/MentrixSessionContext";
 
 interface LayoutProps {
   onLogout?: () => void;
@@ -49,38 +51,41 @@ export default function Layout({ onLogout }: LayoutProps) {
   }, [handleToggle]);
 
   return (
-    <div className={`min-h-screen ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
-      <Sidebar
-        onLogout={onLogout}
-        collapsed={collapsed || mentrixHud}
-        onToggle={handleToggle}
-        mobileOpen={mobileOpen}
-        onMobileClose={handleMobileClose}
-      />
-      <div
-        className={`transition-all duration-200 ease-in-out ${
-          collapsed || mentrixHud ? "md:ml-16" : "md:ml-56"
-        }`}
-      >
-        {!mentrixHud && (
-          <div className="hidden md:flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white">
-            <ProjectRepoSelector />
-            <div className="flex items-center gap-3">
-              <MentrixWakeBridge />
-              <CollaborationPanel room="zect-global" user="admin" />
-              <div className="text-xs text-slate-400">ZECT v2.0</div>
+    <MentrixSessionProvider>
+      <div className={`min-h-screen ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
+        <Sidebar
+          onLogout={onLogout}
+          collapsed={collapsed || mentrixHud}
+          onToggle={handleToggle}
+          mobileOpen={mobileOpen}
+          onMobileClose={handleMobileClose}
+        />
+        <div
+          className={`transition-all duration-200 ease-in-out ${
+            collapsed || mentrixHud ? "md:ml-16" : "md:ml-56"
+          }`}
+        >
+          {!mentrixHud && (
+            <div className="hidden md:flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white">
+              <ProjectRepoSelector />
+              <div className="flex items-center gap-3">
+                <MentrixWakeBridge />
+                <CollaborationPanel room="zect-global" user="admin" />
+                <div className="text-xs text-slate-400">ZECT v2.0</div>
+              </div>
             </div>
-          </div>
-        )}
-        {mentrixHud && (
-          <div className="hidden md:flex justify-end px-3 py-1">
-            <MentrixWakeBridge />
-          </div>
-        )}
-        <main className={mentrixHud ? "p-0" : "p-4 md:p-6 pt-16 md:pt-4"}>
-          <Outlet />
-        </main>
+          )}
+          {mentrixHud && (
+            <div className="hidden md:flex justify-end px-3 py-1">
+              <MentrixWakeBridge />
+            </div>
+          )}
+          <main className={mentrixHud ? "p-0" : "p-4 md:p-6 pt-16 md:pt-4"}>
+            <Outlet />
+          </main>
+        </div>
+        <MentrixPersistentDock />
       </div>
-    </div>
+    </MentrixSessionProvider>
   );
 }

@@ -423,11 +423,27 @@ class CompanionTurnRequest(BaseModel):
     project_id: int | None = None
     confirmed_tools: list[str] = []
     history: list[dict] = []
+    agent_context: str = ""
+    skill_id: int | None = None
 
 
 class OrgPolicyImportRequest(BaseModel):
     pack: dict
     replace: bool = False
+
+
+@router.get("/companion/agent-context")
+def companion_agent_context(
+    skill_id: int | None = None,
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Skills + staged Dream lessons for Mentrix turns (empty text when none)."""
+    from app.services.mentrix.companion import build_agent_context
+
+    text = build_agent_context(db, skill_id=skill_id, project_id=project_id)
+    return {"ok": True, "text": text}
 
 
 @router.post("/companion/turn")
@@ -452,6 +468,8 @@ def companion_turn(
         created_by=getattr(user, "email", "") or "",
         confirmed_tools=req.confirmed_tools or [],
         history=req.history or [],
+        agent_context=req.agent_context or "",
+        skill_id=req.skill_id,
     )
 
 
@@ -467,6 +485,8 @@ def companion_stream(
     project_key: str = "",
     project_id: int | None = None,
     confirmed_tools: str = "",
+    agent_context: str = "",
+    skill_id: int | None = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -488,6 +508,8 @@ def companion_stream(
                 user_id=uid if isinstance(uid, int) else None,
                 created_by=getattr(user, "email", "") or "",
                 confirmed_tools=confirmed,
+                agent_context=agent_context or "",
+                skill_id=skill_id,
             ):
                 yield sse_pack(ev)
         except Exception as exc:  # noqa: BLE001

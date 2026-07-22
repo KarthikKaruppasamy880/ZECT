@@ -2,14 +2,35 @@
 
 Mentrix Companion is the ZECT personal operator: weather, Slack, email, research, content/ads, reporting, internal docs, notes, Mentrix Image board, desktop Computer Mode, and Mentrix Delivery — with permission-gated tools and a streaming HUD.
 
+## Harness vs Loop
+
+| Concept | Meaning in ZECT |
+|---------|-----------------|
+| **Harness** | Single-run safety: permission broker, Allow overlay, org policy, Realtime mint (`client_secrets`), tool schemas, Delivery gates on `/mentrix`. |
+| **Loop** | Stay-alive personal agent: Layout-level session + floating dock, wake continuity across routes, Skills/Dream context injection, sessionStorage chat tail. |
+
+ForgeLoop Delivery remains the upgrade **harness**. Mentrix HUD + dock is the always-on **loop**.
+
 ## Surfaces
 
 | Route | Role |
 |-------|------|
-| `/mentrix-home` | Mentrix HUD (orb, Connect Voice, Mic picker, Display, Computer Mode, Artifacts, Live Log) |
+| `/mentrix-home` | Full Mentrix HUD (orb, Connect Voice, Mic picker, Display, Computer Mode, Artifacts, Live Log) |
+| *(all authenticated routes)* | Persistent Mentrix dock (orb + Connect Voice + mini chat) — survives navigation; hidden when HUD is open |
 | `/mentrix` | Mentrix Delivery (ForgeLoop gates → Approve → PR) |
+| `/skills` | Labs — Skill Library (Mentrix **reads** selected skill into turn context) |
+| `/dream-engine` | Labs — Dream Engine (Mentrix **consumes** staged lessons; does not run the dream cycle) |
 
-Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) opens **Companion HUD** and starts Connect Voice (Realtime).
+Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) expands the **persistent dock** and starts Connect Voice (Realtime) without hard-reloading the SPA.
+
+### Navigate intents
+
+| Phrase | Behavior |
+|--------|----------|
+| Dashboard / app home | SPA navigate to `/` — dock + voice stay up |
+| Mentrix / control tower / desktop app | `/mentrix-home` |
+| Go to desktop / OS desktop / computer mode | Computer tools (`computer_open_app` / screenshot) — **not** Dashboard `/` |
+| Lattice / Sandbox / Delivery / … | Existing `NAV_MAP` routes; dock survives |
 
 ## Voice (Connect Voice)
 
@@ -50,9 +71,17 @@ There is **no minibot runner** inside ZECT. If another app (minibot / App Runner
 
 Mentrix research uses DuckDuckGo-style lookup — **not Exa**. Never invent Slack/email contents when tools report unconfigured.
 
+## Skills + Dream context (Labs → Mentrix)
+
+- Active skill id: `localStorage.mentrix_active_skill_id` (HUD/dock picker; optional None).
+- On each typed turn and Connect Voice start: `GET /api/mentrix/companion/agent-context?skill_id=&project_id=` packs **Active skill** text + up to 3 staged Dream lesson claims (`Learned patterns (Dream)`).
+- Empty/unconfigured → silent no-op (no error toast).
+- Dream cycle itself still runs only from Labs `/dream-engine`; Mentrix does not invent lessons.
+
 ## Streaming API
 
-- `GET /api/mentrix/companion/stream?message=...` — SSE: `thinking`, `tool_start`, `tool_end`, `artifact`, `token`, `navigate`, `pending_confirm`, `done`, `error`
+- `GET /api/mentrix/companion/stream?message=...` — SSE: `thinking`, `tool_start`, `tool_end`, `artifact`, `token`, `navigate`, `pending_confirm`, `done`, `error` (optional `agent_context`, `skill_id`)
+- `GET /api/mentrix/companion/agent-context` — Skills + staged Dream text for injection
 - `POST /api/mentrix/companion/stream/resume` — continue after Allow
 - `POST /api/mentrix/companion/turn` — non-stream fallback (Playwright)
 
@@ -86,7 +115,7 @@ Off by default. **Windows and macOS:** allowlisted open app, desktop screenshot,
 
 ## Post-merge restart
 
-After merging the voice PR into `develop`, restart backend, frontend, and Electron (or double-click the ZECT Mentrix desktop shortcut) so the GA mint path loads.
+After merging Mentrix PRs into `develop`, restart backend, frontend, and Electron (or double-click the ZECT Mentrix desktop shortcut) so the persistent dock session + Realtime mint path load.
 
 ## Artifacts
 

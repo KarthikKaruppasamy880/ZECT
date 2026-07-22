@@ -125,6 +125,41 @@ def test_nav_map_includes_sandbox_and_ask():
     assert NAV_MAP["sandbox"] == "/sandbox"
     assert NAV_MAP["ask"] == "/ask"
     assert NAV_MAP["plan"] == "/plan"
+    assert NAV_MAP["dashboard"] == "/"
+    assert NAV_MAP["desktop app"] == "/mentrix-home"
+    assert NAV_MAP["control tower"] == "/mentrix-home"
+
+
+def test_go_to_desktop_is_not_dashboard_nav():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("go to desktop")
+    assert any(t["name"] == "computer_open_app" for t in intents)
+    assert not any(
+        t["name"] == "navigate" and (t.get("args") or {}).get("path") == "/" for t in intents
+    )
+
+
+def test_desktop_app_navigates_to_mentrix_home():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("open desktop app")
+    assert any(
+        t["name"] == "navigate" and (t.get("args") or {}).get("path") == "/mentrix-home"
+        for t in intents
+    )
+
+
+def test_build_agent_context_empty_without_data():
+    from app.database import SessionLocal
+    from app.services.mentrix.companion import build_agent_context
+
+    db = SessionLocal()
+    try:
+        assert build_agent_context(db) == ""
+        assert build_agent_context(db, agent_context="  Active skill tip  ") == "Active skill tip"
+    finally:
+        db.close()
 
 
 def test_media_board_numbering(tmp_path, monkeypatch):

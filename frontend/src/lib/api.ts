@@ -266,6 +266,32 @@ export const latticeGodNodes = (project_key: string, limit = 20) =>
 
 // Mentrix
 export const mentrixAgents = () => request<any>("/api/mentrix/agents");
+export const mentrixCompanionTurn = (
+  message: string,
+  opts?: {
+    project_key?: string;
+    project_id?: number;
+    confirmed_tools?: string[];
+    history?: { role: string; content: string }[];
+  },
+) =>
+  request<any>("/api/mentrix/companion/turn", {
+    method: "POST",
+    body: JSON.stringify({
+      message,
+      project_key: opts?.project_key || "",
+      project_id: opts?.project_id ?? null,
+      confirmed_tools: opts?.confirmed_tools || [],
+      history: opts?.history || [],
+    }),
+  });
+export const mentrixCompanionPolicy = () => request<any>("/api/mentrix/companion/policy");
+export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, replace = false) =>
+  request<any>("/api/mentrix/companion/policy/import", {
+    method: "POST",
+    body: JSON.stringify({ pack, replace }),
+  });
+export const mentrixCompanionTools = () => request<any>("/api/mentrix/companion/tools");
 export const mentrixStartRun = (
   goal: string,
   mode = "upgrade",

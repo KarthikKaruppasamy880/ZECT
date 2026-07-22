@@ -36,6 +36,28 @@ DEFAULT_RULES = [
     {"action_pattern": "disable_hooks", "permission_level": "never", "category": "git", "description": "Disable pre-commit hooks"},
     {"action_pattern": "delete_memory", "permission_level": "never", "category": "memory", "description": "Delete memory entries permanently"},
     {"action_pattern": "external_network_.*", "permission_level": "never", "category": "network", "description": "Access unapproved external domains"},
+    # Mentrix Companion — company personal agent
+    {"action_pattern": "companion_navigate", "permission_level": "allow", "category": "companion", "description": "Navigate ZECT UI"},
+    {"action_pattern": "companion_delivery_status", "permission_level": "allow", "category": "companion", "description": "Read Mentrix Delivery status"},
+    {"action_pattern": "companion_lattice_query", "permission_level": "allow", "category": "companion", "description": "Query Lattice graph"},
+    {"action_pattern": "companion_research", "permission_level": "allow", "category": "companion", "description": "Research and news fetch"},
+    {"action_pattern": "companion_content", "permission_level": "allow", "category": "companion", "description": "Content and ads briefs"},
+    {"action_pattern": "companion_report", "permission_level": "allow", "category": "companion", "description": "Draft reports on Mentrix Board"},
+    {"action_pattern": "companion_docs_read", "permission_level": "allow", "category": "companion", "description": "Search internal docs"},
+    {"action_pattern": "companion_docs_write", "permission_level": "require_approval", "category": "companion", "description": "Publish internal doc drafts"},
+    {"action_pattern": "companion_slack_read", "permission_level": "allow", "category": "companion", "description": "Slack channel digest"},
+    {"action_pattern": "companion_slack_send", "permission_level": "require_approval", "category": "companion", "description": "Send Slack messages"},
+    {"action_pattern": "companion_email_read", "permission_level": "allow", "category": "companion", "description": "Email inbox digest"},
+    {"action_pattern": "companion_email_send", "permission_level": "require_approval", "category": "companion", "description": "Send email"},
+    {"action_pattern": "companion_image_gen", "permission_level": "require_approval", "category": "companion", "description": "Generate avatar/images from user photo"},
+    {"action_pattern": "companion_delivery_start", "permission_level": "require_approval", "category": "companion", "description": "Start Mentrix Delivery run"},
+    {"action_pattern": "companion_delivery_approve", "permission_level": "require_approval", "category": "companion", "description": "Approve Mentrix Delivery run"},
+    {"action_pattern": "companion_create_pr", "permission_level": "require_approval", "category": "companion", "description": "Create pull request"},
+    {"action_pattern": "companion_desktop_read", "permission_level": "require_approval", "category": "desktop", "description": "Read allowlisted desktop paths"},
+    {"action_pattern": "companion_desktop_screenshot", "permission_level": "require_approval", "category": "desktop", "description": "Capture screenshot"},
+    {"action_pattern": "companion_computer_open", "permission_level": "require_approval", "category": "desktop", "description": "Open allowlisted apps"},
+    {"action_pattern": "companion_computer_control", "permission_level": "require_approval", "category": "desktop", "description": "Computer Mode click/type"},
+    {"action_pattern": "companion_diagnose", "permission_level": "allow", "category": "companion", "description": "Diagnose and fix planning"},
 ]
 
 

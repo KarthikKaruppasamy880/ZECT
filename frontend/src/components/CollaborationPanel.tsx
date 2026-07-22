@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Users, Wifi, WifiOff } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
-const WS_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8001").replace(/^http/, "ws");
+const WS_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
 
 interface PresenceUser {
   user: string;
@@ -25,13 +26,17 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   const [activeCount, setActiveCount] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
+  const failCountRef = useRef(0);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Stop hammering when WS is unavailable (common in local/dev)
+    if (failCountRef.current >= 3) return;
 
     const ws = new WebSocket(`${WS_BASE}/ws/${room}?user=${encodeURIComponent(user)}`);
 
     ws.onopen = () => {
+      failCountRef.current = 0;
       setConnected(true);
       ws.send(JSON.stringify({ type: "page_change", page: window.location.pathname }));
     };
@@ -50,7 +55,10 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
 
     ws.onclose = () => {
       setConnected(false);
-      reconnectRef.current = setTimeout(connect, 5000);
+      failCountRef.current += 1;
+      if (failCountRef.current < 3) {
+        reconnectRef.current = setTimeout(connect, 8000);
+      }
     };
 
     ws.onerror = () => {
@@ -61,15 +69,16 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   }, [room, user]);
 
   const fetchPresence = async () => {
-    const API = import.meta.env.VITE_API_URL || "http://localhost:8001";
     try {
-      const res = await fetch(`${API}/api/realtime/presence/${room}`);
+      const res = await apiFetch(`/api/realtime/presence/${room}`);
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
         setActiveCount(data.active_users || 0);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   useEffect(() => {

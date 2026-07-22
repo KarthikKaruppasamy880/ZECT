@@ -52,6 +52,7 @@ import {
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 const workflowItems: NavItem[] = [
+  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
   { href: "/mentrix", label: "Mentrix Delivery", icon: Bot },
 ];
 

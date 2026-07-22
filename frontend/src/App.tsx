@@ -45,6 +45,7 @@ import RepoWorkspace from "@/pages/RepoWorkspace";
 import AgentMode from "@/pages/AgentMode";
 import LatticeGraph from "@/pages/LatticeGraph";
 import Mentrix from "@/pages/Mentrix";
+import MentrixCompanion from "@/pages/MentrixCompanion";
 import SandboxGate from "@/pages/SandboxGate";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
@@ -88,6 +89,14 @@ export default function App() {
   const handleLogin = (token: string) => {
     localStorage.setItem("zect_token", token);
     setAuthenticated(true);
+    // Desktop: land on Mentrix Companion Home after login
+    if (typeof window !== "undefined" && window.zectDesktop?.isDesktopApp) {
+      try {
+        window.location.assign("/mentrix-home");
+      } catch {
+        /* ignore */
+      }
+    }
   };
 
   const handleLogout = () => {
@@ -164,6 +173,7 @@ export default function App() {
           <Route path="/repo-workspace" element={<RepoWorkspace />} />
           <Route path="/agent-mode" element={<AgentMode />} />
           <Route path="/lattice" element={<LatticeGraph />} />
+          <Route path="/mentrix-home" element={<MentrixCompanion />} />
           <Route path="/mentrix" element={<Mentrix />} />
           <Route path="/sandbox" element={<SandboxGate />} />
           <Route path="/stages/:stage" element={<StagePage />} />

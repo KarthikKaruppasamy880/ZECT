@@ -7,7 +7,8 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "start": "NODE_ENV=development electron .",
+    "start": "electron .",
+    "start:dev": "electron .",
     "start:prod": "electron .",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -27,6 +28,8 @@
     "files": [
       "main.js",
       "preload.js",
+      "wake.js",
+      "win-wake.js",
       "icons/**/*",
       "../frontend/dist/**/*"
     ],

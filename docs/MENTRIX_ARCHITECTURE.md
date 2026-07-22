@@ -125,6 +125,13 @@ Rules Engine still blocks secrets. Enable adapters under Integrations UI (`/api/
 | Context | Scout uses Lattice + RAG; blueprint + Ask feed Plan/Build |
 | Harness | Quality chain: incomplete → lint → sandbox → Ultra Review → API eval → approve → PR |
 
+## Mentrix Companion (personal company agent)
+
+- Route `/mentrix-home` — avatar, chat, Mentrix Board, Computer Mode toggle, always-ask confirms
+- API: `/api/mentrix/companion/turn|tools|policy` — permission-brokered tools for research, content, reporting, docs, comms, Delivery, desktop
+- Org policy export/import for shareable company installs
+- See [`docs/MENTRIX_COMPANION.md`](MENTRIX_COMPANION.md)
+
 ## Lattice intelligence
 
 Graphify-class code intelligence **ships as Lattice** inside ZECT — users never install a separate graph CLI or Neo4j.

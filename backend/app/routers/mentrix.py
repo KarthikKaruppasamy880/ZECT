@@ -409,3 +409,88 @@ def export_fine_tune_dataset(
         "fine_tune_enabled": os.getenv("FINE_TUNE_ENABLED", "false").lower() in ("1", "true"),
         "note": "Train LoRA only after RAG quality bar is green.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Mentrix Companion — personal company agent
+# ---------------------------------------------------------------------------
+
+
+class CompanionTurnRequest(BaseModel):
+    message: str
+    project_key: str = ""
+    project_id: int | None = None
+    confirmed_tools: list[str] = []
+    history: list[dict] = []
+
+
+class OrgPolicyImportRequest(BaseModel):
+    pack: dict
+    replace: bool = False
+
+
+@router.post("/companion/turn")
+def companion_turn(
+    req: CompanionTurnRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.companion import run_companion_turn
+    from app.services.mentrix.org_policy import ensure_companion_rules
+
+    if not (req.message or "").strip():
+        raise HTTPException(status_code=400, detail="message required")
+    ensure_companion_rules(db)
+    uid = getattr(user, "id", None)
+    return run_companion_turn(
+        db,
+        req.message.strip(),
+        project_key=req.project_key or "",
+        project_id=req.project_id,
+        user_id=uid if isinstance(uid, int) else None,
+        confirmed_tools=req.confirmed_tools or [],
+        history=req.history or [],
+    )
+
+
+@router.get("/companion/policy")
+def companion_policy_export(
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.org_policy import export_org_policy
+
+    return export_org_policy(db)
+
+
+@router.post("/companion/policy/import")
+def companion_policy_import(
+    req: OrgPolicyImportRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.org_policy import import_org_policy
+
+    try:
+        return import_org_policy(db, req.pack, replace=req.replace)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/companion/tools")
+def companion_tools(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.permission_broker import ALWAYS_CONFIRM_TOOLS, TOOL_ACTIONS
+
+    return {
+        "tools": sorted(TOOL_ACTIONS.keys()),
+        "always_confirm": sorted(ALWAYS_CONFIRM_TOOLS),
+        "packs": [
+            "research",
+            "content_ads",
+            "reporting",
+            "internal_docs",
+            "comms",
+            "delivery",
+            "desktop",
+        ],
+    }

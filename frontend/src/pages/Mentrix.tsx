@@ -75,7 +75,9 @@ declare global {
       isDesktopApp?: boolean;
       mentrix?: {
         onWake?: (cb: (payload: { phrase?: string; source?: string }) => void) => () => void;
+        onWakeStatus?: (cb: (payload: { ok?: boolean; reason?: string; engine?: string }) => void) => () => void;
         onSttGoal?: (cb: (payload: { goal?: string }) => void) => () => void;
+        getWakeStatus?: () => Promise<{ ok?: boolean; reason?: string; engine?: string; wakeEnabled?: boolean }>;
         submitTranscript?: (t: string) => Promise<{ matched?: boolean }>;
         setWakeEnabled?: (enabled: boolean) => Promise<unknown>;
       };
@@ -111,6 +113,7 @@ export default function Mentrix() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [sttListening, setSttListening] = useState(false);
+  const [wakeHint, setWakeHint] = useState("");
   const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenStatus = useRef<string>("");
@@ -154,7 +157,7 @@ export default function Mentrix() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, active?.events?.length]);
 
-  // Desktop wake + Web Speech STT → Electron IPC
+  // Desktop wake: native Windows speech (main process) + hotkey; Web Speech only as browser bonus
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
     const unsubs: Array<() => void> = [];
@@ -163,9 +166,31 @@ export default function Mentrix() {
         desktop.onWake(() => {
           goalInputRef.current?.focus();
           speakStatus("Mentrix ready. State your goal.", ttsEnabled);
+          setWakeHint("Wake heard — Mentrix ready");
         }),
       );
     }
+    if (desktop?.onWakeStatus) {
+      unsubs.push(
+        desktop.onWakeStatus((s: any) => {
+          if (s?.ok) {
+            setSttListening(true);
+            setWakeHint("Listening (Windows speech / headset mic) — say Hey Mentrix");
+          } else {
+            setSttListening(false);
+            setWakeHint(`Voice wake offline (${s?.reason || "n/a"}) — use Ctrl+Shift+Space`);
+          }
+        }),
+      );
+    }
+    desktop?.getWakeStatus?.().then((s: any) => {
+      if (s?.ok) {
+        setSttListening(true);
+        setWakeHint("Listening (Windows speech / headset mic) — say Hey Mentrix");
+      } else if (desktop) {
+        setWakeHint("Use Ctrl+Shift+Space or Mentrix → Restart wake listening");
+      }
+    });
     if (desktop?.onSttGoal) {
       unsubs.push(
         desktop.onSttGoal((payload) => {
@@ -173,10 +198,11 @@ export default function Mentrix() {
         }),
       );
     }
+    // Browser-only Web Speech (Chrome). Electron Chromium cannot use Google STT.
     const SR =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     let recognition: any = null;
-    if (desktop && SR) {
+    if (!desktop && SR) {
       recognition = new SR();
       recognition.continuous = true;
       recognition.interimResults = false;
@@ -185,28 +211,44 @@ export default function Mentrix() {
         const last = event.results?.[event.results.length - 1];
         const transcript = last?.[0]?.transcript || "";
         if (!transcript) return;
-        const res = await desktop.submitTranscript?.(transcript);
-        if (res?.matched) {
+        const t = transcript.toLowerCase();
+        if (/\b(mentrix|matrix|mentrics)\b/.test(t) || t.includes("hey mentrix")) {
           goalInputRef.current?.focus();
+          setWakeHint("Wake heard — Mentrix ready");
+          speakStatus("Mentrix ready. State your goal.", ttsEnabled);
         } else if (transcript.trim().length > 8) {
           setGoal((g) => (g ? g : transcript.trim()));
         }
       };
       recognition.onerror = () => setSttListening(false);
+      recognition.onend = () => {
+        try {
+          recognition.start();
+        } catch {
+          /* ignore */
+        }
+      };
       try {
         recognition.start();
         setSttListening(true);
+        setWakeHint("Browser listening — say Hey Mentrix");
       } catch {
         setSttListening(false);
       }
     }
-    const onDomWake = () => goalInputRef.current?.focus();
+    const onDomWake = () => {
+      goalInputRef.current?.focus();
+      speakStatus("Mentrix ready. State your goal.", ttsEnabled);
+    };
     window.addEventListener("mentrix-wake", onDomWake);
     return () => {
       unsubs.forEach((u) => u());
       window.removeEventListener("mentrix-wake", onDomWake);
       try {
-        recognition?.stop?.();
+        if (recognition) {
+          recognition.onend = null;
+          recognition.stop();
+        }
       } catch {
         /* ignore */
       }
@@ -439,7 +481,7 @@ export default function Mentrix() {
                 </p>
                 <p>
                   No graph yet?{" "}
-                  <Link to="/repos" className="text-teal-700 underline font-medium">
+                  <Link to="/repo-workspace" className="text-teal-700 underline font-medium">
                     Repo Workspace
                   </Link>{" "}
                   or{" "}
@@ -491,9 +533,12 @@ export default function Mentrix() {
                 />
                 Speak status (TTS)
               </label>
-              {window.zectDesktop?.isDesktopApp && (
+              {(window.zectDesktop?.isDesktopApp || wakeHint) && (
                 <span data-testid="mentrix-stt-status">
-                  STT: {sttListening ? "listening for Hey Mentrix" : "unavailable — use Ctrl+Shift+Space"}
+                  {wakeHint ||
+                    (sttListening
+                      ? "listening for Hey Mentrix"
+                      : "unavailable — use Ctrl+Shift+Space · set headset as Windows default mic")}
                 </span>
               )}
             </div>

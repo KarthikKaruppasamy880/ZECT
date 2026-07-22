@@ -165,13 +165,30 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL(DEV_URL);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    // Detached DevTools + Realtime audio can destabilize the renderer; keep optional.
+    if (process.env.ZECT_DEVTOOLS === "1") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     mainWindow.loadFile(path.join(__dirname, "..", "frontend", "dist", "index.html"));
   }
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
+  });
+
+  // Recover from blank screen after Connect Voice / audio renderer crashes.
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("ZECT renderer gone:", details.reason, details.exitCode);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.reload();
+    }
+  });
+  mainWindow.webContents.on("unresponsive", () => {
+    console.warn("ZECT renderer unresponsive — reloading");
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.reload();
+    }
   });
 
   mainWindow.on("closed", () => {

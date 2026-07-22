@@ -20,6 +20,8 @@ Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) opens **Companion HUD** and st
 
 **Mic picker:** Lists `audioinput` devices; choice persists in `localStorage` (`mentrix_mic_device_id`). Prefer a headset over the laptop array mic.
 
+**Stability:** Connect Voice waits until the mic is open before unlocking the button (prevents double-start races). Capture uses AudioWorklet (ScriptProcessor fallback). Each connect remints a fresh ephemeral key. Electron reloads the page if the renderer crashes (blank window). DevTools opens only when `ZECT_DEVTOOLS=1`.
+
 Realtime tools include personal ops: `weather_report`, `slack_digest`, `slack_send`, `email_digest`, `email_send`, plus ZECT Delivery / Lattice / notes / media / computer.
 
 ## Integrations (OpenAI ≠ Slack ≠ Jira)

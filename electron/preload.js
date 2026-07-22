@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("zectDesktop", {
     submitTranscript: (transcript) => ipcRenderer.invoke("mentrix-stt-transcript", transcript),
     submitGoal: (goal) => ipcRenderer.invoke("mentrix-stt-goal", goal),
     setComputerMode: (enabled) => ipcRenderer.invoke("mentrix-computer-mode", enabled),
+    setDictationEnabled: (enabled) => ipcRenderer.invoke("mentrix-dictation-enabled", enabled),
     onComputerMode: (cb) => {
       const handler = (_event, payload) => cb(payload);
       ipcRenderer.on("mentrix-computer-mode", handler);

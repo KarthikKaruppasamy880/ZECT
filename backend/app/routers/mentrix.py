@@ -6,7 +6,8 @@ import json
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -448,8 +449,86 @@ def companion_turn(
         project_key=req.project_key or "",
         project_id=req.project_id,
         user_id=uid if isinstance(uid, int) else None,
+        created_by=getattr(user, "email", "") or "",
         confirmed_tools=req.confirmed_tools or [],
         history=req.history or [],
+    )
+
+
+class CompanionStreamResumeRequest(BaseModel):
+    turn_id: str
+    confirmed_tools: list[str] = []
+    project_key: str = ""
+
+
+@router.get("/companion/stream")
+def companion_stream(
+    message: str = Query(..., min_length=1),
+    project_key: str = "",
+    project_id: int | None = None,
+    confirmed_tools: str = "",
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """SSE stream: thinking → tool_start → artifact → token → done."""
+    from app.services.mentrix.companion import iter_companion_events, sse_pack
+    from app.services.mentrix.org_policy import ensure_companion_rules
+
+    ensure_companion_rules(db)
+    uid = getattr(user, "id", None)
+    confirmed = [t.strip() for t in confirmed_tools.split(",") if t.strip()]
+
+    def gen():
+        try:
+            for ev in iter_companion_events(
+                db,
+                message.strip(),
+                project_key=project_key or "",
+                project_id=project_id,
+                user_id=uid if isinstance(uid, int) else None,
+                created_by=getattr(user, "email", "") or "",
+                confirmed_tools=confirmed,
+            ):
+                yield sse_pack(ev)
+        except Exception as exc:  # noqa: BLE001
+            yield sse_pack({"event": "error", "data": {"error": str(exc)}})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/companion/stream/resume")
+def companion_stream_resume(
+    req: CompanionStreamResumeRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.companion import resume_companion_turn, sse_pack
+    from app.services.mentrix.org_policy import ensure_companion_rules
+
+    if not req.turn_id.strip():
+        raise HTTPException(status_code=400, detail="turn_id required")
+    ensure_companion_rules(db)
+
+    def gen():
+        try:
+            for ev in resume_companion_turn(
+                db,
+                req.turn_id.strip(),
+                req.confirmed_tools or [],
+                created_by=getattr(user, "email", "") or "",
+            ):
+                yield sse_pack(ev)
+        except Exception as exc:  # noqa: BLE001
+            yield sse_pack({"event": "error", "data": {"error": str(exc)}})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
@@ -492,5 +571,134 @@ def companion_tools(_user: CurrentUser = Depends(get_current_user)):
             "comms",
             "delivery",
             "desktop",
+            "media",
         ],
     }
+
+
+@router.post("/companion/realtime/session")
+def companion_realtime_session(_user: CurrentUser = Depends(get_current_user)):
+    """Mint OpenAI Realtime ephemeral client secret (API key never leaves server)."""
+    from app.services.mentrix.realtime import mint_realtime_session
+
+    return mint_realtime_session()
+
+
+class RealtimeToolRequest(BaseModel):
+    tool: str
+    args: dict = {}
+    confirmed: bool = False
+    project_key: str = ""
+    project_id: int | None = None
+
+
+@router.post("/companion/realtime/tool")
+def companion_realtime_tool(
+    req: RealtimeToolRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Execute a Realtime function call through Mentrix permission broker."""
+    from app.services.mentrix.org_policy import ensure_companion_rules
+    from app.services.mentrix.realtime import run_realtime_tool
+
+    if not (req.tool or "").strip():
+        raise HTTPException(status_code=400, detail="tool required")
+    ensure_companion_rules(db)
+    uid = getattr(user, "user_id", None) or getattr(user, "id", None)
+    return run_realtime_tool(
+        db,
+        req.tool.strip(),
+        req.args or {},
+        user_id=uid if isinstance(uid, int) else None,
+        project_id=req.project_id,
+        project_key=req.project_key or "",
+        created_by=getattr(user, "email", "") or "",
+        user_confirmed=bool(req.confirmed),
+    )
+
+
+@router.get("/companion/media")
+def companion_media_list(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.media_board import list_media
+
+    return {"items": list_media()}
+
+
+@router.get("/companion/media/{number}")
+def companion_media_file(number: int, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.media_board import get_media_file
+
+    path = get_media_file(number)
+    if not path:
+        raise HTTPException(status_code=404, detail="media not found")
+    return FileResponse(path, media_type="image/png", filename=path.name)
+
+
+@router.websocket("/companion/realtime")
+async def companion_realtime_ws(websocket: WebSocket, token: str = Query("")):
+    """
+    Authenticated Mentrix↔OpenAI Realtime relay.
+    Client sends JSON control messages; audio frames forwarded to OpenAI when session active.
+    For browser convenience, prefer ephemeral client_secret from /realtime/session and
+    connect to OpenAI directly; this relay is available when proxying is preferred.
+    """
+    from app.core.auth.session_store import get_token_row
+    from app.database import SessionLocal
+    from app.services.mentrix.realtime import mint_realtime_session, realtime_enabled
+
+    if not token:
+        await websocket.close(code=4401)
+        return
+    db = SessionLocal()
+    try:
+        row = get_token_row(db, token)
+        if not row:
+            await websocket.close(code=4401)
+            return
+    finally:
+        db.close()
+
+    await websocket.accept()
+    if not realtime_enabled():
+        await websocket.send_json({"event": "error", "data": {"error": "realtime_disabled", "fallback": "stt_sse"}})
+        await websocket.close()
+        return
+
+    session = mint_realtime_session()
+    if not session.get("ok"):
+        await websocket.send_json({"event": "error", "data": session})
+        await websocket.close()
+        return
+
+    await websocket.send_json(
+        {
+            "event": "session",
+            "data": {
+                "realtime_enabled": True,
+                "model": session.get("model"),
+                "openai_ws_url": session.get("openai_ws_url"),
+                "client_secret": session.get("client_secret"),
+                "expires_at": session.get("expires_at"),
+                "note": "Use client_secret to open OpenAI Realtime WS; tools via POST /companion/realtime/tool",
+            },
+        }
+    )
+
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            # Control channel: client reports orb state / tool results; relay echoes mentrix events
+            if msg.get("type") == "ping":
+                await websocket.send_json({"event": "pong"})
+            elif msg.get("type") == "orb":
+                await websocket.send_json({"event": "orb", "data": msg.get("data") or {}})
+            else:
+                await websocket.send_json({"event": "ack", "data": {"type": msg.get("type")}})
+    except WebSocketDisconnect:
+        return
+    except Exception:  # noqa: BLE001
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            pass

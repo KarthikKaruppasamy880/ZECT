@@ -30,6 +30,10 @@ backend/.wheels/
 *.pem
 *.log
 
+# Mentrix Companion local notes/records / media board
+backend/data/mentrix_notes/
+backend/data/mentrix_media/
+
 # Playwright
 frontend/e2e/.auth/
 frontend/test-results/

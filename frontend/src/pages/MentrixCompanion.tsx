@@ -1,16 +1,30 @@
 /**
- * Mentrix Companion Home — company personal agent (visual + tools + permissions).
+ * Mentrix Companion HUD — streaming operator shell (orb, voice, artifacts, computer mode).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Bot, Mic, MicOff, Monitor, Send, Sparkles } from "lucide-react";
+import {
+  Bot,
+  Eye,
+  Maximize2,
+  Mic,
+  MicOff,
+  Monitor,
+  Send,
+  Sparkles,
+} from "lucide-react";
 import {
   mentrixCompanionPolicy,
   mentrixCompanionPolicyImport,
+  mentrixCompanionStream,
+  mentrixCompanionStreamResume,
   mentrixCompanionTurn,
   mentrixListRuns,
+  type MentrixStreamEvent,
 } from "@/lib/api";
 import MentrixConfirmModal, { type PendingConfirm } from "@/components/MentrixConfirmModal";
+import MentrixArtifacts, { type ArtifactItem } from "@/components/MentrixArtifacts";
+import { startMentrixRealtime, type RealtimeSessionHandle } from "@/lib/mentrixRealtime";
 
 declare global {
   interface Window {
@@ -21,6 +35,7 @@ declare global {
         onSttGoal?: (cb: (p: { goal?: string }) => void) => () => void;
         onComputerMode?: (cb: (p: { computerMode?: boolean; reason?: string }) => void) => () => void;
         setComputerMode?: (enabled: boolean) => Promise<unknown>;
+        setDictationEnabled?: (enabled: boolean) => Promise<unknown>;
         confirmAction?: (payload: unknown) => Promise<unknown>;
         computer?: (action: string, args?: Record<string, unknown>) => Promise<unknown>;
       };
@@ -29,10 +44,8 @@ declare global {
 }
 
 type AvatarState = "idle" | "listening" | "thinking" | "speaking" | "working" | "needs_permission";
-
 type ChatMsg = { role: "user" | "assistant" | "system"; text: string };
-
-type BoardItem = { type?: string; title?: string; body?: string };
+type LogLine = { ts: string; text: string };
 
 function speak(text: string, enabled: boolean) {
   if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
@@ -46,52 +59,163 @@ function speak(text: string, enabled: boolean) {
   }
 }
 
-const AVATAR_RING: Record<AvatarState, string> = {
-  idle: "border-slate-500 shadow-slate-700/40",
-  listening: "border-teal-400 shadow-teal-500/50 animate-pulse",
-  thinking: "border-amber-400 shadow-amber-500/40 animate-pulse",
-  speaking: "border-emerald-400 shadow-emerald-500/50",
-  working: "border-sky-400 shadow-sky-500/40 animate-pulse",
-  needs_permission: "border-amber-500 shadow-amber-600/60",
+const ORB: Record<AvatarState, string> = {
+  idle: "from-slate-800 to-slate-950 border-slate-500 shadow-slate-700/40",
+  listening: "from-teal-900 to-slate-950 border-teal-400 shadow-teal-500/50 animate-pulse",
+  thinking: "from-amber-950 to-slate-950 border-amber-400 shadow-amber-500/40 animate-pulse",
+  speaking: "from-emerald-950 to-slate-950 border-emerald-400 shadow-emerald-500/50",
+  working: "from-sky-950 to-slate-950 border-sky-400 shadow-sky-500/40 animate-pulse",
+  needs_permission: "from-amber-950 to-slate-950 border-amber-500 shadow-amber-600/60",
 };
+
+function applyNav(path: string | null | undefined, navigate: (to: number | string) => void) {
+  if (!path) return;
+  if (path === "__back__") {
+    navigate(-1);
+    return;
+  }
+  try {
+    navigate(path);
+  } catch {
+    window.location.assign(path);
+  }
+}
 
 export default function MentrixCompanion() {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ChatMsg[]>([
     {
       role: "assistant",
-      text: "I'm Mentrix — your company agent for research, content, reporting, docs, and Delivery. Ask me anything. Sensitive actions always need your permission.",
+      text: "I'm Mentrix — your company operator. Ask for status, research, notes, Delivery, or say Open Lattice.",
     },
   ]);
   const [input, setInput] = useState("");
   const [avatar, setAvatar] = useState<AvatarState>("idle");
-  const [board, setBoard] = useState<BoardItem[]>([]);
-  const [statusLine, setStatusLine] = useState("Ready");
+  const [board, setBoard] = useState<ArtifactItem[]>([]);
+  const [log, setLog] = useState<LogLine[]>([]);
+  const [statusLine, setStatusLine] = useState("SYSTEMS OPERATIONAL");
   const [tts, setTts] = useState(true);
-  const [listening, setListening] = useState(false);
+  const [voiceConnected, setVoiceConnected] = useState(false);
   const [computerMode, setComputerMode] = useState(false);
+  const [displayMode, setDisplayMode] = useState(false);
+  const [showArtifacts, setShowArtifacts] = useState(true);
   const [pending, setPending] = useState<PendingConfirm[]>([]);
-  const [lastMessage, setLastMessage] = useState("");
+  const [turnId, setTurnId] = useState("");
   const [loading, setLoading] = useState(false);
   const [runsHint, setRunsHint] = useState("");
+  const [streamReply, setStreamReply] = useState("");
+  const [lastMessage, setLastMessageKeep] = useState("");
   const recognitionRef = useRef<any>(null);
+  const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
+  const pendingArgsRef = useRef<Record<string, Record<string, unknown>>>({});
   const chatEnd = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const runTurnRef = useRef<(message: string, confirmed?: string[], resumeId?: string) => Promise<void>>();
+
+  const pushLog = useCallback((text: string) => {
+    const ts = new Date().toLocaleTimeString();
+    setLog((l) => [{ ts, text }, ...l].slice(0, 80));
+  }, []);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, streamReply]);
+
+  useEffect(() => {
+    document.body.dataset.mentrixHud = "1";
+    return () => {
+      delete document.body.dataset.mentrixHud;
+    };
+  }, []);
 
   useEffect(() => {
     mentrixListRuns(3)
       .then((runs) => {
         if (Array.isArray(runs) && runs[0]) {
-          setRunsHint(`#${runs[0].id} ${runs[0].status} · ${runs[0].mode}`);
+          setRunsHint(`#${runs[0].id} ${runs[0].status}`);
         }
       })
       .catch(() => {});
   }, []);
 
-  // Desktop wake → focus companion; Computer Mode idle auto-off
+  const startVoiceSession = useCallback(async () => {
+    if (realtimeRef.current) {
+      realtimeRef.current.stop();
+      realtimeRef.current = null;
+    }
+    setVoiceConnected(true);
+    setAvatar("listening");
+    setStatusLine("Connect Voice…");
+    const handle = await startMentrixRealtime({
+      onOrb: (s) => setAvatar(s as AvatarState),
+      onLog: pushLog,
+      onTranscript: (role, text) => {
+        if (!text?.trim()) return;
+        setMessages((m) => [...m, { role, text }]);
+        if (role === "user") setLastMessageKeep(text);
+      },
+      onNavigate: (path) => applyNav(path, navigate as any),
+      onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
+      onPendingConfirm: (pendingList) => {
+        const mapped = pendingList.map((p) => ({
+          tool: String(p.tool || ""),
+          action: String(p.action || p.tool || ""),
+          args_redacted: (p.args_redacted as Record<string, unknown>) || {},
+          reason: String(p.reason || "Allow required"),
+        }));
+        for (const p of mapped) {
+          pendingArgsRef.current[p.tool] = (p.args_redacted as Record<string, unknown>) || {};
+        }
+        setPending(mapped);
+        setAvatar("needs_permission");
+        speak("I need your permission to continue.", tts);
+      },
+      onError: (err) => pushLog(`realtime ${err}`),
+      onFallback: async (reason) => {
+        pushLog(`realtime_fallback ${reason}`);
+        setStatusLine("Listening (STT fallback)");
+        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const desktop = window.zectDesktop?.isDesktopApp;
+        if (SR && !desktop) {
+          const rec = new SR();
+          recognitionRef.current = rec;
+          rec.continuous = true;
+          rec.interimResults = false;
+          rec.lang = "en-US";
+          rec.onresult = (ev: any) => {
+            const t = ev.results?.[ev.results.length - 1]?.[0]?.transcript || "";
+            if (t) {
+              setLastMessageKeep(t);
+              void runTurnRef.current?.(t);
+            }
+          };
+          rec.onerror = () => {
+            setVoiceConnected(false);
+            setAvatar("idle");
+          };
+          try {
+            rec.start();
+            pushLog("Connect Voice — Web Speech fallback");
+          } catch {
+            setVoiceConnected(false);
+          }
+          return;
+        }
+        try {
+          await window.zectDesktop?.mentrix?.setDictationEnabled?.(true);
+          pushLog("Connect Voice — desktop dictation fallback");
+          setStatusLine("Listening after Hey Mentrix");
+        } catch {
+          pushLog("Connect Voice — type your ask (mic fallback unavailable)");
+        }
+      },
+    });
+    realtimeRef.current = handle;
+    if (handle.mode === "realtime") {
+      setStatusLine("Realtime voice connected");
+    }
+  }, [navigate, pushLog, tts]);
+
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
     const unsubs: Array<() => void> = [];
@@ -100,6 +224,8 @@ export default function MentrixCompanion() {
         desktop.onWake(() => {
           setAvatar("listening");
           speak("Mentrix ready. How can I help?", tts);
+          pushLog("Wake — Mentrix listening");
+          void startVoiceSession();
         }),
       );
     }
@@ -109,371 +235,499 @@ export default function MentrixCompanion() {
           if (p?.computerMode === false) {
             setComputerMode(false);
             setStatusLine(
-              p.reason === "idle_auto_off"
-                ? "Computer Mode auto-off after idle"
-                : "Computer Mode OFF",
+              p.reason === "idle_auto_off" ? "Computer Mode auto-off" : "Computer Mode OFF",
             );
           }
         }),
       );
     }
-    const onDom = () => setAvatar("listening");
+    const onDom = () => {
+      setAvatar("listening");
+      void startVoiceSession();
+    };
     window.addEventListener("mentrix-wake", onDom);
     return () => {
       unsubs.forEach((u) => u());
       window.removeEventListener("mentrix-wake", onDom);
     };
-  }, [tts]);
+  }, [tts, pushLog, startVoiceSession]);
 
-  const applyNavigate = useCallback(
-    (path: string | null | undefined) => {
-      if (!path) return;
-      if (path === "__back__") {
-        navigate(-1);
-        return;
+  const handleStreamEvent = useCallback(
+    (ev: MentrixStreamEvent) => {
+      if (ev.turn_id) setTurnId(ev.turn_id);
+      const d = ev.data || {};
+      switch (ev.event) {
+        case "thinking":
+          setAvatar("thinking");
+          setStatusLine("Mentrix thinking…");
+          pushLog("thinking");
+          break;
+        case "tool_start":
+          setAvatar("working");
+          pushLog(`Tool: ${d.tool}`);
+          break;
+        case "tool_end":
+          pushLog(`Tool end: ${d.tool} ${d.ok ? "ok" : d.error || "fail"}`);
+          break;
+        case "artifact":
+          setBoard((b) => [d as ArtifactItem, ...b].slice(0, 16));
+          pushLog(`Artifact: ${d.title || d.type || "item"}`);
+          break;
+        case "navigate":
+          applyNav(d.path, navigate as any);
+          pushLog(`Navigate ${d.path}`);
+          break;
+        case "pending_confirm":
+          setAvatar("needs_permission");
+          setPending((p) => {
+            if (p.some((x) => x.tool === d.tool)) return p;
+            return [...p, { tool: d.tool, args: d.args, reason: d.reason }];
+          });
+          setStatusLine("Waiting for Allow");
+          break;
+        case "token":
+          setStreamReply((r) => r + (d.text || ""));
+          setAvatar("speaking");
+          break;
+        case "done": {
+          const reply = d.reply || "";
+          setStreamReply("");
+          setMessages((m) => [...m, { role: "assistant", text: reply || "Done." }]);
+          if (d.board?.length) setBoard((b) => [...d.board, ...b].slice(0, 16));
+          if (d.navigate) applyNav(d.navigate, navigate as any);
+          if (d.pending_confirmations?.length) {
+            setPending(d.pending_confirmations);
+            setAvatar("needs_permission");
+          } else {
+            setAvatar("speaking");
+            speak(reply, tts);
+          }
+          setStatusLine(d.latency_mode === "fast_tools" ? "Replied (instant)" : "SYSTEMS OPERATIONAL");
+          pushLog(`done ${d.latency_ms || 0}ms`);
+          // Desktop computer acts from tools in done path via turn fallback tools — handled when streaming tool_end with desktop
+          break;
+        }
+        case "error":
+          setMessages((m) => [...m, { role: "assistant", text: d.error || "Stream error" }]);
+          setAvatar("idle");
+          pushLog(`error ${d.error}`);
+          break;
+        default:
+          break;
       }
-      navigate(path);
     },
-    [navigate],
+    [navigate, pushLog, tts],
   );
 
   const runTurn = useCallback(
-    async (message: string, confirmed: string[] = []) => {
+    async (message: string, confirmed: string[] = [], resumeId = "") => {
       setLoading(true);
       setAvatar(confirmed.length ? "working" : "thinking");
       setStatusLine("Mentrix thinking…");
-      try {
-        const res = await mentrixCompanionTurn(message, {
-          confirmed_tools: confirmed,
-          project_key: localStorage.getItem("zect_lattice_key") || "",
+      setStreamReply("");
+      if (!confirmed.length && !resumeId) {
+        setMessages((m) => {
+          if (m[m.length - 1]?.role === "user" && m[m.length - 1]?.text === message) return m;
+          return [...m, { role: "user", text: message }];
         });
-        const pendingItems: PendingConfirm[] = res.pending_confirmations || [];
-        if (pendingItems.length) {
-          setPending(pendingItems);
-          setLastMessage(message);
-          setAvatar("needs_permission");
-          setStatusLine("Waiting for your permission");
-          speak("I need your permission to continue.", tts);
+      }
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const kill = window.setTimeout(() => controller.abort(), 45_000);
+      try {
+        if (resumeId) {
+          await mentrixCompanionStreamResume(resumeId, confirmed, {
+            signal: controller.signal,
+            onEvent: handleStreamEvent,
+          });
         } else {
-          setPending([]);
-          setMessages((m) => [
-            ...m,
-            { role: "user", text: message },
-            { role: "assistant", text: res.reply || "Done." },
-          ]);
-          if (res.board?.length) setBoard((b) => [...res.board, ...b].slice(0, 12));
-          setAvatar("speaking");
-          setStatusLine("Mentrix replied");
-          speak(res.reply || "", tts);
-          applyNavigate(res.navigate);
-          // Desktop computer tools only when Computer Mode ON (after confirm)
-          const desktopActs = (res.tools || []).filter(
-            (t: any) => t.result?.desktop && !t.denied,
-          );
-          for (const t of desktopActs) {
-            if (!computerMode) {
-              setStatusLine("Computer Mode is OFF — enable it for desktop control");
-              continue;
-            }
-            const action = String(t.result.desktop);
-            await window.zectDesktop?.mentrix?.confirmAction?.({ tool: t.tool, action });
-            await window.zectDesktop?.mentrix?.computer?.(action, {
-              ...t.result,
-              ...(t.result.args || {}),
-              app: t.result.app,
-              path: t.result.path,
+          try {
+            await mentrixCompanionStream(message, {
+              project_key: localStorage.getItem("zect_lattice_key") || "",
+              confirmed_tools: confirmed,
+              signal: controller.signal,
+              onEvent: handleStreamEvent,
             });
+          } catch {
+            // Fallback to non-stream turn
+            const res = await mentrixCompanionTurn(message, {
+              confirmed_tools: confirmed,
+              project_key: localStorage.getItem("zect_lattice_key") || "",
+              signal: controller.signal,
+            });
+            if (res.navigate) applyNav(res.navigate, navigate as any);
+            if (res.pending_confirmations?.length) {
+              setPending(res.pending_confirmations);
+              setTurnId(res.turn_id || "");
+              setLastMessageKeep(message);
+              setAvatar("needs_permission");
+              speak("I need your permission to continue.", tts);
+            } else {
+              setPending([]);
+              setMessages((m) => [...m, { role: "assistant", text: res.reply || "Done." }]);
+              if (res.board?.length) setBoard((b) => [...res.board, ...b].slice(0, 16));
+              setAvatar("speaking");
+              speak(res.reply || "", tts);
+            }
+            // Desktop tools
+            for (const t of res.tools || []) {
+              if (t.result?.desktop && !t.denied && computerMode) {
+                await window.zectDesktop?.mentrix?.computer?.(t.result.desktop, {
+                  ...t.result,
+                  app: t.result.app,
+                  path: t.result.path,
+                });
+              }
+            }
           }
         }
       } catch (e) {
-        setMessages((m) => [
-          ...m,
-          { role: "user", text: message },
-          { role: "assistant", text: e instanceof Error ? e.message : "Companion turn failed" },
-        ]);
+        const msg =
+          e instanceof Error && e.name === "AbortError"
+            ? "Mentrix timed out — try a shorter ask."
+            : e instanceof Error
+              ? e.message
+              : "Companion turn failed";
+        setMessages((m) => [...m, { role: "assistant", text: msg }]);
         setAvatar("idle");
       } finally {
+        window.clearTimeout(kill);
         setLoading(false);
-        setTimeout(() => setAvatar((a) => (a === "speaking" ? "idle" : a)), 2500);
+        setTimeout(() => setAvatar((a) => (a === "speaking" ? "idle" : a)), 2200);
       }
     },
-    [applyNavigate, computerMode, tts],
+    [computerMode, handleStreamEvent, navigate, tts],
   );
+
+  runTurnRef.current = runTurn;
 
   const onSend = async () => {
     const msg = input.trim();
     if (!msg || loading) return;
     setInput("");
+    setLastMessageKeep(msg);
     await runTurn(msg);
   };
 
   const onAllow = async (tools: string[]) => {
     setPending([]);
     const msg = lastMessage || input;
-    setMessages((m) => {
-      if (m[m.length - 1]?.text === msg && m[m.length - 1]?.role === "user") return m;
-      return [...m, { role: "user", text: msg }];
-    });
-    await runTurn(msg, tools);
+    if (realtimeRef.current?.mode === "realtime") {
+      const { mentrixRealtimeTool } = await import("@/lib/api");
+      for (const tool of tools) {
+        const res = await mentrixRealtimeTool(tool, pendingArgsRef.current[tool] || {}, true);
+        for (const ev of res.events || []) {
+          if (ev.event === "navigate") applyNav(ev.data?.path, navigate as any);
+          if (ev.event === "artifact") setBoard((b) => [ev.data as ArtifactItem, ...b].slice(0, 16));
+        }
+      }
+      setAvatar("speaking");
+      return;
+    }
+    if (turnId) {
+      await runTurn(msg, tools, turnId);
+    } else {
+      await runTurn(msg, tools);
+    }
   };
 
-  const toggleListen = () => {
-    const SR =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const desktop = window.zectDesktop?.isDesktopApp;
-    if (listening) {
+  const toggleVoice = () => {
+    if (voiceConnected) {
       try {
         recognitionRef.current?.stop?.();
       } catch {
         /* ignore */
       }
-      setListening(false);
+      realtimeRef.current?.stop();
+      realtimeRef.current = null;
+      void window.zectDesktop?.mentrix?.setDictationEnabled?.(false);
+      setVoiceConnected(false);
       setAvatar("idle");
+      pushLog("Voice disconnected");
       return;
     }
-    if (!SR && !desktop) {
-      setStatusLine("Speech recognition unavailable — type your request");
-      return;
-    }
-    if (SR && !desktop) {
-      const rec = new SR();
-      recognitionRef.current = rec;
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = "en-US";
-      rec.onresult = (ev: any) => {
-        const t = ev.results?.[0]?.[0]?.transcript || "";
-        if (t) {
-          setInput(t);
-          setMessages((m) => [...m, { role: "user", text: t }]);
-          runTurn(t);
-        }
-      };
-      rec.onerror = () => {
-        setListening(false);
-        setAvatar("idle");
-      };
-      rec.onend = () => {
-        setListening(false);
-        setAvatar("idle");
-      };
-      try {
-        rec.start();
-        setListening(true);
-        setAvatar("listening");
-      } catch {
-        setListening(false);
-      }
-      return;
-    }
-    // Desktop: mark listening; wake STT feeds transcripts via IPC
-    setListening(true);
-    setAvatar("listening");
-    setStatusLine("Listening — say your request after Hey Mentrix");
+    void startVoiceSession();
   };
 
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
     if (!desktop?.onSttGoal) return;
     return desktop.onSttGoal((payload) => {
-      if (!payload?.goal || !listening) return;
-      setMessages((m) => [...m, { role: "user", text: payload.goal! }]);
-      runTurn(payload.goal);
+      if (!payload?.goal || !voiceConnected) return;
+      setLastMessageKeep(payload.goal);
+      void runTurn(payload.goal);
     });
-  }, [listening, runTurn]);
+  }, [voiceConnected, runTurn]);
+
+  useEffect(() => {
+    return () => {
+      realtimeRef.current?.stop();
+      try {
+        recognitionRef.current?.stop?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, []);
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4" data-testid="mentrix-companion-page">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Mentrix Companion</h1>
-          <p className="text-sm text-slate-600">
-            Company personal agent — research, content, reporting, docs, Delivery. Sensitive work always asks.
-          </p>
-        </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700"
-            data-testid="mentrix-policy-export"
-            onClick={async () => {
-              try {
-                const pack = await mentrixCompanionPolicy();
-                await navigator.clipboard.writeText(JSON.stringify(pack, null, 2));
-                setStatusLine("Org Mentrix policy copied to clipboard");
-              } catch (e) {
-                setStatusLine(e instanceof Error ? e.message : "Policy export failed");
-              }
-            }}
-          >
-            Export org policy
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700"
-            data-testid="mentrix-policy-import"
-            onClick={async () => {
-              const raw = window.prompt("Paste Mentrix org policy JSON to import");
-              if (!raw?.trim()) return;
-              try {
-                const pack = JSON.parse(raw);
-                const res = await mentrixCompanionPolicyImport(pack, false);
-                setStatusLine(`Imported ${res.imported_rules ?? 0} Mentrix policy rules`);
-              } catch (e) {
-                setStatusLine(e instanceof Error ? e.message : "Policy import failed");
-              }
-            }}
-          >
-            Import org policy
-          </button>
-          <Link to="/mentrix" className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700">
-            Mentrix Delivery
-          </Link>
-          <Link to="/permissions" className="rounded-lg border border-slate-300 px-3 py-1.5 text-slate-700">
-            Permissions
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 text-slate-100 p-6 min-h-[480px] flex flex-col">
-          <div className="flex flex-col items-center gap-3 py-6">
-            <div
-              data-testid="mentrix-avatar"
-              data-state={avatar}
-              className={`h-36 w-36 rounded-full border-4 bg-gradient-to-br from-slate-800 to-slate-900 shadow-2xl flex items-center justify-center ${AVATAR_RING[avatar]}`}
-            >
-              <Bot className="h-16 w-16 text-teal-300" />
-            </div>
-            <p className="text-sm text-teal-200/90">GOOD TO SEE YOU</p>
-            <p className="text-xs text-slate-400" data-testid="mentrix-companion-status">
-              {statusLine}
-              {runsHint ? ` · Delivery ${runsHint}` : ""}
+    <div
+      className={`-m-4 md:-m-6 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 ${displayMode ? "fixed inset-0 z-40 m-0 p-4" : ""}`}
+      data-testid="mentrix-companion-page"
+    >
+      <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 p-4">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-[0.25em] text-teal-500/80">Mentrix Operator</p>
+            <h1 className="text-3xl font-bold tracking-tight text-teal-100">MENTRIX</h1>
+            <p className="text-sm text-slate-400">
+              Company personal agent — research, content, reporting, docs, Delivery
             </p>
-            <label className="inline-flex items-center gap-2 text-xs text-slate-300">
-              <input
-                type="checkbox"
-                checked={computerMode}
-                onChange={async (e) => {
-                  const on = e.target.checked;
-                  if (on) {
-                    const ok = window.confirm(
-                      "Enable Mentrix Computer Mode? Mentrix may open allowlisted apps and capture screenshots only after you confirm each sensitive action.",
-                    );
-                    if (!ok) return;
-                  }
-                  setComputerMode(on);
-                  await window.zectDesktop?.mentrix?.setComputerMode?.(on);
-                }}
-                data-testid="mentrix-computer-mode"
-              />
-              <Monitor className="h-3.5 w-3.5" />
-              Computer Mode {computerMode ? "ON" : "OFF"}
-            </label>
           </div>
-
-          <div className="flex-1 overflow-auto space-y-2 border-t border-slate-800 pt-4" data-testid="mentrix-companion-chat">
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={
-                  m.role === "user"
-                    ? "ml-8 rounded-lg bg-teal-900/40 border border-teal-800 px-3 py-2 text-sm"
-                    : "mr-8 rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-sm"
-                }
-              >
-                {m.text}
-              </div>
-            ))}
-            <div ref={chatEnd} />
-          </div>
-
-          <div className="mt-3 flex gap-2 items-end">
-            <textarea
-              data-testid="mentrix-companion-input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              rows={2}
-              placeholder="Ask Mentrix — status, research, brief, report, open Lattice…"
-              className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend();
+          <div className="flex flex-wrap gap-2 text-xs">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-700 px-3 py-1.5"
+              data-testid="mentrix-policy-export"
+              onClick={async () => {
+                try {
+                  const pack = await mentrixCompanionPolicy();
+                  await navigator.clipboard.writeText(JSON.stringify(pack, null, 2));
+                  setStatusLine("Org policy copied");
+                } catch (e) {
+                  setStatusLine(e instanceof Error ? e.message : "Export failed");
                 }
               }}
-            />
-            <button
-              type="button"
-              data-testid="mentrix-companion-mic"
-              onClick={toggleListen}
-              className={`rounded-lg p-2.5 border ${listening ? "bg-teal-700 border-teal-500" : "border-slate-600"}`}
-              title="Voice"
             >
-              {listening ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+              Export org policy
             </button>
             <button
               type="button"
-              data-testid="mentrix-companion-send"
-              disabled={loading || !input.trim()}
-              onClick={onSend}
-              className="rounded-lg bg-teal-600 p-2.5 disabled:opacity-40"
+              className="rounded-lg border border-slate-700 px-3 py-1.5"
+              data-testid="mentrix-policy-import"
+              onClick={async () => {
+                const raw = window.prompt("Paste Mentrix org policy JSON");
+                if (!raw?.trim()) return;
+                try {
+                  const pack = JSON.parse(raw);
+                  const res = await mentrixCompanionPolicyImport(pack, false);
+                  setStatusLine(`Imported ${res.imported_rules ?? 0} rules`);
+                } catch (e) {
+                  setStatusLine(e instanceof Error ? e.message : "Import failed");
+                }
+              }}
             >
-              <Send className="h-5 w-5" />
+              Import org policy
             </button>
+            <Link to="/mentrix" className="rounded-lg border border-slate-700 px-3 py-1.5">
+              Mentrix Delivery
+            </Link>
           </div>
-          <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-400">
-            <input type="checkbox" checked={tts} onChange={(e) => setTts(e.target.checked)} />
-            Speak replies (TTS)
-          </label>
-        </div>
+        </header>
 
-        <aside className="space-y-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-4" data-testid="mentrix-board">
-            <div className="flex items-center gap-2 font-semibold text-slate-900 mb-2">
-              <Sparkles className="h-4 w-4 text-teal-700" />
-              Mentrix Board
-            </div>
-            {!board.length && (
-              <p className="text-xs text-slate-500">
-                Briefs, reports, research citations, and diagnose plans appear here.
-              </p>
+        <div className={`grid flex-1 gap-3 ${showArtifacts && !displayMode ? "lg:grid-cols-[1fr_380px]" : "grid-cols-1"}`}>
+          <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+            {!displayMode && (
+              <>
+                <div className="flex flex-col items-center gap-2 py-4">
+                  <div
+                    data-testid="mentrix-avatar"
+                    data-state={avatar}
+                    className={`flex h-40 w-40 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl ${ORB[avatar]}`}
+                  >
+                    <Bot className="h-16 w-16 text-teal-300" />
+                  </div>
+                  <p className="text-sm font-medium uppercase tracking-widest text-teal-200/90">Good to see you</p>
+                  <p className="text-xs text-slate-400" data-testid="mentrix-companion-status">
+                    ● {statusLine}
+                    {runsHint ? ` · Delivery ${runsHint}` : ""}
+                  </p>
+                  <div className="mt-2 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="mentrix-connect-voice"
+                      onClick={toggleVoice}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
+                        voiceConnected ? "bg-teal-600 text-white" : "border border-slate-600 text-slate-200"
+                      }`}
+                    >
+                      {voiceConnected ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+                      Connect Voice
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="mentrix-display-mode"
+                      onClick={() => setDisplayMode((d) => !d)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Display
+                    </button>
+                    <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={computerMode}
+                        data-testid="mentrix-computer-mode"
+                        onChange={async (e) => {
+                          const on = e.target.checked;
+                          if (on) {
+                            const ok = window.confirm(
+                              "Enable Mentrix Computer Mode? Allowlisted apps/screenshots only after each confirm.",
+                            );
+                            if (!ok) return;
+                          }
+                          setComputerMode(on);
+                          await window.zectDesktop?.mentrix?.setComputerMode?.(on);
+                          pushLog(`Computer Mode ${on ? "ON" : "OFF"}`);
+                        }}
+                      />
+                      <Monitor className="h-3.5 w-3.5" />
+                      Computer Mode
+                    </label>
+                    <button
+                      type="button"
+                      data-testid="mentrix-artifacts-toggle"
+                      onClick={() => setShowArtifacts((s) => !s)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Artifacts
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className="max-h-36 flex-1 space-y-1 overflow-auto border-t border-slate-800 pt-3 text-[11px] text-slate-400"
+                  data-testid="mentrix-live-log"
+                >
+                  {log.length === 0 && <p>Live log — tool events stream here</p>}
+                  {log.map((l, i) => (
+                    <div key={i}>
+                      <span className="text-teal-700">{l.ts}</span> {l.text}
+                    </div>
+                  ))}
+                </div>
+
+                <div
+                  className="mt-3 max-h-48 flex-1 space-y-2 overflow-auto border-t border-slate-800 pt-3"
+                  data-testid="mentrix-companion-chat"
+                >
+                  {messages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={
+                        m.role === "user"
+                          ? "ml-6 rounded-lg border border-teal-800 bg-teal-950/40 px-3 py-2 text-sm"
+                          : "mr-6 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm"
+                      }
+                    >
+                      {m.text}
+                    </div>
+                  ))}
+                  {streamReply ? (
+                    <div className="mr-6 rounded-lg border border-emerald-900 bg-slate-900/80 px-3 py-2 text-sm text-emerald-100">
+                      {streamReply}
+                    </div>
+                  ) : null}
+                  <div ref={chatEnd} />
+                </div>
+
+                <div className="mt-3 flex items-end gap-2">
+                  <textarea
+                    data-testid="mentrix-companion-input"
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    rows={2}
+                    placeholder="Ask Mentrix…"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        onSend();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    data-testid="mentrix-companion-send"
+                    disabled={loading || !input.trim()}
+                    onClick={onSend}
+                    className="rounded-lg bg-teal-600 p-2.5 disabled:opacity-40"
+                  >
+                    <Send className="h-5 w-5" />
+                  </button>
+                </div>
+                <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">
+                  <input type="checkbox" checked={tts} onChange={(e) => setTts(e.target.checked)} />
+                  Speak replies (TTS)
+                </label>
+              </>
             )}
-            <div className="space-y-3 max-h-[420px] overflow-auto">
-              {board.map((item, i) => (
-                <article key={i} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                  <h3 className="text-sm font-medium text-slate-800">{item.title || "Artifact"}</h3>
-                  <pre className="mt-1 text-[11px] text-slate-600 whitespace-pre-wrap font-sans">
-                    {item.body || ""}
-                  </pre>
-                </article>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-600 space-y-1">
-            <p className="font-semibold text-slate-800">Quick asks</p>
-            {[
-              "What's my Mentrix Delivery status?",
-              "Open Lattice",
-              "Research latest on AI marketing",
-              "Draft a content brief for Q3 launch",
-              "Go back",
-            ].map((q) => (
-              <button
-                key={q}
-                type="button"
-                className="block w-full text-left rounded border border-slate-100 px-2 py-1.5 hover:bg-teal-50"
-                onClick={() => {
-                  setInput(q);
-                  setMessages((m) => [...m, { role: "user", text: q }]);
-                  runTurn(q);
-                }}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </aside>
+            {displayMode && (
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs uppercase tracking-widest text-teal-500">Artifacts · Display</span>
+                <button
+                  type="button"
+                  className="rounded border border-slate-600 px-2 py-1 text-xs"
+                  onClick={() => setDisplayMode(false)}
+                >
+                  Hide
+                </button>
+              </div>
+            )}
+            {displayMode && <MentrixArtifacts items={board} displayMode />}
+          </section>
+
+          {showArtifacts && !displayMode && (
+            <aside className="space-y-3 rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-semibold text-teal-200">
+                  <Sparkles className="h-4 w-4" />
+                  ARTIFACTS
+                </div>
+                <button
+                  type="button"
+                  className="text-slate-400 hover:text-teal-300"
+                  title="Fullscreen artifacts"
+                  onClick={() => setDisplayMode(true)}
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </button>
+              </div>
+              <MentrixArtifacts items={board} />
+              <div className="space-y-1 border-t border-slate-800 pt-3 text-xs text-slate-400">
+                <p className="font-semibold text-slate-200">Quick asks</p>
+                {[
+                  "What's my Mentrix Delivery status?",
+                  "What's the weather in Austin?",
+                  "Slack digest",
+                  "Any email?",
+                  "Open Lattice",
+                  "Open Sandbox",
+                  "Research latest on AI marketing",
+                  "Draft a content brief for Q3 launch",
+                  "Diagnose why this is failing",
+                  "Add note: hello from Mentrix",
+                  "Generate image: Mentrix operator thumbnail",
+                  "Go back",
+                ].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    className="block w-full rounded border border-slate-800 px-2 py-1.5 text-left hover:bg-teal-950/50"
+                    onClick={() => {
+                      setLastMessageKeep(q);
+                      runTurn(q);
+                    }}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </aside>
+          )}
+        </div>
       </div>
 
       <MentrixConfirmModal

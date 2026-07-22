@@ -1,29 +1,39 @@
-"""Mentrix Companion turn — intent + permission-gated tools for company work."""
+"""Mentrix Companion — streaming agentic turns with permission-gated tools."""
 
 from __future__ import annotations
 
 import json
 import os
 import re
-from typing import Any
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from pathlib import Path
+from typing import Any, Generator, Iterator
 from urllib.parse import quote_plus
 from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
 from app.models import MentrixRun
-from app.services.lattice.indexer import query_graph, get_graph
+from app.services.lattice.indexer import get_graph, query_graph
 from app.services.mentrix.permission_broker import (
     ALWAYS_CONFIRM_TOOLS,
     check_tool_permission,
     log_mentrix_tool,
 )
 
+_LLM_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_LLM_TIMEOUT", "6"))
+_RESEARCH_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_RESEARCH_TIMEOUT", "2.5"))
+_MAX_TOOLS = 5
+
+# In-memory resume store for Allow overlay (turn_id → state)
+_TURN_STORE: dict[str, dict[str, Any]] = {}
+
 NAV_MAP = {
     "lattice": "/lattice",
     "blueprint": "/blueprint",
     "delivery": "/mentrix",
-    "mentrix delivery": "/mentrix",
     "sandbox": "/sandbox",
     "companion": "/mentrix-home",
     "home": "/mentrix-home",
@@ -32,53 +42,223 @@ NAV_MAP = {
     "dashboard": "/",
     "docs": "/docs",
     "ask": "/ask",
+    "plan": "/plan",
+    "build": "/build",
+    "review": "/review",
+    "deploy": "/deploy",
+    "code review": "/code-review",
+    "code-review": "/code-review",
+    "git": "/git-ops",
+    "ci": "/ci-monitor",
+    "skills": "/skills",
+    "rules": "/rules",
+    "secrets": "/secrets",
+    "conversations": "/conversations",
+    "agent": "/agent-mode",
+    "repo": "/repo-workspace",
+    "knowledge": "/knowledge-base",
+    "playbooks": "/playbooks",
+    "audit": "/audit-trail",
 }
 
 
-def _llm_answer(question: str, context: str = "") -> str:
-    """Best-effort Mentrix reply via OpenAI; offline fallback if unavailable."""
+def _ensure_openai_env() -> str:
     key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return (
-            "I'm Mentrix. I can navigate ZECT, check Delivery status, research topics, "
-            "draft content/reports, and use connectors when permitted. "
-            f"You asked: {question[:400]}"
-            + (f"\n\nContext:\n{context[:1500]}" if context else "")
-        )
+    if key:
+        return key
     try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parents[3] / ".env"
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+    except Exception:  # noqa: BLE001
+        pass
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+def _gates_mermaid(gates: dict | None, run_id: int | None = None) -> str:
+    g = gates or {}
+    title = f"Delivery #{run_id}" if run_id else "Mentrix Delivery"
+    lines = ["flowchart LR", f"  startNode([{title}])"]
+    keys = list(g.keys())[:8] or ["incomplete_ok", "lint_ok", "sandbox_ready", "review_ok", "approve", "create_pr"]
+    prev = "startNode"
+    for i, k in enumerate(keys):
+        nid = f"g{i}"
+        val = g.get(k)
+        label = f"{k}:{'ok' if val else 'pending'}" if val is not None else k
+        lines.append(f"  {nid}[{label}]")
+        lines.append(f"  {prev} --> {nid}")
+        prev = nid
+    return "\n".join(lines)
+
+
+def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigations: list[str]) -> str | None:
+    if not tool_results and not board_items and not navigations:
+        return None
+    parts: list[str] = []
+    for tr in tool_results:
+        if tr.get("denied"):
+            parts.append(f"Blocked: {tr['tool']}")
+            continue
+        name = tr.get("tool")
+        result = tr.get("result") or {}
+        if name == "delivery_status":
+            runs = result.get("runs") or []
+            if not runs:
+                parts.append("No Mentrix Delivery runs yet.")
+            else:
+                r0 = runs[0]
+                parts.append(
+                    f"Latest Delivery #{r0.get('id')}: {r0.get('status')} ({r0.get('mode')}). "
+                    f"Next: {r0.get('next_step') or 'review gates'}."
+                )
+        elif name == "navigate":
+            parts.append(f"Opening {result.get('label') or result.get('navigate')}.")
+        elif name == "go_back":
+            parts.append("Going back.")
+        elif name == "research_news":
+            parts.append((result.get("summary") or f"Research on {result.get('topic')}")[:400])
+        elif name == "start_delivery":
+            parts.append(f"Mentrix Delivery run #{result.get('run_id')} started." if result.get("run_id") else "Delivery queued.")
+        elif name in ("content_brief", "ads_copy", "report_draft", "docs_draft", "diagnose_fix"):
+            parts.append(f"Artifact ready: {(result.get('board') or {}).get('title') or name}.")
+        elif name == "note_add":
+            parts.append("Note saved to Mentrix Notes.")
+        elif name == "note_list":
+            parts.append(f"{len(result.get('notes') or [])} Mentrix notes.")
+        elif name == "weather_report":
+            parts.append((result.get("spoken_summary") or "Weather ready.")[:400])
+        elif name == "slack_digest":
+            parts.append((result.get("spoken_summary") or result.get("note") or "Slack digest ready.")[:400])
+        elif name == "email_digest":
+            parts.append((result.get("spoken_summary") or result.get("note") or "Email digest ready.")[:400])
+        elif name == "lattice_query":
+            hits = result.get("hits") or []
+            parts.append(f"Lattice: {len(hits)} hit(s)." if hits else (result.get("error") or "No hits."))
+    if board_items and not parts:
+        parts.append(f"Posted {board_items[0].get('title') or 'artifact'}.")
+    if navigations and not any(p.startswith("Opening") or p.startswith("Going") for p in parts):
+        parts.append(f"Navigating to {navigations[0]}.")
+    return " ".join(parts)[:1200] if parts else None
+
+
+def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
+    """Ask LLM for up to N tool calls as JSON; empty on failure."""
+    key = _ensure_openai_env()
+    if not key:
+        return []
+
+    def _call() -> list[dict[str, Any]]:
         from openai import OpenAI
 
-        client = OpenAI(api_key=key)
+        client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
+        tool_names = sorted(
+            {
+                "navigate",
+                "go_back",
+                "delivery_status",
+                "research_news",
+                "weather_report",
+                "content_brief",
+                "report_draft",
+                "docs_search",
+                "slack_digest",
+                "slack_send",
+                "email_digest",
+                "email_send",
+                "note_add",
+                "note_list",
+                "lattice_query",
+                "start_delivery",
+                "diagnose_fix",
+                "media_generate",
+                "media_list",
+                "media_edit",
+            }
+        )
+        prompt = (
+            "You are Mentrix planner. Return ONLY a JSON array of tools to run, max 5. "
+            f"Allowed names: {tool_names}. "
+            'Each item: {"name":"...","args":{}}. '
+            "For navigate use args.path like /lattice. Empty array if just chatting.\n"
+            f"User: {message[:800]}"
+        )
+        resp = client.chat.completions.create(
+            model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.1,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        m = re.search(r"\[.*\]", text, re.S)
+        if not m:
+            return []
+        data = json.loads(m.group(0))
+        out = []
+        for item in data[:_MAX_TOOLS]:
+            if isinstance(item, dict) and item.get("name"):
+                out.append({"name": str(item["name"]), "args": item.get("args") or {}})
+        return out
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_call).result(timeout=_LLM_TIMEOUT_S + 0.5)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _llm_answer(question: str, context: str = "") -> str:
+    key = _ensure_openai_env()
+    if not key:
+        return (
+            "I'm Mentrix — ready. Ask for Delivery status, research, a brief, notes, "
+            "or say Open Lattice."
+            + (f"\n\n{context[:900]}" if context else "")
+        )
+
+    def _call() -> str:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are Mentrix, the ZECT company personal agent. Help with ads, research, "
-                    "content, reporting, internal docs, and Mentrix Delivery. Be concise, practical, "
-                    "and never claim you performed a sensitive action without user confirmation."
+                    "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences. "
+                    "Never claim you sent messages or controlled the desktop without confirmation."
                 ),
             }
         ]
         if context:
-            messages.append({"role": "user", "content": f"Tool results:\n{context[:6000]}"})
+            messages.append({"role": "user", "content": f"Tool results:\n{context[:3500]}"})
         messages.append({"role": "user", "content": question})
         resp = client.chat.completions.create(
             model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
             messages=messages,
-            max_tokens=1200,
+            max_tokens=280,
             temperature=0.3,
         )
         return (resp.choices[0].message.content or "").strip()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_call).result(timeout=_LLM_TIMEOUT_S + 0.5)
+    except FuturesTimeout:
+        return "Mentrix — quick path (model timed out):\n" + (context[:900] if context else question[:300])
     except Exception as exc:  # noqa: BLE001
-        return f"Mentrix (offline reply): {question[:200]}\n\nNote: LLM unavailable ({exc})."
+        return (
+            "I'm Mentrix — ready for status, research, briefs, notes, and Delivery."
+            + (f"\n\n{context[:700]}" if context else f"\n\nYou asked: {question[:200]}")
+            + f"\n\n({type(exc).__name__})"
+        )
 
 
 def _parse_intents(message: str) -> list[dict[str, Any]]:
-    """Deterministic intents so Companion works without LLM tool-calling."""
     m = message.lower().strip()
     tools: list[dict[str, Any]] = []
 
-    if re.search(r"\bgo back\b|\bback\b", m) and "feedback" not in m:
+    if re.search(r"\bgo back\b", m):
         tools.append({"name": "go_back", "args": {}})
 
     for key, path in NAV_MAP.items():
@@ -87,15 +267,33 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             break
     if "open lattice" in m or "lattice graph" in m:
         tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
-    if "open delivery" in m or "mentrix delivery" in m:
+    if re.search(r"\b(open|go to|show|navigate|take me)\b.*\b(delivery|mentrix delivery)\b", m) or "open delivery" in m:
         tools.append({"name": "navigate", "args": {"path": "/mentrix", "label": "delivery"}})
 
-    if any(w in m for w in ("status", "gates", "what'?s running", "last run", "delivery status")):
+    if any(w in m for w in ("status", "gates", "what's running", "whats running", "last run", "delivery status")):
         tools.append({"name": "delivery_status", "args": {}})
 
-    if any(w in m for w in ("news", "research", "latest on", "what's happening")):
+    if re.search(r"\b(research|news|latest on)\b", m) and "weather" not in m:
         topic = re.sub(r".*?(news|research|latest on)\s*", "", m, count=1).strip() or message
         tools.append({"name": "research_news", "args": {"topic": topic[:120]}})
+
+    if any(w in m for w in ("weather", "forecast", "temperature", "how's the weather", "how is the weather")):
+        loc = message
+        for prefix in (
+            "what's the weather in",
+            "whats the weather in",
+            "weather in",
+            "weather for",
+            "forecast for",
+            "how's the weather in",
+            "how is the weather in",
+            "what's the weather",
+            "whats the weather",
+        ):
+            if prefix in m:
+                loc = message[m.index(prefix) + len(prefix) :].strip(" ?.")
+                break
+        tools.append({"name": "weather_report", "args": {"location": (loc or "Austin")[:120]}})
 
     if any(w in m for w in ("brief", "ad copy", "campaign", "content idea")):
         tools.append({"name": "content_brief", "args": {"topic": message[:200]}})
@@ -106,53 +304,97 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if any(w in m for w in ("confluence", "internal doc", "search docs")):
         tools.append({"name": "docs_search", "args": {"query": message[:160]}})
 
-    if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel")):
+    if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel", "what's on", "whats on")):
         tools.append({"name": "slack_digest", "args": {}})
-    if "slack" in m and any(w in m for w in ("send", "post", "message")):
+    elif "slack" in m and any(w in m for w in ("send", "post", "message")):
         tools.append({"name": "slack_send", "args": {"text": message[:500]}})
+    elif m.strip() in ("slack digest", "slack summary") or "slack digest" in m:
+        tools.append({"name": "slack_digest", "args": {}})
 
-    if "gmail" in m or ("email" in m and "digest" in m):
+    if any(
+        p in m
+        for p in (
+            "email digest",
+            "any email",
+            "check email",
+            "check my email",
+            "inbox",
+            "gmail",
+        )
+    ) or ("email" in m and "digest" in m):
         tools.append({"name": "email_digest", "args": {}})
     if "send email" in m or "email send" in m:
         tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
 
-    if any(w in m for w in ("avatar", "generate image", "my photo")):
-        tools.append({"name": "image_avatar", "args": {}})
+    if any(w in m for w in ("avatar", "generate image", "my photo", "thumbnail", "image board")):
+        if "list" in m or "show board" in m:
+            tools.append({"name": "media_list", "args": {}})
+        else:
+            tools.append({"name": "media_generate", "args": {"prompt": message[:800]}})
+
+    if re.search(r"\b(edit image|edit thumbnail|edit media)\b", m):
+        num_m = re.search(r"#?\b(\d{1,4})\b", m)
+        tools.append(
+            {
+                "name": "media_edit",
+                "args": {
+                    "number": int(num_m.group(1)) if num_m else 1,
+                    "prompt": message[:800],
+                },
+            }
+        )
+
+    if re.search(r"\b(note|notes)\b", m) and any(w in m for w in ("list", "show", "my")):
+        tools.append({"name": "note_list", "args": {}})
+    if re.search(r"\b(add note|save note|remember|note that)\b", m):
+        tools.append({"name": "note_add", "args": {"text": message[:800]}})
 
     if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find")):
-        q = message
-        tools.append({"name": "lattice_query", "args": {"q": q[:120], "project_key": ""}})
+        tools.append({"name": "lattice_query", "args": {"q": message[:120], "project_key": ""}})
 
-    if any(w in m for w in ("start deliver", "engage delivery", "run upgrade", "start upgrade")):
+    if any(w in m for w in ("start deliver", "engage delivery", "run upgrade", "start upgrade", "start mentrix")):
         tools.append({"name": "start_delivery", "args": {"goal": message[:400], "mode": "deliver"}})
 
-    if "computer mode" in m or "open notepad" in m or "screenshot" in m:
+    if "computer mode" in m or "open notepad" in m or "screenshot" in m or "ui inspect" in m:
         if "screenshot" in m:
             tools.append({"name": "desktop_screenshot", "args": {}})
+        elif "inspect" in m:
+            tools.append({"name": "computer_ui_inspect", "args": {}})
+        elif "scroll" in m:
+            tools.append({"name": "computer_scroll", "args": {"direction": "down"}})
+        elif "click" in m:
+            tools.append({"name": "computer_click", "args": {"x": 100, "y": 100}})
+        elif "type" in m:
+            tools.append({"name": "computer_type", "args": {"text": message[:200]}})
         elif "open" in m:
             tools.append({"name": "computer_open_app", "args": {"app": "notepad.exe"}})
         else:
             tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
 
+    if any(w in m for w in ("open sandbox", "go to sandbox", "show sandbox")):
+        tools.append({"name": "navigate", "args": {"path": "/sandbox", "label": "sandbox"}})
+    if any(w in m for w in ("open ask", "go to ask")):
+        tools.append({"name": "navigate", "args": {"path": "/ask", "label": "ask"}})
+    if any(w in m for w in ("open plan", "go to plan")):
+        tools.append({"name": "navigate", "args": {"path": "/plan", "label": "plan"}})
+    if any(w in m for w in ("open docs", "go to docs")):
+        tools.append({"name": "navigate", "args": {"path": "/docs", "label": "docs"}})
+    if any(w in m for w in ("open integrations", "go to integrations")):
+        tools.append({"name": "navigate", "args": {"path": "/integrations", "label": "integrations"}})
+
     if any(w in m for w in ("diagnose", "fix this", "why is this failing")):
         tools.append({"name": "diagnose_fix", "args": {"issue": message[:400]}})
 
-    # de-dupe by name
-    seen = set()
-    out = []
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
     for t in tools:
         if t["name"] not in seen:
             seen.add(t["name"])
             out.append(t)
-    return out
+    return out[:_MAX_TOOLS]
 
 
-def _exec_tool(
-    db: Session,
-    name: str,
-    args: dict,
-    project_key: str = "",
-) -> dict[str, Any]:
+def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", created_by: str = "") -> dict[str, Any]:
     if name == "navigate":
         return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
     if name == "go_back":
@@ -170,12 +412,17 @@ def _exec_tool(
             }
             for r in runs
         ]
-        return {"ok": True, "runs": items}
+        board = None
+        if items:
+            board = {
+                "type": "mermaid",
+                "title": f"Gates — run #{items[0]['id']}",
+                "body": _gates_mermaid(items[0].get("gates") or {}, items[0]["id"]),
+            }
+        return {"ok": True, "runs": items, "board": board}
     if name == "lattice_query":
         key = args.get("project_key") or project_key
         if not key:
-            gkeys = []
-            # best effort: any cached graph
             from app.services.lattice.indexer import _GRAPH_CACHE  # type: ignore
 
             gkeys = list(_GRAPH_CACHE.keys())[:1]
@@ -188,46 +435,70 @@ def _exec_tool(
             "ok": True,
             "project_key": key,
             "hits": hits[:15],
-            "summary": {
-                "files": g.files_indexed if g else 0,
-                "symbols": g.symbols if g else 0,
+            "summary": {"files": g.files_indexed if g else 0, "symbols": g.symbols if g else 0},
+            "board": {
+                "type": "table",
+                "title": "Lattice hits",
+                "data": {
+                    "columns": ["name", "kind", "path"],
+                    "rows": [
+                        [h.get("name") or h.get("symbol") or "", h.get("kind") or "", h.get("path") or ""]
+                        for h in (hits[:12] if isinstance(hits, list) else [])
+                    ],
+                },
             },
         }
     if name == "research_news":
         topic = args.get("topic") or "technology"
-        # Lightweight public RSS/Atom-free stub: DuckDuckGo HTML-less API
-        citations = []
-        try:
+        citations: list[dict[str, str]] = []
+        abstract = ""
+
+        def _fetch() -> tuple[str, list[dict[str, str]]]:
             url = f"https://api.duckduckgo.com/?q={quote_plus(topic)}&format=json&no_html=1"
-            with urlopen(url, timeout=6) as resp:  # noqa: S310 — public search API
+            with urlopen(url, timeout=_RESEARCH_TIMEOUT_S) as resp:  # noqa: S310
                 data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            cites: list[dict[str, str]] = []
             for item in (data.get("RelatedTopics") or [])[:6]:
                 if isinstance(item, dict) and item.get("Text"):
-                    citations.append({"title": item.get("Text", "")[:160], "url": item.get("FirstURL") or ""})
-            abstract = data.get("AbstractText") or ""
+                    cites.append({"title": item.get("Text", "")[:160], "url": item.get("FirstURL") or ""})
+            return (data.get("AbstractText") or ""), cites
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                abstract, citations = pool.submit(_fetch).result(timeout=_RESEARCH_TIMEOUT_S + 0.4)
         except Exception as exc:  # noqa: BLE001
-            abstract = f"Research stub for '{topic}' (live search unavailable: {exc})"
-        return {"ok": True, "topic": topic, "summary": abstract or f"Research notes on {topic}", "citations": citations}
+            abstract = f"Quick Mentrix research on '{topic}' (live lookup skipped: {type(exc).__name__})."
+        return {
+            "ok": True,
+            "topic": topic,
+            "summary": abstract or f"Research notes on {topic}",
+            "citations": citations,
+            "board": {
+                "type": "markdown",
+                "title": f"Research — {topic[:60]}",
+                "body": (abstract or f"Research notes on {topic}")
+                + (
+                    "\n\n## Sources\n" + "\n".join(f"- {c.get('title')}" for c in citations[:6])
+                    if citations
+                    else ""
+                ),
+            },
+        }
     if name == "content_brief":
         topic = args.get("topic") or "campaign"
         md = (
             f"# Mentrix content brief\n\n**Topic:** {topic}\n\n"
-            "## Audience\n- Primary segment\n- Secondary segment\n\n"
-            "## Key message\nOne clear value proposition.\n\n"
-            "## Ad angles\n1. Problem → solution\n2. Social proof\n3. Urgency\n\n"
-            "## CTA\nClear next step.\n"
+            "## Audience\n- Primary\n- Secondary\n\n## Key message\nValue proposition.\n\n"
+            "## Ad angles\n1. Problem → solution\n2. Social proof\n3. Urgency\n"
         )
         return {"ok": True, "board": {"type": "markdown", "title": "Content brief", "body": md}}
     if name == "ads_copy":
         topic = args.get("topic") or "offer"
-        md = f"# Ad copy variants\n\n1. **Direct:** {topic[:80]} — try it today.\n2. **Story:** Teams waste hours; Mentrix saves them.\n3. **Proof:** Measurable outcomes in one sprint.\n"
+        md = f"# Ad copy\n\n1. **Direct:** {topic[:80]}\n2. **Story:** Mentrix saves hours.\n3. **Proof:** Outcomes in one sprint.\n"
         return {"ok": True, "board": {"type": "markdown", "title": "Ad copy", "body": md}}
     if name == "report_draft":
         topic = args.get("topic") or "weekly"
-        md = (
-            f"# Mentrix report — {topic}\n\n## Highlights\n- Delivery runs reviewed\n- Research completed\n\n"
-            "## Risks\n- Blockers needing approval\n\n## Next steps\n- Confirm sends\n- Close open gates\n"
-        )
+        md = f"# Mentrix report — {topic}\n\n## Highlights\n- Delivery reviewed\n\n## Risks\n- Open gates\n\n## Next\n- Confirm sends\n"
         return {"ok": True, "board": {"type": "markdown", "title": "Report draft", "body": md}}
     if name == "docs_search":
         q = args.get("query") or ""
@@ -237,70 +508,98 @@ def _exec_tool(
             result = execute_tool(db, server_id="confluence", tool_name="search", arguments={"query": q})
             return {"ok": True, "source": "confluence", "result": result}
         except Exception:
-            return {
-                "ok": True,
-                "source": "local",
-                "result": {"note": "Confluence MCP unavailable — use Docs Center", "query": q},
-            }
+            return {"ok": True, "source": "local", "result": {"note": "Confluence unavailable", "query": q}}
     if name == "docs_draft":
         return {
             "ok": True,
-            "needs_publish_confirm": True,
             "board": {
                 "type": "markdown",
                 "title": "Internal doc draft",
-                "body": f"# Draft\n\n{args.get('body') or args.get('query') or 'Outline here.'}\n",
+                "body": f"# Draft\n\n{args.get('body') or args.get('query') or 'Outline.'}\n",
             },
         }
+    if name == "weather_report":
+        from app.services.mentrix.weather import weather_report as _weather
+
+        wr = _weather(str(args.get("location") or args.get("place") or "Austin"))
+        if not wr.get("ok") and wr.get("fallback_research"):
+            # Caller / agent may follow with research_news; still return honest failure
+            return wr
+        return wr
     if name == "slack_digest":
         try:
             from app.services.mcp.hub import execute_tool
 
-            ch = execute_tool(db, server_id="slack", tool_name="list_channels", arguments={})
-            return {"ok": True, "digest": ch, "note": "Channel list (read). Sending requires confirm."}
+            hist = execute_tool(
+                db,
+                server_id="slack",
+                tool_name="channel_history",
+                arguments={
+                    "channel": args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "engineering"),
+                    "limit": 10,
+                },
+            )
+            if hist.get("status") == "not_configured" or hist.get("dry_run"):
+                return {
+                    "ok": True,
+                    "digest": {"messages": []},
+                    "spoken_summary": "Slack is not configured. Set SLACK_BOT_TOKEN in backend/.env.",
+                    "note": "Set SLACK_BOT_TOKEN in backend/.env",
+                }
+            messages = hist.get("messages") or []
+            channel = hist.get("channel") or "default"
+            if not messages:
+                spoken = f"No recent Slack messages in #{channel}."
+            else:
+                bits = [m.get("text") or "" for m in messages[:5] if m.get("text")]
+                spoken = f"Recent Slack in #{channel}: " + "; ".join(bits)[:500]
+            rows = [[m.get("user") or "", m.get("text") or ""] for m in messages[:10]]
+            return {
+                "ok": True,
+                "digest": hist,
+                "spoken_summary": spoken,
+                "note": f"{len(messages)} message(s) in #{channel}",
+                "board": {
+                    "type": "table",
+                    "title": f"Slack — #{channel}",
+                    "data": {"columns": ["user", "text"], "rows": rows},
+                },
+            }
         except Exception as exc:  # noqa: BLE001
-            return {"ok": True, "digest": {"channels": []}, "note": f"Slack adapter: {exc}"}
+            return {
+                "ok": True,
+                "digest": {"messages": []},
+                "spoken_summary": f"Slack digest unavailable: {type(exc).__name__}. Set SLACK_BOT_TOKEN if needed.",
+                "note": str(exc)[:200],
+            }
     if name == "slack_send":
         try:
             from app.services.mcp.hub import execute_tool
 
+            channel = args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "general")
+            text = args.get("text") or ""
             sent = execute_tool(
                 db,
                 server_id="slack",
                 tool_name="send_message",
-                arguments={"channel": args.get("channel") or "general", "text": args.get("text") or ""},
+                arguments={"channel": str(channel).lstrip("#"), "text": text},
             )
-            return {"ok": True, "sent": sent}
-        except Exception as exc:  # noqa: BLE001
-            return {"ok": True, "queued": True, "text": args.get("text"), "note": f"Slack send: {exc}"}
-    if name == "email_digest":
-        try:
-            from app.services.mcp.hub import execute_tool
-
-            # Prefer read/list when connector exposes it; else graceful stub
-            for tool_name in ("list_messages", "search", "inbox_digest"):
-                try:
-                    dig = execute_tool(db, server_id="email", tool_name=tool_name, arguments=args or {})
-                    return {"ok": True, "digest": dig, "source": f"email:{tool_name}"}
-                except Exception:
-                    continue
-            for tool_name in ("list_messages", "search"):
-                try:
-                    dig = execute_tool(db, server_id="gmail", tool_name=tool_name, arguments=args or {})
-                    return {"ok": True, "digest": dig, "source": f"gmail:{tool_name}"}
-                except Exception:
-                    continue
+            return {
+                "ok": True,
+                "sent": sent,
+                "spoken_summary": f"Slack message sent to {channel}." if not sent.get("dry_run") else "Slack send queued (token missing).",
+            }
         except Exception as exc:  # noqa: BLE001
             return {
                 "ok": True,
-                "digest": {"items": []},
-                "note": f"Email/Gmail read not connected ({exc}). Configure Integrations.",
+                "queued": True,
+                "note": f"Slack send: {exc}",
+                "spoken_summary": f"Could not send Slack message: {type(exc).__name__}.",
             }
-        return {
-            "ok": True,
-            "digest": {"items": []},
-            "note": "Configure Gmail OAuth read or email MCP in Integrations for inbox digests",
-        }
+    if name == "email_digest":
+        from app.services.mentrix.email_inbox import fetch_inbox_digest
+
+        return fetch_inbox_digest(limit=8)
     if name == "email_send":
         try:
             from app.services.mcp.hub import execute_tool
@@ -315,79 +614,215 @@ def _exec_tool(
                     "body": args.get("body") or "",
                 },
             )
-            return {"ok": True, "sent": sent}
+            return {
+                "ok": True,
+                "sent": sent,
+                "spoken_summary": "Email sent." if not sent.get("dry_run") else "Email not sent — configure SMTP_HOST.",
+            }
         except Exception as exc:  # noqa: BLE001
-            return {"ok": True, "queued": True, "subject": args.get("subject"), "note": f"Email send: {exc}"}
+            return {
+                "ok": True,
+                "queued": True,
+                "note": f"Email send: {exc}",
+                "spoken_summary": f"Email send failed: {type(exc).__name__}.",
+            }
     if name == "image_avatar":
+        from app.services.mentrix.media_board import generate_media
+
+        entry = generate_media(args.get("prompt") or "Mentrix companion avatar", created_by=created_by)
         return {
             "ok": True,
+            "media": entry,
             "board": {
-                "type": "image_placeholder",
-                "title": "Avatar generation",
-                "body": "Upload photo after confirm — Mentrix will generate a companion avatar (OpenAI images when keyed).",
+                "type": "image",
+                "title": f"Mentrix image #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
             },
         }
-    if name == "start_delivery":
+    if name == "media_generate":
+        from app.services.mentrix.media_board import generate_media
+
+        entry = generate_media(args.get("prompt") or "Mentrix image", created_by=created_by)
         return {
             "ok": True,
-            "start_delivery": {"goal": args.get("goal"), "mode": args.get("mode") or "deliver"},
-            "note": "Open Mentrix Delivery or confirm to start run",
+            "media": entry,
+            "board": {
+                "type": "image",
+                "title": f"Mentrix image #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
+            },
+        }
+    if name == "media_edit":
+        from app.services.mentrix.media_board import edit_media
+
+        num = int(args.get("number") or 1)
+        entry = edit_media(num, args.get("prompt") or "edit", created_by=created_by)
+        return {
+            "ok": True,
+            "media": entry,
+            "board": {
+                "type": "image",
+                "title": f"Mentrix edit #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
+            },
+        }
+    if name == "media_list":
+        from app.services.mentrix.media_board import list_media
+
+        items = list_media()
+        return {
+            "ok": True,
+            "media": items,
+            "board": {
+                "type": "record",
+                "title": "Mentrix Image board",
+                "body": f"{len(items)} images",
+                "data": {
+                    "records": [
+                        {
+                            "id": f"#{it.get('number'):03d}",
+                            "text": it.get("prompt") or "",
+                            "tags": ["media", f"n{it.get('number')}"],
+                            "createdAt": it.get("createdAt"),
+                        }
+                        for it in items
+                    ]
+                },
+            },
+        }
+    if name == "note_list":
+        from app.services.mentrix.notes import list_notes
+
+        notes = list_notes()
+        return {
+            "ok": True,
+            "notes": notes,
+            "board": {
+                "type": "record",
+                "title": "Mentrix Notes",
+                "data": {"records": notes},
+            },
+        }
+    if name == "note_add":
+        from app.services.mentrix.notes import add_note
+
+        note = add_note(str(args.get("text") or ""), tags=args.get("tags") or ["mentrix"])
+        return {
+            "ok": True,
+            "note": note,
+            "board": {"type": "note", "title": "Note saved", "body": note.get("text") or "", "data": note},
+        }
+    if name == "start_delivery":
+        from app.services.forge_loop.orchestrator import MODE_PIPELINE, run_mentrix
+
+        goal = (args.get("goal") or "Mentrix Delivery").strip()
+        mode = args.get("mode") or "upgrade"
+        if mode not in MODE_PIPELINE:
+            mode = "upgrade" if "upgrade" in MODE_PIPELINE else "chat"
+        run = run_mentrix(
+            db,
+            goal=goal,
+            mode=mode,
+            project_key=project_key or args.get("project_key") or "",
+            created_by=created_by or "mentrix-companion",
+            workspace=args.get("workspace") or "",
+        )
+        gates = json.loads(run.gates_json or "{}")
+        return {
+            "ok": True,
+            "run_id": run.id,
+            "status": run.status,
+            "navigate": "/mentrix",
+            "board": {
+                "type": "mermaid",
+                "title": f"Delivery workflow #{run.id}",
+                "body": _gates_mermaid(gates, run.id),
+            },
+            "board_progress": {
+                "type": "progress",
+                "title": f"Run #{run.id}",
+                "data": {"status": run.status, "next_step": run.next_step or "", "percent": 35},
+            },
         }
     if name in ("approve_delivery", "create_pr"):
         return {"ok": True, "queued": True, "action": name, "note": "Confirm in Mentrix Delivery UI"}
     if name == "desktop_screenshot":
-        return {"ok": True, "desktop": "screenshot", "note": "Electron Computer Mode performs capture after confirm"}
+        return {"ok": True, "desktop": "screenshot", "note": "Electron Computer Mode after confirm"}
     if name == "desktop_read":
         path = str(args.get("path") or "")
         blocked = (".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh")
         if any(b in path.lower() for b in blocked):
             return {"ok": False, "error": "path_blocked_default_deny", "path": path}
-        return {"ok": True, "path": path, "desktop": "desktop_read", "note": "Allowlisted read after confirm"}
+        return {"ok": True, "path": path, "desktop": "desktop_read"}
     if name == "computer_open_app":
         return {"ok": True, "app": args.get("app") or "notepad.exe", "desktop": "open_app"}
-    if name in ("computer_click", "computer_type"):
-        return {"ok": True, "desktop": name, "args": args, "note": "Requires Computer Mode ON + confirm"}
+    if name in ("computer_click", "computer_type", "computer_scroll", "computer_ui_inspect"):
+        return {"ok": True, "desktop": name, "args": args}
     if name == "diagnose_fix":
         issue = args.get("issue") or ""
         runs = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(3).all()
-        run_bits = ", ".join(f"#{r.id}:{r.status}" for r in runs) or "no recent runs"
+        run_bits = ", ".join(f"#{r.id}:{r.status}" for r in runs) or "none"
         md = (
-            f"# Diagnose & fix plan\n\n**Issue:** {issue}\n\n"
-            f"**Recent Delivery:** {run_bits}\n\n"
-            "1. Gather Lattice + logs (allowed paths only — secrets blocked)\n"
-            "2. Propose minimal fix on Mentrix Board\n"
-            "3. Confirm → Mentrix Delivery (`/mentrix`) or desktop steps (Computer Mode)\n"
-            "4. Verify gates / outcome\n"
+            f"# Diagnose & fix\n\n**Issue:** {issue}\n\n**Recent Delivery:** {run_bits}\n\n"
+            "1. Gather Lattice + logs\n2. Propose fix\n3. Confirm → Delivery\n4. Verify gates\n"
+        )
+        mermaid = (
+            "flowchart TD\n"
+            "  gather[Gather context] --> plan[Board plan]\n"
+            "  plan --> confirm[User Allow]\n"
+            "  confirm --> deliver[Mentrix Delivery]\n"
+            "  deliver --> verify[Verify gates]\n"
         )
         return {
             "ok": True,
             "board": {"type": "markdown", "title": "Diagnose & fix", "body": md},
-            "navigate": "/mentrix",
-            "start_delivery": {"goal": f"Fix: {issue[:300]}", "mode": "deliver"},
+            "board_extra": {"type": "mermaid", "title": "Fix workflow", "body": mermaid},
         }
     return {"ok": False, "error": f"Unknown tool {name}"}
 
 
-def run_companion_turn(
+def _merge_intents(message: str) -> list[dict[str, Any]]:
+    det = _parse_intents(message)
+    if det:
+        return det
+    planned = _llm_plan_tools(message)
+    return planned[:_MAX_TOOLS]
+
+
+def iter_companion_events(
     db: Session,
     message: str,
     *,
     project_key: str = "",
     project_id: int | None = None,
     user_id: int | None = None,
+    created_by: str = "",
     confirmed_tools: list[str] | None = None,
     history: list[dict] | None = None,
-) -> dict[str, Any]:
+    turn_id: str | None = None,
+    resume_pending: list[dict] | None = None,
+) -> Generator[dict[str, Any], None, dict[str, Any]]:
+    """Yield SSE-shaped events; return final turn summary."""
+    t0 = time.time()
+    tid = turn_id or str(uuid.uuid4())
     confirmed = set(confirmed_tools or [])
-    intents = _parse_intents(message)
+    yield {"event": "thinking", "turn_id": tid, "data": {"message": "Mentrix thinking…"}}
+
+    intents = resume_pending or _merge_intents(message)
     tool_results: list[dict] = []
     pending: list[dict] = []
     board_items: list[dict] = []
     navigations: list[str] = []
+    run_id: int | None = None
 
-    for intent in intents:
+    for intent in intents[:_MAX_TOOLS]:
         name = intent["name"]
         args = intent.get("args") or {}
+        yield {"event": "tool_start", "turn_id": tid, "data": {"tool": name, "args": {k: v for k, v in args.items() if "password" not in k.lower() and "token" not in k.lower()}}}
+
         perm = check_tool_permission(
             db,
             name,
@@ -398,6 +833,7 @@ def run_companion_turn(
         if perm["result"] == "denied":
             tool_results.append({"tool": name, "denied": True, "permission": perm})
             log_mentrix_tool(db, name, args=args, result="denied", user_id=user_id)
+            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "denied"}}
             continue
         if perm.get("needs_confirm") or (perm["result"] == "pending_approval" and name not in confirmed):
             pending.append(
@@ -409,15 +845,37 @@ def run_companion_turn(
                     "always_ask": name in ALWAYS_CONFIRM_TOOLS,
                 }
             )
+            yield {
+                "event": "pending_confirm",
+                "turn_id": tid,
+                "data": {"tool": name, "args": args, "reason": f"Allow Mentrix to run {name}?"},
+            }
+            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
             continue
-        result = _exec_tool(db, name, args, project_key=project_key)
+
+        result = _exec_tool(db, name, args, project_key=project_key, created_by=created_by)
         tool_results.append({"tool": name, "result": result, "permission": perm})
         log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
         if result.get("board"):
             board_items.append(result["board"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board"]}
+        if result.get("board_extra"):
+            board_items.append(result["board_extra"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board_extra"]}
+        if result.get("board_progress"):
+            board_items.append(result["board_progress"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board_progress"]}
         nav = result.get("navigate")
         if nav:
             navigations.append(nav)
+            yield {"event": "navigate", "turn_id": tid, "data": {"path": nav}}
+        if result.get("run_id"):
+            run_id = int(result["run_id"])
+        yield {
+            "event": "tool_end",
+            "turn_id": tid,
+            "data": {"tool": name, "ok": bool(result.get("ok")), "error": result.get("error")},
+        }
 
     context_bits = []
     for tr in tool_results:
@@ -426,24 +884,181 @@ def run_companion_turn(
         else:
             context_bits.append(json.dumps({tr["tool"]: tr.get("result")}, default=str)[:800])
     if pending:
-        context_bits.append("Pending user confirmation: " + ", ".join(p["tool"] for p in pending))
+        context_bits.append("Pending: " + ", ".join(p["tool"] for p in pending))
 
-    reply = _llm_answer(message, "\n".join(context_bits))
     if pending and not tool_results:
         reply = (
-            "I can help with that, but I need your permission first for: "
+            "I can help, but I need your permission for: "
             + ", ".join(p["tool"] for p in pending)
-            + ". Confirm to continue."
+            + ". Allow to continue."
         )
     elif any(tr.get("denied") for tr in tool_results) and not any(not tr.get("denied") for tr in tool_results):
-        reply = "Org policy blocked that action. Ask an admin to update Mentrix Permissions if needed."
+        reply = "Org policy blocked that action."
+    else:
+        fast = _fast_tool_reply(tool_results, board_items, navigations)
+        reply = fast or _llm_answer(message, "\n".join(context_bits))
 
-    return {
+    # token chunks for realtime feel
+    chunk = max(24, len(reply) // 4 or 24)
+    for i in range(0, len(reply), chunk):
+        yield {"event": "token", "turn_id": tid, "data": {"text": reply[i : i + chunk]}}
+
+    summary = {
         "reply": reply,
         "avatar_state": "needs_permission" if pending else ("speaking" if reply else "idle"),
         "tools": tool_results,
         "pending_confirmations": pending,
         "board": board_items,
         "navigate": navigations[0] if navigations else None,
-        "history_tail": (history or [])[-6:] + [{"role": "user", "content": message}, {"role": "assistant", "content": reply}],
+        "latency_mode": "fast_tools" if tool_results and not pending else ("pending" if pending else "llm"),
+        "turn_id": tid,
+        "run_id": run_id,
+        "latency_ms": int((time.time() - t0) * 1000),
+        "history_tail": (history or [])[-6:]
+        + [{"role": "user", "content": message}, {"role": "assistant", "content": reply}],
     }
+
+    if pending:
+        _TURN_STORE[tid] = {
+            "message": message,
+            "project_key": project_key,
+            "project_id": project_id,
+            "user_id": user_id,
+            "created_by": created_by,
+            "pending": pending,
+            "history": history or [],
+        }
+
+    yield {
+        "event": "done",
+        "turn_id": tid,
+        "data": {
+            "reply": reply,
+            "run_id": run_id,
+            "latency_ms": summary["latency_ms"],
+            "pending_confirmations": pending,
+            "navigate": summary["navigate"],
+            "board": board_items,
+            "avatar_state": summary["avatar_state"],
+            "latency_mode": summary["latency_mode"],
+        },
+    }
+    return summary
+
+
+def run_companion_turn_v2(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+) -> dict[str, Any]:
+    """Non-streaming turn that executes once and returns full payload."""
+    events: list[dict] = []
+    gen = iter_companion_events(
+        db,
+        message,
+        project_key=project_key,
+        project_id=project_id,
+        user_id=user_id,
+        created_by=created_by,
+        confirmed_tools=confirmed_tools,
+        history=history,
+    )
+    final: dict[str, Any] | None = None
+    try:
+        while True:
+            events.append(next(gen))
+    except StopIteration as stop:
+        final = stop.value if isinstance(stop.value, dict) else None
+    if final:
+        return final
+    done = next((e for e in reversed(events) if e.get("event") == "done"), None)
+    if not done:
+        return {"reply": "Mentrix ready.", "tools": [], "pending_confirmations": [], "board": []}
+    d = done.get("data") or {}
+    tools = []
+    for e in events:
+        if e.get("event") == "tool_end":
+            td = e.get("data") or {}
+            tools.append(
+                {
+                    "tool": td.get("tool"),
+                    "denied": td.get("error") == "denied",
+                    "result": {"ok": td.get("ok"), "error": td.get("error")},
+                }
+            )
+    return {
+        "reply": d.get("reply"),
+        "avatar_state": d.get("avatar_state"),
+        "tools": tools,
+        "pending_confirmations": d.get("pending_confirmations") or [],
+        "board": d.get("board") or [],
+        "navigate": d.get("navigate"),
+        "latency_mode": d.get("latency_mode"),
+        "turn_id": done.get("turn_id"),
+        "run_id": d.get("run_id"),
+        "latency_ms": d.get("latency_ms"),
+        "history_tail": (history or [])[-6:]
+        + [{"role": "user", "content": message}, {"role": "assistant", "content": d.get("reply") or ""}],
+    }
+
+
+# Public alias used by router
+def run_companion_turn(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+) -> dict[str, Any]:
+    return run_companion_turn_v2(
+        db,
+        message,
+        project_key=project_key,
+        project_id=project_id,
+        user_id=user_id,
+        created_by=created_by,
+        confirmed_tools=confirmed_tools,
+        history=history,
+    )
+
+
+def resume_companion_turn(
+    db: Session,
+    turn_id: str,
+    confirmed_tools: list[str],
+    *,
+    created_by: str = "",
+) -> Iterator[dict[str, Any]]:
+    state = _TURN_STORE.pop(turn_id, None)
+    if not state:
+        yield {"event": "error", "turn_id": turn_id, "data": {"error": "turn_expired"}}
+        return
+    pending_intents = [{"name": p["tool"], "args": p.get("args") or {}} for p in state.get("pending") or []]
+    yield from iter_companion_events(
+        db,
+        state["message"],
+        project_key=state.get("project_key") or "",
+        project_id=state.get("project_id"),
+        user_id=state.get("user_id"),
+        created_by=created_by or "",
+        confirmed_tools=confirmed_tools,
+        history=state.get("history"),
+        turn_id=turn_id,
+        resume_pending=pending_intents,
+    )
+
+
+def sse_pack(event: dict[str, Any]) -> str:
+    name = event.get("event") or "message"
+    payload = json.dumps(event, default=str)
+    return f"event: {name}\ndata: {payload}\n\n"

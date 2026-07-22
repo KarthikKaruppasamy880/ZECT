@@ -28,9 +28,9 @@ from app.routers import confluence_integration, datadog_integration, email_integ
 
 app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 
-# Rate limiting: 120 requests/minute per IP, burst of 20
+# Rate limiting (env: ZECT_RATE_LIMIT_RPM / BURST / DISABLED) — high local defaults for e2e
 # NOTE: added BEFORE CORS so CORS wraps everything (middleware order is LIFO)
-app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
 
 # CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.

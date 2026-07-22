@@ -14,8 +14,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "@/lib/api";
 
 interface BrainState {
   project_id: number;
@@ -47,7 +46,7 @@ export default function MemoryDashboard() {
 
   const fetchBrainState = async () => {
     try {
-      const res = await fetch(`${API}/api/memory/brain-state/${projectId}`);
+      const res = await apiFetch(`/api/memory/brain-state/${projectId}`);
       if (res.ok) setBrainState(await res.json());
       else showToast("error", `Failed to load brain state (${res.status})`);
     } catch (err) { showToast("error", "Network error loading brain state"); }
@@ -55,7 +54,7 @@ export default function MemoryDashboard() {
 
   const fetchEpisodes = async () => {
     try {
-      const res = await fetch(`${API}/api/memory/episodic/${projectId}?limit=50`);
+      const res = await apiFetch(`/api/memory/episodic/${projectId}?limit=50`);
       if (res.ok) setEpisodes(await res.json());
       else showToast("error", `Failed to load episodes (${res.status})`);
     } catch (err) { showToast("error", "Network error loading episodes"); }
@@ -63,7 +62,7 @@ export default function MemoryDashboard() {
 
   const fetchLessons = async () => {
     try {
-      const res = await fetch(`${API}/api/memory/lessons/${projectId}`);
+      const res = await apiFetch(`/api/memory/lessons/${projectId}`);
       if (res.ok) setLessons(await res.json());
       else showToast("error", `Failed to load lessons (${res.status})`);
     } catch (err) { showToast("error", "Network error loading lessons"); }
@@ -71,7 +70,7 @@ export default function MemoryDashboard() {
 
   const fetchDecisions = async () => {
     try {
-      const res = await fetch(`${API}/api/memory/decisions/${projectId}`);
+      const res = await apiFetch(`/api/memory/decisions/${projectId}`);
       if (res.ok) setDecisions(await res.json());
       else showToast("error", `Failed to load decisions (${res.status})`);
     } catch (err) { showToast("error", "Network error loading decisions"); }
@@ -86,7 +85,7 @@ export default function MemoryDashboard() {
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     try {
-      const res = await fetch(`${API}/api/memory/search`, {
+      const res = await apiFetch(`/api/memory/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: searchQuery, project_id: projectId }),
@@ -99,7 +98,7 @@ export default function MemoryDashboard() {
   const handleLearn = async () => {
     if (!learnClaim.trim()) return;
     try {
-      await fetch(`${API}/api/memory/learn`, {
+      await apiFetch(`/api/memory/learn`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -120,7 +119,7 @@ export default function MemoryDashboard() {
 
   const handleGraduate = async (lessonId: number) => {
     try {
-      await fetch(`${API}/api/memory/lessons/${lessonId}/graduate`, {
+      await apiFetch(`/api/memory/lessons/${lessonId}/graduate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rationale: "Graduated via dashboard", reviewer: "user" }),
@@ -133,7 +132,7 @@ export default function MemoryDashboard() {
 
   const handleReject = async (lessonId: number) => {
     try {
-      await fetch(`${API}/api/memory/lessons/${lessonId}/reject`, {
+      await apiFetch(`/api/memory/lessons/${lessonId}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: "Rejected via dashboard", reviewer: "user" }),

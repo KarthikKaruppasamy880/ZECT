@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { generateBlueprint, generateFocusedBlueprint, enhanceBlueprint } from "@/lib/api";
+import { useEffect, useState } from "react";
+import {
+  generateBlueprint,
+  generateFocusedBlueprint,
+  enhanceBlueprint,
+  latticeBlueprintPrompt,
+} from "@/lib/api";
 import type { BlueprintResult, FocusedBlueprintResult, EnhanceBlueprintResponse } from "@/types";
 import {
   Sparkles,
@@ -11,10 +16,11 @@ import {
   AlertCircle,
   FileCode,
   Target,
+  Network,
 } from "lucide-react";
 import { parseGitHubInput } from "@/lib/utils";
 
-type Mode = "standard" | "focused";
+type Mode = "standard" | "focused" | "lattice";
 
 export default function BlueprintGenerator() {
   const [mode, setMode] = useState<Mode>("standard");
@@ -32,6 +38,15 @@ export default function BlueprintGenerator() {
   const [focusGoal, setFocusGoal] = useState("");
   const [focusedResult, setFocusedResult] = useState<FocusedBlueprintResult | null>(null);
 
+  // From Lattice mode
+  const [latticeKey, setLatticeKey] = useState("");
+  const [latticePath, setLatticePath] = useState("");
+  const [latticeResult, setLatticeResult] = useState<{
+    prompt: string;
+    token_estimate: number;
+    stats?: Record<string, unknown>;
+  } | null>(null);
+
   // Shared state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +54,25 @@ export default function BlueprintGenerator() {
   const [enhancing, setEnhancing] = useState(false);
   const [enhanced, setEnhanced] = useState<EnhanceBlueprintResponse | null>(null);
   const [enhanceCopied, setEnhanceCopied] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("zect_mentrix_workspace");
+      if (!raw) return;
+      const ws = JSON.parse(raw) as {
+        project_key?: string;
+        projectKey?: string;
+        path?: string;
+        workspace?: string;
+      };
+      const pk = ws.project_key || ws.projectKey;
+      const wp = ws.path || ws.workspace;
+      if (pk) setLatticeKey(pk);
+      if (wp) setLatticePath(wp);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const addRepo = () => setRepos([...repos, { owner: "", repo: "" }]);
   const removeRepo = (idx: number) => setRepos(repos.filter((_, i) => i !== idx));
@@ -93,26 +127,68 @@ export default function BlueprintGenerator() {
     }
   };
 
+  const handleLatticeGenerate = async () => {
+    if (!latticeKey.trim()) {
+      setError("Enter a Lattice project key (from Repo Workspace clone or Lattice ingest).");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setLatticeResult(null);
+    try {
+      const data = await latticeBlueprintPrompt(
+        latticeKey.trim(),
+        latticePath.trim(),
+        Boolean(latticePath.trim()),
+      );
+      setLatticeResult(data);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Lattice blueprint failed — ingest the workspace first.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const activePrompt = mode === "standard" ? result?.prompt : focusedResult?.prompt;
+  const activePrompt =
+    mode === "standard"
+      ? result?.prompt
+      : mode === "focused"
+        ? focusedResult?.prompt
+        : latticeResult?.prompt;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Blueprint Generator</h1>
         <p className="text-gray-500 mt-1">
-          Synthesize a GitHub repository into a single copy-paste prompt for any AI coding tool
-          to vibe-code the project from scratch.
+          Deep structural blueprints from Lattice (local index) or GitHub Standard/Focused modes
+          for remote-only repos.
         </p>
       </div>
 
       {/* Mode Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit flex-wrap">
+        <button
+          onClick={() => { setMode("lattice"); setError(null); }}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${
+            mode === "lattice"
+              ? "bg-white text-teal-700 shadow-sm"
+              : "text-gray-600 hover:text-gray-900"
+          }`}
+        >
+          <Network size={14} />
+          From Lattice
+        </button>
         <button
           onClick={() => { setMode("standard"); setError(null); }}
           className={`px-4 py-2 rounded-md text-sm font-medium transition flex items-center gap-2 ${
@@ -122,7 +198,7 @@ export default function BlueprintGenerator() {
           }`}
         >
           <Sparkles size={14} />
-          Standard
+          GitHub Standard
         </button>
         <button
           onClick={() => { setMode("focused"); setError(null); }}
@@ -136,6 +212,50 @@ export default function BlueprintGenerator() {
           Focused
         </button>
       </div>
+
+      {mode === "lattice" && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4" data-testid="blueprint-lattice-mode">
+          <h2 className="text-sm font-semibold text-gray-700">From Lattice structural blueprint</h2>
+          <p className="text-xs text-gray-500">
+            Uses Mentrix RepoBlueprint: APIs, symbols, deps, tech stack, god nodes — not README-only.
+          </p>
+          <div className="flex gap-3 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Project key</label>
+              <input
+                data-testid="blueprint-lattice-key"
+                type="text"
+                value={latticeKey}
+                onChange={(e) => setLatticeKey(e.target.value)}
+                placeholder="e.g. owner-repo from Workspace clone"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Local path <span className="text-gray-400 font-normal">(rebuild if missing)</span>
+              </label>
+              <input
+                data-testid="blueprint-lattice-path"
+                type="text"
+                value={latticePath}
+                onChange={(e) => setLatticePath(e.target.value)}
+                placeholder="optional workspace path"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              />
+            </div>
+          </div>
+          <button
+            data-testid="blueprint-lattice-generate"
+            onClick={handleLatticeGenerate}
+            disabled={loading}
+            className="px-5 py-2 bg-teal-700 text-white rounded-lg text-sm font-medium hover:bg-teal-800 disabled:opacity-50 flex items-center gap-2"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Network size={16} />}
+            Generate deep prompt
+          </button>
+        </div>
+      )}
 
       {/* Standard Mode Input */}
       {mode === "standard" && (
@@ -412,6 +532,44 @@ export default function BlueprintGenerator() {
         </div>
       )}
 
+      {/* Lattice Result */}
+      {mode === "lattice" && latticeResult && (
+        <div className="bg-white rounded-xl border border-teal-200" data-testid="blueprint-lattice-result">
+          <div className="p-5 border-b border-teal-200 flex items-center justify-between bg-teal-50">
+            <div className="flex items-center gap-3">
+              <Network size={20} className="text-teal-700" />
+              <div>
+                <h2 className="font-semibold text-gray-900">Lattice deep blueprint</h2>
+                <p className="text-xs text-gray-500">
+                  ~{latticeResult.token_estimate.toLocaleString()} tokens
+                  {latticeResult.stats
+                    ? ` · endpoints=${String((latticeResult.stats as any).api_endpoints ?? "—")} · functions=${String((latticeResult.stats as any).functions ?? "—")}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => handleCopy(latticeResult.prompt)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
+                copied
+                  ? "bg-green-100 text-green-700"
+                  : "bg-teal-700 text-white hover:bg-teal-800"
+              }`}
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? "Copied!" : "Copy to Clipboard"}
+            </button>
+          </div>
+          <div className="p-5">
+            <div className="bg-gray-50 rounded-lg p-4 max-h-96 overflow-y-auto">
+              <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap">
+                {latticeResult.prompt}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Focused Result */}
       {mode === "focused" && focusedResult && (
         <div className="bg-white rounded-xl border border-gray-200">
@@ -455,16 +613,19 @@ export default function BlueprintGenerator() {
       {!activePrompt && !loading && (
         <div className="bg-gray-50 rounded-xl border border-gray-100 p-6">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">How It Works</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
             <div>
-              <p className="font-medium text-gray-800 mb-1">Standard Mode</p>
-              <p>Analyzes one or more repos and generates a comprehensive prompt to recreate
-              the entire project from scratch. Best for full project blueprints.</p>
+              <p className="font-medium text-gray-800 mb-1">From Lattice</p>
+              <p>Deep structural prompt from local Lattice index (APIs, symbols, deps, tech stack).
+              Prefer this when the repo is cloned or ingested.</p>
+            </div>
+            <div>
+              <p className="font-medium text-gray-800 mb-1">GitHub Standard</p>
+              <p>Remote tree + README vibe prompt when you only have a GitHub URL.</p>
             </div>
             <div>
               <p className="font-medium text-gray-800 mb-1">Focused Mode</p>
-              <p>Scopes analysis to a specific feature or layer (e.g. auth, API, database).
-              Best for understanding or replicating a specific part of a codebase.</p>
+              <p>Scopes analysis to a specific feature or layer (e.g. auth, API, database).</p>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-gray-200">

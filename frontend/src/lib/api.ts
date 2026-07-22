@@ -1,18 +1,26 @@
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+/** Bearer + JSON headers for authenticated API calls. */
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(opts?.headers as Record<string, string> | undefined),
+    ...extra,
   };
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   if (token && !headers.Authorization) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    headers,
-  });
+  return headers;
+}
+
+/** Low-level fetch with auth — use when callers need res.ok / status handling. */
+export async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
+  const headers = authHeaders(opts?.headers as Record<string, string> | undefined);
+  return fetch(`${API}${path}`, { ...opts, headers });
+}
+
+export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await apiFetch(path, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const detail = err.detail;
@@ -55,6 +63,14 @@ export const updateProject = (id: number, data: Partial<Project>) =>
   request<Project>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteProject = (id: number) =>
   request<void>(`/api/projects/${id}`, { method: "DELETE" });
+export const addProjectRepo = (
+  projectId: number,
+  data: { owner: string; repo_name: string; default_branch?: string },
+) =>
+  request<Project>(`/api/projects/${projectId}/repos`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 
 // Settings
 export const getSettings = () => request<Setting[]>("/api/settings");
@@ -211,6 +227,42 @@ export const latticeRagSearch = (query: string, project_key?: string, top_k = 8)
     method: "POST",
     body: JSON.stringify({ q: query, project_key: project_key || "", limit: top_k }),
   });
+export const latticePath = (project_key: string, source: string, target: string, max_depth = 8) =>
+  request<any>("/api/lattice/path", {
+    method: "POST",
+    body: JSON.stringify({ project_key, source, target, max_depth }),
+  });
+export const latticeNeighbors = (project_key: string, node: string, depth = 1, limit = 50) =>
+  request<any>("/api/lattice/neighbors", {
+    method: "POST",
+    body: JSON.stringify({ project_key, node, depth, limit }),
+  });
+export const latticeExplain = (
+  project_key: string,
+  opts: { source?: string; target?: string; node?: string } = {},
+) =>
+  request<any>("/api/lattice/explain", {
+    method: "POST",
+    body: JSON.stringify({
+      project_key,
+      source: opts.source || "",
+      target: opts.target || "",
+      node: opts.node || "",
+    }),
+  });
+export const latticeBlueprint = (project_key: string) =>
+  request<any>(`/api/lattice/blueprint?project_key=${encodeURIComponent(project_key)}`);
+export const latticeBlueprintPrompt = (
+  project_key: string,
+  path = "",
+  rebuild = false,
+) =>
+  request<any>("/api/lattice/blueprint/prompt", {
+    method: "POST",
+    body: JSON.stringify({ project_key, path, rebuild }),
+  });
+export const latticeGodNodes = (project_key: string, limit = 20) =>
+  request<any>(`/api/lattice/god-nodes?project_key=${encodeURIComponent(project_key)}&limit=${limit}`);
 
 // Mentrix
 export const mentrixAgents = () => request<any>("/api/mentrix/agents");

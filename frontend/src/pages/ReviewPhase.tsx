@@ -62,9 +62,23 @@ export default function ReviewPhase() {
           <Shield className="h-6 w-6 text-purple-600" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Mentrix Ultra Review</h1>
-          <p className="text-slate-500">Best-in-class Mentrix code quality gate — security, performance, maintainability, and actionable fixes</p>
+          <h1 className="text-2xl font-bold text-slate-900">Snippet Review</h1>
+          <p className="text-slate-500">
+            Manual paste-only quality check — delivery reviews run automatically inside Mentrix
+          </p>
         </div>
+      </div>
+
+      <div
+        className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        data-testid="snippet-review-banner"
+      >
+        Manual paste only. For build, upgrade, or bugfix, use{" "}
+        <a href="/#/mentrix" className="font-medium text-teal-800 underline">
+          Mentrix Delivery
+        </a>{" "}
+        — Ultra Review runs as a gate before Approve → Create PR. For existing PRs, use Quality →
+        Mentrix Ultra Review.
       </div>
 
       {/* Input Form */}

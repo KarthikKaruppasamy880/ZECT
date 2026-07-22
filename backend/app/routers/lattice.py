@@ -13,7 +13,22 @@ from sqlalchemy.orm import Session
 
 from app.core.auth.deps import CurrentUser, get_current_user
 from app.database import get_db
-from app.services.lattice.indexer import get_graph, ingest_path, query_graph
+from app.services.lattice.indexer import (
+    communities as lattice_communities,
+    explain as lattice_explain,
+    find_path,
+    get_graph,
+    god_nodes as lattice_god_nodes,
+    ingest_path,
+    neighbors as lattice_neighbors,
+    query_graph,
+)
+from app.services.lattice.structural_blueprint import (
+    build_deep_prompt,
+    build_structural_blueprint,
+    get_structural_blueprint,
+    persist_structural_blueprint,
+)
 from app.services.rag.retriever import hybrid_retrieve, index_directory
 
 router = APIRouter(prefix="/api/lattice", tags=["lattice"])
@@ -26,12 +41,47 @@ class IngestPathRequest(BaseModel):
     repo_id: int | None = None
     index_rag: bool = True
     max_files: int = 2000
+    build_blueprint: bool = True
 
 
 class QueryRequest(BaseModel):
     project_key: str
     q: str
     limit: int = 50
+
+
+class PathRequest(BaseModel):
+    project_key: str
+    source: str
+    target: str
+    max_depth: int = 8
+
+
+class NeighborsRequest(BaseModel):
+    project_key: str
+    node: str
+    depth: int = 1
+    limit: int = 50
+
+
+class ExplainRequest(BaseModel):
+    project_key: str
+    source: str = ""
+    target: str = ""
+    node: str = ""
+
+
+class BlueprintBuildRequest(BaseModel):
+    path: str
+    project_key: str = ""
+    max_files: int = 2000
+    refresh_graph: bool = True
+
+
+class BlueprintPromptRequest(BaseModel):
+    project_key: str
+    path: str = ""
+    rebuild: bool = False
 
 
 @router.post("/ingest")
@@ -42,8 +92,9 @@ def ingest(
 ):
     if os.getenv("LATTICE_ENABLED", "true").lower() in ("0", "false"):
         raise HTTPException(status_code=503, detail="Lattice is disabled")
+    key = req.project_key or req.path
     try:
-        graph = ingest_path(req.path, project_key=req.project_key or req.path, max_files=req.max_files)
+        graph = ingest_path(req.path, project_key=key, max_files=req.max_files)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     rag_stats = {}
@@ -56,7 +107,31 @@ def ingest(
             project_key=graph.project_key,
             max_files=min(req.max_files, 500),
         )
-    return {"graph": graph.to_dict(), "rag": rag_stats}
+    blueprint_summary = None
+    if req.build_blueprint:
+        try:
+            bp = build_structural_blueprint(
+                req.path,
+                graph.project_key,
+                max_files=req.max_files,
+                refresh_graph=False,
+            )
+            persist_structural_blueprint(db, bp)
+            blueprint_summary = {
+                "project_key": bp["project_key"],
+                "stats": bp.get("stats"),
+                "tech_stack": bp.get("tech_stack"),
+                "api_endpoints": len(bp.get("api_endpoints") or []),
+                "god_nodes": len(bp.get("god_nodes") or []),
+            }
+        except Exception as exc:  # noqa: BLE001 — ingest must still succeed
+            blueprint_summary = {"error": str(exc)}
+    return {
+        "graph": graph.to_dict(),
+        "rag": rag_stats,
+        "blueprint": blueprint_summary,
+        "god_nodes": lattice_god_nodes(graph.project_key, limit=10),
+    }
 
 
 @router.post("/ingest/upload")
@@ -78,7 +153,9 @@ async def ingest_upload(
         key = project_key or file.filename
         graph = ingest_path(str(extract_dir), project_key=key)
         rag_stats = index_directory(db, str(extract_dir), project_key=key)
-    return {"graph": graph.to_dict(), "rag": rag_stats}
+        bp = build_structural_blueprint(str(extract_dir), key, refresh_graph=False)
+        persist_structural_blueprint(db, bp)
+    return {"graph": graph.to_dict(), "rag": rag_stats, "blueprint": bp.get("stats")}
 
 
 @router.get("/graph")
@@ -86,7 +163,10 @@ def graph(project_key: str, _user: CurrentUser = Depends(get_current_user)):
     g = get_graph(project_key)
     if not g:
         raise HTTPException(status_code=404, detail="Graph not found — run /api/lattice/ingest first")
-    return g.to_dict()
+    data = g.to_dict()
+    data["god_nodes"] = lattice_god_nodes(project_key, limit=15)
+    data["communities"] = lattice_communities(project_key, limit=10)
+    return data
 
 
 @router.post("/query")
@@ -102,3 +182,84 @@ def rag_search(
 ):
     hits = hybrid_retrieve(db, req.q, project_key=req.project_key, top_k=req.limit)
     return {"hits": hits}
+
+
+@router.post("/path")
+def path(req: PathRequest, _user: CurrentUser = Depends(get_current_user)):
+    return find_path(req.project_key, req.source, req.target, max_depth=req.max_depth)
+
+
+@router.post("/neighbors")
+def neighbors_api(req: NeighborsRequest, _user: CurrentUser = Depends(get_current_user)):
+    return lattice_neighbors(req.project_key, req.node, depth=req.depth, limit=req.limit)
+
+
+@router.post("/explain")
+def explain_api(req: ExplainRequest, _user: CurrentUser = Depends(get_current_user)):
+    return lattice_explain(
+        req.project_key,
+        source_ref=req.source,
+        target_ref=req.target,
+        node_ref=req.node,
+    )
+
+
+@router.get("/god-nodes")
+def god_nodes_api(project_key: str, limit: int = 20, _user: CurrentUser = Depends(get_current_user)):
+    return {"nodes": lattice_god_nodes(project_key, limit=limit)}
+
+
+@router.get("/communities")
+def communities_api(project_key: str, limit: int = 12, _user: CurrentUser = Depends(get_current_user)):
+    return {"communities": lattice_communities(project_key, limit=limit)}
+
+
+@router.post("/blueprint/build")
+def blueprint_build(
+    req: BlueprintBuildRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    try:
+        bp = build_structural_blueprint(
+            req.path,
+            req.project_key or req.path,
+            max_files=req.max_files,
+            refresh_graph=req.refresh_graph,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    persist_structural_blueprint(db, bp)
+    return bp
+
+
+@router.get("/blueprint")
+def blueprint_get(project_key: str, db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    bp = get_structural_blueprint(db, project_key)
+    if not bp:
+        raise HTTPException(status_code=404, detail="Structural blueprint not found — ingest or build first")
+    return bp
+
+
+@router.post("/blueprint/prompt")
+def blueprint_prompt(
+    req: BlueprintPromptRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    bp = get_structural_blueprint(db, req.project_key)
+    if req.rebuild or not bp:
+        if not req.path:
+            raise HTTPException(
+                status_code=400,
+                detail="Blueprint missing — provide path to rebuild or run ingest first",
+            )
+        bp = build_structural_blueprint(req.path, req.project_key, refresh_graph=True)
+        persist_structural_blueprint(db, bp)
+    prompt = build_deep_prompt(bp)
+    return {
+        "prompt": prompt,
+        "token_estimate": max(1, len(prompt) // 4),
+        "project_key": req.project_key,
+        "stats": bp.get("stats"),
+    }

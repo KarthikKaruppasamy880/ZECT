@@ -12,7 +12,14 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.models import MentrixRun, Rule
-from app.services.lattice.indexer import get_graph, query_graph
+from app.services.lattice.indexer import (
+    explain as lattice_explain,
+    get_graph,
+    god_nodes as lattice_god_nodes,
+    neighbors as lattice_neighbors,
+    query_graph,
+)
+from app.services.lattice.structural_blueprint import get_structural_blueprint
 from app.services.phases.blueprint_phase import run_blueprint
 from app.services.phases.llm_phase import run_ask, run_enhance_blueprint, run_plan
 from app.services.phases.review_phase_svc import run_ultra_review
@@ -174,10 +181,35 @@ def _run_scout(db: Session, goal: str, project_key: str, events: list[dict]) -> 
     rag_hits = []
     if os.getenv("RAG_ENABLED", "true").lower() not in ("0", "false") and project_key:
         rag_hits = hybrid_retrieve(db, goal, project_key=project_key, top_k=8)
+    neighbor_packs: list[dict] = []
+    explain_notes: list[str] = []
+    if project_key and graph_hits:
+        for hit in graph_hits[:5]:
+            ref = hit.get("name") or hit.get("path") or hit.get("id")
+            if not ref:
+                continue
+            nb = lattice_neighbors(project_key, str(ref), depth=1, limit=12)
+            if nb.get("nodes"):
+                neighbor_packs.append(
+                    {
+                        "seed": ref,
+                        "node_count": len(nb.get("nodes") or []),
+                        "edge_kinds": sorted({e.get("kind") for e in (nb.get("edges") or []) if e.get("kind")}),
+                        "related": [n.get("name") for n in (nb.get("nodes") or [])[:6]],
+                    }
+                )
+            exp = lattice_explain(project_key, node_ref=str(ref))
+            if exp.get("summary"):
+                explain_notes.append(exp["summary"])
+    structural = get_structural_blueprint(db, project_key) if project_key else None
     pack = {
         "graph_hits": graph_hits,
         "rag_hits": rag_hits,
         "graph_summary": None,
+        "neighbor_packs": neighbor_packs,
+        "explain_notes": explain_notes[:5],
+        "structural_blueprint": structural,
+        "god_nodes": lattice_god_nodes(project_key, limit=10) if project_key else [],
     }
     g = get_graph(project_key) if project_key else None
     if g:
@@ -186,8 +218,26 @@ def _run_scout(db: Session, goal: str, project_key: str, events: list[dict]) -> 
             "symbols": g.symbols,
             "languages": g.languages,
             "node_count": len(g.nodes),
+            "edge_count": len(g.edges),
+            "call_edges": sum(1 for e in g.edges if e.kind == "calls"),
+            "endpoint_nodes": sum(1 for n in g.nodes if n.kind == "endpoint"),
         }
-    _emit(events, "scout", f"Retrieved {len(graph_hits)} graph hits, {len(rag_hits)} RAG chunks", phase="lattice")
+    if structural:
+        pack["graph_summary"] = {
+            **(pack.get("graph_summary") or {}),
+            "tech_stack": structural.get("tech_stack"),
+            "api_endpoints": len(structural.get("api_endpoints") or []),
+            "functions": (structural.get("stats") or {}).get("functions"),
+            "blueprint_status": structural.get("status"),
+        }
+    _emit(
+        events,
+        "scout",
+        f"Retrieved {len(graph_hits)} graph hits, {len(rag_hits)} RAG chunks, "
+        f"{len(neighbor_packs)} neighbor packs"
+        + (f", structural blueprint ({len(structural.get('api_endpoints') or [])} endpoints)" if structural else ""),
+        phase="lattice",
+    )
     return pack
 
 

@@ -21,9 +21,9 @@ setup("authenticate", async ({ page }) => {
   await page.getByTestId("login-password").fill(password);
   await page.getByTestId("login-submit").click();
 
-  await expect(page.getByText(/Mentrix|Dashboard|Control Tower/i).first()).toBeVisible({
-    timeout: 30_000,
-  });
+  // Wait for post-login navigation (login page also contains "Mentrix" copy)
+  await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
 
   const token = await page.evaluate(() => localStorage.getItem("zect_token"));
   expect(token).toBeTruthy();

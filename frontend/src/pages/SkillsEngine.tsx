@@ -10,9 +10,8 @@ import {
   Clock,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
+import { apiFetch } from "@/lib/api";
 import Pagination from "@/components/Pagination";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 interface Skill {
   id: number;
@@ -52,7 +51,7 @@ export default function SkillsEngine() {
     try {
       const params = new URLSearchParams();
       if (filterCategory) params.set("category", filterCategory);
-      const res = await fetch(`${API}/api/skills-engine/skills?${params}`);
+      const res = await apiFetch(`/api/skills-engine/skills?${params}`);
       if (res.ok) setSkills(await res.json());
       else showToast("error", `Failed to load skills (${res.status})`);
     } catch (err) { showToast("error", "Network error loading skills"); }
@@ -60,7 +59,7 @@ export default function SkillsEngine() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/stats`);
+      const res = await apiFetch(`/api/skills-engine/stats`);
       if (res.ok) setStats(await res.json());
       else showToast("error", `Failed to load stats (${res.status})`);
     } catch (err) { showToast("error", "Network error loading stats"); }
@@ -68,7 +67,7 @@ export default function SkillsEngine() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/categories`);
+      const res = await apiFetch(`/api/skills-engine/categories`);
       if (res.ok) setCategories(await res.json());
       else showToast("error", `Failed to load categories (${res.status})`);
     } catch (err) { showToast("error", "Network error loading categories"); }
@@ -76,7 +75,7 @@ export default function SkillsEngine() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/executions?limit=50`);
+      const res = await apiFetch(`/api/skills-engine/executions?limit=50`);
       if (res.ok) setExecLogs(await res.json());
       else showToast("error", `Failed to load logs (${res.status})`);
     } catch (err) { showToast("error", "Network error loading logs"); }
@@ -91,7 +90,7 @@ export default function SkillsEngine() {
   const handleMatch = async () => {
     if (!matchIntent.trim()) return;
     try {
-      const res = await fetch(`${API}/api/skills-engine/match`, {
+      const res = await apiFetch(`/api/skills-engine/match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: matchIntent }),
@@ -104,7 +103,7 @@ export default function SkillsEngine() {
   const handleCreateSkill = async () => {
     if (!newSkill.name.trim()) return;
     try {
-      const res = await fetch(`${API}/api/skills-engine/skills`, {
+      const res = await apiFetch(`/api/skills-engine/skills`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newSkill),
@@ -124,7 +123,7 @@ export default function SkillsEngine() {
 
   const handleDeactivate = async (skillId: number) => {
     try {
-      await fetch(`${API}/api/skills-engine/skills/${skillId}`, { method: "DELETE" });
+      await apiFetch(`/api/skills-engine/skills/${skillId}`, { method: "DELETE" });
       showToast("info", "Skill deactivated");
       fetchSkills();
       fetchStats();

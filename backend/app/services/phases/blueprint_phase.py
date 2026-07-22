@@ -17,6 +17,7 @@ def run_blueprint(
 ) -> dict[str, Any]:
     """Build a migration blueprint prompt from local workspace + scout hits."""
     scout = scout or {}
+    structural = scout.get("structural_blueprint") or {}
     lines = [
         f"# Mentrix upgrade blueprint",
         f"**Goal:** {goal[:800]}",
@@ -25,9 +26,45 @@ def run_blueprint(
     if source_lang or target_lang:
         lines.append(f"**Languages:** {source_lang or '?'} → {target_lang or '?'}")
 
+    if structural:
+        stats = structural.get("stats") or {}
+        lines.append(
+            f"\n## Structural blueprint (Lattice)\n"
+            f"tech={', '.join(structural.get('tech_stack') or [])} "
+            f"files={stats.get('files_indexed')} endpoints={stats.get('api_endpoints')} "
+            f"functions={stats.get('functions')} classes={stats.get('classes')}"
+        )
+        eps = structural.get("api_endpoints") or []
+        if eps:
+            lines.append("\n## API endpoints")
+            for ep in eps[:30]:
+                lines.append(f"- {ep.get('name')} — {ep.get('path')}")
+        dep = structural.get("dependency_graph") or {}
+        if dep:
+            lines.append("\n## Dependency graph (sample)")
+            for src, tgts in list(dep.items())[:20]:
+                lines.append(f"- {src} → {', '.join(tgts[:6])}")
+        gods = structural.get("god_nodes") or []
+        if gods:
+            lines.append("\n## God nodes")
+            for g in gods[:10]:
+                lines.append(
+                    f"- {g.get('kind')} {g.get('name')} @ {g.get('path')} (degree={g.get('degree')})"
+                )
+        notes = scout.get("explain_notes") or []
+        if notes:
+            lines.append("\n## Lattice explain notes")
+            for note in notes[:5]:
+                lines.append(f"- {note}")
+        funcs = structural.get("functions") or []
+        if funcs:
+            lines.append("\n## Top symbols")
+            for f in funcs[:25]:
+                lines.append(f"- {f.get('name')} — {f.get('path')}")
+
     root = Path(workspace) if workspace else None
     tree: list[str] = []
-    if root and root.is_dir():
+    if root and root.is_dir() and not structural.get("file_tree"):
         skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build"}
         for p in sorted(root.rglob("*"))[:120]:
             if any(part in skip for part in p.parts):
@@ -41,9 +78,15 @@ def run_blueprint(
         lines.append("```")
         lines.extend(tree[:80])
         lines.append("```")
+    elif structural.get("file_tree"):
+        tree = list(structural.get("file_tree") or [])[:80]
+        lines.append("\n## Workspace tree (from Lattice blueprint)")
+        lines.append("```")
+        lines.extend(tree)
+        lines.append("```")
 
     graph_hits = scout.get("graph_hits") or []
-    if graph_hits:
+    if graph_hits and not structural:
         lines.append("\n## Lattice symbols")
         for h in graph_hits[:25]:
             path = h.get("path") or h.get("file") or ""
@@ -51,7 +94,7 @@ def run_blueprint(
             lines.append(f"- {path} :: {name}")
 
     summary = scout.get("graph_summary") or {}
-    if summary:
+    if summary and not structural:
         lines.append(
             f"\n## Graph summary\nfiles={summary.get('files_indexed')} "
             f"symbols={summary.get('symbols')} langs={summary.get('languages')}"
@@ -59,7 +102,7 @@ def run_blueprint(
 
     lines.append(
         "\n## Mentrix instructions\n"
-        "1. Inventory APIs and module boundaries\n"
+        "1. Inventory APIs and module boundaries from the structural blueprint\n"
         "2. Port one module/phase at a time\n"
         "3. Preserve behavior; add tests + API evals\n"
         "4. Mentrix Ultra Review must pass before PR\n"

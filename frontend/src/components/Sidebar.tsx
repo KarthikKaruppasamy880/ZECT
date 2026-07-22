@@ -51,6 +51,10 @@ import {
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
+const workflowItems: NavItem[] = [
+  { href: "/mentrix", label: "Mentrix Delivery", icon: Bot },
+];
+
 const workspaceItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
@@ -68,12 +72,11 @@ const understandItems: NavItem[] = [
 ];
 
 const deliverItems: NavItem[] = [
-  { href: "/mentrix", label: "Mentrix", icon: Bot },
   { href: "/agent-mode", label: "Agent Mode", icon: Bot },
   { href: "/ask", label: "Ask", icon: MessageSquare },
   { href: "/plan", label: "Plan", icon: ClipboardList },
   { href: "/build", label: "Build", icon: Hammer },
-  { href: "/review", label: "Ultra Review", icon: Shield },
+  { href: "/review", label: "Snippet Review", icon: Shield },
   { href: "/deploy", label: "Deploy", icon: Rocket },
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
 ];
@@ -115,6 +118,7 @@ const labsItems: NavItem[] = [
 ];
 
 const sections: { title: string; items: NavItem[] }[] = [
+  { title: "Workflow", items: workflowItems },
   { title: "Workspace", items: workspaceItems },
   { title: "Understand", items: understandItems },
   { title: "Deliver", items: deliverItems },

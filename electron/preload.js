@@ -18,6 +18,13 @@ contextBridge.exposeInMainWorld("zectDesktop", {
       ipcRenderer.on("mentrix-wake", handler);
       return () => ipcRenderer.removeListener("mentrix-wake", handler);
     },
+    onSttGoal: (cb) => {
+      const handler = (_event, payload) => cb(payload);
+      ipcRenderer.on("mentrix-stt-goal", handler);
+      return () => ipcRenderer.removeListener("mentrix-stt-goal", handler);
+    },
     setWakeEnabled: (enabled) => ipcRenderer.invoke("mentrix-wake-enabled", enabled),
+    submitTranscript: (transcript) => ipcRenderer.invoke("mentrix-stt-transcript", transcript),
+    submitGoal: (goal) => ipcRenderer.invoke("mentrix-stt-goal", goal),
   },
 });

@@ -9,8 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "@/lib/api";
 
 interface DreamRun {
   id: number;
@@ -38,7 +37,7 @@ export default function DreamEngine() {
 
   const fetchRuns = async () => {
     try {
-      const res = await fetch(`${API}/api/dream/runs/${projectId}?limit=20`);
+      const res = await apiFetch(`/api/dream/runs/${projectId}?limit=20`);
       if (res.ok) setRuns(await res.json());
       else showToast("error", `Failed to load dream runs (${res.status})`);
     } catch (err) { showToast("error", "Network error loading dream runs"); }
@@ -53,7 +52,7 @@ export default function DreamEngine() {
     setRunning(true);
     setLastResult(null);
     try {
-      const res = await fetch(`${API}/api/dream/run`, {
+      const res = await apiFetch(`/api/dream/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,7 +75,7 @@ export default function DreamEngine() {
 
   const handleDecay = async () => {
     try {
-      const res = await fetch(`${API}/api/dream/decay`, {
+      const res = await apiFetch(`/api/dream/decay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, max_age_days: 30 }),

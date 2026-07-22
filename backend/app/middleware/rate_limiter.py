@@ -1,10 +1,22 @@
 """Rate Limiting Middleware — Token-bucket rate limiter per IP/user."""
 
+import os
 import time
 from collections import defaultdict
-from fastapi import Request, Response
+
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 class RateLimiter:
@@ -13,7 +25,9 @@ class RateLimiter:
     def __init__(self, requests_per_minute: int = 60, burst: int = 10):
         self.rate = requests_per_minute / 60.0  # tokens per second
         self.burst = burst
-        self._buckets: dict[str, dict] = defaultdict(lambda: {"tokens": burst, "last": time.monotonic()})
+        self._buckets: dict[str, dict] = defaultdict(
+            lambda: {"tokens": float(burst), "last": time.monotonic()}
+        )
 
     def allow(self, key: str) -> tuple[bool, dict]:
         bucket = self._buckets[key]
@@ -28,32 +42,37 @@ class RateLimiter:
                 "X-RateLimit-Remaining": str(int(bucket["tokens"])),
                 "X-RateLimit-Limit": str(self.burst),
             }
-        else:
-            retry_after = (1 - bucket["tokens"]) / self.rate
-            return False, {
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Limit": str(self.burst),
-                "Retry-After": str(int(retry_after) + 1),
-            }
+        retry_after = (1 - bucket["tokens"]) / self.rate if self.rate else 1
+        return False, {
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Limit": str(self.burst),
+            "Retry-After": str(int(retry_after) + 1),
+        }
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """FastAPI middleware that applies rate limiting to API requests."""
 
-    def __init__(self, app, requests_per_minute: int = 120, burst: int = 20):
+    def __init__(self, app, requests_per_minute: int | None = None, burst: int | None = None):
         super().__init__(app)
-        self.limiter = RateLimiter(requests_per_minute=requests_per_minute, burst=burst)
+        # Local/e2e: high defaults; override via ZECT_RATE_LIMIT_* env
+        rpm = requests_per_minute if requests_per_minute is not None else _env_int("ZECT_RATE_LIMIT_RPM", 6000)
+        burst_n = burst if burst is not None else _env_int("ZECT_RATE_LIMIT_BURST", 500)
+        self.disabled = os.getenv("ZECT_RATE_LIMIT_DISABLED", "").lower() in ("1", "true", "yes")
+        self.limiter = RateLimiter(requests_per_minute=rpm, burst=burst_n)
 
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for non-API routes (static files, health checks)
-        if not request.url.path.startswith("/api"):
+        path = request.url.path
+        if (
+            self.disabled
+            or not path.startswith("/api")
+            or request.method == "OPTIONS"
+            or path in ("/api/health", "/api/auth/config", "/api/auth/login")
+        ):
             return await call_next(request)
 
-        # Use IP as rate limit key (could be extended to user ID)
         client_ip = request.client.host if request.client else "unknown"
-        key = f"{client_ip}"
-
-        allowed, headers = self.limiter.allow(key)
+        allowed, headers = self.limiter.allow(client_ip)
         if not allowed:
             response = JSONResponse(
                 status_code=429,

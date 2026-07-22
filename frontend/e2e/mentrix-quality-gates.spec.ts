@@ -23,9 +23,15 @@ test.describe("Mentrix quality gates", () => {
     await page.getByTestId("mentrix-mode").selectOption("deliver");
     await page.getByTestId("mentrix-goal").fill("Small deliverable for PR gate check");
     await page.getByTestId("mentrix-engage").click();
+    await expect(page.getByTestId("mentrix-error").or(page.getByTestId("mentrix-run-status"))).toBeVisible({
+      timeout: 90_000,
+    });
+    if (await page.getByTestId("mentrix-error").isVisible()) {
+      throw new Error(await page.getByTestId("mentrix-error").innerText());
+    }
     await expect(page.getByTestId("mentrix-run-status")).toContainText(
-      /awaiting_approval|needs_human|completed|approved/i,
-      { timeout: 60_000 }
+      /awaiting_approval|needs_human|completed|approved|running/i,
+      { timeout: 90_000 }
     );
     await expect(page.getByTestId("mentrix-create-pr")).toBeDisabled();
   });

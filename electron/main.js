@@ -11,6 +11,8 @@ const { matchesWakePhrase } = require("./wake");
 const { startWindowsWake } = require("./win-wake");
 const { startDictation } = require("./dictation");
 const computer = require("./computer");
+const shortcuts = require("./shortcuts");
+const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
 
 const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
 const DEV_URL = process.env.ZECT_DEV_URL || "http://127.0.0.1:5173";
@@ -21,6 +23,66 @@ let wakeEnabled = true;
 let winWakeHandle = null;
 let wakeStatus = { ok: false, reason: "starting", engine: "" };
 let dictationHandle = null;
+let dictationArmedUntil = 0;
+let dictationPaused = false;
+let dictationArmTimer = null;
+
+function isDictationArmed() {
+  return Date.now() < dictationArmedUntil && !dictationPaused;
+}
+
+function stopDictation() {
+  if (dictationArmTimer) {
+    clearTimeout(dictationArmTimer);
+    dictationArmTimer = null;
+  }
+  dictationArmedUntil = 0;
+  if (dictationHandle) {
+    dictationHandle.stop();
+    dictationHandle = null;
+  }
+  if (wakeEnabled) startNativeWake();
+}
+
+function startDictationLoop() {
+  if (dictationHandle) return;
+  if (winWakeHandle) {
+    winWakeHandle.stop();
+    winWakeHandle = null;
+  }
+  dictationHandle = startDictation(
+    (text) => {
+      if (!mainWindow || !text || !isDictationArmed()) return;
+      const goal = stripEchoPhrases(String(text));
+      if (!passesVoiceGate(goal)) return;
+      mainWindow.webContents.send("mentrix-stt-goal", {
+        goal,
+        ts: new Date().toISOString(),
+        staged: true,
+      });
+      stopDictation();
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("mentrix-wake-status", { ...wakeStatus, dictation: status });
+      }
+    },
+  );
+}
+
+function armDictation(durationMs = 15000) {
+  if (process.platform !== "win32") {
+    return { ok: false, reason: "not_windows" };
+  }
+  const ms = Math.max(3000, Math.min(Number(durationMs) || 15000, 30000));
+  dictationArmedUntil = Date.now() + ms;
+  startDictationLoop();
+  if (dictationArmTimer) clearTimeout(dictationArmTimer);
+  dictationArmTimer = setTimeout(() => {
+    stopDictation();
+  }, ms);
+  return { ok: true, armedUntil: dictationArmedUntil, durationMs: ms };
+}
 
 let computerMode = false;
 let computerModeIdleTimer = null;
@@ -149,6 +211,10 @@ function startNativeWake() {
 }
 
 ipcMain.handle("get-app-path", () => app.getAppPath());
+ipcMain.handle("zect-shortcut-status", () => shortcuts.getDesktopShortcutStatus());
+ipcMain.handle("zect-shortcut-create", () => shortcuts.createOrUpdateDesktopShortcut());
+ipcMain.handle("zect-relaunch", () => shortcuts.relaunchApp());
+ipcMain.handle("zect-pull-relaunch", () => shortcuts.pullUpdatesAndRelaunch());
 ipcMain.handle("mentrix-engage", (_e, goal) => {
   emitWake("Mentrix engage", "ipc");
   return { ok: true, goal: goal || "", agent: "Mentrix" };
@@ -176,47 +242,20 @@ ipcMain.handle("mentrix-stt-goal", (_e, goal) => {
   return { ok: true };
 });
 ipcMain.handle("mentrix-dictation-enabled", (_e, enabled) => {
-  if (dictationHandle) {
-    dictationHandle.stop();
-    dictationHandle = null;
-  }
   if (!enabled) {
-    if (wakeEnabled) startNativeWake();
+    stopDictation();
     return { ok: true, dictation: false };
   }
-  if (winWakeHandle) {
-    winWakeHandle.stop();
-    winWakeHandle = null;
-  }
-  dictationHandle = startDictation(
-    (text) => {
-      if (!mainWindow || !text) return;
-      let goal = String(text);
-      const lower = goal.toLowerCase();
-      for (const p of [
-        "hey mentrix",
-        "mentrix engage",
-        "wake mentrix",
-        "hey matrix",
-        "mentrix ready",
-        "how can i help",
-      ]) {
-        if (lower.startsWith(p)) {
-          goal = goal.slice(p.length).trim();
-          break;
-        }
-        goal = goal.replace(new RegExp(p, "gi"), "").trim();
-      }
-      if (!goal || goal.length < 2) return;
-      mainWindow.webContents.send("mentrix-stt-goal", { goal, ts: new Date().toISOString() });
-    },
-    (status) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("mentrix-wake-status", { ...wakeStatus, dictation: status });
-      }
-    },
-  );
-  return { ok: true, dictation: true };
+  return armDictation(15000);
+});
+ipcMain.handle("mentrix-dictation-arm", (_e, durationMs) => armDictation(durationMs));
+ipcMain.handle("mentrix-dictation-disarm", () => {
+  stopDictation();
+  return { ok: true, dictation: false };
+});
+ipcMain.handle("mentrix-dictation-pause", (_e, paused) => {
+  dictationPaused = Boolean(paused);
+  return { ok: true, paused: dictationPaused };
 });
 ipcMain.handle("mentrix-computer-mode", (_e, enabled) => {
   computerMode = Boolean(enabled);
@@ -303,6 +342,20 @@ const menuTemplate = [
         accelerator: "CmdOrCtrl+,",
         click: () =>
           mainWindow?.webContents.executeJavaScript("window.location.assign('/settings')"),
+      },
+      {
+        label: "Create Desktop Shortcut",
+        click: async () => {
+          const res = shortcuts.createOrUpdateDesktopShortcut();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("zect-shortcut-result", res);
+          }
+          if (res.ok) {
+            mainWindow?.webContents.executeJavaScript(
+              "window.location.assign('/mentrix-home')",
+            );
+          }
+        },
       },
       { type: "separator" },
       { label: "Quit", accelerator: "CmdOrCtrl+Q", click: () => app.quit() },
@@ -435,10 +488,7 @@ app.on("will-quit", () => {
     winWakeHandle.stop();
     winWakeHandle = null;
   }
-  if (dictationHandle) {
-    dictationHandle.stop();
-    dictationHandle = null;
-  }
+  stopDictation();
 });
 
 app.on("window-all-closed", () => {

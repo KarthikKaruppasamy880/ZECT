@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import {
+  mentrixCompanionIntegrations,
   mentrixCompanionPolicy,
   mentrixCompanionPolicyImport,
   mentrixCompanionStream,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/api";
 import MentrixConfirmModal, { type PendingConfirm } from "@/components/MentrixConfirmModal";
 import MentrixArtifacts, { type ArtifactItem } from "@/components/MentrixArtifacts";
+import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
 import {
   probeMentrixRealtimePreflight,
   startMentrixRealtime,
@@ -31,6 +33,13 @@ import {
   type RealtimePreflight,
   type RealtimeSessionHandle,
 } from "@/lib/mentrixRealtime";
+import {
+  ensureMicPermission,
+  getStoredMicDeviceId,
+  listMicDevices,
+  setStoredMicDeviceId,
+  type MicDevice,
+} from "@/lib/micDevices";
 
 type AvatarState = "idle" | "listening" | "thinking" | "speaking" | "working" | "needs_permission";
 type ChatMsg = { role: "user" | "assistant" | "system"; text: string };
@@ -44,7 +53,7 @@ function speak(text: string, enabled: boolean) {
     u.rate = 1.05;
     window.speechSynthesis.speak(u);
   } catch {
-    /* ignore */
+    /* ignore — Realtime voice replies use OpenAI audio, not browser TTS */
   }
 }
 
@@ -94,10 +103,17 @@ export default function MentrixCompanion() {
   const [runsHint, setRunsHint] = useState("");
   const [streamReply, setStreamReply] = useState("");
   const [lastMessage, setLastMessageKeep] = useState("");
-  const [voiceTranscript, setVoiceTranscript] = useState("");
   const [realtimePreflight, setRealtimePreflight] = useState<RealtimePreflight | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
+  const [micDeviceId, setMicDeviceId] = useState(() => getStoredMicDeviceId());
+  const [integrations, setIntegrations] = useState<{
+    slack: boolean;
+    jira: boolean;
+    openai: boolean;
+  } | null>(null);
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
+  const micDeviceIdRef = useRef(micDeviceId);
+  micDeviceIdRef.current = micDeviceId;
   const pendingArgsRef = useRef<Record<string, Record<string, unknown>>>({});
   const chatEnd = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -133,127 +149,107 @@ export default function MentrixCompanion() {
     probeMentrixRealtimePreflight()
       .then(setRealtimePreflight)
       .catch(() => setRealtimePreflight({ ready: false, reason: "probe_failed" }));
+    mentrixCompanionIntegrations()
+      .then((s) => setIntegrations({ slack: !!s.slack, jira: !!s.jira, openai: !!s.openai }))
+      .catch(() => setIntegrations(null));
+    void (async () => {
+      await ensureMicPermission();
+      const devices = await listMicDevices();
+      setMicDevices(devices);
+      const stored = getStoredMicDeviceId();
+      if (stored && devices.some((d) => d.deviceId === stored)) {
+        setMicDeviceId(stored);
+      } else if (!stored && devices[0]?.deviceId) {
+        setMicDeviceId(devices[0].deviceId);
+        setStoredMicDeviceId(devices[0].deviceId);
+      }
+    })();
   }, []);
 
-  const stripEchoPhrases = (text: string) => {
-    let t = text.trim();
-    for (const p of [
-      "hey mentrix",
-      "mentrix engage",
-      "wake mentrix",
-      "hey matrix",
-      "mentrix ready",
-      "how can i help",
-    ]) {
-      const lower = t.toLowerCase();
-      if (lower.startsWith(p)) t = t.slice(p.length).trim();
-      t = t.replace(new RegExp(p, "gi"), "").trim();
+  const refreshRealtimePreflight = useCallback(async () => {
+    setRealtimePreflight(null);
+    try {
+      const pf = await probeMentrixRealtimePreflight();
+      setRealtimePreflight(pf);
+      return pf;
+    } catch {
+      const pf = { ready: false, reason: "probe_failed" } as RealtimePreflight;
+      setRealtimePreflight(pf);
+      return pf;
     }
-    return t;
-  };
-
-  const submitVoiceTranscript = useCallback(
-    (raw: string) => {
-      const t = stripEchoPhrases(raw);
-      if (!t || t.length < 2) return;
-      setVoiceTranscript(t);
-      setLastMessageKeep(t);
-      setInput(t);
-      void runTurnRef.current?.(t);
-    },
-    [],
-  );
+  }, []);
 
   const startVoiceSession = useCallback(async () => {
     if (realtimeRef.current) {
       realtimeRef.current.stop();
       realtimeRef.current = null;
     }
-    setVoiceConnected(true);
     setAvatar("listening");
     setStatusLine("Connect Voice…");
-    const preflight =
-      realtimePreflight ?? (await probeMentrixRealtimePreflight().catch(() => ({ ready: false, reason: "probe_failed" })));
-    setRealtimePreflight(preflight);
+    const preflight = await refreshRealtimePreflight();
+    if (!preflight.ready) {
+      setVoiceConnected(false);
+      setAvatar("idle");
+      setStatusLine(`Realtime unavailable — ${preflight.reason || "check OPENAI_API_KEY"}`);
+      pushLog(`realtime_unavailable ${preflight.reason || "unknown"}`);
+      return;
+    }
+    setVoiceConnected(true);
     const handle = await startMentrixRealtime({
-      skipRealtime: !preflight.ready,
+      skipRealtime: false,
       preflight,
+      deviceId: micDeviceIdRef.current || undefined,
       handlers: {
-      onOrb: (s) => setAvatar(s as AvatarState),
-      onLog: pushLog,
-      onTranscript: (role, text) => {
-        if (!text?.trim()) return;
-        setMessages((m) => [...m, { role, text }]);
-        if (role === "user") {
-          setLastMessageKeep(text);
-          setVoiceTranscript(text);
-        }
-      },
-      onNavigate: (path) => applyNav(path, navigate as any),
-      onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
-      onPendingConfirm: (pendingList) => {
-        const mapped = pendingList.map((p) => {
-          const tool = String(p.tool || "");
-          const fullArgs = (p.args as Record<string, unknown>) || {};
-          const redacted =
-            (p.args_redacted as Record<string, unknown>) ||
-            Object.fromEntries(Object.entries(fullArgs).map(([k, v]) => [k, k === "text" || k === "body" || k === "path" ? "…" : v]));
-          pendingArgsRef.current[tool] = fullArgs;
-          return {
-            tool,
-            action: String(p.action || p.tool || ""),
-            args: fullArgs,
-            args_redacted: redacted,
-            reason: String(p.reason || "Allow required"),
-          };
-        });
-        setPending(mapped);
-        setAvatar("needs_permission");
-        speak("I need your permission to continue.", tts);
-      },
-      onError: (err) => pushLog(`realtime ${err}`),
-      onFallback: async (reason) => {
-        pushLog(`realtime_fallback ${reason}`);
-        setStatusLine("Listening (STT fallback)");
-        const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-        const desktop = window.zectDesktop?.isDesktopApp;
-        if (SR && !desktop) {
-          const rec = new SR();
-          recognitionRef.current = rec;
-          rec.continuous = true;
-          rec.interimResults = false;
-          rec.lang = "en-US";
-          rec.onresult = (ev: any) => {
-            const t = ev.results?.[ev.results.length - 1]?.[0]?.transcript || "";
-            if (t) submitVoiceTranscript(t);
-          };
-          rec.onerror = () => {
-            setVoiceConnected(false);
-            setAvatar("idle");
-          };
-          try {
-            rec.start();
-            pushLog("Connect Voice — Web Speech fallback");
-          } catch {
-            setVoiceConnected(false);
-          }
-          return;
-        }
-        try {
-          await window.zectDesktop?.mentrix?.setDictationEnabled?.(true);
-          pushLog("Connect Voice — desktop dictation fallback");
-          setStatusLine("Listening after Hey Mentrix");
-        } catch {
-          pushLog("Connect Voice — type your ask (mic fallback unavailable)");
-        }
-      },
+        onOrb: (s) => setAvatar(s as AvatarState),
+        onLog: pushLog,
+        onTranscript: (role, text) => {
+          if (!text?.trim()) return;
+          setMessages((m) => [...m, { role, text }]);
+          if (role === "user") setLastMessageKeep(text);
+        },
+        onNavigate: (path) => applyNav(path, navigate as any),
+        onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
+        onPendingConfirm: (pendingList) => {
+          const mapped = pendingList.map((p) => {
+            const tool = String(p.tool || "");
+            const fullArgs = (p.args as Record<string, unknown>) || {};
+            const redacted =
+              (p.args_redacted as Record<string, unknown>) ||
+              Object.fromEntries(
+                Object.entries(fullArgs).map(([k, v]) => [
+                  k,
+                  k === "text" || k === "body" || k === "path" ? "…" : v,
+                ]),
+              );
+            pendingArgsRef.current[tool] = fullArgs;
+            return {
+              tool,
+              action: String(p.action || p.tool || ""),
+              args: fullArgs,
+              args_redacted: redacted,
+              reason: String(p.reason || "Allow required"),
+            };
+          });
+          setPending(mapped);
+          setAvatar("needs_permission");
+          speak("I need your permission to continue.", tts);
+        },
+        onError: (err) => pushLog(`realtime ${err}`),
+        onFallback: (reason) => {
+          pushLog(`realtime_unavailable ${reason}`);
+          setVoiceConnected(false);
+          setAvatar("idle");
+          setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
+        },
       },
     });
     realtimeRef.current = handle;
     if (handle.mode === "realtime") {
-      setStatusLine("Realtime voice connected");
+      setStatusLine("Realtime voice connected — speak naturally");
+    } else {
+      setVoiceConnected(false);
     }
-  }, [navigate, pushLog, realtimePreflight, submitVoiceTranscript, tts]);
+  }, [navigate, pushLog, refreshRealtimePreflight, tts]);
 
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
@@ -262,8 +258,7 @@ export default function MentrixCompanion() {
       unsubs.push(
         desktop.onWake(() => {
           setAvatar("listening");
-          speak("Mentrix ready. How can I help?", tts);
-          pushLog("Wake — Mentrix listening");
+          pushLog("Wake — Connect Voice (Realtime)");
           void startVoiceSession();
         }),
       );
@@ -289,7 +284,7 @@ export default function MentrixCompanion() {
       unsubs.forEach((u) => u());
       window.removeEventListener("mentrix-wake", onDom);
     };
-  }, [tts, pushLog, startVoiceSession]);
+  }, [pushLog, startVoiceSession]);
 
   const handleStreamEvent = useCallback(
     (ev: MentrixStreamEvent) => {
@@ -484,16 +479,11 @@ export default function MentrixCompanion() {
 
   const toggleVoice = () => {
     if (voiceConnected) {
-      try {
-        recognitionRef.current?.stop?.();
-      } catch {
-        /* ignore */
-      }
       realtimeRef.current?.stop();
       realtimeRef.current = null;
-      void window.zectDesktop?.mentrix?.setDictationEnabled?.(false);
       setVoiceConnected(false);
       setAvatar("idle");
+      setStatusLine("Voice disconnected");
       pushLog("Voice disconnected");
       return;
     }
@@ -501,22 +491,8 @@ export default function MentrixCompanion() {
   };
 
   useEffect(() => {
-    const desktop = window.zectDesktop?.mentrix;
-    if (!desktop?.onSttGoal) return;
-    return desktop.onSttGoal((payload) => {
-      if (!payload?.goal || !voiceConnected) return;
-      submitVoiceTranscript(payload.goal);
-    });
-  }, [voiceConnected, submitVoiceTranscript]);
-
-  useEffect(() => {
     return () => {
       realtimeRef.current?.stop();
-      try {
-        recognitionRef.current?.stop?.();
-      } catch {
-        /* ignore */
-      }
     };
   }, []);
 
@@ -573,6 +549,7 @@ export default function MentrixCompanion() {
               Mentrix Delivery
             </Link>
           </div>
+          <MentrixDesktopPanel />
         </header>
 
         <div className={`grid flex-1 gap-3 ${showArtifacts && !displayMode ? "lg:grid-cols-[1fr_380px]" : "grid-cols-1"}`}>
@@ -599,21 +576,63 @@ export default function MentrixCompanion() {
                     {realtimePreflight === null
                       ? "Checking Realtime…"
                       : realtimePreflight.ready
-                        ? "Realtime ready"
-                        : `Voice fallback — ${realtimePreflight.reason || "unavailable"}`}
+                        ? `Realtime ready${realtimePreflight.model ? ` · ${realtimePreflight.model}` : ""}`
+                        : `Realtime unavailable — ${realtimePreflight.reason || "check OPENAI_API_KEY"} · use typed asks or Retry`}
                   </p>
+                  {integrations ? (
+                    <p className="text-[10px] text-slate-500" data-testid="mentrix-integrations-status">
+                      OpenAI {integrations.openai ? "ready" : "missing"} · Slack{" "}
+                      {integrations.slack ? "ready" : "not set"} · Jira{" "}
+                      {integrations.jira ? "ready" : "not set"}
+                    </p>
+                  ) : null}
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2 py-1.5 text-xs">
+                      <span className="text-slate-400">Mic</span>
+                      <select
+                        data-testid="mentrix-mic-select"
+                        className="max-w-[180px] rounded bg-slate-900 text-slate-100"
+                        value={micDeviceId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setMicDeviceId(id);
+                          setStoredMicDeviceId(id);
+                          pushLog(`Mic selected: ${micDevices.find((d) => d.deviceId === id)?.label || id}`);
+                        }}
+                      >
+                        {micDevices.length === 0 ? (
+                          <option value="">Default microphone</option>
+                        ) : (
+                          micDevices.map((d) => (
+                            <option key={d.deviceId} value={d.deviceId}>
+                              {d.label}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </label>
                     <button
                       type="button"
                       data-testid="mentrix-connect-voice"
                       onClick={toggleVoice}
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
+                      disabled={!voiceConnected && realtimePreflight?.ready === false}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
                         voiceConnected ? "bg-teal-600 text-white" : "border border-slate-600 text-slate-200"
                       }`}
                     >
                       {voiceConnected ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
-                      Connect Voice
+                      {voiceConnected ? "Disconnect Voice" : "Connect Voice"}
                     </button>
+                    {!realtimePreflight?.ready && realtimePreflight !== null ? (
+                      <button
+                        type="button"
+                        data-testid="mentrix-realtime-retry"
+                        onClick={() => void refreshRealtimePreflight()}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-700 px-3 py-1.5 text-xs text-amber-200"
+                      >
+                        Retry Realtime
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       data-testid="mentrix-display-mode"
@@ -691,38 +710,6 @@ export default function MentrixCompanion() {
                   ) : null}
                   <div ref={chatEnd} />
                 </div>
-
-                {voiceTranscript ? (
-                  <div className="mt-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2">
-                    <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Heard — edit before send</p>
-                    <input
-                      data-testid="mentrix-voice-transcript"
-                      value={voiceTranscript}
-                      onChange={(e) => {
-                        setVoiceTranscript(e.target.value);
-                        setInput(e.target.value);
-                        setLastMessageKeep(e.target.value);
-                      }}
-                      className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-white"
-                    />
-                    <div className="mt-1 flex gap-2">
-                      <button
-                        type="button"
-                        className="rounded bg-teal-700 px-2 py-1 text-xs text-white"
-                        onClick={() => void runTurn(voiceTranscript)}
-                      >
-                        Send corrected
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded border border-slate-600 px-2 py-1 text-xs"
-                        onClick={() => setVoiceTranscript("")}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
 
                 <div className="mt-3 flex items-end gap-2">
                   <textarea

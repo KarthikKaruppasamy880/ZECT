@@ -1,8 +1,9 @@
 /**
- * Mentrix OpenAI Realtime Connect Voice client.
+ * Mentrix OpenAI Realtime Connect Voice client (GA client_secrets + WebSocket).
  * Uses ephemeral client_secret from Mentrix backend; tools go through Mentrix broker.
  */
 import { apiFetch, authHeaders } from "@/lib/api";
+import { audioConstraintsForDevice } from "@/lib/micDevices";
 
 export type RealtimeHandlers = {
   onOrb?: (state: string) => void;
@@ -12,12 +13,15 @@ export type RealtimeHandlers = {
   onArtifact?: (item: Record<string, unknown>) => void;
   onPendingConfirm?: (pending: Array<Record<string, unknown>>) => void;
   onError?: (err: string) => void;
+  /** Mint/WS failed — UI should show Retry, not Windows dictation */
   onFallback?: (reason: string) => void;
 };
 
 export type RealtimePreflight = {
   ready: boolean;
   reason?: string;
+  detail?: string;
+  api?: string;
   client_secret?: string;
   model?: string;
   openai_ws_url?: string;
@@ -80,6 +84,8 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     return {
       ready: false,
       reason: String(session.reason || session.detail || "realtime_unavailable"),
+      detail: session.detail ? String(session.detail).slice(0, 200) : undefined,
+      api: session.api ? String(session.api) : undefined,
     };
   }
   return {
@@ -87,6 +93,7 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     client_secret: session.client_secret,
     model: session.model,
     openai_ws_url: session.openai_ws_url,
+    api: session.api ? String(session.api) : "client_secrets",
   };
 }
 
@@ -125,10 +132,12 @@ async function executeTool(
 
 export type StartMentrixRealtimeOptions = {
   handlers: RealtimeHandlers;
-  /** Skip WS when preflight already failed — go straight to fallback */
+  /** Skip WS when preflight already failed */
   skipRealtime?: boolean;
   /** Reuse preflight session to avoid duplicate mint */
   preflight?: RealtimePreflight;
+  /** Preferred audioinput deviceId (headset) */
+  deviceId?: string;
 };
 
 export async function startMentrixRealtime(
@@ -141,7 +150,7 @@ export async function startMentrixRealtime(
   if (opts.skipRealtime) {
     const reason = opts.preflight?.reason || "realtime_unavailable";
     handlers.onFallback?.(String(reason));
-    handlers.onLog?.(`realtime_fallback ${reason}`);
+    handlers.onLog?.(`realtime_unavailable ${reason}`);
     return { mode: "fallback", stop: () => undefined, resumeAfterTool: () => undefined };
   }
 
@@ -159,7 +168,7 @@ export async function startMentrixRealtime(
     if (!sessionRes.ok || !session.realtime_enabled || !session.client_secret) {
       const reason = session.reason || session.detail || "realtime_unavailable";
       handlers.onFallback?.(String(reason));
-      handlers.onLog?.(`realtime_fallback ${reason}`);
+      handlers.onLog?.(`realtime_unavailable ${reason}`);
       return { mode: "fallback", stop: () => undefined, resumeAfterTool: () => undefined };
     }
   }
@@ -169,11 +178,10 @@ export async function startMentrixRealtime(
 
   const wsUrl =
     (session.openai_ws_url as string) ||
-    `wss://api.openai.com/v1/realtime?model=${session.model}`;
+    `wss://api.openai.com/v1/realtime?model=${session.model || "gpt-realtime"}`;
   const ws = new WebSocket(wsUrl, [
     "realtime",
     `openai-insecure-api-key.${session.client_secret}`,
-    "openai-beta.realtime-v1",
   ]);
 
   let audioCtx: AudioContext | null = null;
@@ -183,6 +191,36 @@ export async function startMentrixRealtime(
   let stopped = false;
   const playQueue: Int16Array[] = [];
   let playing = false;
+  const handledCallIds = new Set<string>();
+
+  const runFunctionCall = async (name: string, callId: string, rawArgs: unknown) => {
+    if (!name || !callId || handledCallIds.has(callId)) return;
+    handledCallIds.add(callId);
+    handlers.onOrb?.("working");
+    let args: Record<string, unknown> = {};
+    try {
+      args =
+        typeof rawArgs === "string"
+          ? JSON.parse(rawArgs || "{}")
+          : (rawArgs as Record<string, unknown>) || {};
+    } catch {
+      args = {};
+    }
+    const output = await executeTool(name, args, false, handlers);
+    if (ws.readyState === WebSocket.OPEN && !output.includes('"pending":true')) {
+      ws.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output,
+          },
+        }),
+      );
+      ws.send(JSON.stringify({ type: "response.create" }));
+    }
+  };
 
   const resumeAfterTool = (output: string) => {
     if (stopped || ws.readyState !== WebSocket.OPEN) return;
@@ -239,7 +277,9 @@ export async function startMentrixRealtime(
 
   ws.onopen = async () => {
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraintsForDevice(opts.deviceId),
+      });
       audioCtx = new AudioContext();
       const inputRate = audioCtx.sampleRate;
       source = audioCtx.createMediaStreamSource(mediaStream);
@@ -256,17 +296,30 @@ export async function startMentrixRealtime(
           }),
         );
       };
+      const mute = audioCtx.createGain();
+      mute.gain.value = 0;
       source.connect(captureNode);
-      captureNode.connect(audioCtx.destination);
+      captureNode.connect(mute);
+      mute.connect(audioCtx.destination);
       ws.send(
         JSON.stringify({
           type: "session.update",
           session: {
-            turn_detection: { type: "server_vad" },
-            input_audio_transcription: { model: "whisper-1" },
+            type: "realtime",
+            audio: {
+              input: {
+                transcription: { model: "whisper-1" },
+                turn_detection: {
+                  type: "server_vad",
+                  create_response: true,
+                  interrupt_response: true,
+                },
+              },
+            },
           },
         }),
       );
+      handlers.onLog?.(`Mic open${opts.deviceId ? ` (${opts.deviceId.slice(0, 8)}…)` : " (default)"}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "mic_failed";
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
@@ -298,39 +351,31 @@ export async function startMentrixRealtime(
     const t = msg.type as string;
     if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
     if (t === "response.created") handlers.onOrb?.("thinking");
-    if (t === "response.audio.delta" && msg.delta) {
+    if ((t === "response.output_audio.delta" || t === "response.audio.delta") && msg.delta) {
       playQueue.push(base64ToInt16(msg.delta));
       void playNext();
     }
-    if (t === "conversation.item.input_audio_transcription.completed" && msg.transcript) {
-      handlers.onTranscript?.("user", msg.transcript);
+    const userTranscript = msg.transcript || msg.item?.content?.[0]?.transcript || "";
+    if (
+      (t === "conversation.item.input_audio_transcription.completed" ||
+        t === "conversation.item.input_audio_transcription.done") &&
+      userTranscript
+    ) {
+      handlers.onTranscript?.("user", String(userTranscript));
     }
-    if (t === "response.audio_transcript.done" && msg.transcript) {
+    if (
+      (t === "response.output_audio_transcript.done" || t === "response.audio_transcript.done") &&
+      msg.transcript
+    ) {
       handlers.onTranscript?.("assistant", msg.transcript);
     }
     if (t === "response.function_call_arguments.done") {
-      handlers.onOrb?.("working");
-      const name = msg.name || msg.tool_name;
-      let args: Record<string, unknown> = {};
-      try {
-        args = JSON.parse(msg.arguments || "{}");
-      } catch {
-        args = {};
-      }
-      const callId = msg.call_id;
-      const output = await executeTool(name, args, false, handlers);
-      if (ws.readyState === WebSocket.OPEN && !output.includes('"pending":true')) {
-        ws.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id: callId,
-              output,
-            },
-          }),
-        );
-        ws.send(JSON.stringify({ type: "response.create" }));
+      await runFunctionCall(msg.name || msg.tool_name, msg.call_id, msg.arguments || "{}");
+    }
+    if (t === "response.done") {
+      for (const item of msg.response?.output || []) {
+        if (item?.type !== "function_call" || !item.call_id || !item.name) continue;
+        await runFunctionCall(item.name, item.call_id, item.arguments ?? "{}");
       }
     }
     if (t === "error") {

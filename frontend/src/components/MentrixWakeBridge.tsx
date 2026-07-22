@@ -9,6 +9,21 @@ declare global {
   interface Window {
     zectDesktop?: {
       isDesktopApp?: boolean;
+      launcher?: {
+        getShortcutStatus?: () => Promise<{
+          ok?: boolean;
+          supported?: boolean;
+          exists?: boolean;
+          stale?: boolean;
+          shortcutPath?: string;
+          mode?: string;
+          version?: string;
+          error?: string;
+        }>;
+        createShortcut?: () => Promise<{ ok?: boolean; operation?: string; error?: string }>;
+        relaunch?: () => Promise<{ ok?: boolean }>;
+        pullUpdatesAndRelaunch?: () => Promise<{ ok?: boolean; error?: string; stderr?: string }>;
+      };
       mentrix?: {
         onWake?: (cb: (payload: { phrase?: string; source?: string }) => void) => () => void;
         onWakeStatus?: (cb: (payload: { ok?: boolean; reason?: string; engine?: string }) => void) => () => void;
@@ -17,6 +32,9 @@ declare global {
         onComputerMode?: (cb: (payload: { computerMode?: boolean; reason?: string }) => void) => () => void;
         setComputerMode?: (enabled: boolean) => Promise<unknown>;
         setDictationEnabled?: (enabled: boolean) => Promise<unknown>;
+        armDictation?: (durationMs?: number) => Promise<unknown>;
+        disarmDictation?: () => Promise<unknown>;
+        setDictationPaused?: (paused: boolean) => Promise<unknown>;
         setWakeEnabled?: (enabled: boolean) => Promise<unknown>;
         submitTranscript?: (t: string) => Promise<{ matched?: boolean }>;
         confirmAction?: (payload: unknown) => Promise<unknown>;

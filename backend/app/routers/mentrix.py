@@ -576,6 +576,26 @@ def companion_tools(_user: CurrentUser = Depends(get_current_user)):
     }
 
 
+@router.get("/companion/integrations")
+def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)):
+    """Non-secret readiness for Mentrix tools (env-backed Slack/Jira). Never returns tokens."""
+    import os
+
+    slack = bool((os.getenv("SLACK_BOT_TOKEN") or "").strip())
+    jira = bool(
+        (os.getenv("MCP_JIRA_URL") or os.getenv("JIRA_BASE_URL") or "").strip()
+        and (os.getenv("JIRA_EMAIL") or "").strip()
+        and (os.getenv("JIRA_API_TOKEN") or "").strip()
+    )
+    openai = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    return {
+        "slack": slack,
+        "jira": jira,
+        "openai": openai,
+        "slack_channel": (os.getenv("SLACK_DEFAULT_CHANNEL") or "#engineering") if slack else "",
+    }
+
+
 @router.post("/companion/realtime/session")
 def companion_realtime_session(_user: CurrentUser = Depends(get_current_user)):
     """Mint OpenAI Realtime ephemeral client secret (API key never leaves server)."""

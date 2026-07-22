@@ -6,22 +6,35 @@ Mentrix Companion is the ZECT personal operator: weather, Slack, email, research
 
 | Route | Role |
 |-------|------|
-| `/mentrix-home` | Mentrix HUD (orb, Connect Voice, Display, Computer Mode, Artifacts, Live Log) |
+| `/mentrix-home` | Mentrix HUD (orb, Connect Voice, Mic picker, Display, Computer Mode, Artifacts, Live Log) |
 | `/mentrix` | Mentrix Delivery (ForgeLoop gates → Approve → PR) |
 
-Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) opens **Companion HUD** and arms Connect Voice.
+Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) opens **Companion HUD** and starts Connect Voice (Realtime).
 
 ## Voice (Connect Voice)
 
-1. **Preflight:** On `/mentrix-home` load, Mentrix probes `POST /api/mentrix/companion/realtime/session` and shows **Realtime ready** (green) or **Voice fallback — {reason}** (amber). Fix `OPENAI_API_KEY` before speaking.
-2. **Primary:** OpenAI Realtime speech-to-speech when preflight succeeds. Backend mints an ephemeral client secret; the long-lived API key never goes to the renderer. Tools run via `POST /api/mentrix/companion/realtime/tool` (permission broker + Allow overlay). After Allow, Realtime resumes with tool output.
-3. **Fallback:** Web Speech (browser) or Electron dictation → companion SSE stream → `speechSynthesis` TTS. Live Log shows `realtime_fallback`. Windows dictation is less accurate — prefer Realtime.
+1. **Preflight:** On `/mentrix-home` load, Mentrix probes `POST /api/mentrix/companion/realtime/session` and shows **Realtime ready** (green) or **Realtime unavailable — {reason}** (amber) with **Retry Realtime**.
+2. **Mint API (GA):** Backend calls OpenAI `POST /v1/realtime/client_secrets` (not the retired `/v1/realtime/sessions`). Default model: `gpt-realtime` (`MENTRIX_REALTIME_MODEL`).
+3. **Primary UX:** Pick your **headset mic**, click **Connect Voice**, speak naturally. Mentrix replies with Realtime audio. **No “Send corrected” / tone / Windows dictation path.**
+4. **If Realtime fails:** Use typed Quick asks or **Retry Realtime**. Fix `OPENAI_API_KEY` and restart backend — OpenAI chat key ≠ automatic Realtime if mint is broken.
 
-**Windows tips:** Use a headset as the default mic. Say **Hey Mentrix**, pause, then speak your command. Edit the **Heard** transcript before send if STT mishears (e.g. email vs event).
+**Mic picker:** Lists `audioinput` devices; choice persists in `localStorage` (`mentrix_mic_device_id`). Prefer a headset over the laptop array mic.
 
 Realtime tools include personal ops: `weather_report`, `slack_digest`, `slack_send`, `email_digest`, `email_send`, plus ZECT Delivery / Lattice / notes / media / computer.
 
-Optional Mentrix WS control channel: `WS /api/mentrix/companion/realtime?token=…`.
+## Integrations (OpenAI ≠ Slack ≠ Jira)
+
+| Env | Purpose |
+|-----|---------|
+| `OPENAI_API_KEY` | Mentrix LLM + Realtime voice |
+| `MENTRIX_REALTIME=1` | Enable Realtime mint |
+| `MENTRIX_REALTIME_MODEL=gpt-realtime` | Realtime model |
+| `SLACK_BOT_TOKEN` | Slack digest / send |
+| `SLACK_DEFAULT_CHANNEL` | Default channel (e.g. `#engineering`) |
+| `MCP_JIRA_URL` or `JIRA_BASE_URL` | Jira base URL |
+| `JIRA_EMAIL` + `JIRA_API_TOKEN` | Jira auth |
+
+There is **no minibot runner** inside ZECT. If another app (minibot / App Runner) already has Slack/Jira tokens, **copy them into `backend/.env`** (never commit). Mentrix HUD shows non-secret chips via `GET /api/mentrix/companion/integrations` (OpenAI / Slack / Jira ready or not).
 
 ## Personal ops
 
@@ -61,13 +74,17 @@ Off by default. **Windows and macOS:** allowlisted open app, desktop screenshot,
 - Audits: permission audits + `mentrix_tool_*`.
 - Never commit API keys; use `backend/.env` only.
 
-## Desktop smoke (personal ops voice)
+## Desktop smoke (Realtime voice)
 
-1. `OPENAI_API_KEY` in `backend/.env`; restart backend + Electron.
-2. Connect Voice → Live Log `Connect Voice — OpenAI Realtime` (not only `realtime_fallback`).
-3. Ask aloud: weather in a city; Slack digest; any email?
-4. Slack send → Allow / Deny overlay.
-5. Optional: set `SLACK_BOT_TOKEN` / `MENTRIX_IMAP_*` for live digests.
+1. `OPENAI_API_KEY` + `MENTRIX_REALTIME_MODEL=gpt-realtime` in `backend/.env`; kill stale port 8000; restart backend + Electron.
+2. HUD shows **Realtime ready** (not unavailable / openai_404).
+3. Select headset in **Mic**, click **Connect Voice** → Live Log `Connect Voice — OpenAI Realtime`.
+4. Say “Hi” / weather question — spoken reply, no Send corrected.
+5. Optional: set `SLACK_BOT_TOKEN` / Jira env for digests; chips show Slack/Jira ready.
+
+## Post-merge restart
+
+After merging the voice PR into `develop`, restart backend, frontend, and Electron (or double-click the ZECT Mentrix desktop shortcut) so the GA mint path loads.
 
 ## Artifacts
 

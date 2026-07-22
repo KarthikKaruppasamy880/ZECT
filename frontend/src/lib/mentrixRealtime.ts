@@ -1,6 +1,6 @@
 /**
  * Mentrix OpenAI Realtime Connect Voice client (GA client_secrets + WebSocket).
- * Uses ephemeral client_secret from Mentrix backend; tools go through Mentrix broker.
+ * Audio capture uses AudioWorklet (not ScriptProcessor) to avoid Electron renderer freezes.
  */
 import { apiFetch, authHeaders } from "@/lib/api";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
@@ -13,8 +13,9 @@ export type RealtimeHandlers = {
   onArtifact?: (item: Record<string, unknown>) => void;
   onPendingConfirm?: (pending: Array<Record<string, unknown>>) => void;
   onError?: (err: string) => void;
-  /** Mint/WS failed — UI should show Retry, not Windows dictation */
   onFallback?: (reason: string) => void;
+  /** Fired when mic + WS are fully ready (or failed before ready) */
+  onReady?: (ok: boolean) => void;
 };
 
 export type RealtimePreflight = {
@@ -31,9 +32,25 @@ export type RealtimeSessionHandle = {
   stop: () => void;
   mode: "realtime" | "fallback";
   resumeAfterTool: (output: string) => void;
+  ready: Promise<boolean>;
 };
 
 const TARGET_SAMPLE_RATE = 24000;
+const MAX_PLAY_QUEUE = 24;
+
+const WORKLET_SRC = `
+class MentrixCaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch && ch.length) {
+      // Copy — underlying buffer is reused by the audio thread.
+      this.port.postMessage(ch.slice(0));
+    }
+    return true;
+  }
+}
+registerProcessor('mentrix-capture', MentrixCaptureProcessor);
+`;
 
 function floatTo16BitPCM(float32: Float32Array): ArrayBuffer {
   const buf = new ArrayBuffer(float32.length * 2);
@@ -64,7 +81,10 @@ function resampleTo24k(input: Float32Array, inputRate: number): Float32Array {
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
   return btoa(binary);
 }
 
@@ -132,13 +152,75 @@ async function executeTool(
 
 export type StartMentrixRealtimeOptions = {
   handlers: RealtimeHandlers;
-  /** Skip WS when preflight already failed */
   skipRealtime?: boolean;
-  /** Reuse preflight session to avoid duplicate mint */
+  /** Prefer reminting; only reuse when forceReusePreflight is set */
   preflight?: RealtimePreflight;
-  /** Preferred audioinput deviceId (headset) */
+  forceReusePreflight?: boolean;
   deviceId?: string;
 };
+
+async function attachMicCapture(
+  audioCtx: AudioContext,
+  mediaStream: MediaStream,
+  onPcm: (pcm: ArrayBuffer) => void,
+): Promise<{ source: MediaStreamAudioSourceNode; node: AudioNode; dispose: () => void }> {
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+  const inputRate = audioCtx.sampleRate;
+  const mute = audioCtx.createGain();
+  mute.gain.value = 0;
+
+  try {
+    const blob = new Blob([WORKLET_SRC], { type: "application/javascript" });
+    const url = URL.createObjectURL(blob);
+    await audioCtx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    const worklet = new AudioWorkletNode(audioCtx, "mentrix-capture");
+    worklet.port.onmessage = (ev) => {
+      const input = ev.data as Float32Array;
+      if (!input?.length) return;
+      const resampled = resampleTo24k(input, inputRate);
+      onPcm(floatTo16BitPCM(resampled));
+    };
+    source.connect(worklet);
+    worklet.connect(mute);
+    mute.connect(audioCtx.destination);
+    return {
+      source,
+      node: worklet,
+      dispose: () => {
+        try {
+          worklet.port.onmessage = null;
+          worklet.disconnect();
+        } catch {
+          /* ignore */
+        }
+      },
+    };
+  } catch {
+    // Fallback ScriptProcessor — used only if AudioWorklet unavailable.
+    const captureNode = audioCtx.createScriptProcessor(8192, 1, 1);
+    captureNode.onaudioprocess = (ev) => {
+      const input = ev.inputBuffer.getChannelData(0);
+      const resampled = resampleTo24k(input, inputRate);
+      onPcm(floatTo16BitPCM(resampled));
+    };
+    source.connect(captureNode);
+    captureNode.connect(mute);
+    mute.connect(audioCtx.destination);
+    return {
+      source,
+      node: captureNode,
+      dispose: () => {
+        try {
+          captureNode.onaudioprocess = null;
+          captureNode.disconnect();
+        } catch {
+          /* ignore */
+        }
+      },
+    };
+  }
+}
 
 export async function startMentrixRealtime(
   handlersOrOptions: RealtimeHandlers | StartMentrixRealtimeOptions,
@@ -147,15 +229,23 @@ export async function startMentrixRealtime(
     "handlers" in handlersOrOptions ? handlersOrOptions : { handlers: handlersOrOptions };
   const handlers = opts.handlers;
 
+  const noopReady = Promise.resolve(false);
   if (opts.skipRealtime) {
     const reason = opts.preflight?.reason || "realtime_unavailable";
     handlers.onFallback?.(String(reason));
     handlers.onLog?.(`realtime_unavailable ${reason}`);
-    return { mode: "fallback", stop: () => undefined, resumeAfterTool: () => undefined };
+    handlers.onReady?.(false);
+    return {
+      mode: "fallback",
+      stop: () => undefined,
+      resumeAfterTool: () => undefined,
+      ready: noopReady,
+    };
   }
 
+  // Always remint unless explicitly reusing — reconnect with stale ek_ keys crashes/fails often.
   let session: Record<string, unknown>;
-  if (opts.preflight?.ready && opts.preflight.client_secret) {
+  if (opts.forceReusePreflight && opts.preflight?.ready && opts.preflight.client_secret) {
     session = {
       realtime_enabled: true,
       client_secret: opts.preflight.client_secret,
@@ -169,7 +259,13 @@ export async function startMentrixRealtime(
       const reason = session.reason || session.detail || "realtime_unavailable";
       handlers.onFallback?.(String(reason));
       handlers.onLog?.(`realtime_unavailable ${reason}`);
-      return { mode: "fallback", stop: () => undefined, resumeAfterTool: () => undefined };
+      handlers.onReady?.(false);
+      return {
+        mode: "fallback",
+        stop: () => undefined,
+        resumeAfterTool: () => undefined,
+        ready: noopReady,
+      };
     }
   }
 
@@ -186,12 +282,23 @@ export async function startMentrixRealtime(
 
   let audioCtx: AudioContext | null = null;
   let mediaStream: MediaStream | null = null;
-  let captureNode: ScriptProcessorNode | null = null;
+  let captureDispose: (() => void) | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
   let stopped = false;
   const playQueue: Int16Array[] = [];
   let playing = false;
   const handledCallIds = new Set<string>();
+  let resolveReady: (ok: boolean) => void = () => undefined;
+  const ready = new Promise<boolean>((resolve) => {
+    resolveReady = resolve;
+  });
+  let readySettled = false;
+  const settleReady = (ok: boolean) => {
+    if (readySettled) return;
+    readySettled = true;
+    resolveReady(ok);
+    handlers.onReady?.(ok);
+  };
 
   const runFunctionCall = async (name: string, callId: string, rawArgs: unknown) => {
     if (!name || !callId || handledCallIds.has(callId)) return;
@@ -239,24 +346,38 @@ export async function startMentrixRealtime(
   };
 
   const stop = () => {
+    if (stopped) return;
     stopped = true;
     try {
-      ws.close();
+      captureDispose?.();
     } catch {
       /* ignore */
     }
     try {
-      captureNode?.disconnect();
       source?.disconnect();
       mediaStream?.getTracks().forEach((t) => t.stop());
       void audioCtx?.close();
     } catch {
       /* ignore */
     }
+    captureDispose = null;
+    source = null;
+    mediaStream = null;
+    audioCtx = null;
+    playQueue.length = 0;
+    playing = false;
+    try {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    } catch {
+      /* ignore */
+    }
+    settleReady(false);
   };
 
-  const playNext = async () => {
-    if (playing || !playQueue.length || !audioCtx) return;
+  const playNext = () => {
+    if (playing || !playQueue.length || !audioCtx || stopped) return;
     playing = true;
     handlers.onOrb?.("speaking");
     const chunk = playQueue.shift()!;
@@ -269,10 +390,14 @@ export async function startMentrixRealtime(
     node.connect(audioCtx.destination);
     node.onended = () => {
       playing = false;
-      if (playQueue.length) void playNext();
+      if (playQueue.length) playNext();
       else if (!stopped) handlers.onOrb?.("listening");
     };
-    node.start();
+    try {
+      node.start();
+    } catch {
+      playing = false;
+    }
   };
 
   ws.onopen = async () => {
@@ -280,27 +405,28 @@ export async function startMentrixRealtime(
       mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: audioConstraintsForDevice(opts.deviceId),
       });
-      audioCtx = new AudioContext();
-      const inputRate = audioCtx.sampleRate;
-      source = audioCtx.createMediaStreamSource(mediaStream);
-      captureNode = audioCtx.createScriptProcessor(4096, 1, 1);
-      captureNode.onaudioprocess = (ev) => {
+      if (stopped) {
+        mediaStream.getTracks().forEach((t) => t.stop());
+        settleReady(false);
+        return;
+      }
+      audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+      // Some browsers ignore sampleRate hint — always resample from actual rate.
+      const attached = await attachMicCapture(audioCtx, mediaStream, (pcm) => {
         if (stopped || ws.readyState !== WebSocket.OPEN) return;
-        const input = ev.inputBuffer.getChannelData(0);
-        const resampled = resampleTo24k(input, inputRate);
-        const pcm = floatTo16BitPCM(resampled);
-        ws.send(
-          JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: arrayBufferToBase64(pcm),
-          }),
-        );
-      };
-      const mute = audioCtx.createGain();
-      mute.gain.value = 0;
-      source.connect(captureNode);
-      captureNode.connect(mute);
-      mute.connect(audioCtx.destination);
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "input_audio_buffer.append",
+              audio: arrayBufferToBase64(pcm),
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      });
+      source = attached.source;
+      captureDispose = attached.dispose;
       ws.send(
         JSON.stringify({
           type: "session.update",
@@ -319,7 +445,10 @@ export async function startMentrixRealtime(
           },
         }),
       );
-      handlers.onLog?.(`Mic open${opts.deviceId ? ` (${opts.deviceId.slice(0, 8)}…)` : " (default)"}`);
+      handlers.onLog?.(
+        `Mic open${opts.deviceId ? ` (${opts.deviceId.slice(0, 8)}…)` : " (default)"} · worklet`,
+      );
+      settleReady(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "mic_failed";
       if (msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("denied")) {
@@ -339,9 +468,11 @@ export async function startMentrixRealtime(
 
   ws.onclose = () => {
     if (!stopped) handlers.onLog?.("Realtime WS closed");
+    settleReady(false);
   };
 
   ws.onmessage = async (ev) => {
+    if (stopped) return;
     let msg: any;
     try {
       msg = JSON.parse(ev.data);
@@ -352,8 +483,9 @@ export async function startMentrixRealtime(
     if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
     if (t === "response.created") handlers.onOrb?.("thinking");
     if ((t === "response.output_audio.delta" || t === "response.audio.delta") && msg.delta) {
+      if (playQueue.length >= MAX_PLAY_QUEUE) playQueue.shift();
       playQueue.push(base64ToInt16(msg.delta));
-      void playNext();
+      playNext();
     }
     const userTranscript = msg.transcript || msg.item?.content?.[0]?.transcript || "";
     if (
@@ -383,7 +515,7 @@ export async function startMentrixRealtime(
     }
   };
 
-  return { mode: "realtime", stop, resumeAfterTool };
+  return { mode: "realtime", stop, resumeAfterTool, ready };
 }
 
 /** Confirm pending tools from Realtime Allow overlay. */

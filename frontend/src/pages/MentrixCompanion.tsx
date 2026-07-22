@@ -94,6 +94,7 @@ export default function MentrixCompanion() {
   const [statusLine, setStatusLine] = useState("SYSTEMS OPERATIONAL");
   const [tts, setTts] = useState(true);
   const [voiceConnected, setVoiceConnected] = useState(false);
+  const [voiceConnecting, setVoiceConnecting] = useState(false);
   const [computerMode, setComputerMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(true);
@@ -112,6 +113,7 @@ export default function MentrixCompanion() {
     openai: boolean;
   } | null>(null);
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
+  const voiceConnectingRef = useRef(false);
   const micDeviceIdRef = useRef(micDeviceId);
   micDeviceIdRef.current = micDeviceId;
   const pendingArgsRef = useRef<Record<string, Record<string, unknown>>>({});
@@ -167,7 +169,6 @@ export default function MentrixCompanion() {
   }, []);
 
   const refreshRealtimePreflight = useCallback(async () => {
-    setRealtimePreflight(null);
     try {
       const pf = await probeMentrixRealtimePreflight();
       setRealtimePreflight(pf);
@@ -179,77 +180,130 @@ export default function MentrixCompanion() {
     }
   }, []);
 
-  const startVoiceSession = useCallback(async () => {
-    if (realtimeRef.current) {
-      realtimeRef.current.stop();
-      realtimeRef.current = null;
+  const stopVoiceSession = useCallback(() => {
+    try {
+      realtimeRef.current?.stop();
+    } catch {
+      /* ignore */
     }
-    setAvatar("listening");
-    setStatusLine("Connect Voice…");
-    const preflight = await refreshRealtimePreflight();
-    if (!preflight.ready) {
-      setVoiceConnected(false);
-      setAvatar("idle");
-      setStatusLine(`Realtime unavailable — ${preflight.reason || "check OPENAI_API_KEY"}`);
-      pushLog(`realtime_unavailable ${preflight.reason || "unknown"}`);
+    realtimeRef.current = null;
+    voiceConnectingRef.current = false;
+    setVoiceConnecting(false);
+    setVoiceConnected(false);
+    setAvatar("idle");
+  }, []);
+
+  const startVoiceSession = useCallback(async () => {
+    // Hard lock — ignore wake + double-clicks while connecting or already live.
+    if (voiceConnectingRef.current) {
+      pushLog("Connect Voice — already connecting (ignored)");
       return;
     }
-    setVoiceConnected(true);
-    const handle = await startMentrixRealtime({
-      skipRealtime: false,
-      preflight,
-      deviceId: micDeviceIdRef.current || undefined,
-      handlers: {
-        onOrb: (s) => setAvatar(s as AvatarState),
-        onLog: pushLog,
-        onTranscript: (role, text) => {
-          if (!text?.trim()) return;
-          setMessages((m) => [...m, { role, text }]);
-          if (role === "user") setLastMessageKeep(text);
-        },
-        onNavigate: (path) => applyNav(path, navigate as any),
-        onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
-        onPendingConfirm: (pendingList) => {
-          const mapped = pendingList.map((p) => {
-            const tool = String(p.tool || "");
-            const fullArgs = (p.args as Record<string, unknown>) || {};
-            const redacted =
-              (p.args_redacted as Record<string, unknown>) ||
-              Object.fromEntries(
-                Object.entries(fullArgs).map(([k, v]) => [
-                  k,
-                  k === "text" || k === "body" || k === "path" ? "…" : v,
-                ]),
-              );
-            pendingArgsRef.current[tool] = fullArgs;
-            return {
-              tool,
-              action: String(p.action || p.tool || ""),
-              args: fullArgs,
-              args_redacted: redacted,
-              reason: String(p.reason || "Allow required"),
-            };
-          });
-          setPending(mapped);
-          setAvatar("needs_permission");
-          speak("I need your permission to continue.", tts);
-        },
-        onError: (err) => pushLog(`realtime ${err}`),
-        onFallback: (reason) => {
-          pushLog(`realtime_unavailable ${reason}`);
-          setVoiceConnected(false);
-          setAvatar("idle");
-          setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
-        },
-      },
-    });
-    realtimeRef.current = handle;
-    if (handle.mode === "realtime") {
-      setStatusLine("Realtime voice connected — speak naturally");
-    } else {
-      setVoiceConnected(false);
+    if (realtimeRef.current) {
+      pushLog("Connect Voice — already connected (ignored)");
+      return;
     }
-  }, [navigate, pushLog, refreshRealtimePreflight, tts]);
+    voiceConnectingRef.current = true;
+    setVoiceConnecting(true);
+    setAvatar("listening");
+    setStatusLine("Connect Voice…");
+    try {
+      // Always remint — reusing ephemeral client_secret after disconnect causes blank/WS failures.
+      const preflight = await refreshRealtimePreflight();
+      if (!preflight?.ready || !preflight.client_secret) {
+        setVoiceConnected(false);
+        setAvatar("idle");
+        setStatusLine(`Realtime unavailable — ${preflight?.reason || "check OPENAI_API_KEY"}`);
+        pushLog(`realtime_unavailable ${preflight?.reason || "unknown"}`);
+        return;
+      }
+      const handle = await startMentrixRealtime({
+        skipRealtime: false,
+        // Mint already done above; client remints again inside unless forceReuse.
+        forceReusePreflight: true,
+        preflight,
+        deviceId: micDeviceIdRef.current || undefined,
+        handlers: {
+          onOrb: (s) => setAvatar(s as AvatarState),
+          onLog: pushLog,
+          onTranscript: (role, text) => {
+            if (!text?.trim()) return;
+            setMessages((m) => [...m, { role, text }]);
+            if (role === "user") setLastMessageKeep(text);
+          },
+          onNavigate: (path) => applyNav(path, navigate as any),
+          onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
+          onPendingConfirm: (pendingList) => {
+            const mapped = pendingList.map((p) => {
+              const tool = String(p.tool || "");
+              const fullArgs = (p.args as Record<string, unknown>) || {};
+              const redacted =
+                (p.args_redacted as Record<string, unknown>) ||
+                Object.fromEntries(
+                  Object.entries(fullArgs).map(([k, v]) => [
+                    k,
+                    k === "text" || k === "body" || k === "path" ? "…" : v,
+                  ]),
+                );
+              pendingArgsRef.current[tool] = fullArgs;
+              return {
+                tool,
+                action: String(p.action || p.tool || ""),
+                args: fullArgs,
+                args_redacted: redacted,
+                reason: String(p.reason || "Allow required"),
+              };
+            });
+            setPending(mapped);
+            setAvatar("needs_permission");
+            speak("I need your permission to continue.", tts);
+          },
+          onError: (err) => pushLog(`realtime ${err}`),
+          onFallback: (reason) => {
+            pushLog(`realtime_unavailable ${reason}`);
+            try {
+              realtimeRef.current?.stop();
+            } catch {
+              /* ignore */
+            }
+            realtimeRef.current = null;
+            setVoiceConnected(false);
+            setAvatar("idle");
+            setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
+          },
+        },
+      });
+      if (handle.mode !== "realtime") {
+        setVoiceConnected(false);
+        setAvatar("idle");
+        return;
+      }
+      realtimeRef.current = handle;
+      // Keep Connecting… until mic is actually open (prevents double-start race).
+      const ok = await handle.ready;
+      if (!ok || realtimeRef.current !== handle) {
+        try {
+          handle.stop();
+        } catch {
+          /* ignore */
+        }
+        if (realtimeRef.current === handle) realtimeRef.current = null;
+        setVoiceConnected(false);
+        setAvatar("idle");
+        setStatusLine("Connect Voice failed — Retry");
+        return;
+      }
+      setVoiceConnected(true);
+      setStatusLine("Realtime voice connected — speak naturally");
+    } catch (e) {
+      pushLog(`Connect Voice failed: ${e instanceof Error ? e.message : "error"}`);
+      stopVoiceSession();
+      setStatusLine("Connect Voice failed — Retry");
+    } finally {
+      voiceConnectingRef.current = false;
+      setVoiceConnecting(false);
+    }
+  }, [navigate, pushLog, refreshRealtimePreflight, stopVoiceSession, tts]);
 
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
@@ -478,11 +532,9 @@ export default function MentrixCompanion() {
   };
 
   const toggleVoice = () => {
-    if (voiceConnected) {
-      realtimeRef.current?.stop();
-      realtimeRef.current = null;
-      setVoiceConnected(false);
-      setAvatar("idle");
+    if (voiceConnectingRef.current) return;
+    if (voiceConnected || realtimeRef.current) {
+      stopVoiceSession();
       setStatusLine("Voice disconnected");
       pushLog("Voice disconnected");
       return;
@@ -492,9 +544,9 @@ export default function MentrixCompanion() {
 
   useEffect(() => {
     return () => {
-      realtimeRef.current?.stop();
+      stopVoiceSession();
     };
-  }, []);
+  }, [stopVoiceSession]);
 
   return (
     <div
@@ -615,13 +667,25 @@ export default function MentrixCompanion() {
                       type="button"
                       data-testid="mentrix-connect-voice"
                       onClick={toggleVoice}
-                      disabled={!voiceConnected && realtimePreflight?.ready === false}
+                      disabled={
+                        voiceConnecting || (!voiceConnected && realtimePreflight?.ready === false)
+                      }
                       className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
-                        voiceConnected ? "bg-teal-600 text-white" : "border border-slate-600 text-slate-200"
+                        voiceConnected || voiceConnecting
+                          ? "bg-teal-600 text-white"
+                          : "border border-slate-600 text-slate-200"
                       }`}
                     >
-                      {voiceConnected ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
-                      {voiceConnected ? "Disconnect Voice" : "Connect Voice"}
+                      {voiceConnected || voiceConnecting ? (
+                        <Mic className="h-3.5 w-3.5" />
+                      ) : (
+                        <MicOff className="h-3.5 w-3.5" />
+                      )}
+                      {voiceConnecting
+                        ? "Connecting…"
+                        : voiceConnected
+                          ? "Disconnect Voice"
+                          : "Connect Voice"}
                     </button>
                     {!realtimePreflight?.ready && realtimePreflight !== null ? (
                       <button

@@ -28,9 +28,12 @@ def mentrix_instructions() -> str:
         "Help with weather, Slack, email, Delivery, Lattice, Sandbox, research, notes, and desktop tools. "
         "ALWAYS use tools for weather (weather_report), Slack digests/sends, and email digests/sends — "
         "never invent inbox contents, Slack messages, or live weather. "
+        "When the user mentions mail, inbox, or email, call email_digest (not a generic chat reply). "
         "Prefer spoken_summary from tool results when speaking. "
         "Use tools for real ZECT actions; never invent run IDs. "
         f"Navigate paths: {nav}. "
+        "Use lattice_query for code symbols and documentation wikilinks. "
+        "For documentation graphs, prefer doc-kind hits and mention backlinks when available. "
         "When a tool needs permission, tell the user to Allow in the Mentrix overlay. "
         "Brand: Mentrix, Lattice, ForgeLoop, ZECT only. No Exa."
     )
@@ -326,6 +329,7 @@ def run_realtime_tool(
                 {
                     "tool": name,
                     "action": perm.get("action"),
+                    "args": args,
                     "args_redacted": {k: ("…" if k in ("text", "body", "path") else v) for k, v in args.items()},
                     "reason": "Always-ask Allow required",
                 }

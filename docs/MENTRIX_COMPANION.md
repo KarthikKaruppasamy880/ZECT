@@ -13,8 +13,11 @@ Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) opens **Companion HUD** and ar
 
 ## Voice (Connect Voice)
 
-1. **Primary:** OpenAI Realtime speech-to-speech when `OPENAI_API_KEY` is set and `MENTRIX_REALTIME` is not `0`. Backend mints an ephemeral client secret (`POST /api/mentrix/companion/realtime/session`); the long-lived API key never goes to the renderer. Tools run via `POST /api/mentrix/companion/realtime/tool` (permission broker + Allow overlay).
-2. **Fallback:** Web Speech (browser) or Electron dictation → companion SSE stream → `speechSynthesis` TTS. Live Log shows `realtime_fallback`.
+1. **Preflight:** On `/mentrix-home` load, Mentrix probes `POST /api/mentrix/companion/realtime/session` and shows **Realtime ready** (green) or **Voice fallback — {reason}** (amber). Fix `OPENAI_API_KEY` before speaking.
+2. **Primary:** OpenAI Realtime speech-to-speech when preflight succeeds. Backend mints an ephemeral client secret; the long-lived API key never goes to the renderer. Tools run via `POST /api/mentrix/companion/realtime/tool` (permission broker + Allow overlay). After Allow, Realtime resumes with tool output.
+3. **Fallback:** Web Speech (browser) or Electron dictation → companion SSE stream → `speechSynthesis` TTS. Live Log shows `realtime_fallback`. Windows dictation is less accurate — prefer Realtime.
+
+**Windows tips:** Use a headset as the default mic. Say **Hey Mentrix**, pause, then speak your command. Edit the **Heard** transcript before send if STT mishears (e.g. email vs event).
 
 Realtime tools include personal ops: `weather_report`, `slack_digest`, `slack_send`, `email_digest`, `email_send`, plus ZECT Delivery / Lattice / notes / media / computer.
 

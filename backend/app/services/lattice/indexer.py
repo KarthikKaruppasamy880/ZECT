@@ -36,6 +36,9 @@ class GraphNode:
     path: str
     language: str = ""
     line: int | None = None
+    group: str = ""
+    slug: str = ""
+    title: str = ""
 
 
 @dataclass
@@ -54,6 +57,9 @@ class LatticeGraph:
     symbols: int = 0
     languages: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    doc_files_indexed: int = 0
+    wikilinks_resolved: int = 0
+    wikilinks_unresolved: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +70,9 @@ class LatticeGraph:
             "symbols": self.symbols,
             "languages": self.languages,
             "errors": self.errors,
+            "doc_files_indexed": self.doc_files_indexed,
+            "wikilinks_resolved": self.wikilinks_resolved,
+            "wikilinks_unresolved": self.wikilinks_unresolved,
         }
 
 
@@ -484,7 +493,12 @@ def _resolve_imports(graph: LatticeGraph, seen: set[str]) -> None:
             edge_keys.add(key)
 
 
-def ingest_path(root: str, project_key: str = "", max_files: int = 2000) -> LatticeGraph:
+def _node_from_dict(n: dict[str, Any]) -> GraphNode:
+    fields_set = {f.name for f in GraphNode.__dataclass_fields__.values()}
+    return GraphNode(**{k: v for k, v in n.items() if k in fields_set})
+
+
+def ingest_path(root: str, project_key: str = "", max_files: int = 2000, index_docs: bool = True) -> LatticeGraph:
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
@@ -522,6 +536,13 @@ def ingest_path(root: str, project_key: str = "", max_files: int = 2000) -> Latt
             break
     graph.files_indexed = count
     _resolve_imports(graph, seen)
+    if index_docs and os.getenv("LATTICE_INDEX_DOCS", "1").strip().lower() not in ("0", "false", "off"):
+        from app.services.lattice.markdown_graph import ingest_markdown_graph
+
+        doc_stats = ingest_markdown_graph(root_path, graph, seen, max_files=max_files)
+        graph.doc_files_indexed = doc_stats.get("doc_files_indexed", 0)
+        graph.wikilinks_resolved = doc_stats.get("wikilinks_resolved", 0)
+        graph.wikilinks_unresolved = doc_stats.get("wikilinks_unresolved", 0)
     # Deduplicate call edges
     edge_keys = set()
     uniq_edges = []
@@ -546,24 +567,41 @@ def get_graph(project_key: str) -> LatticeGraph | None:
         data = json.loads(out.read_text(encoding="utf-8"))
         g = LatticeGraph(
             project_key=data["project_key"],
-            nodes=[GraphNode(**n) for n in data.get("nodes", [])],
+            nodes=[_node_from_dict(n) for n in data.get("nodes", [])],
             edges=[GraphEdge(**e) for e in data.get("edges", [])],
             files_indexed=data.get("files_indexed", 0),
             symbols=data.get("symbols", 0),
             languages=data.get("languages", {}),
             errors=data.get("errors", []),
+            doc_files_indexed=data.get("doc_files_indexed", 0),
+            wikilinks_resolved=data.get("wikilinks_resolved", 0),
+            wikilinks_unresolved=data.get("wikilinks_unresolved", 0),
         )
         _GRAPH_CACHE[project_key] = g
         return g
     return None
 
 
-def query_graph(project_key: str, q: str, limit: int = 50) -> list[dict[str, Any]]:
+def query_graph(
+    project_key: str,
+    q: str,
+    limit: int = 50,
+    kinds: list[str] | None = None,
+) -> list[dict[str, Any]]:
     g = get_graph(project_key)
     if not g:
         return []
     ql = q.lower()
-    hits = [asdict(n) for n in g.nodes if ql in n.name.lower() or ql in n.path.lower()]
+    kind_set = set(kinds) if kinds else None
+    hits = []
+    for n in g.nodes:
+        if kind_set and n.kind not in kind_set:
+            continue
+        hay = " ".join(
+            x for x in (n.name, n.path, n.title, n.slug, n.group) if x
+        ).lower()
+        if ql in hay:
+            hits.append(asdict(n))
     return hits[:limit]
 
 

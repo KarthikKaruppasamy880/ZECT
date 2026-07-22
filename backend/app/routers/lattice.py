@@ -23,6 +23,7 @@ from app.services.lattice.indexer import (
     neighbors as lattice_neighbors,
     query_graph,
 )
+from app.services.lattice.markdown_graph import doc_backlinks, filter_graph_layer
 from app.services.lattice.structural_blueprint import (
     build_deep_prompt,
     build_structural_blueprint,
@@ -40,6 +41,7 @@ class IngestPathRequest(BaseModel):
     project_id: int | None = None
     repo_id: int | None = None
     index_rag: bool = True
+    index_docs: bool = True
     max_files: int = 2000
     build_blueprint: bool = True
 
@@ -48,6 +50,8 @@ class QueryRequest(BaseModel):
     project_key: str
     q: str
     limit: int = 50
+    kinds: list[str] | None = None
+    include_backlinks: bool = False
 
 
 class PathRequest(BaseModel):
@@ -94,7 +98,7 @@ def ingest(
         raise HTTPException(status_code=503, detail="Lattice is disabled")
     key = req.project_key or req.path
     try:
-        graph = ingest_path(req.path, project_key=key, max_files=req.max_files)
+        graph = ingest_path(req.path, project_key=key, max_files=req.max_files, index_docs=req.index_docs)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     rag_stats = {}
@@ -159,19 +163,39 @@ async def ingest_upload(
 
 
 @router.get("/graph")
-def graph(project_key: str, _user: CurrentUser = Depends(get_current_user)):
+def graph(
+    project_key: str,
+    layer: str = "combined",
+    _user: CurrentUser = Depends(get_current_user),
+):
     g = get_graph(project_key)
     if not g:
         raise HTTPException(status_code=404, detail="Graph not found — run /api/lattice/ingest first")
-    data = g.to_dict()
+    data = filter_graph_layer(g.to_dict(), layer=layer)
     data["god_nodes"] = lattice_god_nodes(project_key, limit=15)
     data["communities"] = lattice_communities(project_key, limit=10)
     return data
 
 
+@router.get("/graph/backlinks")
+def graph_backlinks(
+    project_key: str,
+    doc: str,
+    limit: int = 50,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return doc_backlinks(project_key, doc, limit=limit)
+
+
 @router.post("/query")
 def query(req: QueryRequest, _user: CurrentUser = Depends(get_current_user)):
-    return {"hits": query_graph(req.project_key, req.q, req.limit)}
+    hits = query_graph(req.project_key, req.q, req.limit, kinds=req.kinds)
+    out: dict = {"hits": hits}
+    if req.include_backlinks and hits:
+        first = hits[0]
+        ref = first.get("path") or first.get("name") or req.q
+        out["backlinks"] = doc_backlinks(req.project_key, str(ref), limit=20)
+    return out
 
 
 @router.post("/rag/search")

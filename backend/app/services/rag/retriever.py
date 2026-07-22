@@ -139,14 +139,28 @@ def hybrid_retrieve(
         scored.append((_cosine(q_emb, emb), row))
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # Lattice boost: prefer paths that appear as graph neighbors of query terms
+    # Lattice boost: graph node paths + wikilink neighbors
     boost_paths: set[str] = set()
     g = get_graph(project_key) if project_key else None
     if g:
         ql = query.lower()
+        seed_ids: set[str] = set()
         for n in g.nodes:
-            if ql in n.name.lower():
+            hay = " ".join(x for x in (n.name, n.path, getattr(n, "title", ""), getattr(n, "slug", "")) if x).lower()
+            if ql in hay:
                 boost_paths.add(n.path)
+                seed_ids.add(n.id)
+        if seed_ids:
+            for e in g.edges:
+                if e.kind in ("wikilink", "md_link", "references", "in_folder"):
+                    if e.source in seed_ids:
+                        tgt = next((n for n in g.nodes if n.id == e.target), None)
+                        if tgt:
+                            boost_paths.add(tgt.path)
+                    if e.target in seed_ids:
+                        src = next((n for n in g.nodes if n.id == e.source), None)
+                        if src:
+                            boost_paths.add(src.path)
 
     results = []
     for score, row in scored[: k * 2]:

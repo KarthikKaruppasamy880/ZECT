@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import ProjectRepoSelector from "./ProjectRepoSelector";
 import CollaborationPanel from "./CollaborationPanel";
@@ -10,10 +10,16 @@ interface LayoutProps {
 }
 
 export default function Layout({ onLogout }: LayoutProps) {
+  const location = useLocation();
+  const mentrixHud = location.pathname === "/mentrix-home";
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem("sidebar-collapsed") === "true";
   });
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    if (mentrixHud) setCollapsed(true);
+  }, [mentrixHud]);
 
   const handleToggle = useCallback(() => {
     if (window.innerWidth < 768) {
@@ -31,7 +37,6 @@ export default function Layout({ onLogout }: LayoutProps) {
     setMobileOpen(false);
   }, []);
 
-  // Keyboard shortcut: Ctrl+B to toggle sidebar
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "b") {
@@ -44,30 +49,35 @@ export default function Layout({ onLogout }: LayoutProps) {
   }, [handleToggle]);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className={`min-h-screen ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
       <Sidebar
         onLogout={onLogout}
-        collapsed={collapsed}
+        collapsed={collapsed || mentrixHud}
         onToggle={handleToggle}
         mobileOpen={mobileOpen}
         onMobileClose={handleMobileClose}
       />
-      {/* Main content with responsive margin */}
       <div
         className={`transition-all duration-200 ease-in-out ${
-          collapsed ? "md:ml-16" : "md:ml-56"
+          collapsed || mentrixHud ? "md:ml-16" : "md:ml-56"
         }`}
       >
-        {/* Top bar with project/repo selector */}
-        <div className="hidden md:flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white">
-          <ProjectRepoSelector />
-          <div className="flex items-center gap-3">
-            <MentrixWakeBridge />
-            <CollaborationPanel room="zect-global" user="admin" />
-            <div className="text-xs text-slate-400">ZECT v2.0</div>
+        {!mentrixHud && (
+          <div className="hidden md:flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white">
+            <ProjectRepoSelector />
+            <div className="flex items-center gap-3">
+              <MentrixWakeBridge />
+              <CollaborationPanel room="zect-global" user="admin" />
+              <div className="text-xs text-slate-400">ZECT v2.0</div>
+            </div>
           </div>
-        </div>
-        <main className="p-4 md:p-6 pt-16 md:pt-4">
+        )}
+        {mentrixHud && (
+          <div className="hidden md:flex justify-end px-3 py-1">
+            <MentrixWakeBridge />
+          </div>
+        )}
+        <main className={mentrixHud ? "p-0" : "p-4 md:p-6 pt-16 md:pt-4"}>
           <Outlet />
         </main>
       </div>

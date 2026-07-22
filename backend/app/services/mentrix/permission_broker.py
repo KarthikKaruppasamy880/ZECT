@@ -19,6 +19,7 @@ TOOL_ACTIONS: dict[str, str] = {
     "lattice_query": "companion_lattice_query",
     "research_news": "companion_research",
     "summarize_topic": "companion_research",
+    "weather_report": "companion_weather",
     "content_brief": "companion_content",
     "ads_copy": "companion_content",
     "report_draft": "companion_report",
@@ -29,6 +30,9 @@ TOOL_ACTIONS: dict[str, str] = {
     "email_digest": "companion_email_read",
     "email_send": "companion_email_send",
     "image_avatar": "companion_image_gen",
+    "media_generate": "companion_image_gen",
+    "media_edit": "companion_image_gen",
+    "media_list": "companion_image_list",
     "start_delivery": "companion_delivery_start",
     "approve_delivery": "companion_delivery_approve",
     "create_pr": "companion_create_pr",
@@ -37,7 +41,11 @@ TOOL_ACTIONS: dict[str, str] = {
     "computer_open_app": "companion_computer_open",
     "computer_click": "companion_computer_control",
     "computer_type": "companion_computer_control",
+    "computer_scroll": "companion_computer_control",
+    "computer_ui_inspect": "companion_computer_inspect",
     "diagnose_fix": "companion_diagnose",
+    "note_add": "companion_notes_write",
+    "note_list": "companion_notes_read",
 }
 
 ALWAYS_CONFIRM_TOOLS = {
@@ -45,6 +53,8 @@ ALWAYS_CONFIRM_TOOLS = {
     "email_send",
     "docs_draft",
     "image_avatar",
+    "media_generate",
+    "media_edit",
     "start_delivery",
     "approve_delivery",
     "create_pr",
@@ -53,6 +63,8 @@ ALWAYS_CONFIRM_TOOLS = {
     "computer_open_app",
     "computer_click",
     "computer_type",
+    "computer_scroll",
+    "computer_ui_inspect",
 }
 
 

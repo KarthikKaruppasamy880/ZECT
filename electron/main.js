@@ -9,6 +9,8 @@ const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut, session } = re
 const path = require("path");
 const { matchesWakePhrase } = require("./wake");
 const { startWindowsWake } = require("./win-wake");
+const { startDictation } = require("./dictation");
+const computer = require("./computer");
 
 const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
 const DEV_URL = process.env.ZECT_DEV_URL || "http://127.0.0.1:5173";
@@ -18,11 +20,13 @@ let mainWindow;
 let wakeEnabled = true;
 let winWakeHandle = null;
 let wakeStatus = { ok: false, reason: "starting", engine: "" };
+let dictationHandle = null;
 
 let computerMode = false;
 let computerModeIdleTimer = null;
 const COMPUTER_MODE_IDLE_MS = Number(process.env.MENTRIX_COMPUTER_IDLE_MS || 10 * 60 * 1000);
-const ALLOWLISTED_APPS = ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe"];
+const ALLOWLISTED_APPS =
+  process.platform === "darwin" ? computer.MAC_APPS : computer.WIN_APPS;
 const BLOCKED_PATH_FRAGMENTS = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
 
 function clearComputerModeIdle() {
@@ -171,6 +175,35 @@ ipcMain.handle("mentrix-stt-goal", (_e, goal) => {
   mainWindow.webContents.send("mentrix-stt-goal", { goal: String(goal), ts: new Date().toISOString() });
   return { ok: true };
 });
+ipcMain.handle("mentrix-dictation-enabled", (_e, enabled) => {
+  if (dictationHandle) {
+    dictationHandle.stop();
+    dictationHandle = null;
+  }
+  if (!enabled) return { ok: true, dictation: false };
+  dictationHandle = startDictation(
+    (text) => {
+      if (!mainWindow || !text) return;
+      // Strip wake phrase if user says Hey Mentrix + command
+      let goal = String(text);
+      const lower = goal.toLowerCase();
+      for (const p of ["hey mentrix", "mentrix engage", "wake mentrix", "hey matrix"]) {
+        if (lower.startsWith(p)) {
+          goal = goal.slice(p.length).trim();
+          break;
+        }
+      }
+      if (!goal) return;
+      mainWindow.webContents.send("mentrix-stt-goal", { goal, ts: new Date().toISOString() });
+    },
+    (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("mentrix-wake-status", { ...wakeStatus, dictation: status });
+      }
+    },
+  );
+  return { ok: true, dictation: true };
+});
 ipcMain.handle("mentrix-computer-mode", (_e, enabled) => {
   computerMode = Boolean(enabled);
   if (computerMode) armComputerModeIdle();
@@ -183,6 +216,7 @@ ipcMain.handle("mentrix-get-policy", () => ({
   allowlistedApps: ALLOWLISTED_APPS,
   blockedPathFragments: BLOCKED_PATH_FRAGMENTS,
   idleMs: COMPUTER_MODE_IDLE_MS,
+  platform: process.platform,
 }));
 ipcMain.handle("mentrix-confirm-action", (_e, payload) => {
   // Renderer shows modal; main records intent only
@@ -194,36 +228,25 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     return { ok: false, error: "computer_mode_off" };
   }
   armComputerModeIdle();
+  const a = args || {};
   if (action === "open_app" || action === "open") {
-    const appName = (args && (args.app || args.appName)) || "notepad.exe";
-    const base = String(appName).split(/[/\\]/).pop().toLowerCase();
-    if (!ALLOWLISTED_APPS.includes(base)) {
-      return { ok: false, error: "app_not_allowlisted", app: base };
-    }
-    try {
-      const { spawn } = require("child_process");
-      spawn(base, [], { detached: true, stdio: "ignore", shell: true }).unref();
-      return { ok: true, opened: base, audited: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
-    }
+    const appName =
+      a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
+    return computer.openApp(appName);
   }
-  if (action === "screenshot") {
+  if (action === "screenshot" || action === "desktop_screenshot") {
+    const desk = await computer.screenshotDesktop();
+    if (desk.ok) return desk;
     try {
       const img = await mainWindow.webContents.capturePage();
       const png = img.toPNG();
-      return {
-        ok: true,
-        desktop: "screenshot",
-        bytes: png.length,
-        note: "Window capture only — user confirmed",
-      };
+      return { ok: true, desktop: "screenshot", bytes: png.length, note: "window_fallback" };
     } catch (err) {
       return { ok: false, error: String(err) };
     }
   }
   if (action === "read_path" || action === "desktop_read") {
-    const target = (args && (args.path || args.file)) || "";
+    const target = a.path || a.file || "";
     if (!target || pathBlocked(target)) {
       return { ok: false, error: "path_blocked", path: target };
     }
@@ -241,21 +264,16 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     }
   }
   if (action === "click" || action === "computer_click") {
-    // Confirm-gated UI Automation stub (Windows) — no silent form input
-    return {
-      ok: true,
-      desktop: "computer_click",
-      args: args || {},
-      note: "Click queued after confirm; full UIA automation can be enabled per org policy",
-    };
+    return computer.clickAt(a.x, a.y);
   }
   if (action === "type" || action === "computer_type") {
-    return {
-      ok: true,
-      desktop: "computer_type",
-      args: { ...(args || {}), text: String((args && args.text) || "").slice(0, 200) },
-      note: "Type queued after confirm; never used for password fields",
-    };
+    return computer.typeText(a.text);
+  }
+  if (action === "scroll" || action === "computer_scroll") {
+    return computer.scroll(a.direction || "down");
+  }
+  if (action === "ui_inspect" || action === "computer_ui_inspect") {
+    return computer.uiInspect();
   }
   return { ok: false, error: "unsupported_action", action };
 });
@@ -402,6 +420,10 @@ app.on("will-quit", () => {
   if (winWakeHandle) {
     winWakeHandle.stop();
     winWakeHandle = null;
+  }
+  if (dictationHandle) {
+    dictationHandle.stop();
+    dictationHandle = null;
   }
 });
 

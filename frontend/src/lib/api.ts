@@ -1,4 +1,5 @@
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Prefer 127.0.0.1 — Electron/Windows can hang on localhost → IPv6 (::1)
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 /** Bearer + JSON headers for authenticated API calls. */
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -273,10 +274,12 @@ export const mentrixCompanionTurn = (
     project_id?: number;
     confirmed_tools?: string[];
     history?: { role: string; content: string }[];
+    signal?: AbortSignal;
   },
 ) =>
   request<any>("/api/mentrix/companion/turn", {
     method: "POST",
+    signal: opts?.signal,
     body: JSON.stringify({
       message,
       project_key: opts?.project_key || "",
@@ -285,6 +288,104 @@ export const mentrixCompanionTurn = (
       history: opts?.history || [],
     }),
   });
+
+export type MentrixStreamEvent = {
+  event: string;
+  turn_id?: string;
+  data?: Record<string, any>;
+};
+
+/** SSE companion stream via fetch (supports Bearer). */
+export async function mentrixCompanionStream(
+  message: string,
+  opts: {
+    project_key?: string;
+    confirmed_tools?: string[];
+    signal?: AbortSignal;
+    onEvent: (ev: MentrixStreamEvent) => void;
+  },
+): Promise<void> {
+  const params = new URLSearchParams({
+    message,
+    project_key: opts.project_key || "",
+  });
+  if (opts.confirmed_tools?.length) {
+    params.set("confirmed_tools", opts.confirmed_tools.join(","));
+  }
+  const res = await apiFetch(`/api/mentrix/companion/stream?${params.toString()}`, {
+    method: "GET",
+    signal: opts.signal,
+  });
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Companion stream failed");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      try {
+        opts.onEvent(JSON.parse(dataLine) as MentrixStreamEvent);
+      } catch {
+        /* ignore partial */
+      }
+    }
+  }
+}
+
+export async function mentrixCompanionStreamResume(
+  turnId: string,
+  confirmedTools: string[],
+  opts: {
+    signal?: AbortSignal;
+    onEvent: (ev: MentrixStreamEvent) => void;
+  },
+): Promise<void> {
+  const res = await apiFetch("/api/mentrix/companion/stream/resume", {
+    method: "POST",
+    signal: opts.signal,
+    body: JSON.stringify({ turn_id: turnId, confirmed_tools: confirmedTools }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error("Companion stream resume failed");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      try {
+        opts.onEvent(JSON.parse(dataLine) as MentrixStreamEvent);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 export const mentrixCompanionPolicy = () => request<any>("/api/mentrix/companion/policy");
 export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, replace = false) =>
   request<any>("/api/mentrix/companion/policy/import", {
@@ -292,6 +393,32 @@ export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, repl
     body: JSON.stringify({ pack, replace }),
   });
 export const mentrixCompanionTools = () => request<any>("/api/mentrix/companion/tools");
+export const mentrixRealtimeSession = () =>
+  request<{
+    ok: boolean;
+    realtime_enabled?: boolean;
+    client_secret?: string;
+    model?: string;
+    openai_ws_url?: string;
+    fallback?: string;
+    reason?: string;
+  }>("/api/mentrix/companion/realtime/session", { method: "POST" });
+export const mentrixRealtimeTool = (tool: string, args: Record<string, unknown>, confirmed = false) =>
+  request<any>("/api/mentrix/companion/realtime/tool", {
+    method: "POST",
+    body: JSON.stringify({
+      tool,
+      args,
+      confirmed,
+      project_key: typeof localStorage !== "undefined" ? localStorage.getItem("zect_lattice_key") || "" : "",
+    }),
+  });
+export const mentrixMediaList = () => request<{ items: any[] }>("/api/mentrix/companion/media");
+export const mentrixMediaUrl = (number: number) => {
+  const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : "";
+  return `${API}/api/mentrix/companion/media/${number}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+};
 export const mentrixStartRun = (
   goal: string,
   mode = "upgrade",

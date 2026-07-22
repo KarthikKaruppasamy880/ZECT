@@ -43,7 +43,7 @@ Goal → Lattice → Blueprint (design_contract) → Ask → Plan
 
 Callable wrappers live under `backend/app/services/phases/` so ForgeLoop does **not** HTTP self-call Ask/Plan/Build/Review routers.
 
-### Anti-hallucination doctrine (Mentrix-native — not MinionBot)
+### Anti-hallucination doctrine (Mentrix-native)
 
 | Defense | Module |
 |---------|--------|

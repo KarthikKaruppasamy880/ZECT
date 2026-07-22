@@ -1,9 +1,9 @@
 /**
- * App-wide Mentrix wake bridge (after login).
- * Desktop: native Windows wake + hotkey navigate to /mentrix-home.
+ * App-wide Mentrix wake status chip (after login).
+ * Wake handling + Connect Voice live in MentrixSessionProvider (survives navigation).
  */
 import { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 declare global {
   interface Window {
@@ -46,26 +46,22 @@ declare global {
 
 export default function MentrixWakeBridge() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [status, setStatus] = useState<string>("");
+
+  useEffect(() => {
+    const onSpaNav = (ev: Event) => {
+      const path = (ev as CustomEvent<{ path?: string }>).detail?.path;
+      if (path) navigate(path);
+    };
+    window.addEventListener("mentrix-spa-navigate", onSpaNav);
+    return () => window.removeEventListener("mentrix-spa-navigate", onSpaNav);
+  }, [navigate]);
 
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
     if (!desktop) return;
 
     const unsubs: Array<() => void> = [];
-    if (desktop.onWake) {
-      unsubs.push(
-        desktop.onWake((payload) => {
-          if (location.pathname !== "/mentrix-home") {
-            navigate("/mentrix-home");
-          }
-          window.dispatchEvent(
-            new CustomEvent("mentrix-wake", { detail: { phrase: payload?.phrase || "Mentrix" } }),
-          );
-        }),
-      );
-    }
     if (desktop.onWakeStatus) {
       unsubs.push(
         desktop.onWakeStatus((s) => {
@@ -81,7 +77,7 @@ export default function MentrixWakeBridge() {
     });
 
     return () => unsubs.forEach((u) => u());
-  }, [navigate, location.pathname]);
+  }, []);
 
   if (!window.zectDesktop?.isDesktopApp || !status) return null;
 

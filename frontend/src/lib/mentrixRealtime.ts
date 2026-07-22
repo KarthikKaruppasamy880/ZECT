@@ -157,6 +157,8 @@ export type StartMentrixRealtimeOptions = {
   preflight?: RealtimePreflight;
   forceReusePreflight?: boolean;
   deviceId?: string;
+  /** Appended to session instructions (Skills / Dream lessons). */
+  extraInstructions?: string;
 };
 
 async function attachMicCapture(
@@ -445,6 +447,28 @@ export async function startMentrixRealtime(
           },
         }),
       );
+      // Inject Skills/Dream context without replacing mint-time Mentrix instructions.
+      if (opts.extraInstructions?.trim()) {
+        try {
+          ws.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "message",
+                role: "system",
+                content: [
+                  {
+                    type: "input_text",
+                    text: opts.extraInstructions.trim().slice(0, 3500),
+                  },
+                ],
+              },
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+      }
       handlers.onLog?.(
         `Mic open${opts.deviceId ? ` (${opts.deviceId.slice(0, 8)}…)` : " (default)"} · worklet`,
       );

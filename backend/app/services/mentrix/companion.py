@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
-from app.models import MentrixRun
+from app.models import Lesson, MentrixRun, Skill
 from app.services.lattice.indexer import get_graph, query_graph
 from app.services.mentrix.permission_broker import (
     ALWAYS_CONFIRM_TOOLS,
@@ -37,6 +37,9 @@ NAV_MAP = {
     "sandbox": "/sandbox",
     "companion": "/mentrix-home",
     "home": "/mentrix-home",
+    "control tower": "/mentrix-home",
+    "desktop app": "/mentrix-home",
+    "mentrix home": "/mentrix-home",
     "integrations": "/integrations",
     "permissions": "/permissions",
     "dashboard": "/",
@@ -60,6 +63,63 @@ NAV_MAP = {
     "playbooks": "/playbooks",
     "audit": "/audit-trail",
 }
+
+
+def os_desktop_phrase(message: str) -> bool:
+    m = (message or "").lower()
+    if "desktop app" in m or "control tower" in m or "dashboard" in m:
+        return False
+    return bool(
+        re.search(
+            r"\b(open|go to|show|enable|take me to)\b.{0,32}\b(desktop|computer mode|os desktop|my desktop)\b",
+            m,
+        )
+        or re.search(r"\b(open desktop|go to desktop|enable computer|computer mode on)\b", m)
+    )
+
+
+def build_agent_context(
+    db: Session,
+    *,
+    skill_id: int | None = None,
+    project_id: int | None = None,
+    agent_context: str = "",
+) -> str:
+    """Compose Active Skill + staged Dream lessons for companion / Realtime turns.
+
+    Silent empty string when nothing is configured — never raises to callers.
+    """
+    bits: list[str] = []
+    raw = (agent_context or "").strip()
+    if raw:
+        bits.append(raw[:4000])
+    try:
+        if skill_id is not None:
+            skill = db.query(Skill).filter(Skill.id == int(skill_id)).first()
+            if skill:
+                body = (skill.template or skill.description or "").strip()
+                bits.append(
+                    f"Active skill ({skill.name}): {body[:1200]}"
+                    if body
+                    else f"Active skill: {skill.name}"
+                )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if project_id is not None:
+            lessons = (
+                db.query(Lesson)
+                .filter(Lesson.project_id == int(project_id), Lesson.status == "staged")
+                .order_by(Lesson.created_at.desc())
+                .limit(3)
+                .all()
+            )
+            claims = [str(L.claim or "").strip()[:220] for L in lessons if (L.claim or "").strip()]
+            if claims:
+                bits.append("Learned patterns (Dream):\n" + "\n".join(f"- {c}" for c in claims))
+    except Exception:  # noqa: BLE001
+        pass
+    return "\n\n".join(bits).strip()[:4000]
 
 
 def _ensure_openai_env() -> str:
@@ -261,7 +321,23 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if re.search(r"\bgo back\b", m):
         tools.append({"name": "go_back", "args": {}})
 
-    for key, path in NAV_MAP.items():
+    # OS desktop / Computer Mode — never map to app Dashboard ("/").
+    # "desktop app" / "control tower" are Mentrix HUD aliases (handled via NAV_MAP).
+    os_desktop = os_desktop_phrase(message)
+    if os_desktop:
+        if "screenshot" in m:
+            tools.append({"name": "desktop_screenshot", "args": {}})
+        else:
+            tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
+
+    # Longer NAV keys first so "desktop app" wins over accidental short matches.
+    nav_keys = sorted(NAV_MAP.keys(), key=len, reverse=True)
+    for key in nav_keys:
+        path = NAV_MAP[key]
+        if key == "dashboard" and re.search(r"\bdesktop\b", m) and "dashboard" not in m:
+            continue
+        if os_desktop and path == "/":
+            continue
         if key in m and any(w in m for w in ("open", "go to", "show", "navigate", "take me")):
             tools.append({"name": "navigate", "args": {"path": path, "label": key}})
             break
@@ -843,6 +919,8 @@ def iter_companion_events(
     history: list[dict] | None = None,
     turn_id: str | None = None,
     resume_pending: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
 ) -> Generator[dict[str, Any], None, dict[str, Any]]:
     """Yield SSE-shaped events; return final turn summary."""
     t0 = time.time()
@@ -851,6 +929,12 @@ def iter_companion_events(
     yield {"event": "thinking", "turn_id": tid, "data": {"message": "Mentrix thinking…"}}
 
     intents = resume_pending or _merge_intents(message)
+    packed_ctx = build_agent_context(
+        db,
+        skill_id=skill_id,
+        project_id=project_id,
+        agent_context=agent_context,
+    )
     tool_results: list[dict] = []
     pending: list[dict] = []
     board_items: list[dict] = []
@@ -917,6 +1001,8 @@ def iter_companion_events(
         }
 
     context_bits = []
+    if packed_ctx:
+        context_bits.append(packed_ctx)
     for tr in tool_results:
         if tr.get("denied"):
             context_bits.append(f"DENIED {tr['tool']}")
@@ -934,8 +1020,18 @@ def iter_companion_events(
     elif any(tr.get("denied") for tr in tool_results) and not any(not tr.get("denied") for tr in tool_results):
         reply = "Org policy blocked that action."
     else:
-        fast = _fast_tool_reply(tool_results, board_items, navigations)
-        reply = fast or _llm_answer(message, "\n".join(context_bits))
+        # Spoken clarification when OS-desktop intent opened Explorer (not Dashboard).
+        if any(
+            tr.get("tool") == "computer_open_app" and not tr.get("denied")
+            for tr in tool_results
+        ) and os_desktop_phrase(message):
+            reply = (
+                "Computer Mode desktop action is ready — confirm Allow if prompted. "
+                "That is your OS desktop, not the ZECT Dashboard."
+            )
+        else:
+            fast = _fast_tool_reply(tool_results, board_items, navigations)
+            reply = fast or _llm_answer(message, "\n".join(context_bits))
 
     # token chunks for realtime feel
     chunk = max(24, len(reply) // 4 or 24)
@@ -995,6 +1091,8 @@ def run_companion_turn_v2(
     created_by: str = "",
     confirmed_tools: list[str] | None = None,
     history: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
 ) -> dict[str, Any]:
     """Non-streaming turn that executes once and returns full payload."""
     events: list[dict] = []
@@ -1007,6 +1105,8 @@ def run_companion_turn_v2(
         created_by=created_by,
         confirmed_tools=confirmed_tools,
         history=history,
+        agent_context=agent_context,
+        skill_id=skill_id,
     )
     final: dict[str, Any] | None = None
     try:
@@ -1058,6 +1158,8 @@ def run_companion_turn(
     created_by: str = "",
     confirmed_tools: list[str] | None = None,
     history: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
 ) -> dict[str, Any]:
     return run_companion_turn_v2(
         db,
@@ -1068,6 +1170,8 @@ def run_companion_turn(
         created_by=created_by,
         confirmed_tools=confirmed_tools,
         history=history,
+        agent_context=agent_context,
+        skill_id=skill_id,
     )
 
 

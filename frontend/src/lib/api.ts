@@ -286,6 +286,7 @@ export const mentrixCompanionTurn = (
     project_id?: number;
     confirmed_tools?: string[];
     history?: { role: string; content: string }[];
+    agent_context?: string;
     signal?: AbortSignal;
   },
 ) =>
@@ -298,6 +299,7 @@ export const mentrixCompanionTurn = (
       project_id: opts?.project_id ?? null,
       confirmed_tools: opts?.confirmed_tools || [],
       history: opts?.history || [],
+      agent_context: opts?.agent_context || "",
     }),
   });
 
@@ -313,6 +315,7 @@ export async function mentrixCompanionStream(
   opts: {
     project_key?: string;
     confirmed_tools?: string[];
+    agent_context?: string;
     signal?: AbortSignal;
     onEvent: (ev: MentrixStreamEvent) => void;
   },
@@ -323,6 +326,9 @@ export async function mentrixCompanionStream(
   });
   if (opts.confirmed_tools?.length) {
     params.set("confirmed_tools", opts.confirmed_tools.join(","));
+  }
+  if (opts.agent_context?.trim()) {
+    params.set("agent_context", opts.agent_context.trim().slice(0, 4000));
   }
   const res = await apiFetch(`/api/mentrix/companion/stream?${params.toString()}`, {
     method: "GET",

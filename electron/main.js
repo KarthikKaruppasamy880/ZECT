@@ -117,14 +117,11 @@ function pathBlocked(p) {
 
 function navigateMentrix() {
   if (!mainWindow) return;
+  // Wake only — persistent dock expands + Connect Voice. Avoid hard location.assign (remounts React).
   const js = `
     (function () {
       try {
-        if (window.location.pathname !== '/mentrix-home') {
-          window.location.assign('/mentrix-home');
-        } else {
-          window.dispatchEvent(new CustomEvent('mentrix-wake', { detail: { phrase: 'Mentrix' } }));
-        }
+        window.dispatchEvent(new CustomEvent('mentrix-wake', { detail: { phrase: 'Mentrix', expand: true } }));
       } catch (e) {}
     })();
   `;

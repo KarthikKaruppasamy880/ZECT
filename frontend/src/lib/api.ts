@@ -216,12 +216,24 @@ export const latticeIngest = (path: string, project_key?: string, index_rag = tr
     method: "POST",
     body: JSON.stringify({ path, project_key: project_key || path, index_rag }),
   });
-export const latticeGraph = (project_key: string) =>
-  request<any>(`/api/lattice/graph?project_key=${encodeURIComponent(project_key)}`);
-export const latticeQuery = (project_key: string, q: string, limit = 50) =>
+export const latticeGraph = (project_key: string, layer = "combined") =>
+  request<any>(
+    `/api/lattice/graph?project_key=${encodeURIComponent(project_key)}&layer=${encodeURIComponent(layer)}`,
+  );
+export const latticeBacklinks = (project_key: string, doc: string, limit = 50) =>
+  request<any>(
+    `/api/lattice/graph/backlinks?project_key=${encodeURIComponent(project_key)}&doc=${encodeURIComponent(doc)}&limit=${limit}`,
+  );
+export const latticeQuery = (
+  project_key: string,
+  q: string,
+  limit = 50,
+  kinds?: string[],
+  include_backlinks = false,
+) =>
   request<any>("/api/lattice/query", {
     method: "POST",
-    body: JSON.stringify({ project_key, q, limit }),
+    body: JSON.stringify({ project_key, q, limit, kinds, include_backlinks }),
   });
 export const latticeRagSearch = (query: string, project_key?: string, top_k = 8) =>
   request<any>("/api/lattice/rag/search", {

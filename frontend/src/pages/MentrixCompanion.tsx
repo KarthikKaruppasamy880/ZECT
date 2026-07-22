@@ -24,24 +24,13 @@ import {
 } from "@/lib/api";
 import MentrixConfirmModal, { type PendingConfirm } from "@/components/MentrixConfirmModal";
 import MentrixArtifacts, { type ArtifactItem } from "@/components/MentrixArtifacts";
-import { startMentrixRealtime, type RealtimeSessionHandle } from "@/lib/mentrixRealtime";
-
-declare global {
-  interface Window {
-    zectDesktop?: {
-      isDesktopApp?: boolean;
-      mentrix?: {
-        onWake?: (cb: (p: { phrase?: string }) => void) => () => void;
-        onSttGoal?: (cb: (p: { goal?: string }) => void) => () => void;
-        onComputerMode?: (cb: (p: { computerMode?: boolean; reason?: string }) => void) => () => void;
-        setComputerMode?: (enabled: boolean) => Promise<unknown>;
-        setDictationEnabled?: (enabled: boolean) => Promise<unknown>;
-        confirmAction?: (payload: unknown) => Promise<unknown>;
-        computer?: (action: string, args?: Record<string, unknown>) => Promise<unknown>;
-      };
-    };
-  }
-}
+import {
+  probeMentrixRealtimePreflight,
+  startMentrixRealtime,
+  confirmRealtimeTools,
+  type RealtimePreflight,
+  type RealtimeSessionHandle,
+} from "@/lib/mentrixRealtime";
 
 type AvatarState = "idle" | "listening" | "thinking" | "speaking" | "working" | "needs_permission";
 type ChatMsg = { role: "user" | "assistant" | "system"; text: string };
@@ -105,6 +94,8 @@ export default function MentrixCompanion() {
   const [runsHint, setRunsHint] = useState("");
   const [streamReply, setStreamReply] = useState("");
   const [lastMessage, setLastMessageKeep] = useState("");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [realtimePreflight, setRealtimePreflight] = useState<RealtimePreflight | null>(null);
   const recognitionRef = useRef<any>(null);
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
   const pendingArgsRef = useRef<Record<string, Record<string, unknown>>>({});
@@ -138,6 +129,41 @@ export default function MentrixCompanion() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    probeMentrixRealtimePreflight()
+      .then(setRealtimePreflight)
+      .catch(() => setRealtimePreflight({ ready: false, reason: "probe_failed" }));
+  }, []);
+
+  const stripEchoPhrases = (text: string) => {
+    let t = text.trim();
+    for (const p of [
+      "hey mentrix",
+      "mentrix engage",
+      "wake mentrix",
+      "hey matrix",
+      "mentrix ready",
+      "how can i help",
+    ]) {
+      const lower = t.toLowerCase();
+      if (lower.startsWith(p)) t = t.slice(p.length).trim();
+      t = t.replace(new RegExp(p, "gi"), "").trim();
+    }
+    return t;
+  };
+
+  const submitVoiceTranscript = useCallback(
+    (raw: string) => {
+      const t = stripEchoPhrases(raw);
+      if (!t || t.length < 2) return;
+      setVoiceTranscript(t);
+      setLastMessageKeep(t);
+      setInput(t);
+      void runTurnRef.current?.(t);
+    },
+    [],
+  );
+
   const startVoiceSession = useCallback(async () => {
     if (realtimeRef.current) {
       realtimeRef.current.stop();
@@ -146,26 +172,41 @@ export default function MentrixCompanion() {
     setVoiceConnected(true);
     setAvatar("listening");
     setStatusLine("Connect Voice…");
+    const preflight =
+      realtimePreflight ?? (await probeMentrixRealtimePreflight().catch(() => ({ ready: false, reason: "probe_failed" })));
+    setRealtimePreflight(preflight);
     const handle = await startMentrixRealtime({
+      skipRealtime: !preflight.ready,
+      preflight,
+      handlers: {
       onOrb: (s) => setAvatar(s as AvatarState),
       onLog: pushLog,
       onTranscript: (role, text) => {
         if (!text?.trim()) return;
         setMessages((m) => [...m, { role, text }]);
-        if (role === "user") setLastMessageKeep(text);
+        if (role === "user") {
+          setLastMessageKeep(text);
+          setVoiceTranscript(text);
+        }
       },
       onNavigate: (path) => applyNav(path, navigate as any),
       onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
       onPendingConfirm: (pendingList) => {
-        const mapped = pendingList.map((p) => ({
-          tool: String(p.tool || ""),
-          action: String(p.action || p.tool || ""),
-          args_redacted: (p.args_redacted as Record<string, unknown>) || {},
-          reason: String(p.reason || "Allow required"),
-        }));
-        for (const p of mapped) {
-          pendingArgsRef.current[p.tool] = (p.args_redacted as Record<string, unknown>) || {};
-        }
+        const mapped = pendingList.map((p) => {
+          const tool = String(p.tool || "");
+          const fullArgs = (p.args as Record<string, unknown>) || {};
+          const redacted =
+            (p.args_redacted as Record<string, unknown>) ||
+            Object.fromEntries(Object.entries(fullArgs).map(([k, v]) => [k, k === "text" || k === "body" || k === "path" ? "…" : v]));
+          pendingArgsRef.current[tool] = fullArgs;
+          return {
+            tool,
+            action: String(p.action || p.tool || ""),
+            args: fullArgs,
+            args_redacted: redacted,
+            reason: String(p.reason || "Allow required"),
+          };
+        });
         setPending(mapped);
         setAvatar("needs_permission");
         speak("I need your permission to continue.", tts);
@@ -184,10 +225,7 @@ export default function MentrixCompanion() {
           rec.lang = "en-US";
           rec.onresult = (ev: any) => {
             const t = ev.results?.[ev.results.length - 1]?.[0]?.transcript || "";
-            if (t) {
-              setLastMessageKeep(t);
-              void runTurnRef.current?.(t);
-            }
+            if (t) submitVoiceTranscript(t);
           };
           rec.onerror = () => {
             setVoiceConnected(false);
@@ -209,12 +247,13 @@ export default function MentrixCompanion() {
           pushLog("Connect Voice — type your ask (mic fallback unavailable)");
         }
       },
+      },
     });
     realtimeRef.current = handle;
     if (handle.mode === "realtime") {
       setStatusLine("Realtime voice connected");
     }
-  }, [navigate, pushLog, tts]);
+  }, [navigate, pushLog, realtimePreflight, submitVoiceTranscript, tts]);
 
   useEffect(() => {
     const desktop = window.zectDesktop?.mentrix;
@@ -414,14 +453,25 @@ export default function MentrixCompanion() {
     setPending([]);
     const msg = lastMessage || input;
     if (realtimeRef.current?.mode === "realtime") {
-      const { mentrixRealtimeTool } = await import("@/lib/api");
-      for (const tool of tools) {
-        const res = await mentrixRealtimeTool(tool, pendingArgsRef.current[tool] || {}, true);
-        for (const ev of res.events || []) {
-          if (ev.event === "navigate") applyNav(ev.data?.path, navigate as any);
-          if (ev.event === "artifact") setBoard((b) => [ev.data as ArtifactItem, ...b].slice(0, 16));
+      const outputs = await confirmRealtimeTools(
+        tools,
+        pendingArgsRef.current,
+        {
+          onNavigate: (path) => applyNav(path, navigate as any),
+          onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
+          onLog: pushLog,
+          onOrb: (s) => setAvatar(s as AvatarState),
+        },
+      );
+      const summary = outputs.map((o) => {
+        try {
+          const j = JSON.parse(o);
+          return j.spoken_summary || j.note || o.slice(0, 120);
+        } catch {
+          return o.slice(0, 120);
         }
-      }
+      }).join(" ");
+      realtimeRef.current.resumeAfterTool(summary || "Done.");
       setAvatar("speaking");
       return;
     }
@@ -455,10 +505,9 @@ export default function MentrixCompanion() {
     if (!desktop?.onSttGoal) return;
     return desktop.onSttGoal((payload) => {
       if (!payload?.goal || !voiceConnected) return;
-      setLastMessageKeep(payload.goal);
-      void runTurn(payload.goal);
+      submitVoiceTranscript(payload.goal);
     });
-  }, [voiceConnected, runTurn]);
+  }, [voiceConnected, submitVoiceTranscript]);
 
   useEffect(() => {
     return () => {
@@ -542,6 +591,16 @@ export default function MentrixCompanion() {
                   <p className="text-xs text-slate-400" data-testid="mentrix-companion-status">
                     ● {statusLine}
                     {runsHint ? ` · Delivery ${runsHint}` : ""}
+                  </p>
+                  <p
+                    className={`text-[11px] ${realtimePreflight?.ready ? "text-emerald-400" : "text-amber-400"}`}
+                    data-testid="mentrix-realtime-status"
+                  >
+                    {realtimePreflight === null
+                      ? "Checking Realtime…"
+                      : realtimePreflight.ready
+                        ? "Realtime ready"
+                        : `Voice fallback — ${realtimePreflight.reason || "unavailable"}`}
                   </p>
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
                     <button
@@ -633,6 +692,38 @@ export default function MentrixCompanion() {
                   <div ref={chatEnd} />
                 </div>
 
+                {voiceTranscript ? (
+                  <div className="mt-2 rounded-lg border border-amber-900/50 bg-amber-950/20 p-2">
+                    <p className="text-[10px] uppercase tracking-wider text-amber-500/80">Heard — edit before send</p>
+                    <input
+                      data-testid="mentrix-voice-transcript"
+                      value={voiceTranscript}
+                      onChange={(e) => {
+                        setVoiceTranscript(e.target.value);
+                        setInput(e.target.value);
+                        setLastMessageKeep(e.target.value);
+                      }}
+                      className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-white"
+                    />
+                    <div className="mt-1 flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded bg-teal-700 px-2 py-1 text-xs text-white"
+                        onClick={() => void runTurn(voiceTranscript)}
+                      >
+                        Send corrected
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded border border-slate-600 px-2 py-1 text-xs"
+                        onClick={() => setVoiceTranscript("")}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="mt-3 flex items-end gap-2">
                   <textarea
                     data-testid="mentrix-companion-input"
@@ -702,7 +793,7 @@ export default function MentrixCompanion() {
                   "What's my Mentrix Delivery status?",
                   "What's the weather in Austin?",
                   "Slack digest",
-                  "Any email?",
+                  "Check my email",
                   "Open Lattice",
                   "Open Sandbox",
                   "Research latest on AI marketing",

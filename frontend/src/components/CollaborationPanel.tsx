@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Users, Wifi, WifiOff } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
-const WS_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/^http/, "ws");
+const WS_BASE = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/^http/, "ws");
 
 interface PresenceUser {
   user: string;
@@ -24,13 +24,14 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   const [connected, setConnected] = useState(false);
   const [users, setUsers] = useState<PresenceUser[]>([]);
   const [activeCount, setActiveCount] = useState(0);
+  const [backendReady, setBackendReady] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const failCountRef = useRef(0);
 
   const connect = useCallback(() => {
+    if (!backendReady) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    // Stop hammering when WS is unavailable (common in local/dev)
     if (failCountRef.current >= 3) return;
 
     const ws = new WebSocket(`${WS_BASE}/ws/${room}?user=${encodeURIComponent(user)}`);
@@ -66,7 +67,7 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
     };
 
     wsRef.current = ws;
-  }, [room, user]);
+  }, [backendReady, room, user]);
 
   const fetchPresence = async () => {
     try {
@@ -82,50 +83,55 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   };
 
   useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/auth/config")
+      .then((res) => {
+        if (!cancelled && res.ok) setBackendReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) setBackendReady(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!backendReady) return;
     connect();
     return () => {
       clearTimeout(reconnectRef.current);
       wsRef.current?.close();
     };
-  }, [connect]);
+  }, [backendReady, connect]);
 
-  // Send page change on navigation
   useEffect(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "page_change", page: window.location.pathname }));
     }
   }, []);
 
-  // Ping keep-alive
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (!connected) return;
+    const id = setInterval(() => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "ping" }));
       }
     }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => clearInterval(id);
+  }, [connected]);
+
+  const colorClass = USER_COLORS[user.length % USER_COLORS.length];
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg border border-slate-700">
+    <div className="flex items-center gap-2 text-xs text-slate-500" data-testid="collaboration-panel">
       {connected ? (
-        <Wifi className="w-3.5 h-3.5 text-green-400" />
+        <Wifi className={`h-3.5 w-3.5 ${colorClass}`} />
       ) : (
-        <WifiOff className="w-3.5 h-3.5 text-red-400" />
+        <WifiOff className="h-3.5 w-3.5 text-slate-400" />
       )}
-      <Users className="w-3.5 h-3.5 text-slate-400" />
-      <span className="text-xs text-slate-300">{activeCount}</span>
-      <div className="flex -space-x-1">
-        {users.slice(0, 5).map((u, i) => (
-          <div
-            key={`${u.user}-${i}`}
-            className={`w-5 h-5 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center ${USER_COLORS[i % USER_COLORS.length]}`}
-            title={`${u.user} on ${u.page || "unknown"}`}
-          >
-            <span className="text-[8px] font-bold uppercase">{u.user.charAt(0)}</span>
-          </div>
-        ))}
-      </div>
+      <Users className="h-3.5 w-3.5" />
+      <span>{activeCount || users.length} online</span>
     </div>
   );
 }

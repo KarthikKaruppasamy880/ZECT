@@ -180,20 +180,34 @@ ipcMain.handle("mentrix-dictation-enabled", (_e, enabled) => {
     dictationHandle.stop();
     dictationHandle = null;
   }
-  if (!enabled) return { ok: true, dictation: false };
+  if (!enabled) {
+    if (wakeEnabled) startNativeWake();
+    return { ok: true, dictation: false };
+  }
+  if (winWakeHandle) {
+    winWakeHandle.stop();
+    winWakeHandle = null;
+  }
   dictationHandle = startDictation(
     (text) => {
       if (!mainWindow || !text) return;
-      // Strip wake phrase if user says Hey Mentrix + command
       let goal = String(text);
       const lower = goal.toLowerCase();
-      for (const p of ["hey mentrix", "mentrix engage", "wake mentrix", "hey matrix"]) {
+      for (const p of [
+        "hey mentrix",
+        "mentrix engage",
+        "wake mentrix",
+        "hey matrix",
+        "mentrix ready",
+        "how can i help",
+      ]) {
         if (lower.startsWith(p)) {
           goal = goal.slice(p.length).trim();
           break;
         }
+        goal = goal.replace(new RegExp(p, "gi"), "").trim();
       }
-      if (!goal) return;
+      if (!goal || goal.length < 2) return;
       mainWindow.webContents.send("mentrix-stt-goal", { goal, ts: new Date().toISOString() });
     },
     (status) => {

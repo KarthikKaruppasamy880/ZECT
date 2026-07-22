@@ -63,6 +63,7 @@ test.describe("Mentrix Companion", () => {
 
   test("Connect Voice button toggles", async ({ page }) => {
     await page.goto("/mentrix-home");
+    await expect(page.getByTestId("mentrix-realtime-status")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("mentrix-connect-voice").click();
     await expect(page.getByTestId("mentrix-live-log")).toContainText(/Connect Voice|Realtime|fallback|listening/i, {
       timeout: 30_000,

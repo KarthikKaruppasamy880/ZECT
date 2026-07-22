@@ -69,22 +69,6 @@ function workflowStepIndex(run: any): number {
   return -1;
 }
 
-declare global {
-  interface Window {
-    zectDesktop?: {
-      isDesktopApp?: boolean;
-      mentrix?: {
-        onWake?: (cb: (payload: { phrase?: string; source?: string }) => void) => () => void;
-        onWakeStatus?: (cb: (payload: { ok?: boolean; reason?: string; engine?: string }) => void) => () => void;
-        onSttGoal?: (cb: (payload: { goal?: string }) => void) => () => void;
-        getWakeStatus?: () => Promise<{ ok?: boolean; reason?: string; engine?: string; wakeEnabled?: boolean }>;
-        submitTranscript?: (t: string) => Promise<{ matched?: boolean }>;
-        setWakeEnabled?: (enabled: boolean) => Promise<unknown>;
-      };
-    };
-  }
-}
-
 function speakStatus(text: string, enabled: boolean) {
   if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
   try {

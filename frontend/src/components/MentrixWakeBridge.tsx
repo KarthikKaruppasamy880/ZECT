@@ -13,6 +13,14 @@ declare global {
         onWake?: (cb: (payload: { phrase?: string; source?: string }) => void) => () => void;
         onWakeStatus?: (cb: (payload: { ok?: boolean; reason?: string; engine?: string }) => void) => () => void;
         getWakeStatus?: () => Promise<{ ok?: boolean; reason?: string; engine?: string; wakeEnabled?: boolean }>;
+        onSttGoal?: (cb: (payload: { goal?: string }) => void) => () => void;
+        onComputerMode?: (cb: (payload: { computerMode?: boolean; reason?: string }) => void) => () => void;
+        setComputerMode?: (enabled: boolean) => Promise<unknown>;
+        setDictationEnabled?: (enabled: boolean) => Promise<unknown>;
+        setWakeEnabled?: (enabled: boolean) => Promise<unknown>;
+        submitTranscript?: (t: string) => Promise<{ matched?: boolean }>;
+        confirmAction?: (payload: unknown) => Promise<unknown>;
+        computer?: (action: string, args?: Record<string, unknown>) => Promise<unknown>;
       };
     };
   }

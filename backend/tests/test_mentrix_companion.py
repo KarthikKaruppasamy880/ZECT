@@ -237,6 +237,14 @@ def test_weather_report_tool(monkeypatch):
     assert out.get("board", {}).get("type") == "markdown"
 
 
+def test_email_intent_aliases():
+    from app.services.mentrix.companion import _parse_intents
+
+    assert any(t["name"] == "email_digest" for t in _parse_intents("check my email"))
+    assert any(t["name"] == "email_digest" for t in _parse_intents("read my inbox"))
+    assert not any(t["name"] == "email_digest" for t in _parse_intents("any event"))
+
+
 def test_email_digest_without_imap(monkeypatch):
     monkeypatch.delenv("MENTRIX_IMAP_HOST", raising=False)
     monkeypatch.delenv("MENTRIX_IMAP_USER", raising=False)

@@ -267,6 +267,8 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             break
     if "open lattice" in m or "lattice graph" in m:
         tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
+    if re.search(r"\b(open|show|go to)\b.*\b(lattice docs|documentation graph|wiki graph|docs graph)\b", m):
+        tools.append({"name": "navigate", "args": {"path": "/lattice?layer=docs", "label": "lattice docs"}})
     if re.search(r"\b(open|go to|show|navigate|take me)\b.*\b(delivery|mentrix delivery)\b", m) or "open delivery" in m:
         tools.append({"name": "navigate", "args": {"path": "/mentrix", "label": "delivery"}})
 
@@ -315,13 +317,15 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         p in m
         for p in (
             "email digest",
-            "any email",
             "check email",
             "check my email",
+            "check mail",
+            "read email",
+            "my inbox",
             "inbox",
             "gmail",
         )
-    ) or ("email" in m and "digest" in m):
+    ) or re.search(r"\b(e-?mail|inbox|gmail)\b", m) or ("email" in m and "digest" in m):
         tools.append({"name": "email_digest", "args": {}})
     if "send email" in m or "email send" in m:
         tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
@@ -349,7 +353,7 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if re.search(r"\b(add note|save note|remember|note that)\b", m):
         tools.append({"name": "note_add", "args": {"text": message[:800]}})
 
-    if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find")):
+    if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find", "wiki", "doc", "markdown")):
         tools.append({"name": "lattice_query", "args": {"q": message[:120], "project_key": ""}})
 
     if any(w in m for w in ("start deliver", "engage delivery", "run upgrade", "start upgrade", "start mentrix")):
@@ -429,24 +433,59 @@ def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", create
             key = gkeys[0] if gkeys else ""
         if not key:
             return {"ok": False, "error": "No Lattice project_key — ingest a workspace first"}
-        hits = query_graph(key, args.get("q") or "", limit=15)
+        q = args.get("q") or ""
+        doc_mode = any(w in q.lower() for w in ("wiki", "doc", "markdown", "note"))
+        kinds = ["doc", "folder", "vault"] if doc_mode else None
+        hits = query_graph(key, q, limit=15, kinds=kinds)
+        if not hits and doc_mode:
+            hits = query_graph(key, q, limit=15)
         g = get_graph(key)
-        return {
-            "ok": True,
-            "project_key": key,
-            "hits": hits[:15],
-            "summary": {"files": g.files_indexed if g else 0, "symbols": g.symbols if g else 0},
-            "board": {
+        from app.services.lattice.markdown_graph import doc_backlinks as lattice_doc_backlinks
+
+        bl_rows: list[list[str]] = []
+        if hits and hits[0].get("kind") in ("doc", "folder", "vault"):
+            bl = lattice_doc_backlinks(key, hits[0].get("path") or hits[0].get("name") or q, limit=8)
+            for item in bl.get("backlinks") or []:
+                src = item.get("source") or {}
+                bl_rows.append([src.get("name") or "", src.get("kind") or "", src.get("path") or ""])
+        summary = {
+            "files": g.files_indexed if g else 0,
+            "symbols": g.symbols if g else 0,
+            "docs": getattr(g, "doc_files_indexed", 0) if g else 0,
+            "wikilinks": getattr(g, "wikilinks_resolved", 0) if g else 0,
+        }
+        boards: list[dict] = [
+            {
                 "type": "table",
                 "title": "Lattice hits",
                 "data": {
                     "columns": ["name", "kind", "path"],
                     "rows": [
-                        [h.get("name") or h.get("symbol") or "", h.get("kind") or "", h.get("path") or ""]
+                        [h.get("name") or "", h.get("kind") or "", h.get("path") or ""]
                         for h in (hits[:12] if isinstance(hits, list) else [])
                     ],
                 },
-            },
+            }
+        ]
+        if bl_rows:
+            boards.append(
+                {
+                    "type": "table",
+                    "title": "Doc backlinks",
+                    "data": {"columns": ["name", "kind", "path"], "rows": bl_rows},
+                }
+            )
+        spoken = f"Found {len(hits)} Lattice matches"
+        if summary.get("docs"):
+            spoken += f", including {summary['docs']} documentation nodes."
+        return {
+            "ok": True,
+            "project_key": key,
+            "hits": hits[:15],
+            "summary": summary,
+            "board": boards[0],
+            "board_extra": boards[1] if len(boards) > 1 else None,
+            "spoken_summary": spoken,
         }
     if name == "research_news":
         topic = args.get("topic") or "technology"

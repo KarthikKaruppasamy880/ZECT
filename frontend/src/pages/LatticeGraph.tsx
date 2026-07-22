@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Network, Search, Upload } from "lucide-react";
 import {
   latticeBlueprint,
@@ -10,10 +11,15 @@ import {
   latticeQuery,
   latticeRagSearch,
 } from "@/lib/api";
+import LatticeForceGraph from "@/components/LatticeForceGraph";
 
 export default function LatticeGraph() {
+  const [searchParams] = useSearchParams();
   const [path, setPath] = useState("");
   const [projectKey, setProjectKey] = useState("");
+  const [layer, setLayer] = useState<"combined" | "code" | "docs">(
+    (searchParams.get("layer") as "combined" | "code" | "docs") || "combined",
+  );
   const [query, setQuery] = useState("");
   const [pathSource, setPathSource] = useState("");
   const [pathTarget, setPathTarget] = useState("");
@@ -60,7 +66,7 @@ export default function LatticeGraph() {
     setError("");
     setLoading(true);
     try {
-      const res = await latticeGraph(key);
+      const res = await latticeGraph(key, layer);
       setGraph(res);
       await loadBlueprint(key);
     } catch (e) {
@@ -69,6 +75,11 @@ export default function LatticeGraph() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const l = searchParams.get("layer");
+    if (l === "code" || l === "docs" || l === "combined") setLayer(l);
+  }, [searchParams]);
 
   const runQuery = async () => {
     setError("");
@@ -124,8 +135,13 @@ export default function LatticeGraph() {
   const nodes = graph?.nodes?.slice(0, 80) || [];
   const edges = graph?.edges || [];
   const edgePreview = edges.slice(0, 120);
-  const callEdges = edges.filter((e: any) => e.kind === "calls").length;
   const endpoints = (graph?.nodes || []).filter((n: any) => n.kind === "endpoint").length;
+  const docNodes = (graph?.nodes || []).filter((n: any) =>
+    ["doc", "folder", "vault", "wikilink_stub"].includes(n.kind),
+  ).length;
+  const wikilinks = edges.filter((e: any) =>
+    ["wikilink", "md_link", "references"].includes(e.kind),
+  ).length;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-1" data-testid="lattice-page">
@@ -161,6 +177,26 @@ export default function LatticeGraph() {
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
           />
         </label>
+      </div>
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <span className="text-sm text-slate-600">Layer:</span>
+        {(["combined", "code", "docs"] as const).map((l) => (
+          <button
+            key={l}
+            type="button"
+            data-testid={`lattice-layer-${l}`}
+            onClick={() => {
+              setLayer(l);
+              if (key) void latticeGraph(key, l).then(setGraph).catch(() => {});
+            }}
+            className={`rounded-lg px-3 py-1 text-sm capitalize ${
+              layer === l ? "bg-teal-700 text-white" : "border border-slate-300"
+            }`}
+          >
+            {l}
+          </button>
+        ))}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -205,12 +241,21 @@ export default function LatticeGraph() {
       )}
 
       {graph && (
-        <div className="grid gap-4 md:grid-cols-5">
+        <div className="grid gap-4 md:grid-cols-7">
           <Stat label="Files" value={graph.files_indexed ?? "—"} />
+          <Stat label="Docs" value={graph.doc_files_indexed ?? docNodes ?? "—"} />
+          <Stat label="Wikilinks" value={graph.wikilinks_resolved ?? wikilinks ?? "—"} />
+          <Stat label="Broken" value={graph.wikilinks_unresolved ?? "—"} />
           <Stat label="Symbols" value={graph.symbols ?? nodes.length} />
           <Stat label="Edges" value={edges.length} />
-          <Stat label="Calls" value={callEdges} />
           <Stat label="Endpoints" value={endpoints} />
+        </div>
+      )}
+
+      {graph && nodes.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-slate-900 p-3">
+          <h2 className="mb-2 text-sm font-semibold text-teal-200">Interactive graph</h2>
+          <LatticeForceGraph nodes={graph.nodes || []} edges={edges} />
         </div>
       )}
 

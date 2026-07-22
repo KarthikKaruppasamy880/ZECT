@@ -217,7 +217,22 @@ def build_structural_blueprint(
         "classes": len(classes),
         "api_endpoints": len(api_endpoints),
         "call_edges": sum(1 for e in graph.edges if e.kind == "calls"),
+        "doc_files_indexed": getattr(graph, "doc_files_indexed", 0),
+        "wikilinks_resolved": getattr(graph, "wikilinks_resolved", 0),
+        "wikilinks_unresolved": getattr(graph, "wikilinks_unresolved", 0),
     }
+    doc_files = [
+        {"name": n.name, "path": n.path, "group": getattr(n, "group", "") or ""}
+        for n in graph.nodes
+        if n.kind == "doc"
+    ][:200]
+    from app.services.lattice.markdown_graph import doc_backlinks as lattice_doc_backlinks
+
+    doc_backlinks_map: dict[str, list] = {}
+    for d in doc_files[:30]:
+        bl = lattice_doc_backlinks(key, d["path"], limit=8)
+        if bl.get("backlinks"):
+            doc_backlinks_map[d["path"]] = bl["backlinks"]
     # Lightweight business_context from endpoints + top classes (no LLM required)
     business_context: list[dict] = []
     for ep in api_endpoints[:30]:
@@ -256,6 +271,8 @@ def build_structural_blueprint(
         "business_context": business_context,
         "god_nodes": gods,
         "stats": stats,
+        "doc_files": doc_files,
+        "doc_backlinks": doc_backlinks_map,
         "error": "",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -340,7 +357,8 @@ def build_deep_prompt(blueprint: dict[str, Any]) -> str:
         "## Stats",
         f"- files={stats.get('files_indexed')} symbols={stats.get('symbols')} "
         f"functions={stats.get('functions')} classes={stats.get('classes')} "
-        f"endpoints={stats.get('api_endpoints')} call_edges={stats.get('call_edges')}",
+        f"endpoints={stats.get('api_endpoints')} call_edges={stats.get('call_edges')} "
+        f"docs={stats.get('doc_files_indexed')} wikilinks={stats.get('wikilinks_resolved')}",
         "",
         "## God nodes (highest connectivity)",
     ]
@@ -365,6 +383,17 @@ def build_deep_prompt(blueprint: dict[str, Any]) -> str:
     dep = blueprint.get("dependency_graph") or {}
     for src, tgts in list(dep.items())[:25]:
         lines.append(f"- {src} → {', '.join(tgts[:6])}")
+    lines.append("")
+    lines.append("## Documentation graph")
+    for d in (blueprint.get("doc_files") or [])[:25]:
+        lines.append(f"- doc {d.get('name')} — {d.get('path')} ({d.get('group')})")
+    bl_map = blueprint.get("doc_backlinks") or {}
+    if bl_map:
+        lines.append("")
+        lines.append("## Doc backlinks (sample)")
+        for path, links in list(bl_map.items())[:10]:
+            names = ", ".join(l.get("source", {}).get("name", "?") for l in links[:4])
+            lines.append(f"- {path} ← {names}")
     lines.append("")
     lines.append("## Business context")
     for b in (blueprint.get("business_context") or [])[:25]:

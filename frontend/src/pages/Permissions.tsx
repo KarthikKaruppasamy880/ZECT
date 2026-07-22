@@ -12,9 +12,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
+import { apiFetch } from "@/lib/api";
 import Pagination from "@/components/Pagination";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 interface Rule {
   id: number;
@@ -57,7 +56,7 @@ export default function Permissions() {
 
   const fetchRules = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/rules`);
+      const res = await apiFetch(`/api/permissions/rules`);
       if (res.ok) setRules(await res.json());
       else showToast("error", `Failed to load rules (${res.status})`);
     } catch (err) { showToast("error", "Network error loading rules"); }
@@ -65,7 +64,7 @@ export default function Permissions() {
 
   const fetchAudits = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/audits?limit=50`);
+      const res = await apiFetch(`/api/permissions/audits?limit=50`);
       if (res.ok) setAudits(await res.json());
       else showToast("error", `Failed to load audits (${res.status})`);
     } catch (err) { showToast("error", "Network error loading audits"); }
@@ -73,7 +72,7 @@ export default function Permissions() {
 
   const fetchPending = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/audits/pending`);
+      const res = await apiFetch(`/api/permissions/audits/pending`);
       if (res.ok) setPending(await res.json());
       else showToast("error", `Failed to load pending (${res.status})`);
     } catch (err) { showToast("error", "Network error loading pending"); }
@@ -87,7 +86,7 @@ export default function Permissions() {
   const handleCheck = async () => {
     if (!checkAction.trim()) return;
     try {
-      const res = await fetch(`${API}/api/permissions/check`, {
+      const res = await apiFetch(`/api/permissions/check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: checkAction }),
@@ -105,7 +104,7 @@ export default function Permissions() {
   const handleAddRule = async () => {
     if (!newRule.action_pattern.trim()) return;
     try {
-      await fetch(`${API}/api/permissions/rules`, {
+      await apiFetch(`/api/permissions/rules`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newRule),
@@ -119,7 +118,7 @@ export default function Permissions() {
 
   const handleApproval = async (auditId: number, approved: boolean) => {
     try {
-      await fetch(`${API}/api/permissions/audits/${auditId}/approve`, {
+      await apiFetch(`/api/permissions/audits/${auditId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved, approved_by: "admin", reason: approved ? "Approved via dashboard" : "Rejected via dashboard" }),
@@ -132,7 +131,7 @@ export default function Permissions() {
 
   const handleDeleteRule = async (ruleId: number) => {
     try {
-      await fetch(`${API}/api/permissions/rules/${ruleId}`, { method: "DELETE" });
+      await apiFetch(`/api/permissions/rules/${ruleId}`, { method: "DELETE" });
       showToast("info", "Rule deleted");
       fetchRules();
     } catch (err) { showToast("error", "Failed to delete rule"); }

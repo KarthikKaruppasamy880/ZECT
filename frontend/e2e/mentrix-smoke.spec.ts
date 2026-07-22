@@ -10,6 +10,10 @@ test.describe("Mentrix smoke", () => {
   test("Mentrix page engage run", async ({ page }) => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
+    await expect(page.getByTestId("mentrix-step-rail")).toBeVisible();
+    await expect(page.getByTestId("mentrix-step-lattice")).toBeVisible();
+    await expect(page.getByTestId("mentrix-step-pr")).toBeVisible();
+    await expect(page.getByTestId("mentrix-empty-state")).toContainText(/Clone or Lattice-ingest/i);
     await page.getByTestId("mentrix-goal").fill("Smoke test: summarize delivery gates");
     await page.getByTestId("mentrix-mode").selectOption("chat");
     await page.getByTestId("mentrix-engage").click();
@@ -18,6 +22,26 @@ test.describe("Mentrix smoke", () => {
       timeout: 45_000,
     });
     await expect(page.getByTestId("mentrix-events")).toBeVisible();
+  });
+
+  test("Blueprint From Lattice mode is available", async ({ page }) => {
+    await page.goto("/blueprint");
+    await page.getByRole("button", { name: /From Lattice/i }).click();
+    await expect(page.getByTestId("blueprint-lattice-mode")).toBeVisible();
+    await expect(page.getByTestId("blueprint-lattice-key")).toBeVisible();
+  });
+
+  test("Snippet Review banner clarifies Mentrix delivery", async ({ page }) => {
+    await page.goto("/review");
+    await expect(page.getByTestId("snippet-review-banner")).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Snippet Review/i })).toBeVisible();
+  });
+
+  test("Workflow sidebar links to Mentrix Delivery", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: /Mentrix Delivery/i })).toBeVisible();
+    await page.getByRole("link", { name: /Mentrix Delivery/i }).click();
+    await expect(page.getByTestId("mentrix-page")).toBeVisible();
   });
 
   test("Mentrix upgrade mode chat + gates", async ({ page }) => {
@@ -30,6 +54,12 @@ test.describe("Mentrix smoke", () => {
     await page.getByTestId("mentrix-engage").click();
     await expect(page.getByTestId("mentrix-live-status")).toBeVisible();
     await expect(page.getByTestId("mentrix-chat")).toBeVisible();
+    await expect(page.getByTestId("mentrix-error").or(page.getByTestId("mentrix-run-status"))).toBeVisible({
+      timeout: 90_000,
+    });
+    if (await page.getByTestId("mentrix-error").isVisible()) {
+      throw new Error(await page.getByTestId("mentrix-error").innerText());
+    }
     await expect(page.getByTestId("mentrix-run-status")).toContainText(
       /completed|awaiting|needs_human|running|approved/i,
       { timeout: 90_000 }

@@ -8,8 +8,8 @@ import {
   cloneRepo, pullRepo, deleteRepoClone,
   getRepoBranches, checkoutRepoBranch, getClonedRepos,
   getRepoTree, getRepoFile, searchRepoFiles,
+  getProjects, getProject, addProjectRepo, latticeIngest,
 } from "@/lib/api";
-import { getProjects } from "@/lib/api";
 import { showToast } from "@/components/Toast";
 
 interface TreeNode {
@@ -112,38 +112,57 @@ export default function RepoWorkspace() {
       return;
     }
     setCloning(true);
+    const owner = cloneOwner.trim();
+    const name = cloneRepoName.trim();
+    const projectKey = `${owner}-${name}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
     try {
-      // First create the repo in the project if needed
-      const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const addRes = await fetch(`${API}/api/projects/${selectedProjectId}/repos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          owner: cloneOwner.trim(),
-          repo_name: cloneRepoName.trim(),
-          default_branch: cloneBranch || "main",
-        }),
-      });
-      let repo;
-      if (addRes.ok) {
-        repo = await addRes.json();
-      } else {
-        // Repo may already exist, try to find it
-        const listRes = await fetch(`${API}/api/projects/${selectedProjectId}`);
-        if (listRes.ok) {
-          const proj = await listRes.json();
-          repo = proj.repos?.find(
-            (r: any) => r.owner === cloneOwner.trim() && r.repo_name === cloneRepoName.trim()
-          );
-        }
-      }
+      let proj = await getProject(selectedProjectId);
+      let repo = proj.repos?.find(
+        (r: any) => r.owner === owner && r.repo_name === name,
+      );
       if (!repo) {
+        proj = await addProjectRepo(selectedProjectId, {
+          owner,
+          repo_name: name,
+          default_branch: cloneBranch || "main",
+        });
+        repo = proj.repos?.find(
+          (r: any) => r.owner === owner && r.repo_name === name,
+        );
+      }
+      if (!repo?.id) {
         showToast("error", "Could not create/find repo");
         return;
       }
 
       const result = await cloneRepo(repo.id, cloneBranch || undefined, cloneShallow);
-      showToast("success", `Cloned ${cloneOwner}/${cloneRepoName}: ${result.stats?.total_files || 0} files`);
+      const localPath = result.local_path || result.path || "";
+      showToast(
+        "success",
+        `Cloned ${owner}/${name}: ${result.stats?.total_files || 0} files`,
+      );
+
+      if (localPath) {
+        try {
+          await latticeIngest(localPath, projectKey, true);
+          localStorage.setItem(
+            "zect_mentrix_workspace",
+            JSON.stringify({
+              path: localPath,
+              workspace: localPath,
+              project_key: projectKey,
+              projectKey,
+            }),
+          );
+          showToast("success", `Lattice indexed as project key "${projectKey}"`);
+        } catch (ingestErr: any) {
+          showToast(
+            "error",
+            `Clone OK; Lattice ingest failed: ${ingestErr?.message || "unknown"}`,
+          );
+        }
+      }
+
       setCloneOwner("");
       setCloneRepoName("");
       setCloneBranch("");

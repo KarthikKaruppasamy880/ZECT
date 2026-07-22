@@ -1284,3 +1284,29 @@ class FineTuneSample(Base):
     rejected_output = Column(Text, default="")
     accepted = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LatticeStructuralBlueprint(Base):
+    """Mentrix structural RepoBlueprint — deep inventory per Lattice project_key."""
+    __tablename__ = "lattice_structural_blueprints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_key = Column(String, unique=True, nullable=False, index=True)
+    workspace_path = Column(String, default="")
+    status = Column(String, default="synced")  # pending, indexing, synced, failed
+    indexed_commit_sha = Column(String, default="")
+    file_tree_json = Column(Text, default="[]")
+    functions_json = Column(Text, default="[]")
+    classes_json = Column(Text, default="[]")
+    api_endpoints_json = Column(Text, default="[]")
+    outbound_calls_json = Column(Text, default="[]")
+    dependency_graph_json = Column(Text, default="{}")
+    database_connections_json = Column(Text, default="[]")
+    config_entries_json = Column(Text, default="[]")
+    tech_stack_json = Column(Text, default="[]")
+    business_context_json = Column(Text, default="[]")
+    god_nodes_json = Column(Text, default="[]")
+    stats_json = Column(Text, default="{}")
+    error = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

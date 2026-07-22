@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Bot, Check, GitPullRequest, Play, Sparkles } from "lucide-react";
 import {
   mentrixAgents,
@@ -11,11 +12,88 @@ import {
 
 const MODES = ["upgrade", "chat", "understand", "deliver", "review_only", "ops"];
 
+const WORKFLOW_STEPS = [
+  { id: "lattice", label: "Lattice" },
+  { id: "plan_build", label: "Plan/Build" },
+  { id: "gates", label: "Gates" },
+  { id: "ultra_review", label: "Ultra Review" },
+  { id: "approve", label: "Approve" },
+  { id: "pr", label: "PR" },
+] as const;
+
 type ChatMsg = {
   role: "user" | "assistant" | "system";
   text: string;
   meta?: string;
 };
+
+function workflowStepIndex(run: any): number {
+  if (!run) return -1;
+  if (run.pr_url || run.status === "pr_created") return 5;
+  if (run.approved_at || run.status === "approved") return 4;
+  const gates = run.gates || run.result?.gates || {};
+  const events = run.events || [];
+  const phases = new Set(events.map((e: any) => e.phase).filter(Boolean));
+  const agents = new Set(events.map((e: any) => e.agent).filter(Boolean));
+  if (
+    gates.review_ok != null ||
+    phases.has("review") ||
+    agents.has("reviewer") ||
+    run.result?.ultra_review
+  ) {
+    return 3;
+  }
+  if (
+    gates.lint_ok != null ||
+    gates.sandbox_ready != null ||
+    gates.incomplete_ok != null ||
+    phases.has("lint") ||
+    phases.has("sandbox")
+  ) {
+    return 2;
+  }
+  if (
+    phases.has("plan") ||
+    phases.has("build") ||
+    phases.has("ask") ||
+    phases.has("blueprint") ||
+    agents.has("planner") ||
+    agents.has("builder")
+  ) {
+    return 1;
+  }
+  if (phases.has("lattice") || agents.has("scout") || agents.has("lattice")) {
+    return 0;
+  }
+  if (run.status === "running") return 0;
+  return -1;
+}
+
+declare global {
+  interface Window {
+    zectDesktop?: {
+      isDesktopApp?: boolean;
+      mentrix?: {
+        onWake?: (cb: (payload: { phrase?: string; source?: string }) => void) => () => void;
+        onSttGoal?: (cb: (payload: { goal?: string }) => void) => () => void;
+        submitTranscript?: (t: string) => Promise<{ matched?: boolean }>;
+        setWakeEnabled?: (enabled: boolean) => Promise<unknown>;
+      };
+    };
+  }
+}
+
+function speakStatus(text: string, enabled: boolean) {
+  if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  } catch {
+    /* ignore TTS failures */
+  }
+}
 
 export default function Mentrix() {
   const [goal, setGoal] = useState("");
@@ -31,8 +109,12 @@ export default function Mentrix() {
   const [error, setError] = useState("");
   const [ack, setAck] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [ttsEnabled, setTtsEnabled] = useState(false);
+  const [sttListening, setSttListening] = useState(false);
   const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const lastSpokenStatus = useRef<string>("");
+  const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const refresh = async () => {
     try {
@@ -46,6 +128,23 @@ export default function Mentrix() {
 
   useEffect(() => {
     refresh();
+    try {
+      const raw = localStorage.getItem("zect_mentrix_workspace");
+      if (raw) {
+        const ws = JSON.parse(raw) as {
+          project_key?: string;
+          projectKey?: string;
+          path?: string;
+          workspace?: string;
+        };
+        const pk = ws.project_key || ws.projectKey;
+        const wp = ws.path || ws.workspace;
+        if (pk) setProjectKey(pk);
+        if (wp) setWorkspace(wp);
+      }
+    } catch {
+      /* ignore */
+    }
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
@@ -54,6 +153,91 @@ export default function Mentrix() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, active?.events?.length]);
+
+  // Desktop wake + Web Speech STT → Electron IPC
+  useEffect(() => {
+    const desktop = window.zectDesktop?.mentrix;
+    const unsubs: Array<() => void> = [];
+    if (desktop?.onWake) {
+      unsubs.push(
+        desktop.onWake(() => {
+          goalInputRef.current?.focus();
+          speakStatus("Mentrix ready. State your goal.", ttsEnabled);
+        }),
+      );
+    }
+    if (desktop?.onSttGoal) {
+      unsubs.push(
+        desktop.onSttGoal((payload) => {
+          if (payload?.goal) setGoal(payload.goal);
+        }),
+      );
+    }
+    const SR =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    let recognition: any = null;
+    if (desktop && SR) {
+      recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+      recognition.onresult = async (event: any) => {
+        const last = event.results?.[event.results.length - 1];
+        const transcript = last?.[0]?.transcript || "";
+        if (!transcript) return;
+        const res = await desktop.submitTranscript?.(transcript);
+        if (res?.matched) {
+          goalInputRef.current?.focus();
+        } else if (transcript.trim().length > 8) {
+          setGoal((g) => (g ? g : transcript.trim()));
+        }
+      };
+      recognition.onerror = () => setSttListening(false);
+      try {
+        recognition.start();
+        setSttListening(true);
+      } catch {
+        setSttListening(false);
+      }
+    }
+    const onDomWake = () => goalInputRef.current?.focus();
+    window.addEventListener("mentrix-wake", onDomWake);
+    return () => {
+      unsubs.forEach((u) => u());
+      window.removeEventListener("mentrix-wake", onDomWake);
+      try {
+        recognition?.stop?.();
+      } catch {
+        /* ignore */
+      }
+      setSttListening(false);
+    };
+  }, [ttsEnabled]);
+
+  // TTS on status transitions
+  useEffect(() => {
+    if (!active?.status || !ttsEnabled) return;
+    const key = `${active.id}:${active.status}:${active.next_step || ""}`;
+    if (key === lastSpokenStatus.current) return;
+    lastSpokenStatus.current = key;
+    const blockers = Object.entries(active.gates || active.result?.gates || {})
+      .filter(([k, v]) => k.endsWith("_ok") && v === false)
+      .map(([k]) => k);
+    if (active.status === "running") {
+      speakStatus(`Mentrix running. Phase ${active.current_agent || "scout"}.`, true);
+    } else if (active.status === "awaiting_approval" || active.status === "needs_human") {
+      speakStatus(
+        blockers.length
+          ? `Mentrix needs attention. Blockers: ${blockers.join(", ")}.`
+          : "Mentrix awaiting your approval.",
+        true,
+      );
+    } else if (active.status === "approved") {
+      speakStatus("Approved. You can create the pull request.", true);
+    } else if (active.pr_url) {
+      speakStatus("Pull request ready.", true);
+    }
+  }, [active?.id, active?.status, active?.next_step, active?.pr_url, ttsEnabled]);
 
   const eventsToMessages = (run: any): ChatMsg[] => {
     const msgs: ChatMsg[] = [
@@ -186,6 +370,7 @@ export default function Mentrix() {
     [...(active?.events || [])].reverse().find((e: any) => e.phase)?.phase ||
     active?.current_agent ||
     "—";
+  const stepIdx = workflowStepIndex(active);
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 p-1" data-testid="mentrix-page">
@@ -196,15 +381,48 @@ export default function Mentrix() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Mentrix</h1>
           <p className="text-sm text-slate-600">
-            Unified agent chat — Lattice → Blueprint → Ask/Plan → Mentrix Ultra Review → Build →
-            gates → Approve → PR
+            Primary delivery workflow — Lattice → Plan/Build → Gates → Ultra Review → Approve → PR
           </p>
           {agents?.wake_phrases && (
             <p className="text-xs text-slate-500 mt-1">
-              Wake: {agents.wake_phrases.join(" · ")}
+              Wake: {agents.wake_phrases.join(" · ")} · Desktop: Ctrl/Cmd+Shift+Space
             </p>
           )}
         </div>
+      </div>
+
+      <div
+        className="rounded-xl border border-slate-200 bg-white px-3 py-3 overflow-x-auto"
+        data-testid="mentrix-step-rail"
+      >
+        <ol className="flex items-center gap-1 min-w-max">
+          {WORKFLOW_STEPS.map((step, i) => {
+            const done = stepIdx > i;
+            const current = stepIdx === i;
+            return (
+              <li key={step.id} className="flex items-center gap-1">
+                {i > 0 && (
+                  <span
+                    className={`w-6 h-px ${done || current ? "bg-teal-500" : "bg-slate-200"}`}
+                    aria-hidden
+                  />
+                )}
+                <span
+                  data-testid={`mentrix-step-${step.id}`}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap ${
+                    done
+                      ? "bg-teal-100 text-teal-800"
+                      : current
+                        ? "bg-teal-700 text-white"
+                        : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -214,10 +432,23 @@ export default function Mentrix() {
             data-testid="mentrix-chat"
           >
             {messages.length === 0 && (
-              <p className="text-sm text-slate-500">
-                Describe an upgrade goal (any language → any language). Mentrix will stream phase
-                status here.
-              </p>
+              <div className="text-sm text-slate-500 space-y-2" data-testid="mentrix-empty-state">
+                <p>
+                  <strong>Clone or Lattice-ingest once → engage.</strong> Workspace + project key
+                  auto-fill from Repo Workspace when available.
+                </p>
+                <p>
+                  No graph yet?{" "}
+                  <Link to="/repos" className="text-teal-700 underline font-medium">
+                    Repo Workspace
+                  </Link>{" "}
+                  or{" "}
+                  <Link to="/lattice" className="text-teal-700 underline font-medium">
+                    Lattice Graph
+                  </Link>
+                  , then describe your goal and Mentrix engage.
+                </p>
+              </div>
             )}
             {messages.map((m, i) => (
               <div
@@ -243,6 +474,7 @@ export default function Mentrix() {
 
           <div className="border-t border-slate-200 p-4 space-y-3">
             <textarea
+              ref={goalInputRef}
               data-testid="mentrix-goal"
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
@@ -250,6 +482,21 @@ export default function Mentrix() {
               placeholder="e.g. Port this C service to Java with REST parity and API evals"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
+            <div className="flex flex-wrap gap-4 text-xs text-slate-600">
+              <label className="inline-flex items-center gap-2" data-testid="mentrix-tts-toggle">
+                <input
+                  type="checkbox"
+                  checked={ttsEnabled}
+                  onChange={(e) => setTtsEnabled(e.target.checked)}
+                />
+                Speak status (TTS)
+              </label>
+              {window.zectDesktop?.isDesktopApp && (
+                <span data-testid="mentrix-stt-status">
+                  STT: {sttListening ? "listening for Hey Mentrix" : "unavailable — use Ctrl+Shift+Space"}
+                </span>
+              )}
+            </div>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               <label className="block text-xs">
                 <span className="text-slate-600">Mode</span>

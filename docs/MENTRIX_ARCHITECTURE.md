@@ -4,11 +4,14 @@ ZECT is the product. **Mentrix** is the user-facing agent. Internally:
 
 | Layer | Name |
 |-------|------|
-| Graph | Lattice |
+| Graph | **Lattice** (Graphify-class, ZECT-native — symbols, imports, calls, path/explain, endpoints) |
 | Runtime | **ForgeLoop** (custom FSM — **not LangGraph**) |
 | Vectors | Postgres pgvector (JSON cosine fallback for SQLite/dev) |
 | Tools | MCP hub (GitHub, Jira, Confluence, Slack, Datadog, Filesystem, Email) |
 | Review | **Mentrix Ultra Review** (ZECT-branded; no third-party review product names) |
+| Primary UX | **Workflow → Mentrix Delivery** (`/mentrix`) with step rail |
+
+See also: [docs/zect-assessment/HOW_IT_WORKS_MENTRIX.md](zect-assessment/HOW_IT_WORKS_MENTRIX.md).
 
 ## Not LangGraph
 
@@ -122,10 +125,30 @@ Rules Engine still blocks secrets. Enable adapters under Integrations UI (`/api/
 | Context | Scout uses Lattice + RAG; blueprint + Ask feed Plan/Build |
 | Harness | Quality chain: incomplete → lint → sandbox → Ultra Review → API eval → approve → PR |
 
+## Lattice intelligence
+
+Graphify-class code intelligence **ships as Lattice** inside ZECT — users never install a separate graph CLI or Neo4j.
+
+- Indexer: `backend/app/services/lattice/indexer.py` — AST/regex parse, optional tree-sitter enrichment, resolved relative imports (`imports_file`), `calls` edges, `endpoint`/`business` nodes, path/neighbors/explain, god-nodes (degree) + connected-component communities
+- Structural RepoBlueprint: `structural_blueprint.py` — APIs, symbols, deps, tech stack, configs, business_context; stored in `lattice_structural_blueprints`
+- APIs: `/api/lattice/ingest|graph|query|path|neighbors|explain|god-nodes|communities|blueprint|blueprint/prompt|rag/search`
+- Ingest builds/persists structural blueprint; Scout injects blueprint + neighbor/explain packs into ForgeLoop / Mentrix planning
+- UI: Blueprint **From Lattice**, Lattice stats panel, Mentrix autofill from Repo Workspace (`zect_mentrix_workspace`)
+
+## Review UX
+
+| Surface | Role |
+|---------|------|
+| Mentrix ForgeLoop Ultra Review | Automatic gate on deliver/upgrade |
+| Quality → Mentrix Ultra Review (`/code-review`) | PR/repo product review |
+| Deliver → Snippet Review (`/review`) | Manual paste only |
+
 ## Wake phrases (desktop)
 
-- Mentrix / Hey Mentrix / Mentrix engage  
+- Mentrix / Hey Mentrix / Mentrix engage (Web Speech STT → `mentrix-stt-transcript` IPC)
 - Hotkey: `Ctrl/Cmd+Shift+Space`
+- TTS: optional “Speak status” on Mentrix page (`speechSynthesis`)
+- Matching helper: `electron/wake.js`
 
 ## Auth
 

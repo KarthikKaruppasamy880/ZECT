@@ -2,15 +2,16 @@
  * ZECT Desktop App — Electron main process.
  *
  * Wraps the ZECT web application in a native desktop window.
- * Mentrix wake: global shortcut + STT stub listening for "Hey Mentrix".
+ * Mentrix wake: global shortcut + renderer STT transcripts for "Hey Mentrix".
  */
 
 const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut } = require("electron");
 const path = require("path");
+const { matchesWakePhrase } = require("./wake");
 
 const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
 const DEV_URL = process.env.ZECT_DEV_URL || "http://localhost:5173";
-const WAKE_PHRASE = (process.env.WAKE_PHRASE || "Hey Mentrix").toLowerCase();
+const WAKE_PHRASE = process.env.WAKE_PHRASE || "Hey Mentrix";
 
 let mainWindow;
 let wakeEnabled = true;
@@ -71,17 +72,6 @@ function emitWake(phrase, source) {
   ).catch(() => {});
 }
 
-/** STT wake stub — replace with OS speech recognition later. */
-function matchesWakePhrase(transcript) {
-  const t = (transcript || "").toLowerCase();
-  return (
-    t.includes(WAKE_PHRASE) ||
-    t.includes("hey mentrix") ||
-    t.includes("mentrix engage") ||
-    t.trim() === "mentrix"
-  );
-}
-
 ipcMain.handle("get-app-path", () => app.getAppPath());
 ipcMain.handle("mentrix-engage", (_e, goal) => {
   emitWake("Mentrix engage", "ipc");
@@ -92,11 +82,17 @@ ipcMain.handle("mentrix-wake-enabled", (_e, enabled) => {
   return { wakeEnabled };
 });
 ipcMain.handle("mentrix-stt-transcript", (_e, transcript) => {
-  if (matchesWakePhrase(transcript)) {
+  if (matchesWakePhrase(transcript, WAKE_PHRASE)) {
     emitWake(WAKE_PHRASE, "stt");
-    return { matched: true };
+    return { matched: true, phrase: WAKE_PHRASE };
   }
   return { matched: false };
+});
+/** Follow-up spoken goal after wake — forward to renderer Mentrix page. */
+ipcMain.handle("mentrix-stt-goal", (_e, goal) => {
+  if (!mainWindow || !goal) return { ok: false };
+  mainWindow.webContents.send("mentrix-stt-goal", { goal: String(goal), ts: new Date().toISOString() });
+  return { ok: true };
 });
 
 const menuTemplate = [

@@ -10,7 +10,7 @@ const { promisify } = require("util");
 
 const execFileAsync = promisify(execFile);
 
-const WIN_APPS = ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe", "calc.exe"];
+const WIN_APPS = ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe", "calc.exe", "Slack.exe"];
 const MAC_APPS = ["TextEdit", "Finder", "Safari", "Google Chrome", "Visual Studio Code", "Calculator"];
 
 function allowlisted(appName) {

@@ -42,6 +42,13 @@ import {
   type MicDevice,
 } from "@/lib/micDevices";
 import { fetchMentrixAgentContext } from "@/mentrix/agentContext";
+import {
+  applyDesktopToolOutput,
+  COMPUTER_MODE_HINT,
+  isOpenAiQuotaError,
+  OPENAI_QUOTA_STATUS,
+} from "@/mentrix/desktopBridge";
+import { cancelBrowserSpeech, speakBrowser } from "@/mentrix/speak";
 
 export type AvatarState =
   | "idle"
@@ -71,15 +78,7 @@ export const ORB: Record<AvatarState, string> = {
 };
 
 function speak(text: string, enabled: boolean) {
-  if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.slice(0, 500));
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
-  } catch {
-    /* ignore */
-  }
+  speakBrowser(text, enabled);
 }
 
 function loadPersistedMessages(): ChatMsg[] {
@@ -148,6 +147,7 @@ type MentrixSessionValue = {
   setStatusLine: (v: string) => void;
   tts: boolean;
   setTts: (v: boolean) => void;
+  browserTtsEnabled: boolean;
   voiceConnected: boolean;
   voiceConnecting: boolean;
   computerMode: boolean;
@@ -236,11 +236,47 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   ttsRef.current = tts;
   const computerModeRef = useRef(computerMode);
   computerModeRef.current = computerMode;
+  const voiceConnectedRef = useRef(voiceConnected);
+  voiceConnectedRef.current = voiceConnected;
+  const browserTtsEnabled = tts && !voiceConnected;
+
+  const speakAllowed = useCallback(
+    () => ttsRef.current && !voiceConnectedRef.current,
+    [],
+  );
 
   const pushLog = useCallback((text: string) => {
     const ts = new Date().toLocaleTimeString();
     setLog((l) => [{ ts, text }, ...l].slice(0, 80));
   }, []);
+
+  const handleDesktopOutput = useCallback(
+    async (output: string | Record<string, unknown>) => {
+      const res = await applyDesktopToolOutput(output, computerModeRef.current);
+      if (res.skipped) return;
+      if (res.error === "computer_mode_off") {
+        setStatusLine(COMPUTER_MODE_HINT);
+        pushLog("Computer Mode required for desktop tools");
+      } else if (res.error === "not_desktop_app") {
+        pushLog("Desktop tools require the ZECT Electron app");
+      } else if (!res.ok) {
+        pushLog(`Desktop tool failed: ${res.error || "unknown"}`);
+      }
+    },
+    [pushLog],
+  );
+
+  const handleQuotaError = useCallback(
+    (err: string) => {
+      pushLog(`realtime ${err}`);
+      if (!isOpenAiQuotaError(err)) return;
+      setRealtimePreflight({ ready: false, reason: "openai_quota" });
+      setStatusLine(OPENAI_QUOTA_STATUS);
+      setVoiceConnected(false);
+      setAvatar("idle");
+    },
+    [pushLog],
+  );
 
   const applyNavPath = useCallback(
     (path: string | null | undefined) => applyNav(path, navigate as (to: number | string) => void),
@@ -342,6 +378,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setAvatar("listening");
     setStatusLine("Connect Voice…");
     setDockExpanded(true);
+    cancelBrowserSpeech();
     try {
       const preflight = await refreshRealtimePreflight();
       if (!preflight?.ready || !preflight.client_secret) {
@@ -362,6 +399,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         deviceId: micDeviceIdRef.current || undefined,
         extraInstructions: agentCtx || undefined,
         handlers: {
+          getComputerMode: () => computerModeRef.current,
+          onDesktopOutput: (output) => handleDesktopOutput(output),
           onOrb: (s) => setAvatar(s as AvatarState),
           onLog: pushLog,
           onTranscript: (role, text) => {
@@ -394,11 +433,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             });
             setPending(mapped);
             setAvatar("needs_permission");
-            speak("I need your permission to continue.", ttsRef.current);
+            speak("I need your permission to continue.", speakAllowed());
           },
-          onError: (err) => pushLog(`realtime ${err}`),
+          onError: (err) => handleQuotaError(err),
           onFallback: (reason) => {
             pushLog(`realtime_unavailable ${reason}`);
+            if (isOpenAiQuotaError(String(reason))) {
+              handleQuotaError(String(reason));
+            }
             try {
               realtimeRef.current?.stop();
             } catch {
@@ -407,7 +449,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             realtimeRef.current = null;
             setVoiceConnected(false);
             setAvatar("idle");
-            setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
+            if (!isOpenAiQuotaError(String(reason))) {
+              setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
+            }
           },
         },
       });
@@ -440,7 +484,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       voiceConnectingRef.current = false;
       setVoiceConnecting(false);
     }
-  }, [activeSkillId, applyNavPath, pushLog, refreshRealtimePreflight, stopVoice]);
+  }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakAllowed, stopVoice]);
 
   const handleStreamEvent = useCallback(
     (ev: MentrixStreamEvent) => {
@@ -490,7 +534,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             setAvatar("needs_permission");
           } else {
             setAvatar("speaking");
-            speak(reply, ttsRef.current);
+            speak(reply, ttsRef.current && !voiceConnectedRef.current);
           }
           setStatusLine(d.latency_mode === "fast_tools" ? "Replied (instant)" : "SYSTEMS OPERATIONAL");
           pushLog(`done ${d.latency_ms || 0}ms`);
@@ -556,21 +600,17 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               setTurnId(res.turn_id || "");
               setLastMessageKeep(message);
               setAvatar("needs_permission");
-              speak("I need your permission to continue.", ttsRef.current);
+              speak("I need your permission to continue.", speakAllowed());
             } else {
               setPending([]);
               setMessages((m) => [...m, { role: "assistant", text: res.reply || "Done." }]);
               if (res.board?.length) setBoard((b) => [...res.board, ...b].slice(0, 16));
               setAvatar("speaking");
-              speak(res.reply || "", ttsRef.current);
+              speak(res.reply || "", speakAllowed());
             }
             for (const t of res.tools || []) {
-              if (t.result?.desktop && !t.denied && computerModeRef.current) {
-                await window.zectDesktop?.mentrix?.computer?.(t.result.desktop, {
-                  ...t.result,
-                  app: t.result.app,
-                  path: t.result.path,
-                });
+              if (t.result?.desktop && !t.denied) {
+                await handleDesktopOutput(t.result as Record<string, unknown>);
               }
             }
           }
@@ -590,7 +630,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         setTimeout(() => setAvatar((a) => (a === "speaking" ? "idle" : a)), 2200);
       }
     },
-    [activeSkillId, applyNavPath, handleStreamEvent],
+    [activeSkillId, applyNavPath, handleDesktopOutput, handleStreamEvent, speakAllowed],
   );
 
   const onSend = useCallback(async () => {
@@ -611,6 +651,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           onArtifact: (item) => setBoard((b) => [item as ArtifactItem, ...b].slice(0, 16)),
           onLog: pushLog,
           onOrb: (s) => setAvatar(s as AvatarState),
+          onDesktopOutput: (output) => handleDesktopOutput(output),
         });
         const summary = outputs
           .map((o) => {
@@ -629,7 +670,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       if (turnId) await runTurn(msg, tools, turnId);
       else await runTurn(msg, tools);
     },
-    [applyNavPath, input, lastMessage, pushLog, runTurn, turnId],
+    [applyNavPath, handleDesktopOutput, input, lastMessage, pushLog, runTurn, turnId],
   );
 
   const toggleVoice = useCallback(() => {
@@ -736,6 +777,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       setStatusLine,
       tts,
       setTts,
+      browserTtsEnabled,
       voiceConnected,
       voiceConnecting,
       computerMode,
@@ -782,6 +824,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       log,
       statusLine,
       tts,
+      browserTtsEnabled,
       voiceConnected,
       voiceConnecting,
       computerMode,

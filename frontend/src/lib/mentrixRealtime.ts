@@ -3,6 +3,7 @@
  * Audio capture uses AudioWorklet (not ScriptProcessor) to avoid Electron renderer freezes.
  */
 import { apiFetch, authHeaders } from "@/lib/api";
+import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 
 export type RealtimeHandlers = {
@@ -16,6 +17,8 @@ export type RealtimeHandlers = {
   onFallback?: (reason: string) => void;
   /** Fired when mic + WS are fully ready (or failed before ready) */
   onReady?: (ok: boolean) => void;
+  getComputerMode?: () => boolean;
+  onDesktopOutput?: (output: string) => void | Promise<void>;
 };
 
 export type RealtimePreflight = {
@@ -147,7 +150,11 @@ async function executeTool(
     handlers.onPendingConfirm?.(data.pending_confirmations);
     return JSON.stringify({ ok: false, pending: true, tool });
   }
-  return data.output || JSON.stringify(data.result || { ok: true });
+  const output = data.output || JSON.stringify(data.result || { ok: true });
+  if (confirmed && handlers.onDesktopOutput) {
+    await handlers.onDesktopOutput(output);
+  }
+  return output;
 }
 
 export type StartMentrixRealtimeOptions = {
@@ -535,7 +542,11 @@ export async function startMentrixRealtime(
       }
     }
     if (t === "error") {
-      handlers.onError?.(msg.error?.message || "realtime_error");
+      const errMsg = msg.error?.message || "realtime_error";
+      handlers.onError?.(errMsg);
+      if (isOpenAiQuotaError(errMsg)) {
+        handlers.onFallback?.("openai_quota");
+      }
     }
   };
 

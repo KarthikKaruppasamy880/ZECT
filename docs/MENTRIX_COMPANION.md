@@ -36,8 +36,18 @@ Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) expands the **persistent dock*
 
 1. **Preflight:** On `/mentrix-home` load, Mentrix probes `POST /api/mentrix/companion/realtime/session` and shows **Realtime ready** (green) or **Realtime unavailable — {reason}** (amber) with **Retry Realtime**.
 2. **Mint API (GA):** Backend calls OpenAI `POST /v1/realtime/client_secrets` (not the retired `/v1/realtime/sessions`). Default model: `gpt-realtime` (`MENTRIX_REALTIME_MODEL`).
-3. **Primary UX:** Pick your **headset mic**, click **Connect Voice**, speak naturally. Mentrix replies with Realtime audio. **No “Send corrected” / tone / Windows dictation path.**
+3. **Primary UX:** Pick your **headset mic**, click **Connect Voice**, speak naturally. Mentrix replies with Realtime audio. **Turn off “Speak replies (TTS)” is automatic while Connect Voice is live** — browser TTS must not overlap Realtime audio.
 4. **If Realtime fails:** Use typed Quick asks or **Retry Realtime**. Fix `OPENAI_API_KEY` and restart backend — OpenAI chat key ≠ automatic Realtime if mint is broken.
+
+### Quota / billing
+
+If Live Log shows `You exceeded your current quota`:
+
+1. Add billing / credits at [platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing)
+2. Confirm `OPENAI_API_KEY` in `backend/.env` belongs to that org
+3. Restart backend and click **Retry Realtime**
+
+HUD status will show: **OpenAI quota exceeded — add billing at platform.openai.com, then Retry Realtime**
 
 **Mic picker:** Lists `audioinput` devices; choice persists in `localStorage` (`mentrix_mic_device_id`). Prefer a headset over the laptop array mic.
 
@@ -95,7 +105,19 @@ Numbered generations/edits under `backend/data/mentrix_media/` (gitignored). Too
 
 ## Computer Mode
 
-Off by default. **Windows and macOS:** allowlisted open app, desktop screenshot, path read (secrets denied), click / type / scroll / UI inspect after Allow. Idle auto-off. Always-ask for high-risk actions.
+Off by default. Requires **ZECT Electron app** (not browser tab alone). Enable the **Computer Mode** checkbox on the HUD before Allow on desktop tools.
+
+**Allowlisted Windows apps:** `explorer.exe`, `chrome.exe`, `msedge.exe`, `Slack.exe`, `notepad.exe`, `code.exe`, `calc.exe`.
+
+| Voice phrase | Action |
+|--------------|--------|
+| Go to desktop / OS desktop | Opens File Explorer (`explorer.exe`) after Allow |
+| Open browser / Open Chrome | `chrome.exe` |
+| Open Edge | `msedge.exe` |
+| Open Slack app | `Slack.exe` (desktop app — not Slack API digest) |
+| Slack digest | API tool — needs `SLACK_BOT_TOKEN` |
+
+Voice Allow on `computer_open_app` runs Electron IPC after confirm (typed and Realtime paths). Idle auto-off. Always-ask for high-risk actions.
 
 ## Security
 
@@ -115,7 +137,14 @@ Off by default. **Windows and macOS:** allowlisted open app, desktop screenshot,
 
 ## Post-merge restart
 
-After merging Mentrix PRs into `develop`, restart backend, frontend, and Electron (or double-click the ZECT Mentrix desktop shortcut) so the persistent dock session + Realtime mint path load.
+After merging Mentrix PRs into `develop`, restart all services from repo root:
+
+```powershell
+cd C:\Users\karuppk\Downloads\ZECT
+.\RESTART_MENTRIX.ps1
+```
+
+Or start fresh without stopping first: `.\RUN_MENTRIX.ps1`
 
 ## Artifacts
 

@@ -70,6 +70,7 @@ DEFAULT_DESKTOP_POLICY = {
         "msedge.exe",
         "chrome.exe",
         "calc.exe",
+        "Slack.exe",
     ],
     "allowlisted_apps_macos": [
         "TextEdit",
@@ -79,7 +80,7 @@ DEFAULT_DESKTOP_POLICY = {
         "Visual Studio Code",
         "Calculator",
     ],
-    "allowlisted_apps": ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe"],
+    "allowlisted_apps": ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe", "Slack.exe"],
     "allowlisted_folders": [],
     "deny_globs": ["**/.env", "**/.env.*", "**/id_rsa", "**/*.pem", "**/credentials*"],
     "enabled_connectors": ["slack", "email", "news", "confluence"],

@@ -162,6 +162,39 @@ def test_build_agent_context_empty_without_data():
         db.close()
 
 
+def test_open_browser_maps_to_chrome():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("open browser")
+    assert any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "chrome.exe"
+        for t in intents
+    )
+    assert not any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "notepad.exe"
+        for t in intents
+    )
+
+
+def test_open_slack_app_not_digest():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("open slack app")
+    assert any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "Slack.exe"
+        for t in intents
+    )
+    assert not any(t["name"] == "slack_digest" for t in intents)
+
+
+def test_slack_digest_unchanged():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("slack digest")
+    assert any(t["name"] == "slack_digest" for t in intents)
+    assert not any(t["name"] == "computer_open_app" for t in intents)
+
+
 def test_media_board_numbering(tmp_path, monkeypatch):
     from app.services.mentrix import media_board
 

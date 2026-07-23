@@ -202,7 +202,7 @@ export default function MentrixPersistentDock() {
       <MentrixConfirmModal
         open={s.pending.length > 0}
         items={s.pending}
-        speakPrompt={s.tts}
+        speakPrompt={s.browserTtsEnabled}
         onAllow={s.onAllow}
         onDeny={() => {
           s.setPending([]);

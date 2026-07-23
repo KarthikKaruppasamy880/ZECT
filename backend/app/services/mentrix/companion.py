@@ -54,6 +54,8 @@ NAV_MAP = {
     "git": "/git-ops",
     "ci": "/ci-monitor",
     "skills": "/skills",
+    "skills engine": "/skills-engine",
+    "dream engine": "/dream-engine",
     "rules": "/rules",
     "secrets": "/secrets",
     "conversations": "/conversations",
@@ -382,6 +384,15 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if any(w in m for w in ("confluence", "internal doc", "search docs")):
         tools.append({"name": "docs_search", "args": {"query": message[:160]}})
 
+    if re.search(r"\b(open|launch|start)\b.*\b(slack app|slack desktop)\b", m) or re.search(
+        r"\blaunch slack\b", m
+    ):
+        tools.append({"name": "computer_open_app", "args": {"app": "Slack.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(browser|chrome)\b", m) or "open browser" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "chrome.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\bedge\b", m):
+        tools.append({"name": "computer_open_app", "args": {"app": "msedge.exe"}})
+
     if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel", "what's on", "whats on")):
         tools.append({"name": "slack_digest", "args": {}})
     elif "slack" in m and any(w in m for w in ("send", "post", "message")):
@@ -446,9 +457,11 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             tools.append({"name": "computer_click", "args": {"x": 100, "y": 100}})
         elif "type" in m:
             tools.append({"name": "computer_type", "args": {"text": message[:200]}})
-        elif "open" in m:
+        elif "open notepad" in m:
             tools.append({"name": "computer_open_app", "args": {"app": "notepad.exe"}})
-        else:
+        elif "open explorer" in m or "file explorer" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
+        elif "computer mode" in m:
             tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
 
     if any(w in m for w in ("open sandbox", "go to sandbox", "show sandbox")):

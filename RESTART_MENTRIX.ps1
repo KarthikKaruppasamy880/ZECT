@@ -1,4 +1,4 @@
-# ZECT Mentrix — stop stale services, then start backend + frontend + Electron.
+# ZECT Mentrix - stop stale services, then start backend + frontend + Electron.
 # Run from repo root:  .\RESTART_MENTRIX.ps1
 
 param(
@@ -23,7 +23,7 @@ function Stop-PortListener {
 }
 
 Write-Host ""
-Write-Host "ZECT Mentrix — restart" -ForegroundColor Cyan
+Write-Host "ZECT Mentrix - restart" -ForegroundColor Cyan
 Write-Host "Repo: $root" -ForegroundColor Gray
 Write-Host ""
 
@@ -32,7 +32,7 @@ Stop-PortListener -Port 8000
 Stop-PortListener -Port 5173
 Start-Sleep -Seconds 1
 
-# Close Electron windows titled like ZECT (optional — user may want to keep other Electron apps)
+# Close Electron windows titled like ZECT (optional; user may want to keep other Electron apps)
 Get-Process electron -ErrorAction SilentlyContinue | Where-Object {
     $_.MainWindowTitle -match "ZECT|Mentrix"
 } | ForEach-Object {

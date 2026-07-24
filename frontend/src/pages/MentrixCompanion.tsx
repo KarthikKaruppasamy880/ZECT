@@ -117,6 +117,11 @@ export default function MentrixCompanion() {
                       OpenAI {s.integrations.openai ? "ready" : "missing"} · Slack{" "}
                       {s.integrations.slack ? "ready" : "not set"} · Jira{" "}
                       {s.integrations.jira ? "ready" : "not set"}
+                      {" · Skill "}
+                      {s.activeSkillId
+                        ? s.skills.find((sk) => String(sk.id) === s.activeSkillId)?.name ||
+                          `#${s.activeSkillId}`
+                        : "None"}
                     </p>
                   ) : null}
                   <div className="mt-2 flex flex-wrap justify-center gap-2">
@@ -381,7 +386,7 @@ export default function MentrixCompanion() {
       <MentrixConfirmModal
         open={s.pending.length > 0}
         items={s.pending}
-        speakPrompt={s.tts}
+        speakPrompt={s.browserTtsEnabled}
         onAllow={s.onAllow}
         onDeny={() => {
           s.setPending([]);

@@ -162,6 +162,39 @@ def test_build_agent_context_empty_without_data():
         db.close()
 
 
+def test_open_browser_maps_to_chrome():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("open browser")
+    assert any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "chrome.exe"
+        for t in intents
+    )
+    assert not any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "notepad.exe"
+        for t in intents
+    )
+
+
+def test_open_slack_app_not_digest():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("open slack app")
+    assert any(
+        t["name"] == "computer_open_app" and (t.get("args") or {}).get("app") == "Slack.exe"
+        for t in intents
+    )
+    assert not any(t["name"] == "slack_digest" for t in intents)
+
+
+def test_slack_digest_unchanged():
+    from app.services.mentrix.companion import _parse_intents
+
+    intents = _parse_intents("slack digest")
+    assert any(t["name"] == "slack_digest" for t in intents)
+    assert not any(t["name"] == "computer_open_app" for t in intents)
+
+
 def test_media_board_numbering(tmp_path, monkeypatch):
     from app.services.mentrix import media_board
 
@@ -223,6 +256,55 @@ def test_realtime_mint_uses_client_secrets(monkeypatch):
     assert out.get("client_secret") == "ek_test_secret"
     assert out.get("api") == "client_secrets"
     assert out.get("model") == "gpt-realtime"
+
+
+def test_mentrix_instructions_default_english_with_explicit_switch():
+    """Guardrail: Mentrix must default to English and only switch on explicit request —
+    previously there was no language directive at all, so the model could switch languages
+    unpredictably based on the user's input language."""
+    from app.services.mentrix.realtime import mentrix_instructions
+
+    text = mentrix_instructions()
+    assert "english" in text.lower()
+    assert "explicit" in text.lower()
+
+
+def test_realtime_mint_returns_voice_for_session_update(monkeypatch):
+    """The frontend re-asserts this voice in session.update to stop it drifting mid-call —
+    mint_realtime_session must keep returning it in the response body."""
+    from app.services.mentrix import realtime
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {
+                "value": "ek_test_secret",
+                "expires_at": 9999999999,
+                "session": {"type": "realtime", "model": "gpt-realtime"},
+            }
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            assert json["session"]["audio"]["output"]["voice"] == "shimmer"
+            return _Resp()
+
+    monkeypatch.setenv("MENTRIX_REALTIME", "1")
+    monkeypatch.setenv("MENTRIX_REALTIME_MODEL", "gpt-realtime")
+    monkeypatch.setenv("MENTRIX_REALTIME_VOICE", "shimmer")
+    monkeypatch.setattr(realtime, "_ensure_openai_env", lambda: "sk-test")
+    monkeypatch.setattr(realtime.httpx, "Client", _Client)
+    out = realtime.mint_realtime_session()
+    assert out.get("voice") == "shimmer"
 
 
 def test_open_sandbox_intent():

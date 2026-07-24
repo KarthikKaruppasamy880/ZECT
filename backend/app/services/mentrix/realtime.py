@@ -47,10 +47,16 @@ def mentrix_instructions() -> str:
         "Dashboard (/) is the ZECT app home — not the OS desktop. "
         "For 'go to desktop' / Computer Mode, use computer_open_app or desktop_screenshot — do not navigate to /. "
         "'Desktop app' or 'control tower' means Mentrix HUD at /mentrix-home. "
+        "Launch Slack desktop app with computer_open_app Slack.exe; use slack_digest for channel summaries (API). "
+        "Open browser with computer_open_app chrome.exe or msedge.exe. "
         "Use lattice_query for code symbols and documentation wikilinks. "
         "For documentation graphs, prefer doc-kind hits and mention backlinks when available. "
         "When a tool needs permission, tell the user to Allow in the Mentrix overlay. "
-        "Brand: Mentrix, Lattice, ForgeLoop, ZECT only. No Exa."
+        "Brand: Mentrix, Lattice, ForgeLoop, ZECT only. No Exa. "
+        "Always respond in English by default, regardless of what language the user speaks or "
+        "types in. Only switch to a different language if the user explicitly asks you to "
+        "(e.g. 'reply in Spanish' or 'speak French from now on'). If they don't ask for a "
+        "language switch, respond in English even if their message was in another language."
     )
 
 

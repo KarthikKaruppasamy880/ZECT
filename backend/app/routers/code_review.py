@@ -19,6 +19,7 @@ from app.review_service import review_pr_diff, review_code_snippet, review_repo_
 from app.database import SessionLocal, get_db
 from app.models import ReviewWebhookConfig, Rule
 from app.core.auth.deps import CurrentUser, get_current_user
+from app.core.budget import enforce_token_budget
 
 # Import for inline PR review
 try:
@@ -116,6 +117,7 @@ class ReviewResponse(BaseModel):
     total_lines: int | None = None
     scanned_files: list[str] | None = None
     chunks_reviewed: int | None = None
+    review_session_id: int | None = None  # ReviewSession row — history now shared across PR/snippet/repo review
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +125,11 @@ class ReviewResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/pr", response_model=ReviewResponse)
-def review_pull_request(req: ReviewPRRequest):
+def review_pull_request(
+    req: ReviewPRRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Run AI code review on a GitHub Pull Request.
 
     Fetches the PR diff from GitHub and analyses it for bugs,
@@ -158,6 +164,8 @@ def review_pull_request(req: ReviewPRRequest):
             pr_title=pr.title,
             pr_body=pr.body,
             files=files,
+            user_id=current_user.user_id,
+            db=db,
         )
         return ReviewResponse(**result)
     except ValueError as e:
@@ -165,13 +173,17 @@ def review_pull_request(req: ReviewPRRequest):
 
 
 @router.post("/snippet", response_model=ReviewResponse)
-def review_snippet(req: ReviewSnippetRequest):
+def review_snippet(
+    req: ReviewSnippetRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Run AI code review on a standalone code snippet."""
     if not req.code.strip():
         raise HTTPException(status_code=400, detail="Code snippet cannot be empty.")
 
     try:
-        result = review_code_snippet(code=req.code, language=req.language)
+        result = review_code_snippet(code=req.code, language=req.language, user_id=current_user.user_id, db=db)
         return ReviewResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -199,7 +211,11 @@ class PostReviewRequest(BaseModel):
 
 
 @router.post("/pr/inline")
-def review_pr_and_post_comments(req: PostReviewRequest):
+def review_pr_and_post_comments(
+    req: PostReviewRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Review a PR and post findings as inline comments on GitHub.
 
     ZECT reviews actual PRs and posts inline comments directly on GitHub,
@@ -208,7 +224,7 @@ def review_pr_and_post_comments(req: PostReviewRequest):
     # First, run the review
     review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)
     try:
-        review_result = review_pull_request(review_req)
+        review_result = review_pull_request(review_req, current_user=current_user, db=db)
     except HTTPException:
         raise
 
@@ -319,7 +335,11 @@ def get_review_comments(owner: str, repo: str, pr_number: int):
 # ---------------------------------------------------------------------------
 
 @router.post("/repo", response_model=ReviewResponse)
-def review_full_repo(req: ReviewRepoRequest):
+def review_full_repo(
+    req: ReviewRepoRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Scan an entire GitHub repository and run AI code review on all source files.
 
     Unlike PR review (which only checks changed files), this scans ALL source files
@@ -331,6 +351,8 @@ def review_full_repo(req: ReviewRepoRequest):
             repo=req.repo,
             branch=req.branch,
             file_patterns=req.file_patterns,
+            user_id=current_user.user_id,
+            db=db,
         )
         return ReviewResponse(**result)
     except ValueError as e:
@@ -344,7 +366,11 @@ def review_full_repo(req: ReviewRepoRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/auto-fix-loop")
-def auto_fix_loop(req: AutoFixLoopRequest):
+def auto_fix_loop(
+    req: AutoFixLoopRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Run the auto-fix loop: review PR → generate fix suggestions → post to PR.
 
     Flow:
@@ -352,9 +378,11 @@ def auto_fix_loop(req: AutoFixLoopRequest):
     2. For each finding, generate a specific fix suggestion
     3. Post fix suggestions as inline comments on the PR
     4. Return the review + all suggested fixes
-    
+
     The 'max_iterations' parameter controls how many review passes to run
     (each pass focuses on remaining unfixed issues from the previous pass).
+    Budget is checked once up front — each iteration still spends tokens,
+    so max_iterations should stay small relative to the per-user budget.
     """
     all_iterations: list[dict] = []
     total_tokens = 0
@@ -364,7 +392,7 @@ def auto_fix_loop(req: AutoFixLoopRequest):
         # Step 1: Run review
         review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)
         try:
-            review_result = review_pull_request(review_req)
+            review_result = review_pull_request(review_req, current_user=current_user, db=db)
         except HTTPException:
             raise
 
@@ -620,10 +648,14 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
         except re.error:
             pass
 
-    # Run the review
+    # Run the review — webhook-triggered, no logged-in user (GitHub is the
+    # caller, already bypasses normal Bearer auth per auth_middleware.py's
+    # open-path list) so there's no per-user budget to check against; use a
+    # system identity purely for audit/history attribution, not enforcement.
     try:
         review_req = ReviewPRRequest(owner=owner, repo=repo_name, pr_number=pr_number)
-        review_result = review_pull_request(review_req)
+        system_user = CurrentUser(user_id=None, username="github-webhook", email="", auth_mode="system", token="")
+        review_result = review_pull_request(review_req, current_user=system_user, db=db)
 
         posted_comments = []
         if config.get("auto_comment", False) and post_pr_review_comment:

@@ -328,10 +328,82 @@ def _run_sandbox_gate(review_score: int, critical: int, events: list[dict]) -> d
     return out
 
 
-def _run_reviewer(goal: str, builder: dict, rules: str, events: list[dict]) -> dict[str, Any]:
+def _detect_test_command(workspace: str) -> str | None:
+    """Best-effort test command from what's actually in the workspace — no
+    guessing when the stack isn't recognized; caller falls back to the
+    heuristic gate in that case."""
+    if not workspace:
+        return None
+    root = Path(workspace)
+    if not root.is_dir():
+        return None
+    if (root / "package.json").exists():
+        return "npm test"
+    if (root / "pyproject.toml").exists() or (root / "requirements.txt").exists():
+        return "pytest -q"
+    if (root / "go.mod").exists():
+        return "go test ./..."
+    return None
+
+
+def _run_sandbox_check(
+    workspace: str, review_score: int, critical: int, events: list[dict], mode: str
+) -> dict[str, Any]:
+    """Sandbox gate — runs the repo's real test command (App Runner's execution
+    path, via autofix.py's run_and_fix so a failing run gets AI-assisted retries
+    before giving up) when the workspace's stack is recognized, instead of only
+    ever estimating readiness from the review score."""
+    test_cmd = _detect_test_command(workspace) if mode == "upgrade" else None
+    if not test_cmd:
+        return _run_sandbox_gate(review_score, critical, events)
+
+    from app.routers.autofix import AutoFixRequest, run_and_fix
+
+    _emit(events, "orchestrator", f"Sandbox: running real test command: {test_cmd}", phase="sandbox")
+    autofix_result = run_and_fix(AutoFixRequest(command=test_cmd, cwd=workspace, max_retries=_max_recovery()))
+    blockers: list[str] = []
+    if not autofix_result.success:
+        blockers.append(f"Real test run failed: {(autofix_result.final_output or '')[:200]}")
+    if critical > 0:
+        blockers.append(f"{critical} critical finding(s)")
+    ready = autofix_result.success and critical == 0
+    out = {
+        "ready": ready,
+        "blockers": blockers,
+        "quality_score": review_score,
+        "critical_findings": critical,
+        "create_pr_hard_blocked": not ready,
+        "real_execution": True,
+        "test_command": test_cmd,
+        "attempts": autofix_result.total_attempts,
+    }
+    _emit(
+        events,
+        "orchestrator",
+        f"Sandbox real-execution ready={ready} attempts={autofix_result.total_attempts}",
+        event="sandbox",
+        phase="sandbox",
+        ready=ready,
+        blockers=blockers,
+        quality_score=review_score,
+        critical_findings=critical,
+    )
+    return out
+
+
+def _run_reviewer(
+    goal: str, builder: dict, rules: str, events: list[dict], *, db: Session = None, user_id: int | None = None
+) -> dict[str, Any]:
     _emit(events, "reviewer", "Running Mentrix Ultra Review heuristics", phase="ultra_review")
     code = (builder or {}).get("generated_code") or ""
-    review = run_ultra_review(code, language=(builder or {}).get("language") or "python", goal=goal, context=rules[:2000])
+    review = run_ultra_review(
+        code,
+        language=(builder or {}).get("language") or "python",
+        goal=goal,
+        context=rules[:2000],
+        db=db,
+        user_id=user_id,
+    )
     _emit(
         events,
         "reviewer",
@@ -682,7 +754,9 @@ def run_mentrix(
         elif agent in ("ultra_review_pre",):
             _emit_phase(events, "ultra_review", 0.55, "build", "Mentrix Ultra Review preflight")
             pre_code = (blueprint.get("prompt") or goal)[:4000]
-            pre = run_ultra_review(pre_code, language=target_lang or "python", goal=goal, context="preflight")
+            pre = run_ultra_review(
+                pre_code, language=target_lang or "python", goal=goal, context="preflight", db=db, user_id=None
+            )
             result["ultra_review_pre"] = {
                 "brand": "Mentrix Ultra Review",
                 "score": pre.get("score"),
@@ -692,30 +766,57 @@ def run_mentrix(
             push("reviewer", "Mentrix Ultra Review preflight complete", phase="ultra_review", brand="Mentrix Ultra Review")
 
         elif agent in ("build", "builder"):
-            _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — one module/step")
+            _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
             if mode == "upgrade":
+                from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
                 plan_text = plan.get("plan") or goal
-                builder = run_build_from_plan(
-                    plan_text,
-                    step_index=0,
-                    project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
-                    tech_stack=f"{source_lang}->{target_lang}" if source_lang or target_lang else "",
-                    workspace=workspace,
-                    write_to_repo=bool(workspace or repo_id),
-                    repo_id=repo_id,
-                    db=db,
-                )
-                # Ensure expected files list for incomplete gate
-                if not builder.get("files_expected") and builder.get("file_path"):
-                    builder["files_expected"] = [builder["file_path"]]
-                if builder.get("file_path") and builder.get("files_written") is not None:
-                    if builder["file_path"] not in builder.get("files_written", []) and workspace:
-                        # already written by build svc when workspace set
-                        pass
+                # Previously hardcoded step_index=0 — a multi-phase plan (inventory,
+                # port module 1, port module 2, tests, review...) only ever built its
+                # first step. Loop every step so the whole plan actually gets built.
+                num_steps = len(plan.get("steps") or []) or 1
+                all_files_written: list[str] = []
+                all_files_expected: list[str] = []
+                rule_violations: list[dict] = []
+                builder: dict[str, Any] = {}
+                for step_idx in range(num_steps):
+                    step_builder = run_build_from_plan(
+                        plan_text,
+                        step_index=step_idx,
+                        project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
+                        tech_stack=f"{source_lang}->{target_lang}" if source_lang or target_lang else "",
+                        workspace=workspace,
+                        write_to_repo=bool(workspace or repo_id),
+                        repo_id=repo_id,
+                        db=db,
+                    )
+                    builder = step_builder  # last step's fields (language/model/etc.) represent the run
+                    for f in step_builder.get("files_written") or (
+                        [step_builder["file_path"]] if step_builder.get("file_path") else []
+                    ):
+                        if f not in all_files_written:
+                            all_files_written.append(f)
+                    for f in step_builder.get("files_expected") or (
+                        [step_builder["file_path"]] if step_builder.get("file_path") else []
+                    ):
+                        if f not in all_files_expected:
+                            all_files_expected.append(f)
+                    if step_builder.get("truncated") or step_builder.get("incomplete"):
+                        rejected_files.append(step_builder.get("file_path") or "(generated)")
+                    if step_builder.get("generated_code") and db is not None:
+                        violations = check_rule_violations(
+                            db, step_builder["generated_code"], step_builder.get("language") or "text"
+                        )
+                        for v in violations:
+                            rule_violations.append({**v, "file_path": step_builder.get("file_path")})
+                            if v.get("severity") in ("critical", "high"):
+                                rejected_files.append(step_builder.get("file_path") or "(generated)")
+                builder["files_written"] = all_files_written
+                builder["files_expected"] = all_files_expected or builder.get("files_expected")
             else:
                 builder = _run_builder(goal, plan or {"steps": []}, scout, events)
+                rule_violations = []
             result["builder"] = {
                 k: builder.get(k)
                 for k in (
@@ -733,8 +834,16 @@ def run_mentrix(
             }
             if builder.get("generated_code"):
                 result["builder"]["code_chars"] = len(builder["generated_code"])
-            if builder.get("truncated") or builder.get("incomplete"):
+            if not (mode == "upgrade") and (builder.get("truncated") or builder.get("incomplete")):
                 rejected_files.append(builder.get("file_path") or "(generated)")
+            if rule_violations:
+                result["builder"]["rule_violations"] = rule_violations
+                push(
+                    "builder",
+                    f"Rules Engine flagged {len(rule_violations)} violation(s)",
+                    phase="build",
+                    event="rule_violations",
+                )
             # Bind design contract required_files to what Build claimed
             contract = dict(blueprint.get("design_contract") or {})
             if builder.get("files_written"):
@@ -828,13 +937,17 @@ def run_mentrix(
                     attempt=recovery_attempt,
                     gate="incomplete",
                 )
-                # Re-build current step
+                # Re-build the step that actually failed — the last one the
+                # build stage produced, not always step 0 (that only matched
+                # step 0's own recovery before the build stage looped over
+                # every plan step).
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
                 plan_text = plan.get("plan") or goal
+                retry_step_index = (num_steps - 1) if mode == "upgrade" else 0
                 builder = run_build_from_plan(
                     plan_text,
-                    step_index=0,
+                    step_index=retry_step_index,
                     project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
                     workspace=workspace,
                     write_to_repo=bool(workspace or repo_id),
@@ -849,6 +962,14 @@ def run_mentrix(
                     generated_code=builder.get("generated_code") or "",
                 )
                 result["incomplete"] = incomplete
+                if mode == "upgrade":
+                    for f in builder.get("files_written") or (
+                        [builder["file_path"]] if builder.get("file_path") else []
+                    ):
+                        if f not in all_files_written:
+                            all_files_written.append(f)
+                    builder["files_written"] = all_files_written
+                    builder["files_expected"] = all_files_expected or builder.get("files_expected")
                 result["builder"] = {
                     "file_path": builder.get("file_path"),
                     "files_written": builder.get("files_written"),
@@ -933,12 +1054,12 @@ def run_mentrix(
         elif agent == "sandbox":
             score = int((review or {}).get("quality_score") or 80)
             crit = int((review or {}).get("critical_findings") or 0)
-            sandbox = _run_sandbox_gate(score, crit, events)
+            sandbox = _run_sandbox_check(workspace, score, crit, events, mode)
             result["sandbox"] = sandbox
 
         elif agent in ("reviewer", "ultra_review"):
             _emit_phase(events, "ultra_review", 0.85, "api_eval", "Mentrix Ultra Review postflight")
-            review = _run_reviewer(goal, builder, rules, events)
+            review = _run_reviewer(goal, builder, rules, events, db=db, user_id=None)
             result["review"] = review
             result["ultra_review"] = {
                 "brand": "Mentrix Ultra Review",
@@ -948,10 +1069,12 @@ def run_mentrix(
                 "findings": review.get("findings"),
                 "summary": review.get("summary"),
             }
-            sandbox = _run_sandbox_gate(
+            sandbox = _run_sandbox_check(
+                workspace,
                 int(review.get("quality_score") or 0),
                 int(review.get("critical_findings") or 0),
                 events,
+                mode,
             )
             result["sandbox"] = sandbox
             while (
@@ -975,10 +1098,12 @@ def run_mentrix(
                 )
                 review["passed"] = review["critical_findings"] == 0
                 review["quality_score"] = 75 if review["passed"] else review.get("quality_score", 40)
-                sandbox = _run_sandbox_gate(
+                sandbox = _run_sandbox_check(
+                    workspace,
                     int(review["quality_score"]),
                     int(review["critical_findings"]),
                     events,
+                    mode,
                 )
                 result["review"] = review
                 result["sandbox"] = sandbox

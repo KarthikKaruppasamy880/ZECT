@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth.deps import CurrentUser, get_current_user
+from app.core.budget import enforce_token_budget
 from app.database import get_db
 from app.services.lattice.indexer import (
     communities as lattice_communities,
@@ -86,6 +87,11 @@ class BlueprintPromptRequest(BaseModel):
     project_key: str
     path: str = ""
     rebuild: bool = False
+
+
+class HldRequest(BaseModel):
+    project_key: str
+    goal: str = "Produce a high-level design document for this codebase"
 
 
 @router.post("/ingest")
@@ -287,3 +293,22 @@ def blueprint_prompt(
         "project_key": req.project_key,
         "stats": bp.get("stats"),
     }
+
+
+@router.post("/hld")
+def hld_generate_api(
+    req: HldRequest,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(enforce_token_budget),
+):
+    """Generate a real High-Level Design document (component breakdown, data
+    flow, Mermaid diagram, risks) from Lattice's structural blueprint — unlike
+    /blueprint/prompt, this actually calls an LLM to synthesize the data rather
+    than just templating it into a prompt for the user to paste elsewhere."""
+    from app.services.phases.hld_phase import run_hld_generate
+
+    try:
+        result = run_hld_generate(db, req.project_key, goal=req.goal, user_id=current_user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result

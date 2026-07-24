@@ -3,6 +3,7 @@
  * Audio capture uses AudioWorklet (not ScriptProcessor) to avoid Electron renderer freezes.
  */
 import { apiFetch, authHeaders } from "@/lib/api";
+import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 
 export type RealtimeHandlers = {
@@ -16,6 +17,8 @@ export type RealtimeHandlers = {
   onFallback?: (reason: string) => void;
   /** Fired when mic + WS are fully ready (or failed before ready) */
   onReady?: (ok: boolean) => void;
+  getComputerMode?: () => boolean;
+  onDesktopOutput?: (output: string) => void | Promise<void>;
 };
 
 export type RealtimePreflight = {
@@ -26,6 +29,7 @@ export type RealtimePreflight = {
   client_secret?: string;
   model?: string;
   openai_ws_url?: string;
+  voice?: string;
 };
 
 export type RealtimeSessionHandle = {
@@ -113,6 +117,7 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     client_secret: session.client_secret,
     model: session.model,
     openai_ws_url: session.openai_ws_url,
+    voice: session.voice,
     api: session.api ? String(session.api) : "client_secrets",
   };
 }
@@ -147,7 +152,11 @@ async function executeTool(
     handlers.onPendingConfirm?.(data.pending_confirmations);
     return JSON.stringify({ ok: false, pending: true, tool });
   }
-  return data.output || JSON.stringify(data.result || { ok: true });
+  const output = data.output || JSON.stringify(data.result || { ok: true });
+  if (confirmed && handlers.onDesktopOutput) {
+    await handlers.onDesktopOutput(output);
+  }
+  return output;
 }
 
 export type StartMentrixRealtimeOptions = {
@@ -253,6 +262,7 @@ export async function startMentrixRealtime(
       client_secret: opts.preflight.client_secret,
       model: opts.preflight.model,
       openai_ws_url: opts.preflight.openai_ws_url,
+      voice: opts.preflight.voice,
     };
   } else {
     const sessionRes = await apiFetch("/api/mentrix/companion/realtime/session", { method: "POST" });
@@ -443,6 +453,11 @@ export async function startMentrixRealtime(
                   interrupt_response: true,
                 },
               },
+              // Re-assert the mint-time voice explicitly — if this session.update's
+              // `audio` object were treated as a full replace rather than a merge,
+              // omitting `output` here would silently reset the voice to the API
+              // default mid-conversation instead of keeping MENTRIX_REALTIME_VOICE.
+              output: { voice: (session.voice as string) || "alloy" },
             },
           },
         }),
@@ -535,7 +550,11 @@ export async function startMentrixRealtime(
       }
     }
     if (t === "error") {
-      handlers.onError?.(msg.error?.message || "realtime_error");
+      const errMsg = msg.error?.message || "realtime_error";
+      handlers.onError?.(errMsg);
+      if (isOpenAiQuotaError(errMsg)) {
+        handlers.onFallback?.("openai_quota");
+      }
     }
   };
 

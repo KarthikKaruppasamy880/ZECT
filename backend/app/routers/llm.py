@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
 
+from app.core.auth.deps import CurrentUser
+from app.core.budget import enforce_token_budget
 from app.database import get_db
 from app.models import Repo
 from app.token_tracker import log_tokens
@@ -145,7 +147,11 @@ def _build_repo_context(db: Session, repo_id: int, max_chars: int = 8000) -> str
 
 
 @router.post("/ask", response_model=AskResponse)
-def ask_question(req: AskRequest, db: Session = Depends(get_db)):
+def ask_question(
+    req: AskRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Ask any engineering question, optionally with repo context."""
     client = _get_client()
 
@@ -189,6 +195,7 @@ def ask_question(req: AskRequest, db: Session = Depends(get_db)):
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
+            user_id=current_user.user_id,
         )
         return AskResponse(answer=answer, model="gpt-4o-mini", tokens_used=tokens)
     except APIError as e:
@@ -196,7 +203,11 @@ def ask_question(req: AskRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/plan", response_model=PlanResponse)
-def generate_plan(req: PlanRequest, db: Session = Depends(get_db)):
+def generate_plan(
+    req: PlanRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
     """Generate a structured engineering plan for a project."""
     client = _get_client()
 
@@ -254,6 +265,7 @@ def generate_plan(req: PlanRequest, db: Session = Depends(get_db)):
             prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
+            user_id=current_user.user_id,
         )
         return PlanResponse(plan=plan_text, phases=phases, model="gpt-4o-mini", tokens_used=tokens)
     except APIError as e:
@@ -261,7 +273,10 @@ def generate_plan(req: PlanRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/enhance-blueprint", response_model=EnhanceBlueprintResponse)
-def enhance_blueprint(req: EnhanceBlueprintRequest):
+def enhance_blueprint(
+    req: EnhanceBlueprintRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+):
     """Enhance a raw blueprint prompt with LLM-powered improvements."""
     client = _get_client()
 
@@ -297,6 +312,7 @@ def enhance_blueprint(req: EnhanceBlueprintRequest):
             prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
+            user_id=current_user.user_id,
         )
         return EnhanceBlueprintResponse(
             enhanced_prompt=enhanced, model="gpt-4o-mini", tokens_used=tokens

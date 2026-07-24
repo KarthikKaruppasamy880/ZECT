@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -1077,6 +1077,31 @@ class CodeSymbol(Base):
     repo = relationship("Repo", backref="code_symbols")
 
 
+class CodeEmbedding(Base):
+    """Semantic chunk + embedding for retrieval-augmented Build context.
+
+    Distinct from CodeSymbol (regex symbol names, free, structural) — this is
+    real content chunks with vector embeddings for similarity search, replacing
+    the flat 4KB repo-context snapshot Build used to send on every generation.
+    """
+    __tablename__ = "code_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=False, index=True)
+    file_path = Column(String, nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    language = Column(String, default="")
+    line_start = Column(Integer, default=0)
+    line_end = Column(Integer, default=0)
+    symbol_name = Column(String, nullable=True)  # function/class name if chunk is boundary-aligned
+    content = Column(Text, nullable=False)  # the actual chunk text, injected into context at retrieval
+    embedding = Column(Text, nullable=False)  # JSON-encoded list[float]
+    embedding_model = Column(String, default="text-embedding-3-small")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    repo = relationship("Repo", backref="code_embeddings")
+
+
 # ---------------------------------------------------------------------------
 # Recordings — video test recordings for session proof
 # ---------------------------------------------------------------------------
@@ -1308,5 +1333,24 @@ class LatticeStructuralBlueprint(Base):
     god_nodes_json = Column(Text, default="[]")
     stats_json = Column(Text, default="{}")
     error = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ContextStoreEntry(Base):
+    """Per-user, per-page context key/value store — backs /api/context/*.
+
+    Previously an in-memory dict (context_management.py), global across all
+    users and wiped on every restart. This persists it and scopes it by
+    user_id so one user's Ask/Plan/Build context can't leak into another's.
+    """
+    __tablename__ = "context_store_entries"
+    __table_args__ = (UniqueConstraint("user_id", "page", "key", name="uq_context_store_user_page_key"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    page = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False)
+    value = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -115,6 +115,44 @@ function pathBlocked(p) {
   return BLOCKED_PATH_FRAGMENTS.some((frag) => s.includes(frag));
 }
 
+async function waitForDevServer(url, attempts = 20, delayMs = 500) {
+  const http = require("http");
+  const target = new URL(url);
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      await new Promise((resolve, reject) => {
+        const req = http.get(
+          { hostname: target.hostname, port: target.port, path: target.pathname || "/", timeout: 2000 },
+          (res) => {
+            res.resume();
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) resolve(undefined);
+            else reject(new Error(`status ${res.statusCode}`));
+          },
+        );
+        req.on("error", reject);
+        req.on("timeout", () => {
+          req.destroy();
+          reject(new Error("timeout"));
+        });
+      });
+      return true;
+    } catch {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
+}
+
+async function loadDevUrlWithRetry(win, url) {
+  const ready = await waitForDevServer(url);
+  if (!ready) {
+    console.warn("ZECT dev server not ready yet — loading anyway:", url);
+  }
+  if (win && !win.isDestroyed()) {
+    await win.loadURL(url);
+  }
+}
+
 function navigateMentrix() {
   if (!mainWindow) return;
   // Wake only — persistent dock expands + Connect Voice. Avoid hard location.assign (remounts React).
@@ -161,7 +199,7 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL(DEV_URL);
+    loadDevUrlWithRetry(mainWindow, DEV_URL);
     // Detached DevTools + Realtime audio can destabilize the renderer; keep optional.
     if (process.env.ZECT_DEVTOOLS === "1") {
       mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -173,6 +211,18 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
   });
+
+  if (isDev) {
+    mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return;
+      console.error("ZECT dev load failed:", errorCode, errorDescription, validatedURL);
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          loadDevUrlWithRetry(mainWindow, DEV_URL);
+        }
+      }, 1500);
+    });
+  }
 
   // Recover from blank screen after Connect Voice / audio renderer crashes.
   mainWindow.webContents.on("render-process-gone", (_event, details) => {

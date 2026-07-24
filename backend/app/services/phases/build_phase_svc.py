@@ -38,6 +38,7 @@ def run_build_generate(
     workspace: str = "",
     db: Any = None,
     expected_files: list[str] | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Generate code for one plan step. Offline stub writes a marker file when workspace set."""
     expected_files = expected_files or ([file_path] if file_path else [])
@@ -89,7 +90,7 @@ def run_build_generate(
         write_to_repo=write_to_repo and bool(repo_id),
     )
     # generate_code expects FastAPI Depends(db) — call core path when possible
-    result = _generate_core(req, db=db, workspace=workspace, write_workspace=write_to_repo)
+    result = _generate_core(req, db=db, workspace=workspace, write_workspace=write_to_repo, user_id=user_id)
     files_written = list(result.get("files_written") or [])
     if write_to_repo and workspace and result.get("file_path") and result.get("generated_code"):
         out = Path(workspace) / result["file_path"]
@@ -103,17 +104,46 @@ def run_build_generate(
     return result
 
 
-def _generate_core(req: Any, *, db: Any, workspace: str, write_workspace: bool = False) -> dict[str, Any]:
+def _generate_core(
+    req: Any, *, db: Any, workspace: str, write_workspace: bool = False, user_id: int | None = None
+) -> dict[str, Any]:
     from openai import APIError, OpenAI
 
+    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
+    from app.services.llm.anthropic_client import anthropic_available
+    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
     from app.token_tracker import log_tokens
 
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    # Prefer Claude Sonnet for generation quality when configured — current
+    # benchmarks (SWE-Bench) put it ahead of gpt-4o-mini specifically on
+    # real repo-editing tasks. Falls back to the existing OpenAI path
+    # untouched when ANTHROPIC_API_KEY isn't set — no regression either way.
+    use_anthropic = anthropic_available()
+    client = None if use_anthropic else OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
+
     context = req.project_context or ""
     if req.repo_id and db is not None and not context:
-        from app.routers.llm import _build_repo_context
+        from app.services.build_intel.retriever import search as semantic_search
 
-        context = _build_repo_context(db, req.repo_id, max_chars=4000)
+        query = f"{req.plan_step} {req.file_path or ''}".strip()
+        hits = semantic_search(db, req.repo_id, query, top_k=6, user_id=user_id)
+        if hits:
+            context = "\n\n".join(
+                f"--- {h['file_path']} (lines {h['line_start']}-{h['line_end']}) ---\n{h['content']}"
+                for h in hits
+            )
+        else:
+            from app.routers.llm import _build_repo_context
+
+            context = _build_repo_context(db, req.repo_id, max_chars=4000)
+
+    if not context and db is not None:
+        from app.services import context_store
+
+        saved = context_store.load(db, user_id, "blueprint", ["hld_document"])
+        if saved.get("hld_document"):
+            context = saved["hld_document"][:4000]
 
     system_prompt = (
         "You are ZECT Mentrix Build Agent. Generate production-ready code for one plan step.\n"
@@ -141,10 +171,11 @@ def _generate_core(req: Any, *, db: Any, workspace: str, write_workspace: bool =
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
             ],
-            model="gpt-4o-mini",
+            model=model_name,
             max_tokens=4000,
             temperature=0.2,
             language_hint=lang_hint,
+            create_fn=anthropic_create_fn if use_anthropic else None,
         )
         content = completed["content"]
         tokens = completed["tokens_used"]
@@ -172,27 +203,36 @@ def _generate_core(req: Any, *, db: Any, workspace: str, write_workspace: bool =
         log_tokens(
             action="build_generate",
             feature="build_phase",
-            model="gpt-4o-mini",
+            model=model_name,
             prompt_tokens=completed.get("prompt_tokens") or 0,
             completion_tokens=completed.get("completion_tokens") or 0,
             total_tokens=tokens,
+            user_id=user_id,
         )
+        from app.services.build_intel.file_ops import diff_against_existing, write_file
+
         files_written: list[str] = []
-        if req.write_to_repo and req.repo_id and db is not None:
+        diff = None
+        file_existed = False
+        repo_local_path: str | None = None
+        if req.repo_id and db is not None:
             from app.models import Repo
 
             repo = db.query(Repo).filter(Repo.id == req.repo_id).first()
             if repo and repo.local_path:
-                target = Path(repo.local_path) / file_path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(code, encoding="utf-8")
-                files_written.append(file_path)
+                repo_local_path = repo.local_path
+                file_existed, diff = diff_against_existing(repo.local_path, file_path, code)
+
+        if req.write_to_repo and repo_local_path:
+            write_file(repo_local_path, file_path, code)
+            files_written.append(file_path)
+
         out = {
             "generated_code": code,
             "file_path": file_path,
             "language": language,
             "explanation": explanation,
-            "model": "gpt-4o-mini",
+            "model": model_name,
             "tokens_used": tokens,
             "files_written": files_written,
             "offline": False,
@@ -201,6 +241,8 @@ def _generate_core(req: Any, *, db: Any, workspace: str, write_workspace: bool =
             "structure_ok": completed.get("structure_ok"),
             "structure_blockers": completed.get("structure_blockers") or [],
             "truncated": bool(completed.get("truncated")),
+            "file_existed": file_existed,
+            "diff": diff,
         }
         if completed.get("truncated") or not completed.get("structure_ok"):
             out["incomplete"] = True
@@ -212,6 +254,22 @@ def _generate_core(req: Any, *, db: Any, workspace: str, write_workspace: bool =
             "file_path": req.file_path or "",
             "language": "text",
             "explanation": f"Build failed: {e.message}",
+            "model": "error",
+            "tokens_used": 0,
+            "files_written": [],
+            "offline": True,
+            "error": str(e),
+        }
+    except Exception as e:
+        # Anthropic's SDK raises its own exception hierarchy, not openai.APIError —
+        # this path is Claude-only when use_anthropic is true, hence the broad catch.
+        if not use_anthropic:
+            raise
+        return {
+            "generated_code": "",
+            "file_path": req.file_path or "",
+            "language": "text",
+            "explanation": f"Build failed: {e}",
             "model": "error",
             "tokens_used": 0,
             "files_written": [],
@@ -230,6 +288,7 @@ def run_build_from_plan(
     write_to_repo: bool = False,
     repo_id: int | None = None,
     db: Any = None,
+    user_id: int | None = None,
 ) -> dict[str, Any]:
     """Parse plan into steps and build the current step."""
     # Lightweight step parse without requiring OpenAI
@@ -250,6 +309,7 @@ def run_build_from_plan(
         repo_id=repo_id,
         db=db,
         expected_files=[],
+        user_id=user_id,
     )
     return {
         "steps": steps,

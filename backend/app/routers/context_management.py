@@ -1,22 +1,26 @@
-"""Context Management — Smart context loading per page and session state."""
+"""Context Management — Smart context loading per page and session state.
 
-import json
+Was an in-memory dict (_context_store), global across every user and wiped on
+every restart — now backed by ContextStoreEntry, scoped per user_id so one
+user's Ask/Plan/Build context can't leak into another's, and persisted across
+restarts. Unauthenticated callers (no bearer token) fall back to a shared
+user_id=None bucket, matching the router's previous no-auth behavior exactly.
+"""
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.database import SessionLocal
-from app.models import Setting
-from datetime import datetime, timezone
+
+from app.core.auth.deps import CurrentUser, get_optional_user
+from app.database import get_db
+from app.models import ContextStoreEntry
+from app.services import context_store
 
 router = APIRouter(prefix="/api/context", tags=["context"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+def _user_id(user: CurrentUser | None) -> int | None:
+    return user.user_id if user else None
 
 
 # ---------------------------------------------------------------------------
@@ -47,40 +51,30 @@ class LoadContextRequest(BaseModel):
     keys: list[str] | None = None  # None = load all for page
 
 
-# In-memory context store (per-session, resets on restart)
-# In production, this would be Redis or database-backed
-_context_store: dict[str, dict[str, str]] = {}
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.post("/save")
-def save_context(req: SaveContextRequest):
-    """Save context for a specific page."""
-    page_key = f"page:{req.page}"
-    if page_key not in _context_store:
-        _context_store[page_key] = {}
-    _context_store[page_key][req.key] = req.value
+def save_context(
+    req: SaveContextRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser | None = Depends(get_optional_user),
+):
+    """Save context for a specific page (upsert by user_id+page+key)."""
+    context_store.save(db, _user_id(user), req.page, req.key, req.value)
     return {"saved": True, "page": req.page, "key": req.key}
 
 
 @router.post("/load", response_model=SessionContext)
-def load_context(req: LoadContextRequest):
+def load_context(
+    req: LoadContextRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser | None = Depends(get_optional_user),
+):
     """Load context for a specific page."""
-    page_key = f"page:{req.page}"
-    stored = _context_store.get(page_key, {})
-
-    if req.keys:
-        filtered = {k: v for k, v in stored.items() if k in req.keys}
-    else:
-        filtered = stored
-
-    entries = [
-        ContextEntry(key=k, value=v, page=req.page)
-        for k, v in filtered.items()
-    ]
+    stored = context_store.load(db, _user_id(user), req.page, req.keys)
+    entries = [ContextEntry(key=k, value=v, page=req.page) for k, v in stored.items()]
 
     # Rough token estimation (4 chars ~ 1 token)
     total_chars = sum(len(e.value) for e in entries)
@@ -94,32 +88,46 @@ def load_context(req: LoadContextRequest):
 
 
 @router.delete("/clear/{page}")
-def clear_context(page: str):
+def clear_context(
+    page: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser | None = Depends(get_optional_user),
+):
     """Clear all context for a page."""
-    page_key = f"page:{page}"
-    if page_key in _context_store:
-        del _context_store[page_key]
+    db.query(ContextStoreEntry).filter(
+        ContextStoreEntry.user_id == _user_id(user), ContextStoreEntry.page == page
+    ).delete()
+    db.commit()
     return {"cleared": True, "page": page}
 
 
 @router.get("/pages")
-def list_pages_with_context():
+def list_pages_with_context(
+    db: Session = Depends(get_db),
+    user: CurrentUser | None = Depends(get_optional_user),
+):
     """List all pages that have stored context."""
-    pages = []
-    for key, entries in _context_store.items():
-        if key.startswith("page:"):
-            page_name = key[5:]
-            total_chars = sum(len(v) for v in entries.values())
-            pages.append({
-                "page": page_name,
-                "entries_count": len(entries),
-                "estimated_tokens": total_chars // 4,
-            })
-    return pages
+    rows = db.query(ContextStoreEntry).filter(ContextStoreEntry.user_id == _user_id(user)).all()
+    by_page: dict[str, list] = {}
+    for r in rows:
+        by_page.setdefault(r.page, []).append(r.value)
+
+    return [
+        {
+            "page": page,
+            "entries_count": len(values),
+            "estimated_tokens": sum(len(v) for v in values) // 4,
+        }
+        for page, values in by_page.items()
+    ]
 
 
 @router.get("/recommendations/{page}")
-def get_context_recommendations(page: str):
+def get_context_recommendations(
+    page: str,
+    db: Session = Depends(get_db),
+    user: CurrentUser | None = Depends(get_optional_user),
+):
     """Get recommended context to load for a specific page."""
     recommendations = {
         "ask": ["repo_analysis", "project_description", "tech_stack"],
@@ -131,8 +139,15 @@ def get_context_recommendations(page: str):
         "skills": ["detected_patterns", "project_conventions"],
     }
 
+    currently_loaded = [
+        r.key
+        for r in db.query(ContextStoreEntry)
+        .filter(ContextStoreEntry.user_id == _user_id(user), ContextStoreEntry.page == page)
+        .all()
+    ]
+
     return {
         "page": page,
         "recommended_keys": recommendations.get(page, []),
-        "currently_loaded": list(_context_store.get(f"page:{page}", {}).keys()),
+        "currently_loaded": currently_loaded,
     }

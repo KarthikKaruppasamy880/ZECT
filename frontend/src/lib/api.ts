@@ -187,10 +187,30 @@ export const listWebhookConfigs = () =>
   request<any[]>("/api/review/webhook/configs");
 
 // Build Phase
-export const buildGenerate = (plan_step: string, tech_stack?: string, project_context?: string, file_path?: string) =>
+export const buildGenerate = (plan_step: string, tech_stack?: string, project_context?: string, file_path?: string, repo_id?: number) =>
   request<any>("/api/build/generate", {
     method: "POST",
-    body: JSON.stringify({ plan_step, ...(tech_stack ? { tech_stack } : {}), ...(project_context ? { project_context } : {}), ...(file_path ? { file_path } : {}) }),
+    body: JSON.stringify({ plan_step, ...(tech_stack ? { tech_stack } : {}), ...(project_context ? { project_context } : {}), ...(file_path ? { file_path } : {}), ...(repo_id ? { repo_id } : {}) }),
+  });
+export const buildApply = (repo_id: number, file_path: string, code: string, commit_message?: string) =>
+  request<any>("/api/build/apply", {
+    method: "POST",
+    body: JSON.stringify({ repo_id, file_path, code, ...(commit_message ? { commit_message } : {}) }),
+  });
+export const buildGenerateMulti = (plan_step: string, target_files: string[], repo_id?: number, tech_stack?: string) =>
+  request<any>("/api/build/generate-multi", {
+    method: "POST",
+    body: JSON.stringify({ plan_step, target_files, ...(repo_id ? { repo_id } : {}), ...(tech_stack ? { tech_stack } : {}) }),
+  });
+export const buildApplyMulti = (repo_id: number, files: { file_path: string; code: string }[], commit_message?: string) =>
+  request<any>("/api/build/apply-multi", {
+    method: "POST",
+    body: JSON.stringify({ repo_id, files, ...(commit_message ? { commit_message } : {}) }),
+  });
+export const buildVerifyAndFix = (repo_id: number, test_command: string, max_retries?: number) =>
+  request<any>("/api/build/verify-and-fix", {
+    method: "POST",
+    body: JSON.stringify({ repo_id, test_command, ...(max_retries ? { max_retries } : {}) }),
   });
 export const buildFromPlan = (full_plan: string, step_index: number, tech_stack?: string) =>
   request<any>("/api/build/from-plan", {

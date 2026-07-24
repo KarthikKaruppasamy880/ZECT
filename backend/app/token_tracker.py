@@ -9,6 +9,10 @@ from app.models import TokenLog
 PRICING = {
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "github-api": {"input": 0.0, "output": 0.0},
+    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
+    # Standard pricing; Anthropic's introductory rate ($2/$10) runs through
+    # 2026-08-31 — using standard rate here since it's the steady-state cost.
+    "claude-sonnet-5": {"input": 3.00, "output": 15.00},
 }
 
 
@@ -25,12 +29,16 @@ def log_tokens(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     total_tokens: int = 0,
+    user_id: int | None = None,
 ) -> None:
     """Persist a token usage record to the database.
 
     This function is fail-safe: if the database write fails for any reason
     (missing table, connection error, etc.), it logs the error to stdout
     but does NOT raise — token tracking must never crash the main request.
+
+    user_id must be passed by every caller that has an authenticated request —
+    without it, per-user budgets and usage dashboards silently see zero usage.
     """
     if total_tokens == 0:
         total_tokens = prompt_tokens + completion_tokens
@@ -38,6 +46,7 @@ def log_tokens(
     db = SessionLocal()
     try:
         entry = TokenLog(
+            user_id=user_id,
             action=action,
             feature=feature,
             model=model,

@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.models import AuditLog
+from app.core.auth.deps import get_current_user, CurrentUser
+from app.core.auth.rbac import require_authentication
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -79,14 +81,16 @@ def log_audit(
 
 @router.get("", response_model=list[AuditLogResponse])
 @router.get("/", response_model=list[AuditLogResponse])
+@require_authentication  # ✅ RBAC: Authentication required
 def list_audit_logs(
     action: str | None = None,
     resource_type: str | None = None,
     limit: int = Query(default=50, le=500),
     offset: int = 0,
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List audit log entries with optional filters."""
+    """List audit log entries with optional filters (authentication required)."""
     query = db.query(AuditLog)
     if action:
         query = query.filter(AuditLog.action == action)
@@ -111,8 +115,12 @@ def list_audit_logs(
 
 
 @router.get("/stats", response_model=AuditStats)
-def audit_stats(db: Session = Depends(get_db)):
-    """Get audit trail statistics."""
+@require_authentication  # ✅ RBAC: Authentication required
+def audit_stats(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get audit trail statistics (authentication required)."""
     from sqlalchemy import func
     from datetime import timedelta
 

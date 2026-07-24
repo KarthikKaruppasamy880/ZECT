@@ -58,7 +58,10 @@ Analyse the provided PR diff and produce a comprehensive code review. Your revie
       "file": "path/to/file.ext",
       "line": <line number or null>,
       "suggestion": "Recommended fix or improvement",
-      "code_snippet": "relevant code snippet if applicable"
+      "code_snippet": "relevant code snippet if applicable",
+      "fixed_code": "corrected code for this specific finding, or null if not safely auto-fixable",
+      "cwe_id": "CWE ID e.g. CWE-79, only for vulnerabilities findings, else null",
+      "owasp_category": "OWASP category e.g. A03:2021-Injection, only for vulnerabilities findings, else null"
     }
   ],
   "strengths": ["list of positive aspects of the code"],
@@ -67,7 +70,7 @@ Analyse the provided PR diff and produce a comprehensive code review. Your revie
 
 Review criteria:
 1. BUGS: Logic errors, off-by-one, null/undefined access, race conditions, edge cases
-2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization
+2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization — always populate cwe_id and owasp_category for these
 3. PERFORMANCE: N+1 queries, unnecessary re-renders, memory leaks, blocking operations
 4. CODE QUALITY: Dead code, duplicated logic, poor naming, missing types, unclear intent
 5. ARCHITECTURE: Tight coupling, circular dependencies, layer violations, anti-patterns
@@ -90,6 +93,9 @@ def review_pr_diff(
     pr_title: str,
     pr_body: str | None,
     files: list[dict],
+    user_id: int | None = None,
+    db: object = None,
+    repo_id: int | None = None,
 ) -> dict:
     """Analyse a PR diff using AI and return structured review results.
 
@@ -158,6 +164,7 @@ Provide your review as valid JSON following the specified structure."""
                 prompt_tokens=prompt_tok,
                 completion_tokens=completion_tok,
                 total_tokens=tokens,
+                user_id=user_id,
             )
             part = json.loads(content)
             summaries.append(part.get("summary", ""))
@@ -189,6 +196,9 @@ Provide your review as valid JSON following the specified structure."""
             "repo": f"{owner}/{repo}",
             "chunks_reviewed": len(chunks),
         }
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="pr", result=review, user_id=user_id, repo_id=repo_id, pr_number=pr_number,
+        )
         return review
 
     except APIError as e:
@@ -209,7 +219,9 @@ Provide your review as valid JSON following the specified structure."""
         }
 
 
-def review_code_snippet(code: str, language: str = "unknown") -> dict:
+def review_code_snippet(
+    code: str, language: str = "unknown", user_id: int | None = None, db: object = None,
+) -> dict:
     """Review a standalone code snippet (not a PR diff).
 
     Args:
@@ -251,6 +263,7 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
+            user_id=user_id,
         )
 
         review = json.loads(content)
@@ -263,6 +276,7 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
         review.setdefault("recommendations", [])
         review["tokens_used"] = tokens
         review["model"] = "gpt-4o-mini"
+        review["review_session_id"] = _persist_review_session(db, review_type="snippet", result=review, user_id=user_id)
 
         return review
 
@@ -311,7 +325,10 @@ Analyse the provided source files from a full repository scan and produce a comp
       "file": "path/to/file.ext",
       "line": <line number or null>,
       "suggestion": "Recommended fix or improvement",
-      "code_snippet": "relevant code snippet if applicable"
+      "code_snippet": "relevant code snippet if applicable",
+      "fixed_code": "corrected code for this specific finding, or null if not safely auto-fixable",
+      "cwe_id": "CWE ID e.g. CWE-79, only for vulnerabilities findings, else null",
+      "owasp_category": "OWASP category e.g. A03:2021-Injection, only for vulnerabilities findings, else null"
     }
   ],
   "strengths": ["list of positive aspects of the code"],
@@ -320,13 +337,87 @@ Analyse the provided source files from a full repository scan and produce a comp
 
 Review criteria:
 1. BUGS: Logic errors, off-by-one, null/undefined access, race conditions, edge cases
-2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization
+2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization — always populate cwe_id and owasp_category for these
 3. PERFORMANCE: N+1 queries, unnecessary re-renders, memory leaks, blocking operations
 4. CODE QUALITY: Dead code, duplicated logic, poor naming, missing types, unclear intent
 5. ARCHITECTURE: Tight coupling, circular dependencies, layer violations, anti-patterns
 6. BEST PRACTICES: Missing error handling, no input validation, missing tests, poor logging
 
 Be thorough but avoid false positives. Only flag real issues. Be specific with line numbers and file paths."""
+
+
+def _persist_review_session(
+    db: object,
+    *,
+    review_type: str,
+    result: dict,
+    user_id: int | None = None,
+    repo_id: int | None = None,
+    pr_number: int | None = None,
+    branch_name: str | None = None,
+) -> int | None:
+    """Persist any review result (PR, snippet, or full-repo) to ReviewSession +
+    ReviewFinding — the DB-backed history ultrareview.py already built, now
+    populated by every review entry point instead of only its own /snippet.
+    Fail-safe: a persistence error must never break the review response the
+    caller already has in hand.
+    """
+    if db is None:
+        return None
+    from datetime import datetime, timezone
+    from app.models import ReviewSession, ReviewFinding
+
+    try:
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for f in result.get("findings", []):
+            sev = f.get("severity", "info")
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+
+        session = ReviewSession(
+            user_id=user_id,
+            repo_id=repo_id,
+            review_type=review_type,
+            pr_number=pr_number,
+            branch_name=branch_name,
+            status="completed",
+            total_findings=result.get("total_issues", len(result.get("findings", []))),
+            critical_count=severity_counts["critical"],
+            high_count=severity_counts["high"],
+            medium_count=severity_counts["medium"],
+            low_count=severity_counts["low"],
+            info_count=severity_counts["info"],
+            overall_score=float(result.get("quality_score", 0)),
+            review_summary=result.get("summary", ""),
+            files_reviewed=result.get("files_scanned") or result.get("chunks_reviewed") or 0,
+            tokens_used=result.get("tokens_used", 0),
+            model_used=result.get("model", "gpt-4o-mini"),
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+        db.flush()
+
+        for f in result.get("findings", []):
+            db.add(ReviewFinding(
+                review_session_id=session.id,
+                category=f.get("category", "code_quality"),
+                severity=f.get("severity", "info"),
+                title=f.get("title", ""),
+                description=f.get("description", ""),
+                file_path=f.get("file"),
+                line_start=f.get("line"),
+                code_snippet=f.get("code_snippet"),
+                suggestion=f.get("suggestion"),
+                fixed_code=f.get("fixed_code"),
+                cwe_id=f.get("cwe_id"),
+                owasp_category=f.get("owasp_category"),
+            ))
+        db.commit()
+        return session.id
+    except Exception as e:
+        db.rollback()
+        print(f"[ZECT REVIEW] Failed to persist review session: {e}")
+        return None
 
 
 def _collect_repo_files(gh_repo: object, path: str = "", branch: str | None = None) -> list[dict]:
@@ -402,6 +493,9 @@ def review_repo_files(
     repo: str,
     branch: str | None = None,
     file_patterns: list[str] | None = None,
+    user_id: int | None = None,
+    db: object = None,
+    repo_id: int | None = None,
 ) -> dict:
     """Scan an entire GitHub repository and run AI code review on all source files.
 
@@ -501,6 +595,7 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
+            user_id=user_id,
         )
 
         review = json.loads(content)
@@ -520,6 +615,9 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
         review["files_scanned"] = len(all_files)
         review["total_lines"] = total_lines
         review["scanned_files"] = [f["path"] for f in all_files]
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="full_repo", result=review, user_id=user_id, repo_id=repo_id,
+        )
 
         return review
 

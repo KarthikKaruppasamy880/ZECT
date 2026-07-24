@@ -1,0 +1,104 @@
+"""Real Anthropic client — replaces the broken model_selection.py attempt that
+pointed OpenAI's SDK at Anthropic's URL (different API shape entirely: separate
+`system` param, content-block list instead of `.choices[0].message.content`,
+`input_tokens`/`output_tokens` instead of `prompt_tokens`/`completion_tokens`,
+`stop_reason` values like "max_tokens" instead of `finish_reason="length"`).
+
+Exposes create_fn() shaped to plug directly into
+app.services.quality.truncation.complete_with_continuations's `create_fn` hook,
+so the existing truncation-continuation logic works unchanged for both providers
+— no Anthropic-specific branching needed at Build's call sites.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+DEFAULT_MODEL = "claude-sonnet-5"
+
+# Anthropic stop_reason -> OpenAI finish_reason, so callers built around OpenAI's
+# shape (complete_with_continuations checks `finish_reason == "length"`) work as-is.
+_STOP_REASON_MAP = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+}
+
+
+def anthropic_available() -> bool:
+    return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+
+
+def _get_client():
+    from anthropic import Anthropic
+
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY not configured.")
+    return Anthropic(api_key=key)
+
+
+class _ShimUsage:
+    def __init__(self, prompt_tokens: int, completion_tokens: int):
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+        self.total_tokens = prompt_tokens + completion_tokens
+
+
+class _ShimMessage:
+    def __init__(self, content: str):
+        self.content = content
+
+
+class _ShimChoice:
+    def __init__(self, content: str, finish_reason: str):
+        self.message = _ShimMessage(content)
+        self.finish_reason = finish_reason
+
+
+class _ShimResponse:
+    """Mimics the subset of OpenAI's ChatCompletion shape that
+    complete_with_continuations actually reads, so it needs no Anthropic branch."""
+
+    def __init__(self, content: str, finish_reason: str, prompt_tokens: int, completion_tokens: int):
+        self.choices = [_ShimChoice(content, finish_reason)]
+        self.usage = _ShimUsage(prompt_tokens, completion_tokens)
+
+
+def _split_system(messages: list[dict[str, str]]) -> tuple[str, list[dict[str, str]]]:
+    """Anthropic takes system prompt as a top-level param, not a message with
+    role="system" — OpenAI-shaped callers always put it first in `messages`."""
+    system = ""
+    rest: list[dict[str, str]] = []
+    for m in messages:
+        if m.get("role") == "system" and not system:
+            system = m.get("content", "")
+        else:
+            rest.append(m)
+    return system, rest
+
+
+def create_fn(*, model: str = DEFAULT_MODEL, messages: list[dict[str, str]], max_tokens: int = 4000, temperature: float = 0.2, **_kwargs: Any) -> _ShimResponse:
+    """Drop-in replacement for `client.chat.completions.create` — pass this as
+    `create_fn` to complete_with_continuations() to route through Claude instead
+    of OpenAI, with zero changes to the calling code's truncation/stitching logic.
+    """
+    client = _get_client()
+    system, rest = _split_system(messages)
+
+    resp = client.messages.create(
+        model=model,
+        system=system or None,
+        messages=rest,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+    text = "".join(block.text for block in resp.content if getattr(block, "type", None) == "text")
+    finish_reason = _STOP_REASON_MAP.get(resp.stop_reason or "", "stop")
+    prompt_tokens = resp.usage.input_tokens if resp.usage else 0
+    completion_tokens = resp.usage.output_tokens if resp.usage else 0
+
+    return _ShimResponse(text, finish_reason, prompt_tokens, completion_tokens)

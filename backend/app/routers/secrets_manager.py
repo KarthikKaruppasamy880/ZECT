@@ -1,6 +1,5 @@
-"""Secrets Management — encrypted credential storage."""
+"""Secrets Management — encrypted credential storage using Fernet."""
 
-import base64
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,31 +7,44 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.database import get_db
-from app.models import SecretEntry
+from app.models import SecretEntry, User
+from app.security.vault import vault
+from app.core.auth.deps import get_current_user, CurrentUser
+from app.core.auth.rbac import (
+    require_role,
+    log_audit,
+    can_user_access_resource,
+    get_user_from_current_user,
+    PermissionDenied,
+)
 
 router = APIRouter(prefix="/api/secrets", tags=["secrets"])
 
-# Simple encryption using base64 + XOR with a key derived from env
-# In production, use Fernet from cryptography package
-_ENCRYPT_KEY = os.getenv("ZECT_ENCRYPT_KEY", "zect-default-encrypt-key-change-me")
+# Initialize Fernet cipher with secure key from vault
+_cipher = Fernet(vault.get_key())
 
 
 def _encrypt(value: str) -> str:
-    """Simple reversible encryption for secrets."""
-    key_bytes = _ENCRYPT_KEY.encode()
-    val_bytes = value.encode()
-    encrypted = bytes(v ^ key_bytes[i % len(key_bytes)] for i, v in enumerate(val_bytes))
-    return base64.b64encode(encrypted).decode()
+    """Encrypt a value using Fernet (AES-128)."""
+    try:
+        encrypted_bytes = _cipher.encrypt(value.encode())
+        return encrypted_bytes.decode()
+    except Exception as e:
+        raise RuntimeError(f"Encryption failed: {e}")
 
 
-def _decrypt(encrypted: str) -> str:
-    """Decrypt a previously encrypted value."""
-    key_bytes = _ENCRYPT_KEY.encode()
-    val_bytes = base64.b64decode(encrypted.encode())
-    decrypted = bytes(v ^ key_bytes[i % len(key_bytes)] for i, v in enumerate(val_bytes))
-    return decrypted.decode()
+def _decrypt(encrypted_value: str) -> str:
+    """Decrypt a previously encrypted value using Fernet."""
+    try:
+        decrypted_bytes = _cipher.decrypt(encrypted_value.encode())
+        return decrypted_bytes.decode()
+    except InvalidToken:
+        raise ValueError("Decryption failed: Invalid token. Data may be corrupted or encrypted with different key.")
+    except Exception as e:
+        raise RuntimeError(f"Decryption failed: {e}")
 
 
 class SecretCreate(BaseModel):
@@ -55,17 +67,31 @@ def list_secrets(
     scope: Optional[str] = None,
     project_id: Optional[int] = None,
     secret_type: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),  # ✅ RBAC: Authentication required
     db: Session = Depends(get_db),
 ):
-    """List secrets (values are masked)."""
+    """List secrets (values are masked). Authentication required."""
     try:
+        # ✅ Filter secrets based on user's role and team
+        user = get_user_from_current_user(current_user, db)
         q = db.query(SecretEntry).filter(SecretEntry.is_active == True)
+
+        # Admin can see all secrets, others see only their team's secrets
+        if user.role != "admin":
+            # For non-admins, filter by team
+            if user.team:
+                q = q.filter(SecretEntry.project.has(project__team=user.team))
+            else:
+                # If user has no team, they see no secrets
+                q = q.filter(False)
+
         if scope:
             q = q.filter(SecretEntry.scope == scope)
         if project_id:
             q = q.filter(SecretEntry.project_id == project_id)
         if secret_type:
             q = q.filter(SecretEntry.secret_type == secret_type)
+
         items = q.order_by(SecretEntry.name).all()
         return [_to_dict(s, mask=True) for s in items]
     except Exception as e:
@@ -149,16 +175,38 @@ def update_secret(secret_id: int, data: SecretUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{secret_id}")
-def delete_secret(secret_id: int, db: Session = Depends(get_db)):
-    """Delete a secret."""
+@require_role("admin")  # ✅ RBAC: Only admins can delete secrets
+def delete_secret(
+    secret_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a secret (admin only)."""
     try:
         entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="Secret not found")
+
+        # ✅ Extra check: Admin can delete, or user owns the secret's project
+        user = get_user_from_current_user(current_user, db)
+        if user.role != "admin" and not can_user_access_resource(user, "secret", secret_id, db):
+            raise PermissionDenied("You don't have permission to delete this secret")
+
         db.delete(entry)
         db.commit()
+
+        # ✅ Log to audit trail
+        log_audit(
+            db=db,
+            user_id=current_user.user_id,
+            action="delete_secret",
+            resource_id=secret_id,
+            resource_type="secret",
+            details={"name": entry.name}
+        )
+
         return {"status": "deleted", "id": secret_id}
-    except HTTPException:
+    except (HTTPException, PermissionDenied):
         raise
     except Exception as e:
         db.rollback()

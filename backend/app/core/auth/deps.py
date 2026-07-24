@@ -18,6 +18,7 @@ class CurrentUser:
     email: str
     auth_mode: str
     token: str
+    role: str = "developer"  # ✅ RBAC: Include user's role (default: developer)
 
 
 def _extract_bearer(request: Request) -> str:
@@ -38,12 +39,19 @@ def get_optional_user(
     row = get_token_row(db, token)
     if not row:
         return None
+
+    # ✅ RBAC: Fetch user's role from database
+    from app.models import User
+    user = db.query(User).filter(User.id == row.user_id).first()
+    user_role = user.role if user else "developer"
+
     return CurrentUser(
         user_id=row.user_id,
         username=row.username or row.email or "",
         email=row.email or row.username or "",
         auth_mode=row.auth_mode or "local",
         token=token,
+        role=user_role,
     )
 
 

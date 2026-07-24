@@ -1,9 +1,29 @@
-"""Review Phase — AI code quality gate with fix prompt generation."""
+"""Review Phase — thin adapter over the canonical reviewer in review_service.py.
+
+Previously this duplicated code_review.py's LLM-calling logic almost verbatim
+under a different brand ("Mentrix Ultra Review" vs "ZECT Review Engine") —
+confirmed by direct comparison: same 6 review categories, same JSON schema,
+same severity scale, different prompt wording, same OpenAI call. That's the
+"two systems doing the same thing under different names" pattern found
+elsewhere in this codebase this session (Mentrix Companion/Delivery,
+build_phase.py/build_phase_svc.py) — consolidated here so there's one real
+reviewer (review_service.py), not two drifting copies.
+
+/analyze now delegates to review_code_snippet() and adapts its richer response
+shape back to this router's existing contract, so nothing calling this
+endpoint needs to change. /fix-prompt is kept as real, distinct logic — it's a
+generic "fix any snippet, no GitHub PR required" tool, genuinely different
+from code_review.py's /auto-fix-loop (which requires and posts to a real PR).
+"""
 
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
+from app.core.auth.deps import CurrentUser
+from app.core.budget import enforce_token_budget
+from app.database import get_db
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/review-phase", tags=["review-phase"])
@@ -29,7 +49,7 @@ class ReviewRequest(BaseModel):
 
 class ReviewFinding(BaseModel):
     severity: str  # critical, high, medium, low, info
-    category: str  # security, performance, maintainability, bug, style
+    category: str  # bugs, vulnerabilities, performance, code_quality, architecture, best_practices
     line: int | None = None
     message: str
     suggestion: str
@@ -62,106 +82,65 @@ class FixPromptResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+_SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+
+
 @router.post("/analyze", response_model=ReviewResponse)
-def analyze_code(req: ReviewRequest):
-    """AI code quality analysis — acts as a quality gate."""
-    client = _get_client()
+def analyze_code(
+    req: ReviewRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """AI code quality analysis — delegates to the canonical review engine."""
+    from app.review_service import review_code_snippet
 
-    system_prompt = (
-        "You are Mentrix Ultra Review — ZECT's best-in-class code quality expert. "
-        "Analyze the provided code for:\n"
-        "1. Security vulnerabilities (SQL injection, XSS, secrets exposure)\n"
-        "2. Performance issues (N+1 queries, memory leaks, inefficient algorithms)\n"
-        "3. Maintainability problems (code smell, complexity, naming)\n"
-        "4. Bugs and logic errors\n"
-        "5. Style and best practice violations\n\n"
-        "Respond in this exact JSON format:\n"
-        "{\n"
-        '  "score": <0-100>,\n'
-        '  "passed": <true if score >= 70>,\n'
-        '  "summary": "<2-3 sentence summary>",\n'
-        '  "findings": [\n'
-        "    {\n"
-        '      "severity": "<critical|high|medium|low|info>",\n'
-        '      "category": "<security|performance|maintainability|bug|style>",\n'
-        '      "line": <line number or null>,\n'
-        '      "message": "<what is wrong>",\n'
-        '      "suggestion": "<how to fix it>"\n'
-        "    }\n"
-        "  ]\n"
-        "}\n"
-        "Only return valid JSON, nothing else."
-    )
-
-    user_content = f"Language: {req.language}\n\nCode to review:\n```{req.language}\n{req.code[:8000]}\n```"
+    code = req.code
     if req.context:
-        user_content += f"\n\nContext: {req.context[:2000]}"
+        code = f"# Context: {req.context[:500]}\n\n{req.code}"
 
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-            max_tokens=3000,
-            temperature=0.1,
-        )
-        content = resp.choices[0].message.content or "{}"
-        tokens = resp.usage.total_tokens if resp.usage else 0
-
-        import json
-        # Clean markdown code fence if present
-        if content.startswith("```"):
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        
-        try:
-            data = json.loads(content.strip())
-        except json.JSONDecodeError:
-            data = {"score": 50, "passed": False, "summary": "Unable to parse review results.", "findings": []}
-
-        # Filter by severity threshold
-        severity_order = ["critical", "high", "medium", "low", "info"]
-        threshold_idx = severity_order.index(req.severity_threshold) if req.severity_threshold in severity_order else 2
-        
-        findings = []
-        for f in data.get("findings", []):
-            f_severity = f.get("severity", "info")
-            if f_severity in severity_order and severity_order.index(f_severity) <= threshold_idx:
-                findings.append(ReviewFinding(
-                    severity=f_severity,
-                    category=f.get("category", "style"),
-                    line=f.get("line"),
-                    message=f.get("message", ""),
-                    suggestion=f.get("suggestion", ""),
-                ))
-
-        log_tokens(
-            action="review_analyze",
-            feature="review_phase",
-            model="gpt-4o-mini",
-            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
-            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
-            total_tokens=tokens,
-        )
-
-        return ReviewResponse(
-            passed=data.get("passed", False),
-            score=data.get("score", 50),
-            findings=findings,
-            summary=data.get("summary", ""),
-            model="gpt-4o-mini",
-            tokens_used=tokens,
-        )
+        result = review_code_snippet(code=code, language=req.language, user_id=current_user.user_id, db=db)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
 
+    threshold_idx = (
+        _SEVERITY_ORDER.index(req.severity_threshold) if req.severity_threshold in _SEVERITY_ORDER else 2
+    )
+    findings = []
+    for f in result.get("findings", []):
+        f_severity = f.get("severity", "info")
+        if f_severity in _SEVERITY_ORDER and _SEVERITY_ORDER.index(f_severity) <= threshold_idx:
+            title = f.get("title", "")
+            description = f.get("description", "")
+            findings.append(ReviewFinding(
+                severity=f_severity,
+                category=f.get("category", "code_quality"),
+                line=f.get("line"),
+                message=f"{title} — {description}" if title and description else (title or description),
+                suggestion=f.get("suggestion", ""),
+            ))
+
+    quality_score = result.get("quality_score", 50)
+    return ReviewResponse(
+        passed=quality_score >= 70,
+        score=quality_score,
+        findings=findings,
+        summary=result.get("summary", ""),
+        model=result.get("model", "gpt-4o-mini"),
+        tokens_used=result.get("tokens_used", 0),
+    )
+
 
 @router.post("/fix-prompt", response_model=FixPromptResponse)
-def generate_fix_prompt(req: FixPromptRequest):
-    """Generate a fix prompt from review findings — auto-fix workflow."""
+def generate_fix_prompt(
+    req: FixPromptRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+):
+    """Generate a fix prompt + corrected code from review findings — works on
+    any snippet, no GitHub PR required (distinct from /api/review/auto-fix-loop,
+    which requires and posts to a real PR)."""
     client = _get_client()
 
     system_prompt = (
@@ -200,7 +179,6 @@ def generate_fix_prompt(req: FixPromptRequest):
         content = resp.choices[0].message.content or ""
         tokens = resp.usage.total_tokens if resp.usage else 0
 
-        # Parse response sections
         fix_prompt = ""
         fixed_code = ""
         changes = ""
@@ -216,7 +194,6 @@ def generate_fix_prompt(req: FixPromptRequest):
                     changes = remainder.split("CHANGES:")[1].strip()
                 else:
                     code_part = remainder.strip()
-                # Extract code from code block
                 if "```" in code_part:
                     code_parts = code_part.split("```")
                     if len(code_parts) >= 2:
@@ -240,6 +217,7 @@ def generate_fix_prompt(req: FixPromptRequest):
             prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
+            user_id=current_user.user_id,
         )
 
         return FixPromptResponse(

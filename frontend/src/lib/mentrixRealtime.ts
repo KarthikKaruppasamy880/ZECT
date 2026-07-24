@@ -29,6 +29,7 @@ export type RealtimePreflight = {
   client_secret?: string;
   model?: string;
   openai_ws_url?: string;
+  voice?: string;
 };
 
 export type RealtimeSessionHandle = {
@@ -116,6 +117,7 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     client_secret: session.client_secret,
     model: session.model,
     openai_ws_url: session.openai_ws_url,
+    voice: session.voice,
     api: session.api ? String(session.api) : "client_secrets",
   };
 }
@@ -260,6 +262,7 @@ export async function startMentrixRealtime(
       client_secret: opts.preflight.client_secret,
       model: opts.preflight.model,
       openai_ws_url: opts.preflight.openai_ws_url,
+      voice: opts.preflight.voice,
     };
   } else {
     const sessionRes = await apiFetch("/api/mentrix/companion/realtime/session", { method: "POST" });
@@ -450,6 +453,11 @@ export async function startMentrixRealtime(
                   interrupt_response: true,
                 },
               },
+              // Re-assert the mint-time voice explicitly — if this session.update's
+              // `audio` object were treated as a full replace rather than a merge,
+              // omitting `output` here would silently reset the voice to the API
+              // default mid-conversation instead of keeping MENTRIX_REALTIME_VOICE.
+              output: { voice: (session.voice as string) || "alloy" },
             },
           },
         }),

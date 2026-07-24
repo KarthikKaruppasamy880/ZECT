@@ -52,7 +52,11 @@ def mentrix_instructions() -> str:
         "Use lattice_query for code symbols and documentation wikilinks. "
         "For documentation graphs, prefer doc-kind hits and mention backlinks when available. "
         "When a tool needs permission, tell the user to Allow in the Mentrix overlay. "
-        "Brand: Mentrix, Lattice, ForgeLoop, ZECT only. No Exa."
+        "Brand: Mentrix, Lattice, ForgeLoop, ZECT only. No Exa. "
+        "Always respond in English by default, regardless of what language the user speaks or "
+        "types in. Only switch to a different language if the user explicitly asks you to "
+        "(e.g. 'reply in Spanish' or 'speak French from now on'). If they don't ask for a "
+        "language switch, respond in English even if their message was in another language."
     )
 
 

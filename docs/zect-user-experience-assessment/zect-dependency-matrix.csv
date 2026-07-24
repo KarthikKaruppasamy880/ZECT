@@ -1,0 +1,47 @@
+Module,Frontend Route,Backend Service,Database,Status,Dependencies,Frontend Component,Connected To,Context Used,Cost Model,User Primary Role
+Mentrix Companion,/mentrix-home,/api/mentrix/companion/*,User Sessions,Working,OpenAI Realtime + Slack + Jira + Email,MentrixHUD.tsx,Dashboard/Latice/Skills,Project + Skill + Dream,Realtime tokens,Voice User
+Mentrix Delivery,/mentrix,/api/mentrix/delivery,Projects + Output History,UI Only,Ask + Plan + Build + Review + Deploy,DeliveryPage.tsx,Delivery flow,Project + Repo Context,Model calls per stage,Developer
+Dashboard,/,/api/projects + /api/analytics,Projects + Activity,Working,Projects + Analytics,DashboardPage.tsx,Projects/Mentrix,Project list,Free (cached),All Users
+Projects,/projects,/api/projects,Projects,Working,GitHub API,ProjectsPage.tsx,Repo Workspace,Project metadata,Free,All Users
+Repo Workspace,/repo-workspace,/api/projects/{id}/repos,Projects + Repos,Partial,Repository connection,RepoWorkspacePage.tsx,Repo Analysis + Blueprint,Project + Repo,Free,Developer
+Settings,/settings,/api/settings,Settings,Working,GitHub + OpenAI keys,SettingsPage.tsx,Dashboard,API keys,Free,Admin
+Lattice Graph,/lattice,/api/lattice/graph,Code Graph (incomplete),Partial,Repo Analysis (no link),LatticeForceGraph.tsx,Ask (no integration),Repo symbols,High (graph computation),Architect
+Repo Analysis,/repo-analysis,/api/analysis/repo,Repos,Working,GitHub API,RepoAnalysisPage.tsx,Blueprint + Ask + Plan,Repo context,gpt-4o-mini,Developer
+Blueprint,/blueprint,/api/analysis/blueprint,Outputs,Working,Repo Analysis,BlueprintPage.tsx,Ask + Plan,Repo context,gpt-4o-mini,Developer
+Doc Generator,/doc-generator,/api/analysis/docs,Outputs,Working,Repo Analysis,DocGeneratorPage.tsx,Standalone,Repo context,gpt-4o-mini,Developer
+Code Index,/code-index,/api/code-index/search,Code Index (hardcoded),Partial,Repo Analysis (no link),CodeIndexPage.tsx,Ask (no integration),Symbol search,High (per-query),Developer
+Docs Center,/docs,Static pages,None,UI Only,Help documentation,DocsPage.tsx,Standalone,Static docs,Free,All Users
+Agent Mode,/agent-mode,/api/agent/run,Sessions + Projects,Partial,Skills + Memory,AgentModeLoopUI.tsx,Ask + Plan + Build,Project + Repo + Agent state,gpt-4o,Developer
+Ask,/ask,/api/llm/ask,Conversations,Working,Repository context,AskPage.tsx,Plan,Repo context (optional),gpt-4o-mini,Developer
+Plan,/plan,/api/llm/plan,Plans,Working,Ask output,PlanPage.tsx,Build (no link),Repo context + ask output,gpt-4o-mini,Developer
+Build,/build,None (UI stub),None,Not Implemented,Plan output,BuildPage.tsx,Review (no link),Repo context + plan,Would be gpt-4o,Developer
+Snippet Review,/review,None (no backend),None,UI Only,Build output,ReviewPage.tsx,Deploy (no link),Code diff,Would be gpt-4o,Reviewer
+Deploy,/deploy,None (no backend),None,Not Implemented,Review output,DeployPage.tsx,Standalone,Code diff + deployment config,Would be gpt-4o-mini,DevOps
+Orchestration,/orchestration,/api/orchestration/status,Multiple repos,Partial,GitHub API,OrchestrationPage.tsx,Standalone,Multi-repo context,gpt-4o-mini,Architect
+Mentrix Ultra Review,/code-review,/api/llm/ask (redirects),Conversations,Not Implemented,Code Review rules,CodeReviewPage.tsx,Standalone,Code context,Would be Claude Sonnet,Reviewer
+Rules Engine,/rules,/api/permissions/rules,Rules,Partial,Enforcement rules,RulesPage.tsx,Standalone,Rules + context,Free (deterministic),Admin
+Sandbox Gate,/sandbox,/api/sandbox/gate,Sandbox results,Partial,Test execution,SandboxPage.tsx,Build output,Test results,Free (deterministic),QA
+CI Monitor,/ci-monitor,/api/github/actions,GitHub Actions,Working,GitHub integration,CIMonitorPage.tsx,Standalone,Workflow runs,Free (GitHub API),DevOps
+Git Operations,/git-ops,/api/git/operations,Repos,Partial,GitHub API,GitOpsPage.tsx,Deploy,Commit/PR context,Free (GitHub API),DevOps
+Integrations,/integrations,/api/integrations/*,Integrations,Partial,Slack + Jira + GitHub,IntegrationsPage.tsx,Mentrix Companion,Integration configs,Free (auth only),Admin
+Audit Trail,/audit-trail,/api/audit,Audit Logs,Working,User actions,AuditTrailPage.tsx,Standalone,Audit logs,Free,Admin
+Export/Share,/export,/api/export,Exports,Working,Projects + outputs,ExportPage.tsx,Standalone,Project data,Free,Developer
+Output History,/output-history,/api/outputs,Outputs,Working,All API calls,OutputHistoryPage.tsx,Ask + Plan + Build,Output history,Free,Developer
+Analytics,/analytics,/api/analytics,Analytics,Working,Projects + usage,AnalyticsPage.tsx,Standalone,Usage metrics,Free,Manager
+Token Controls,/token-controls,/api/tokens/budget,Token budgets,Working,Per-user/project limits,TokenControlsPage.tsx,Standalone,Budget config,Free,Admin
+Secrets Manager,/secrets,/api/secrets,Secrets,Working,Encrypted storage,SecretsManagerPage.tsx,Integrations,API keys,Free (encryption only),Admin
+Skill Library,/skills,/api/skills,Skills,Partial,Skill CRUD,SkillsPage.tsx,Mentrix Companion + Skills Engine,Skill text,Free,Developer
+Skills Engine,/skills-engine,/api/skills/run,Skill runs,Partial,Skill execution,SkillsEnginePage.tsx,Agent Mode,Skill code,Depends on skill,Developer
+Memory System,/memory,/api/memory,Project Memory,Partial,Conversation + project context,MemoryPage.tsx,Mentrix Companion (reads),Memories,Free,Developer
+Dream Engine,/dream-engine,/api/dream-engine/cycle,Dream cycles,Not Implemented,Learning loop,DreamEnginePage.tsx,Build (no link),Lesson plans,Would be gpt-4o,Developer
+Data Layer,/data-layer,/api/data-layer,Data schema,Incomplete,Data models,DataLayerPage.tsx,Data Flywheel,Schema,Free,Architect
+Data Flywheel,/data-flywheel,/api/data-flywheel,Data automation,Not Implemented,Automated workflows,DataFlywheelPage.tsx,Standalone,Workflow rules,Would be free,Architect
+Permissions,/permissions,/api/permissions,Permission rules,Working,Rule enforcement,PermissionsPage.tsx,Mentrix Companion (indirect),Permission rules,Free (deterministic),Admin
+Transfer & Onboard,/transfer,/api/transfer,Project copies,Incomplete,Project replication,TransferPage.tsx,Standalone,Project data,Free,Admin
+Knowledge Base,/knowledge-base,/api/knowledge-base,Knowledge docs,Partial,Documentation index,KnowledgeBasePage.tsx,Standalone,Doc search,Free,Developer
+Playbooks,/playbooks,/api/playbooks,Playbooks,Partial,Workflow templates,PlaybooksPage.tsx,Orchestration (indirect),Playbook steps,Free,Developer
+Scheduled Tasks,/scheduled-tasks,/api/tasks/schedule,Scheduled tasks,Working,Cron jobs,ScheduledTasksPage.tsx,Standalone,Task config,Free,DevOps
+Session Insights,/session-insights,/api/sessions/insights,Session data,Partial,Session analytics,SessionInsightsPage.tsx,Standalone,Session metrics,Free,Manager
+Conversations,/conversations,/api/conversations,Conversations,Working,Chat history,ConversationsPage.tsx,Standalone,Conversation search,Free,Developer
+App Runner,/app-runner,/api/app-runner,Container execution,Incomplete,Application sandbox,AppRunnerPage.tsx,Build output,App state,Free (compute paid),Developer
+File Explorer,/file-explorer,/api/workspace/files,Workspace files,Partial,File system,FileExplorerPage.tsx,Standalone,Directory tree,Free,Developer

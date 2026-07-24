@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
-import { buildGenerate, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush } from "@/lib/api";
+import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
+import DiffViewer from "@/components/DiffViewer";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
@@ -38,10 +39,13 @@ export default function BuildPhase() {
   const [planStep, setPlanStep] = useState("");
   const [techStack, setTechStack] = useState("");
   const [filePath, setFilePath] = useState("");
+  const [repoId, setRepoId] = useState("");
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [newFileName, setNewFileName] = useState("");
@@ -73,6 +77,7 @@ export default function BuildPhase() {
     setLoading(true);
     setError("");
     setResult(null);
+    setApplied(false);
     try {
       const contextParts: string[] = [];
       if (attachedFiles.length > 0) {
@@ -84,7 +89,13 @@ export default function BuildPhase() {
         );
       }
       const projectContext = contextParts.length > 0 ? contextParts.join("\n") : undefined;
-      const res = await buildGenerate(planStep, techStack || undefined, projectContext, filePath || undefined);
+      const res = await buildGenerate(
+        planStep,
+        techStack || undefined,
+        projectContext,
+        filePath || undefined,
+        repoId ? Number(repoId) : undefined
+      );
       setResult(res);
       if (res.generated_code) {
         setGeneratedFiles((prev) => [
@@ -103,6 +114,20 @@ export default function BuildPhase() {
       setError(e.message || "Failed to generate code");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApply = async () => {
+    if (!result?.generated_code || !repoId || !result.file_path) return;
+    setApplying(true);
+    setError("");
+    try {
+      await buildApply(Number(repoId), result.file_path, result.generated_code);
+      setApplied(true);
+    } catch (e: any) {
+      setError(e.message || "Failed to write file");
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -250,7 +275,7 @@ export default function BuildPhase() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
                     <Layers className="inline h-4 w-4 mr-1" />
@@ -274,6 +299,19 @@ export default function BuildPhase() {
                     value={filePath}
                     onChange={(e) => setFilePath(e.target.value)}
                     placeholder="e.g., src/api/auth.ts"
+                    className="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    <FolderGit2 className="inline h-4 w-4 mr-1" />
+                    Repo ID (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={repoId}
+                    onChange={(e) => setRepoId(e.target.value)}
+                    placeholder="Cloned repo ID — enables retrieval + diff review"
                     className="w-full p-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                   />
                 </div>
@@ -323,6 +361,52 @@ export default function BuildPhase() {
                 title={result.file_path || result.language}
                 maxHeight="500px"
               />
+
+              {repoId && result.file_path && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  {result.file_existed && result.diff ? (
+                    <>
+                      <h3 className="text-sm font-semibold text-slate-700 mb-2">
+                        Review changes to {result.file_path}
+                      </h3>
+                      <DiffViewer
+                        sideBySide={result.diff.side_by_side}
+                        unified={result.diff.unified}
+                        stats={result.diff.stats}
+                        leftLabel="Current"
+                        rightLabel="Generated"
+                      />
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500 mb-2">
+                      {result.file_path} doesn't exist yet in this repo — nothing to diff against.
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={handleApply}
+                      disabled={applying || applied}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-slate-300 text-white text-sm rounded-lg font-medium transition"
+                    >
+                      {applying ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Writing...</>
+                      ) : applied ? (
+                        <><Check className="h-4 w-4" /> Applied</>
+                      ) : (
+                        <><CheckCircle2 className="h-4 w-4" /> Apply to Repo</>
+                      )}
+                    </button>
+                    {!applied && (
+                      <button
+                        onClick={() => setResult(null)}
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm rounded-lg font-medium transition"
+                      >
+                        Reject
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

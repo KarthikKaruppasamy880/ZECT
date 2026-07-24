@@ -10,6 +10,13 @@ import traceback
 _backend_root = Path(__file__).resolve().parents[1]
 load_dotenv(_backend_root / ".env")
 
+# Initialize encryption vault (must be before other imports that use secrets)
+from app.security.vault import vault
+try:
+    _ = vault.get_key()
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to initialize encryption vault: {e}")
+
 from app.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
@@ -18,7 +25,7 @@ from app.routers import audit_trail, ultrareview, jira_integration, slack_integr
 from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
 from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
 from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights
-from app.routers import repo_clone, repo_browser
+from app.routers import repo_clone, repo_browser, build_intel
 from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, realtime, file_watcher, diff_viewer
 from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
@@ -35,13 +42,51 @@ app.add_middleware(AuthMiddleware)
 
 # CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.
 # This ensures CORS headers are present on ALL responses including 500 errors.
+# ✅ SECURITY: Whitelist only trusted origins, not "*"
+import os
+_ALLOWED_ORIGINS = os.getenv(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+).split(",")
+
+if os.getenv("ENV") == "production":
+    # Override with production origins
+    _ALLOWED_ORIGINS = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "https://yourdomain.com,https://app.yourdomain.com"
+    ).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=_ALLOWED_ORIGINS,  # ✅ Whitelist only
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # ✅ Explicit methods
+    allow_headers=["Content-Type", "Authorization", "Accept"],  # ✅ Explicit headers
 )
+
+# ✅ Add additional security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # Enforce HTTPS in production
+    if os.getenv("ENV") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # XSS Protection (legacy, but doesn't hurt)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Content Security Policy (basic)
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+
+    return response
 
 
 @app.exception_handler(Exception)
@@ -122,6 +167,7 @@ app.include_router(session_insights.router)
 # Deep Repo Integration
 app.include_router(repo_clone.router)
 app.include_router(repo_browser.router)
+app.include_router(build_intel.router)
 
 # Gap Fixes — v2.0 features
 app.include_router(agent_mode.router)

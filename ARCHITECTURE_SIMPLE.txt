@@ -1,0 +1,243 @@
+================================================================================
+                    ZECT v3.0 ARCHITECTURE - SIMPLE VIEW
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: USER INTERACTION POINTS                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Voice Input      Text Input       Desktop Cmd     Mentrix HUD            │
+│  Microphone       Chat Box         Electron IPC    Chat Interface          │
+│  ✅ READY         ✅ READY         ✅ READY        ✅ READY                │
+│                                                                             │
+│  Settings         Projects         Artifacts       Notifications          │
+│  User Prefs       Code Selection   Code/Diagrams   Status Updates          │
+│  ⚠️ PARTIAL       ⚠️ PARTIAL       ✅ READY        ⚠️ PARTIAL              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            WebSocket + HTTP
+                                      ↓
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 2: DESKTOP APPLICATION (Electron)                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Main Process     Wake Listener    Audio Device    Computer Mode          │
+│  Window Mgmt      Windows.Speech   Mic/Speaker     Screenshot              │
+│  ✅ READY         ✅ READY         ✅ READY        ⚠️ PARTIAL              │
+│                                                                             │
+│  IPC Bridge       Permissions      System Events                           │
+│  Main ↔ Render    Auto-Grant       Lifecycle       │
+│  ✅ READY         ✅ READY         ✅ READY                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            HTTP Port 5173
+                                      ↓
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 3: FRONTEND SERVER (Vite + React)                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Dev Server       Pages            Components      WebSocket              │
+│  Port 5173        Mentrix          HUD, Chat       Real-time Voice         │
+│  ✅ READY         Lattice          UI Elements     ✅ READY                │
+│  Hot Reload       Dashboard        ✅ READY                               │
+│  ✅ READY         ✅ READY                                                 │
+│                                                                             │
+│  API Client       State Mgmt       Error Handling                          │
+│  HTTP REST        React Hooks      Graceful Degrade                        │
+│  ✅ READY         ✅ READY         ✅ READY                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            HTTP Port 8000
+                                      ↓
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 4: API GATEWAY (FastAPI)                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  HTTP Router      Auth & Middleware    Request Validation                  │
+│  58 Routes        JWT Tokens           Input Checking                      │
+│  ✅ READY         ✅ READY             ✅ READY                            │
+│                                                                             │
+│  Rate Limiter     WebSocket Realtime   Error Handling                      │
+│  Throttle         Voice Streaming      Response Format                     │
+│  ✅ READY         ✅ READY             ✅ READY                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            Service Calls
+                                      ↓
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 5: BUSINESS LOGIC (Core Services)                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ForgeLoop        Mentrix Assistant   Lattice Code Analysis               │
+│  Orchestrator     Voice Agent         File Scanning                        │
+│  Multi-Step       19 Tools            Dependency Detection                 │
+│  ✅ READY         ✅ READY            ⚠️ PARTIAL (needs parser)            │
+│                                                                             │
+│  Permission Broker   Session Manager   Auth Service                        │
+│  Access Control      Context State     JWT Validation                      │
+│  Tool Approval       ⚠️ PARTIAL       User Isolation                       │
+│  ✅ READY           (needs memory)     ✅ READY                            │
+│                                                                             │
+│  LLM Interface      Tool Executor     Error Handler                        │
+│  OpenAI API         Slack, GitHub     Recovery                            │
+│  GPT-4 Turbo        Email, Weather    Retry Logic                         │
+│  ✅ READY           ✅ READY          ✅ READY                            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+                            SQL + File I/O
+                                      ↓
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 6: DATA & PERSISTENCE                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SQLite Database    File System       Environment Variables                │
+│  Users, Sessions    Repos, Configs    API Keys (Encrypted)                 │
+│  Runs, Projects     Logs              Credentials                          │
+│  ✅ READY           ✅ READY          ✅ READY                             │
+│                                                                             │
+│  Cache/State        Audit Logs        External Services                    │
+│  Ephemeral          Actions, Runs     OpenAI, GitHub                       │
+│  Realtime Secrets   Executions        Slack, Email, Weather                │
+│  ⚠️ PARTIAL         ⚠️ PARTIAL        ✅ READY                             │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+                              LEGEND & STATUS
+================================================================================
+
+✅ READY          = Fully implemented and working
+⚠️ PARTIAL        = Works but has limitations or incomplete
+❌ MISSING        = Not implemented yet
+
+================================================================================
+                            QUICK STATUS SUMMARY
+================================================================================
+
+WORKING (✅):
+  • Voice/Real-time streaming (OpenAI Realtime API)
+  • Frontend React app (Vite dev server)
+  • Backend FastAPI (58 routers on port 8000)
+  • Electron desktop app (hotkey, wake listening)
+  • Mentrix assistant (19 integrated tools)
+  • ForgeLoop orchestrator (multi-step workflows)
+  • GitHub integration (PR creation, commits)
+  • Slack integration (send/read messages)
+  • Weather API (live forecasts)
+  • User authentication (JWT tokens)
+  • Permission broker (tool access control)
+
+PARTIAL (⚠️):
+  • Lattice code analysis (only file scanning, needs Tree-sitter)
+  • Session manager (per-request only, needs persistent memory)
+  • Email integration (basic SMTP, needs IMAP)
+  • Computer mode (screenshot works, click/type partial)
+  • Cache/state (ephemeral only)
+  • Audit logs (basic logging only)
+
+MISSING (❌):
+  • Persona injection (system prompt not passed to LLM) - 2-4 hours to fix
+  • Code parser (no AST analysis, no symbol extraction) - 60-100 hours
+  • Persistent memory (conversations not saved) - 20-30 hours
+  • Multi-user support (single user only) - 100+ hours
+
+================================================================================
+                            DATA FLOW EXAMPLE
+================================================================================
+
+USER SAYS: "What's in this repo?"
+
+    User speaks → Microphone captured by Electron
+                    ↓
+              WebSocket opened to OpenAI Realtime API
+                    ↓
+              Audio streamed to OpenAI (OpenAI Realtime)
+                    ↓
+              OpenAI transcribes: "What's in this repo?"
+                    ↓
+              OpenAI calls Mentrix system prompt
+                    ↓
+              Mentrix LLM decides to use: LATTICE_QUERY tool
+                    ↓
+              Tool call sent back to frontend
+                    ↓
+              Frontend sends HTTP POST to backend
+                    ↓
+              API Gateway routes to /api/mentrix/companion/realtime/tool
+                    ↓
+              Permission Broker checks: OK (read-only)
+                    ↓
+              Lattice Service analyzes repo
+                    ↓
+              Returns: files, structure, dependencies
+                    ↓
+              Backend sends result back to OpenAI
+                    ↓
+              OpenAI generates response + synthesizes voice
+                    ↓
+              Frontend receives audio + text
+                    ↓
+              Browser plays audio, displays text
+                    ↓
+        USER HEARS: "This is a Python FastAPI backend with..."
+
+        TOTAL TIME: 2-5 seconds
+
+================================================================================
+                        WHAT TO FIX FIRST (PRIORITY)
+================================================================================
+
+PRIORITY 1: Persona Injection (2-4 hours)
+  Problem: Mentrix system prompt exists but isn't used by LLM
+  Fix: Add persona parameter to /mentrix/runs POST request
+  Impact: Mentrix identifies as "Mentrix" instead of generic assistant
+  Status: Simple code change, high impact
+
+PRIORITY 2: Persistent Memory (20-30 hours)
+  Problem: Each conversation starts from scratch
+  Fix: Save messages to database, load on session start
+  Impact: Mentrix remembers previous questions
+  Status: Medium effort, important for UX
+
+PRIORITY 3: Code Parser (60-100 hours)
+  Problem: Lattice only scans files, can't parse code
+  Fix: Implement Tree-sitter integration for AST parsing
+  Impact: Deep code understanding (functions, classes, calls)
+  Status: High effort, critical for advanced features
+
+PRIORITY 4: Multi-user/Enterprise (100+ hours)
+  Problem: Built for single user on one laptop
+  Fix: Add SSO, user isolation, PostgreSQL, RBAC
+  Impact: Production-ready for organizations
+  Status: Very high effort, future milestone
+
+================================================================================
+                              NEXT STEPS
+================================================================================
+
+1. UNDERSTAND: Read this file (you just did!)
+
+2. CHOOSE: Pick which gap to fix first
+   Option A: Quick win → Persona Injection (do this first!)
+   Option B: Big impact → Code Parser (do later)
+   Option C: Better UX → Persistent Memory (do parallel)
+
+3. IMPLEMENT: I'll provide exact code changes for whichever you choose
+
+4. TEST: Follow the test procedures to verify it works
+
+5. COMMIT: Create PR with the changes
+
+Which one should we start with?
+
+================================================================================

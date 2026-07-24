@@ -10,6 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import PermissionRule, PermissionAudit
+from app.core.auth.deps import get_current_user, CurrentUser
+from app.core.auth.rbac import (
+    require_role,
+    log_audit,
+    get_user_from_current_user,
+    PermissionDenied,
+)
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
 
@@ -126,18 +133,42 @@ def list_rules(
 
 
 @router.post("/rules")
-def create_rule(data: PermissionRuleCreate, db: Session = Depends(get_db)):
+@require_role("admin")  # ✅ RBAC: Only admins can create rules
+def create_rule(
+    data: PermissionRuleCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new permission rule (admin only)."""
     if data.permission_level not in ("allow", "require_approval", "never"):
         raise HTTPException(400, "permission_level must be: allow, require_approval, or never")
     rule = PermissionRule(**data.model_dump())
     db.add(rule)
     db.commit()
     db.refresh(rule)
+
+    # ✅ Audit logging
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="create_permission_rule",
+        resource_id=rule.id,
+        resource_type="permission_rule",
+        details={"action_pattern": rule.action_pattern, "permission_level": rule.permission_level}
+    )
+
     return _serialize_rule(rule)
 
 
 @router.put("/rules/{rule_id}")
-def update_rule(rule_id: int, data: PermissionRuleUpdate, db: Session = Depends(get_db)):
+@require_role("admin")  # ✅ RBAC: Only admins can update rules
+def update_rule(
+    rule_id: int,
+    data: PermissionRuleUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update a permission rule (admin only)."""
     rule = db.query(PermissionRule).filter(PermissionRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Rule not found")
@@ -146,16 +177,44 @@ def update_rule(rule_id: int, data: PermissionRuleUpdate, db: Session = Depends(
             setattr(rule, k, v)
     db.commit()
     db.refresh(rule)
+
+    # ✅ Audit logging
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="update_permission_rule",
+        resource_id=rule.id,
+        resource_type="permission_rule",
+        details={"action_pattern": rule.action_pattern, "permission_level": rule.permission_level}
+    )
+
     return _serialize_rule(rule)
 
 
 @router.delete("/rules/{rule_id}")
-def delete_rule(rule_id: int, db: Session = Depends(get_db)):
+@require_role("admin")  # ✅ RBAC: Only admins can delete rules
+def delete_rule(
+    rule_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a permission rule (admin only)."""
     rule = db.query(PermissionRule).filter(PermissionRule.id == rule_id).first()
     if not rule:
         raise HTTPException(404, "Rule not found")
     rule.is_active = False
     db.commit()
+
+    # ✅ Audit logging
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="delete_permission_rule",
+        resource_id=rule_id,
+        resource_type="permission_rule",
+        details={"action_pattern": rule.action_pattern}
+    )
+
     return {"status": "deactivated", "id": rule_id}
 
 
@@ -228,7 +287,14 @@ def check_permission(data: PermissionCheck, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/audits/{audit_id}/approve")
-def approve_action(audit_id: int, data: ApprovalAction, db: Session = Depends(get_db)):
+@require_role("admin", "lead")  # ✅ RBAC: Only admins/leads can approve
+def approve_action(
+    audit_id: int,
+    data: ApprovalAction,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Approve or reject a pending action (admin/lead only)."""
     audit = db.query(PermissionAudit).filter(PermissionAudit.id == audit_id).first()
     if not audit:
         raise HTTPException(404, "Audit entry not found")
@@ -236,11 +302,26 @@ def approve_action(audit_id: int, data: ApprovalAction, db: Session = Depends(ge
         raise HTTPException(400, "This action is not pending approval")
 
     audit.approval_status = "approved" if data.approved else "rejected"
-    audit.approved_by = data.approved_by
+    audit.approved_by = data.approved_by or current_user.email
     audit.reason = data.reason
     audit.result = "granted" if data.approved else "denied"
     db.commit()
     db.refresh(audit)
+
+    # ✅ Audit logging
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="approve_action",
+        resource_id=audit_id,
+        resource_type="permission_audit",
+        details={
+            "action": audit.action,
+            "approval_status": audit.approval_status,
+            "reason": audit.reason
+        }
+    )
+
     return _serialize_audit(audit)
 
 

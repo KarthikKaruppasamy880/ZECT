@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.auth.deps import CurrentUser
+from app.core.budget import enforce_token_budget
 from app.database import get_db
 from app.models import Repo, Setting
 from app.services.repo_clone import (
@@ -127,12 +129,20 @@ def delete(repo_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{repo_id}/index")
-def index(repo_id: int, db: Session = Depends(get_db)):
-    """Index code symbols in a cloned repo for search and context injection."""
+def index(
+    repo_id: int,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Index code symbols (free, regex-based) and build the semantic index
+    (real embedding-API cost) for a cloned repo — one action, both indexes."""
     from app.services.auto_indexer import index_repo as do_index
+    from app.services.build_intel.indexer import index_repo_semantic
+
     result = do_index(db, repo_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
+    result["semantic_index"] = index_repo_semantic(db, repo_id, user_id=current_user.user_id)
     return result
 
 

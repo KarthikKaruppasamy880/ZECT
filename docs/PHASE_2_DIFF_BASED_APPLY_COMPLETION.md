@@ -5,7 +5,7 @@
 **Files Created:** 2
 **Files Modified:** 5
 **Tests Added:** 7
-**Scope:** Second of four phases toward Cursor-parity code generation. See `PHASE_1_BUILD_INTELLIGENCE_COMPLETION.md` for Phase 1.
+**Scope:** Second of four phases toward best-in-class code generation. See `PHASE_1_BUILD_INTELLIGENCE_COMPLETION.md` for Phase 1.
 
 ---
 

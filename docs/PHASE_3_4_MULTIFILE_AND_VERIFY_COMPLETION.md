@@ -5,7 +5,7 @@
 **Files Created:** 2
 **Files Modified:** 4
 **Tests Added:** 19
-**Scope:** Third and fourth of four phases toward Cursor-parity code generation. See `PHASE_1_BUILD_INTELLIGENCE_COMPLETION.md` and `PHASE_2_DIFF_BASED_APPLY_COMPLETION.md` for prior phases.
+**Scope:** Third and fourth of four phases toward best-in-class code generation. See `PHASE_1_BUILD_INTELLIGENCE_COMPLETION.md` and `PHASE_2_DIFF_BASED_APPLY_COMPLETION.md` for prior phases.
 
 ---
 

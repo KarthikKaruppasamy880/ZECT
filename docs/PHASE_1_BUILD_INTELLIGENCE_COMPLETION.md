@@ -5,7 +5,7 @@
 **Files Created:** 7
 **Files Modified:** 6
 **Tests Added:** 22
-**Scope:** First of four phases toward Cursor-parity code generation (see `docs/zect-user-experience-assessment/` for the full 4-phase plan and honest accuracy expectations — no LLM-based tool, including Cursor itself, achieves 100% correctness; this closes the context-quality gap, not that one).
+**Scope:** First of four phases toward best-in-class code generation (see `docs/zect-user-experience-assessment/` for the full 4-phase plan and honest accuracy expectations — no LLM-based tool achieves 100% correctness; this closes the context-quality gap, not that one).
 
 ---
 

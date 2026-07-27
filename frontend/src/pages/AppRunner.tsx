@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Terminal,
   Play,
@@ -23,6 +24,7 @@ import {
   runnerRemoveProcess,
   runnerConfigure,
 } from "@/lib/api";
+import { readMentrixWorkspace } from "@/lib/workspaceContext";
 
 interface ProcessEntry {
   id: string;
@@ -45,6 +47,7 @@ interface OutputData {
 }
 
 export default function AppRunner() {
+  const [searchParams] = useSearchParams();
   // --- State ---
   const [showGuide, setShowGuide] = useState(false);
   const [activeTab, setActiveTab] = useState<"terminal" | "configure" | "processes">("terminal");
@@ -74,6 +77,18 @@ export default function AppRunner() {
   const [envVars, setEnvVars] = useState("");
   const [configuring, setConfiguring] = useState(false);
   const [configResult, setConfigResult] = useState<any>(null);
+
+  // Prefill cwd/repo from Agent Mode handoff (?cwd=) or Mentrix workspace
+  useEffect(() => {
+    const fromQuery = searchParams.get("cwd") || searchParams.get("repo_path") || "";
+    const ws = readMentrixWorkspace();
+    const path = fromQuery || ws?.path || "";
+    if (path) {
+      setCwd(path);
+      setRepoPath(path);
+      if (fromQuery) setActiveTab("configure");
+    }
+  }, [searchParams]);
 
   // --- Effects ---
 

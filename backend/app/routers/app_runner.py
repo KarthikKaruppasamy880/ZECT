@@ -7,6 +7,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import sys
 import time
 import uuid
 from typing import Dict, Optional
@@ -15,6 +16,50 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/runner", tags=["app-runner"])
+
+_IS_WINDOWS = sys.platform.startswith("win")
+
+
+def _popen_kwargs() -> dict:
+    """Platform-safe Popen flags. ``os.setsid`` / ``killpg`` are Unix-only and
+    crash App Runner Start/Configure on Windows."""
+    if _IS_WINDOWS:
+        # CREATE_NEW_PROCESS_GROUP = 0x00000200 — allows Ctrl-Break terminate
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    setsid = getattr(os, "setsid", None)
+    return {"preexec_fn": setsid} if callable(setsid) else {}
+
+
+def _stop_process_tree(proc: subprocess.Popen, pid: int) -> None:
+    if not proc or proc.poll() is not None:
+        return
+    if _IS_WINDOWS:
+        try:
+            # Kill the whole tree (npm/node children included)
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except Exception:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        return
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception:
+            pass
 
 # ---------------------------------------------------------------------------
 # In-memory store for running processes
@@ -173,7 +218,7 @@ async def start_process(req: StartRequest):
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
-            preexec_fn=os.setsid,
+            **_popen_kwargs(),
         )
     except Exception as e:
         raise HTTPException(500, f"Failed to start process: {e}")
@@ -202,14 +247,7 @@ async def stop_process(process_id: str):
         raise HTTPException(404, f"Process {process_id} not found")
 
     if info.is_running:
-        try:
-            os.killpg(os.getpgid(info.pid), signal.SIGTERM)
-            info.proc.wait(timeout=5)
-        except Exception:
-            try:
-                os.killpg(os.getpgid(info.pid), signal.SIGKILL)
-            except Exception:
-                pass
+        _stop_process_tree(info.proc, info.pid)
 
     # Cancel bg task
     task = _bg_tasks.pop(process_id, None)
@@ -303,7 +341,7 @@ async def configure_project(req: ConfigureRequest):
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
-            preexec_fn=os.setsid,
+            **_popen_kwargs(),
         )
         label = f"Dev Server ({os.path.basename(req.repo_path)})"
         info = ProcessInfo(pid=proc.pid, proc=proc, label=label, cwd=req.repo_path, cmd=req.startup_command)

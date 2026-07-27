@@ -1,25 +1,6 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Mentrix voice clone", () => {
-  test("Clone voice panel on Mentrix Delivery", async ({ page }) => {
-    await page.goto("/mentrix");
-    await expect(page.getByTestId("mentrix-page")).toBeVisible({ timeout: 30_000 });
-    const expand = page.getByTestId("clone-voice-expand");
-    if (await expand.isVisible().catch(() => false)) {
-      await expand.click();
-    }
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
-    // If a voice is already active, reset so the clone form is available
-    const reset = page.getByTestId("clone-voice-reset");
-    if (await reset.isVisible().catch(() => false)) {
-      await reset.click();
-      await expect(page.getByTestId("clone-voice-name")).toBeVisible({ timeout: 10_000 });
-    } else {
-      await expect(page.getByTestId("clone-voice-name")).toBeVisible();
-      await expect(page.getByTestId("clone-voice-transcript")).toBeVisible();
-    }
-  });
-
   test("Clone voice panel on Mentrix Companion", async ({ page }) => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
@@ -30,10 +11,21 @@ test.describe("Mentrix voice clone", () => {
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
   });
 
-  test("Voice clone Labs sidebar link opens Mentrix Delivery", async ({ page }) => {
+  test("Voice Cloning Labs link opens Mentrix Companion with form expanded", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("link", { name: /Voice Cloning/i }).click();
-    await expect(page).toHaveURL(/\/mentrix/, { timeout: 15_000 });
+    await expect(page).toHaveURL(/\/mentrix-home\?voice=1/, { timeout: 15_000 });
+    await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("clone-voice-record")).toBeVisible();
+  });
+
+  test("Delivery page does not host voice cloning", async ({ page }) => {
+    await page.goto("/mentrix");
+    await expect(page.getByTestId("mentrix-page")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("clone-voice-panel")).toHaveCount(0);
+    await expect(page.getByTestId("clone-voice-expand")).toHaveCount(0);
   });
 
   test("Clone submit shows Voicebox error when offline", async ({ page }) => {
@@ -45,13 +37,8 @@ test.describe("Mentrix voice clone", () => {
       });
     });
 
-    await page.goto("/mentrix");
-    await expect(page.getByTestId("mentrix-page")).toBeVisible({ timeout: 30_000 });
-
-    const expand = page.getByTestId("clone-voice-expand");
-    if (await expand.isVisible().catch(() => false)) {
-      await expand.click();
-    }
+    await page.goto("/mentrix-home?voice=1");
+    await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
 
     const reset = page.getByTestId("clone-voice-reset");

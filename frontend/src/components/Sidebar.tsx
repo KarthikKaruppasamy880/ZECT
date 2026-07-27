@@ -102,7 +102,7 @@ const enterpriseItems: NavItem[] = [
 ];
 
 const labsItems: NavItem[] = [
-  { href: "/mentrix?voice=1", label: "Voice Cloning", icon: Mic },
+  { href: "/mentrix-home?voice=1", label: "Voice Cloning", icon: Mic },
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/memory", label: "Memory System", icon: Brain },
@@ -170,7 +170,16 @@ export default function Sidebar({
       <ul className="space-y-0.5">
         {items.map((item) => {
           const Icon = item.icon;
-          const active = location.pathname === item.href;
+          const itemUrl = new URL(item.href, "http://local");
+          const pathMatch = location.pathname === itemUrl.pathname;
+          const voiceDeepLink = itemUrl.searchParams.get("voice");
+          const active = voiceDeepLink
+            ? pathMatch && new URLSearchParams(location.search).get("voice") === voiceDeepLink
+            : pathMatch &&
+              !(
+                itemUrl.pathname === "/mentrix-home" &&
+                new URLSearchParams(location.search).get("voice")
+              );
           return (
             <li key={item.href}>
               <Link

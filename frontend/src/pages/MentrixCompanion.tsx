@@ -1,7 +1,8 @@
 /**
  * Mentrix Companion HUD — full operator shell over shared MentrixSessionContext.
  */
-import { Link } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Bot,
   Eye,
@@ -25,6 +26,14 @@ import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
 export default function MentrixCompanion() {
   const s = useMentrixSession();
+  const [searchParams] = useSearchParams();
+  const openVoice = searchParams.get("voice") === "1";
+  const voiceSectionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openVoice) return;
+    voiceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openVoice]);
 
   return (
     <div
@@ -88,6 +97,19 @@ export default function MentrixCompanion() {
           <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
             {!s.displayMode && (
               <>
+                {openVoice && (
+                  <div
+                    ref={voiceSectionRef}
+                    id="mentrix-voice-cloning"
+                    data-testid="mentrix-voice-section"
+                    className="mb-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+                  >
+                    <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
+                      Voice cloning — record here
+                    </p>
+                    <CloneVoicePanel defaultExpanded variant="dark" />
+                  </div>
+                )}
                 <div className="flex flex-col items-center gap-2 py-4">
                   <div
                     data-testid="mentrix-avatar"
@@ -312,11 +334,21 @@ export default function MentrixCompanion() {
                     checked={s.tts}
                     onChange={(e) => s.setTts(e.target.checked)}
                   />
-                  Speak replies (TTS)
+                  Speak replies (TTS) — uses your cloned voice when set
                 </label>
-                <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
-                  <CloneVoicePanel />
-                </div>
+                {!openVoice && (
+                  <div
+                    ref={voiceSectionRef}
+                    id="mentrix-voice-cloning"
+                    data-testid="mentrix-voice-section"
+                    className="mt-3 rounded-xl border border-teal-900/50 bg-slate-900/60 p-3"
+                  >
+                    <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-500/80">
+                      Voice cloning
+                    </p>
+                    <CloneVoicePanel variant="dark" />
+                  </div>
+                )}
               </>
             )}
             {s.displayMode && (

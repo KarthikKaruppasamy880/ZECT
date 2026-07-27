@@ -619,11 +619,14 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
 
 
 @router.post("/companion/realtime/session")
-def companion_realtime_session(_user: CurrentUser = Depends(get_current_user)):
+def companion_realtime_session(
+    _user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Mint OpenAI Realtime ephemeral client secret (API key never leaves server)."""
     from app.services.mentrix.realtime import mint_realtime_session
 
-    return mint_realtime_session()
+    return mint_realtime_session(db=db, user_id=_user.user_id)
 
 
 class RealtimeToolRequest(BaseModel):
@@ -698,6 +701,7 @@ async def companion_realtime_ws(websocket: WebSocket, token: str = Query("")):
         if not row:
             await websocket.close(code=4401)
             return
+        user_id = row.user_id
     finally:
         db.close()
 
@@ -707,7 +711,11 @@ async def companion_realtime_ws(websocket: WebSocket, token: str = Query("")):
         await websocket.close()
         return
 
-    session = mint_realtime_session()
+    mint_db = SessionLocal()
+    try:
+        session = mint_realtime_session(db=mint_db, user_id=user_id)
+    finally:
+        mint_db.close()
     if not session.get("ok"):
         await websocket.send_json({"event": "error", "data": session})
         await websocket.close()

@@ -245,8 +245,25 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
     ]
 
 
-def mint_realtime_session() -> dict[str, Any]:
-    """Mint short-lived OpenAI Realtime client secret. Never returns the long-lived API key."""
+def _cloned_voice_for_user(db: Any, user_id: int | None) -> dict[str, Any] | None:
+    if db is None or user_id is None:
+        return None
+    from app.models import ClonedVoice
+
+    row = db.query(ClonedVoice).filter(ClonedVoice.user_id == user_id).first()
+    if not row:
+        return None
+    return {"voice_id": row.voice_id, "name": row.name}
+
+
+def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[str, Any]:
+    """Mint short-lived OpenAI Realtime client secret. Never returns the long-lived API key.
+
+    When the caller has a cloned voice configured, the response flags it so
+    the frontend can switch the session to text-only output (output_modalities:
+    ["text"]) and synthesize the response via /api/mentrix/voice/speak instead
+    of playing OpenAI's own stock-voice audio.
+    """
     if not realtime_enabled():
         return {
             "ok": False,
@@ -256,6 +273,7 @@ def mint_realtime_session() -> dict[str, Any]:
         }
     key = _ensure_openai_env()
     voice = os.getenv("MENTRIX_REALTIME_VOICE", "alloy")
+    cloned_voice = _cloned_voice_for_user(db, user_id)
     last_error: dict[str, Any] | None = None
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -323,6 +341,7 @@ def mint_realtime_session() -> dict[str, Any]:
                     "openai_ws_url": f"wss://api.openai.com/v1/realtime?model={resolved}",
                     "voice": voice,
                     "api": "client_secrets",
+                    "cloned_voice": cloned_voice,
                 }
         err = last_error or {
             "ok": False,

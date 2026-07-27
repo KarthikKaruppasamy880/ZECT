@@ -1,5 +1,7 @@
-import { useState, useRef } from "react";
-import { askQuestion } from "@/lib/api";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { askQuestion, saveContext, loadContext } from "@/lib/api";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
@@ -19,6 +21,7 @@ import {
   Upload,
   Copy,
   Check,
+  ArrowRight,
 } from "lucide-react";
 
 interface Message {
@@ -36,9 +39,12 @@ interface AttachedFile {
 }
 
 export default function AskMode() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { activeRepoId, projectKey, blueprintPrompt, loadSavedBlueprint } = useWorkspaceRepoContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [repoContext] = useState("");
+  const [repoContext, setRepoContext] = useState("");
   const [selectedModel, setSelectedModel] = useState("gpt-4o-mini");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +55,27 @@ export default function AskMode() {
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const state = location.state as { repoContext?: string; question?: string } | null;
+      let ctx = state?.repoContext || "";
+      if (!ctx) {
+        const session = await loadContext("workspace", ["blueprint_prompt", "repo_analysis"]).catch(() => null);
+        ctx =
+          session?.entries.find((e) => e.key === "blueprint_prompt")?.value ||
+          session?.entries.find((e) => e.key === "repo_analysis")?.value ||
+          "";
+      }
+      if (!ctx && blueprintPrompt) ctx = blueprintPrompt;
+      if (!ctx) {
+        const saved = await loadSavedBlueprint();
+        if (saved) ctx = saved;
+      }
+      if (ctx) setRepoContext(ctx);
+      if (state?.question) setInput(state.question);
+    })();
+  }, [location.state, blueprintPrompt, loadSavedBlueprint]);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -98,17 +125,38 @@ export default function AskMode() {
       if (attachedFiles.length > 0) {
         context += "\n\nAttached files:\n" + attachedFiles.map((f) => `--- ${f.name} (${f.type}) ---\n${f.content}`).join("\n\n");
       }
-      const res = await askQuestion(question, context || undefined);
+      const res = await askQuestion(
+        question,
+        context || undefined,
+        activeRepoId ?? undefined,
+      );
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: res.answer, tokens: res.tokens_used, model: res.model || selectedModel },
       ]);
+      await saveContext("workspace", "last_ask_summary", res.answer.slice(0, 8000)).catch(() => {});
+      await saveContext("ask", "repo_context", context).catch(() => {});
+      await saveContext("ask", "last_question", question).catch(() => {});
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to get response.";
       setError(msg);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSendToPlan = async () => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const summary = lastAssistant?.content || "";
+    const question = lastUser?.content || input.trim();
+    const desc = question
+      ? `Based on this Ask triage:\n\n**Question:** ${question}\n\n**Answer:**\n${summary.slice(0, 4000)}`
+      : summary.slice(0, 4000);
+    await saveContext("workspace", "last_ask_summary", summary.slice(0, 8000)).catch(() => {});
+    await saveContext("plan", "repo_context", repoContext).catch(() => {});
+    await saveContext("plan", "project_description", desc).catch(() => {});
+    navigate("/plan", { state: { projectDescription: desc, repoContext } });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -136,6 +184,23 @@ export default function AskMode() {
           </p>
         </div>
         <ModelSelector value={selectedModel} onChange={setSelectedModel} compact />
+      </div>
+
+      {projectKey && (
+        <div className="mb-2 text-xs text-slate-500" data-testid="ask-workspace-key">
+          Active repo context: <span className="font-mono text-teal-700">{projectKey}</span>
+        </div>
+      )}
+
+      <div className="mb-3">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Repo / Blueprint context</label>
+        <textarea
+          data-testid="ask-repo-context"
+          value={repoContext}
+          onChange={(e) => setRepoContext(e.target.value)}
+          placeholder="Blueprint or repo analysis loads here from Lattice / workspace…"
+          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs font-mono h-20 resize-none focus:ring-2 focus:ring-blue-500"
+        />
       </div>
 
       {/* Context Files Bar */}
@@ -341,16 +406,28 @@ export default function AskMode() {
       )}
 
       {/* Input */}
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap items-end">
         <textarea
+          data-testid="ask-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask a question... (Enter to send, Shift+Enter for new line)"
-          className="flex-1 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none h-12"
+          className="flex-1 min-w-[200px] px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none h-12"
           rows={1}
         />
+        {messages.some((m) => m.role === "assistant") && (
+          <button
+            type="button"
+            data-testid="ask-send-to-plan"
+            onClick={handleSendToPlan}
+            className="px-3 py-3 border border-indigo-300 text-indigo-700 rounded-xl hover:bg-indigo-50 text-sm flex items-center gap-1"
+          >
+            Send to Plan <ArrowRight size={14} />
+          </button>
+        )}
         <button
+          data-testid="ask-send"
           onClick={handleSend}
           disabled={loading || !input.trim()}
           className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"

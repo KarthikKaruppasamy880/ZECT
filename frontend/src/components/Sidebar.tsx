@@ -47,6 +47,7 @@ import {
   Network,
   FlaskConical,
   Box,
+  Mic,
 } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
@@ -101,6 +102,7 @@ const enterpriseItems: NavItem[] = [
 ];
 
 const labsItems: NavItem[] = [
+  { href: "/mentrix?voice=1", label: "Voice Cloning", icon: Mic },
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/memory", label: "Memory System", icon: Brain },

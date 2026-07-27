@@ -88,9 +88,21 @@ def create_fn(*, model: str = DEFAULT_MODEL, messages: list[dict[str, str]], max
     client = _get_client()
     system, rest = _split_system(messages)
 
+    # Cost-tree lever #11: the same system prompt ("You are ZECT Build
+    # Agent...") is sent on every call — marking it cacheable lets Anthropic
+    # skip reprocessing it on subsequent calls within the cache TTL instead
+    # of paying full input-token price every time. Below Anthropic's ~1024
+    # token minimum this is simply a no-op, not an error, so it's safe to
+    # always set.
+    system_param: str | list[dict[str, Any]] | None
+    if system:
+        system_param = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    else:
+        system_param = None
+
     resp = client.messages.create(
         model=model,
-        system=system or None,
+        system=system_param,
         messages=rest,
         max_tokens=max_tokens,
         temperature=temperature,

@@ -129,6 +129,30 @@ def clone_repo(
             "message": "Repo is already cloned. Use pull to update or delete to re-clone.",
         }
 
+    # Adopt an existing git checkout at the workspace path (e.g. manual pre-clone)
+    if os.path.isdir(os.path.join(workspace, ".git")):
+        disk_mb = _compute_disk_usage(workspace)
+        stats = _count_repo_stats(workspace)
+        repo.clone_status = "cloned"
+        repo.local_path = workspace
+        repo.clone_branch = clone_branch
+        repo.clone_depth = 1 if shallow else None
+        repo.disk_usage_mb = disk_mb
+        repo.last_pulled_at = datetime.now(timezone.utc)
+        repo.clone_error = None
+        repo.total_files = stats["total_files"]
+        repo.total_lines = stats["total_lines"]
+        repo.index_stats = stats
+        db.commit()
+        return {
+            "status": "cloned",
+            "local_path": workspace,
+            "branch": clone_branch,
+            "disk_usage_mb": disk_mb,
+            "stats": stats,
+            "message": "Adopted existing workspace checkout.",
+        }
+
     # Mark as cloning
     repo.clone_status = "cloning"
     repo.clone_error = None

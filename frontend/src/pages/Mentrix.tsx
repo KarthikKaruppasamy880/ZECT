@@ -10,8 +10,9 @@ import {
   mentrixStartRun,
 } from "@/lib/api";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
+import CloneVoicePanel from "@/components/CloneVoicePanel";
 
-const MODES = ["upgrade", "chat", "understand", "deliver", "review_only", "ops"];
+const MODES = ["upgrade", "bugfix", "chat", "understand", "deliver", "review_only", "ops"];
 
 const WORKFLOW_STEPS = [
   { id: "lattice", label: "Lattice" },
@@ -421,6 +422,8 @@ export default function Mentrix() {
           )}
         </div>
       </div>
+
+      <CloneVoicePanel />
 
       <div
         className="rounded-xl border border-slate-200 bg-white px-3 py-3 overflow-x-auto"

@@ -1,5 +1,6 @@
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
-import { GitBranch, FolderOpen, RefreshCw, ChevronDown } from "lucide-react";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { GitBranch, FolderOpen, RefreshCw, ChevronDown, Network } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
 export default function ProjectRepoSelector() {
@@ -18,6 +19,7 @@ export default function ProjectRepoSelector() {
     activeRepo,
     activeProject,
   } = useActiveProject();
+  const { latticeStatus: latticeIdx, loadingStatus, projectKey } = useWorkspaceRepoContext();
 
   const [showProjectDD, setShowProjectDD] = useState(false);
   const [showRepoDD, setShowRepoDD] = useState(false);
@@ -145,6 +147,22 @@ export default function ProjectRepoSelector() {
       )}
 
       {/* Refresh */}
+      {activeRepo && projectKey && (
+        <span
+          data-testid="workspace-lattice-status"
+          className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium ${
+            loadingStatus
+              ? "bg-slate-100 text-slate-500"
+              : latticeIdx?.indexed
+                ? "bg-teal-50 text-teal-700 border border-teal-200"
+                : "bg-amber-50 text-amber-700 border border-amber-200"
+          }`}
+          title={projectKey}
+        >
+          <Network size={10} />
+          {loadingStatus ? "…" : latticeIdx?.indexed ? "Lattice indexed" : "Not indexed"}
+        </span>
+      )}
       <button
         onClick={refresh}
         disabled={loading}

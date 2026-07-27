@@ -267,3 +267,22 @@ def list_workflow_runs(owner: str, repo_name: str, limit: int = 10) -> list[GitH
         return result
     except GithubException:
         return []
+
+
+def trigger_workflow_dispatch(
+    owner: str, repo_name: str, workflow_file: str, ref: str = "main", inputs: dict | None = None
+) -> dict:
+    """Fire a real workflow_dispatch run — the actual CI/CD trigger; nothing
+    else in this module does more than read Actions status."""
+    gh = get_github()
+    repo = gh.get_repo(f"{owner}/{repo_name}")
+    workflow = repo.get_workflow(workflow_file)
+    ok = workflow.create_dispatch(ref, inputs or {})
+    if not ok:
+        raise GithubException(502, f"workflow_dispatch rejected for {workflow_file}@{ref}", None)
+    return {
+        "dispatched": True,
+        "workflow": workflow_file,
+        "ref": ref,
+        "message": f"Dispatched {workflow_file} on {ref}",
+    }

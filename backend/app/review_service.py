@@ -78,6 +78,69 @@ Review criteria:
 
 Be thorough but avoid false positives. Only flag real issues. Be specific with line numbers and file paths."""
 
+_FINDING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+        "category": {
+            "type": "string",
+            "enum": ["bugs", "vulnerabilities", "performance", "code_quality", "architecture", "best_practices"],
+        },
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "file": {"type": "string"},
+        "line": {"type": ["integer", "null"]},
+        "suggestion": {"type": "string"},
+        "code_snippet": {"type": ["string", "null"]},
+        "fixed_code": {"type": ["string", "null"]},
+        "cwe_id": {"type": ["string", "null"]},
+        "owasp_category": {"type": ["string", "null"]},
+    },
+    "required": [
+        "severity", "category", "title", "description", "file", "line",
+        "suggestion", "code_snippet", "fixed_code", "cwe_id", "owasp_category",
+    ],
+    "additionalProperties": False,
+}
+
+# response_format for the review JSON shape — strict structured outputs
+# instead of plain json_object mode: OpenAI now *guarantees* every required
+# field is present with the right type/enum, eliminating the .setdefault()
+# fallbacks and JSONDecodeError path as anything but a defensive backstop.
+REVIEW_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "code_review_result",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "quality_score": {"type": "integer"},
+                "total_issues": {"type": "integer"},
+                "categories": {
+                    "type": "object",
+                    "properties": {
+                        "bugs": {"type": "integer"},
+                        "vulnerabilities": {"type": "integer"},
+                        "performance": {"type": "integer"},
+                        "code_quality": {"type": "integer"},
+                        "architecture": {"type": "integer"},
+                        "best_practices": {"type": "integer"},
+                    },
+                    "required": ["bugs", "vulnerabilities", "performance", "code_quality", "architecture", "best_practices"],
+                    "additionalProperties": False,
+                },
+                "findings": {"type": "array", "items": _FINDING_SCHEMA},
+                "strengths": {"type": "array", "items": {"type": "string"}},
+                "recommendations": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["summary", "quality_score", "total_issues", "categories", "findings", "strengths", "recommendations"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 
 def _get_client() -> OpenAI:
     key = os.getenv("OPENAI_API_KEY", "")
@@ -120,6 +183,8 @@ def review_pr_diff(
     total_tokens = 0
     scores: list[int] = []
 
+    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+
     try:
         for idx, chunk in enumerate(chunks):
             diff_parts: list[str] = []
@@ -131,7 +196,17 @@ def review_pr_diff(
                         f"+{f.get('additions', 0)}/-{f.get('deletions', 0)} ---\n{patch}"
                     )
             diff_text = "\n\n".join(diff_parts)
-            user_content = f"""Review this Pull Request (chunk {idx + 1}/{len(chunks)}):
+
+            # Per-chunk, not per-PR — re-reviewing a PR where only some files
+            # changed since the last review should only re-hit the API for
+            # the chunks that actually changed.
+            chunk_cache_key = cache_key_for("review_pr_chunk", diff_text)
+            cached_part = get_cached(db, chunk_cache_key)
+            if cached_part is not None:
+                part = cached_part
+                tokens = 0
+            else:
+                user_content = f"""Review this Pull Request (chunk {idx + 1}/{len(chunks)}):
 
 **PR #{pr_number}: {pr_title}**
 Repository: {owner}/{repo}
@@ -142,31 +217,33 @@ Repository: {owner}/{repo}
 
 Provide your review as valid JSON following the specified structure."""
 
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
-                max_tokens=4000,
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            content = resp.choices[0].message.content or "{}"
-            tokens = resp.usage.total_tokens if resp.usage else 0
-            prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
-            completion_tok = resp.usage.completion_tokens if resp.usage else 0
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    max_tokens=4000,
+                    temperature=0.2,
+                    response_format=REVIEW_RESPONSE_FORMAT,
+                )
+                content = resp.choices[0].message.content or "{}"
+                tokens = resp.usage.total_tokens if resp.usage else 0
+                prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
+                completion_tok = resp.usage.completion_tokens if resp.usage else 0
+                part = json.loads(content)
+                store_cached(db, chunk_cache_key, part, model="gpt-4o-mini", tokens_used=tokens)
+                log_tokens(
+                    action="code_review",
+                    feature="code_review",
+                    model="gpt-4o-mini",
+                    prompt_tokens=prompt_tok,
+                    completion_tokens=completion_tok,
+                    total_tokens=tokens,
+                    user_id=user_id,
+                )
+
             total_tokens += tokens
-            log_tokens(
-                action="code_review",
-                feature="code_review",
-                model="gpt-4o-mini",
-                prompt_tokens=prompt_tok,
-                completion_tokens=completion_tok,
-                total_tokens=tokens,
-                user_id=user_id,
-            )
-            part = json.loads(content)
             summaries.append(part.get("summary", ""))
             scores.append(int(part.get("quality_score", 50)))
             strengths.extend(part.get("strengths") or [])
@@ -228,6 +305,15 @@ def review_code_snippet(
         code: The code to review
         language: Programming language hint
     """
+    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+
+    cache_key = cache_key_for("review_snippet", language, code)
+    cached = get_cached(db, cache_key)
+    if cached is not None:
+        review = dict(cached)
+        review["review_session_id"] = _persist_review_session(db, review_type="snippet", result=review, user_id=user_id)
+        return review
+
     client = _get_client()
 
     user_content = f"""Review this {language} code snippet:
@@ -248,7 +334,7 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
             ],
             max_tokens=3000,
             temperature=0.2,
-            response_format={"type": "json_object"},
+            response_format=REVIEW_RESPONSE_FORMAT,
         )
 
         content = resp.choices[0].message.content or "{}"
@@ -276,6 +362,7 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
         review.setdefault("recommendations", [])
         review["tokens_used"] = tokens
         review["model"] = "gpt-4o-mini"
+        store_cached(db, cache_key, review, model="gpt-4o-mini", tokens_used=tokens)
         review["review_session_id"] = _persist_review_session(db, review_type="snippet", result=review, user_id=user_id)
 
         return review
@@ -557,6 +644,17 @@ def review_repo_files(
     if len(files_text) > 60_000:
         files_text = files_text[:60_000] + "\n\n... [remaining files truncated for context limit]"
 
+    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+
+    cache_key = cache_key_for("review_repo", owner, repo, scan_branch, files_text)
+    cached = get_cached(db, cache_key)
+    if cached is not None:
+        review = dict(cached)
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="full_repo", result=review, user_id=user_id, repo_id=repo_id,
+        )
+        return review
+
     client = _get_client()
 
     user_content = f"""Perform a FULL REPOSITORY CODE REVIEW:
@@ -580,7 +678,7 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
             ],
             max_tokens=4000,
             temperature=0.2,
-            response_format={"type": "json_object"},
+            response_format=REVIEW_RESPONSE_FORMAT,
         )
 
         content = resp.choices[0].message.content or "{}"
@@ -615,6 +713,7 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
         review["files_scanned"] = len(all_files)
         review["total_lines"] = total_lines
         review["scanned_files"] = [f["path"] for f in all_files]
+        store_cached(db, cache_key, review, model="gpt-4o-mini", tokens_used=tokens)
         review["review_session_id"] = _persist_review_session(
             db, review_type="full_repo", result=review, user_id=user_id, repo_id=repo_id,
         )

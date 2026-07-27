@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   generateBlueprint,
   generateFocusedBlueprint,
   enhanceBlueprint,
   latticeBlueprintPrompt,
+  saveContext,
+  loadContext,
 } from "@/lib/api";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import type { BlueprintResult, FocusedBlueprintResult, EnhanceBlueprintResponse } from "@/types";
 import {
   Sparkles,
@@ -17,12 +21,15 @@ import {
   FileCode,
   Target,
   Network,
+  ArrowRight,
 } from "lucide-react";
 import { parseGitHubInput } from "@/lib/utils";
 
 type Mode = "standard" | "focused" | "lattice";
 
 export default function BlueprintGenerator() {
+  const navigate = useNavigate();
+  const { projectKey, localPath, latticeStatus: idxStatus } = useWorkspaceRepoContext();
   const [mode, setMode] = useState<Mode>("standard");
 
   // Standard mode state
@@ -67,12 +74,54 @@ export default function BlueprintGenerator() {
       };
       const pk = ws.project_key || ws.projectKey;
       const wp = ws.path || ws.workspace;
-      if (pk) setLatticeKey(pk);
+      if (pk) {
+        setLatticeKey(pk);
+        setMode("lattice");
+      }
       if (wp) setLatticePath(wp);
     } catch {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    if (projectKey) setLatticeKey(projectKey);
+    if (localPath) setLatticePath(localPath);
+  }, [projectKey, localPath]);
+
+  useEffect(() => {
+    void (async () => {
+      const session = await loadContext("workspace", ["blueprint_prompt"]).catch(() => null);
+      const saved = session?.entries.find((e) => e.key === "blueprint_prompt")?.value;
+      if (saved) {
+        setLatticeResult({
+          prompt: saved,
+          token_estimate: Math.max(1, Math.floor(saved.length / 4)),
+        });
+        setMode("lattice");
+      }
+    })();
+  }, []);
+
+  const persistBlueprint = async (prompt: string) => {
+    await saveContext("workspace", "blueprint_prompt", prompt).catch(() => {});
+    await saveContext("blueprint", "repo_analysis", prompt.slice(0, 12000)).catch(() => {});
+  };
+
+  const handleUseInAsk = async (prompt: string) => {
+    await persistBlueprint(prompt);
+    navigate("/ask", { state: { repoContext: prompt } });
+  };
+
+  const handleUseInPlan = async (prompt: string) => {
+    await persistBlueprint(prompt);
+    navigate("/plan", {
+      state: {
+        repoContext: prompt,
+        projectDescription: `Implement using this Lattice blueprint context:\n\n${prompt.slice(0, 2000)}…`,
+      },
+    });
+  };
 
   const addRepo = () => setRepos([...repos, { owner: "", repo: "" }]);
   const removeRepo = (idx: number) => setRepos(repos.filter((_, i) => i !== idx));
@@ -142,6 +191,7 @@ export default function BlueprintGenerator() {
         Boolean(latticePath.trim()),
       );
       setLatticeResult(data);
+      await persistBlueprint(data.prompt);
     } catch (e) {
       setError(
         e instanceof Error
@@ -174,6 +224,15 @@ export default function BlueprintGenerator() {
           Deep structural blueprints from Lattice (local index) or GitHub Standard/Focused modes
           for remote-only repos.
         </p>
+        {latticeKey && (
+          <p className="text-xs mt-2" data-testid="blueprint-index-status">
+            {idxStatus?.indexed ? (
+              <span className="text-teal-700">Indexed for <code>{latticeKey}</code></span>
+            ) : (
+              <span className="text-amber-700">Not indexed — clone & ingest in Repo Workspace first</span>
+            )}
+          </p>
+        )}
       </div>
 
       {/* Mode Tabs */}
@@ -565,6 +624,24 @@ export default function BlueprintGenerator() {
               <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap">
                 {latticeResult.prompt}
               </pre>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                data-testid="blueprint-use-in-ask"
+                onClick={() => handleUseInAsk(latticeResult.prompt)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+              >
+                Use in Ask <ArrowRight size={14} />
+              </button>
+              <button
+                type="button"
+                data-testid="blueprint-use-in-plan"
+                onClick={() => handleUseInPlan(latticeResult.prompt)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 flex items-center gap-2"
+              >
+                Use in Plan <ArrowRight size={14} />
+              </button>
             </div>
           </div>
         </div>

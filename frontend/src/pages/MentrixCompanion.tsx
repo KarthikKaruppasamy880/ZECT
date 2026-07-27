@@ -19,6 +19,7 @@ import {
 import MentrixConfirmModal from "@/components/MentrixConfirmModal";
 import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
+import CloneVoicePanel from "@/components/CloneVoicePanel";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
@@ -313,6 +314,9 @@ export default function MentrixCompanion() {
                   />
                   Speak replies (TTS)
                 </label>
+                <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                  <CloneVoicePanel />
+                </div>
               </>
             )}
             {s.displayMode && (

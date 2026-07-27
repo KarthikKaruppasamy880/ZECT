@@ -31,6 +31,7 @@ from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
 from app.routers import lattice as lattice_router
 from app.routers import mentrix as mentrix_router
+from app.routers import voice_clone
 from app.routers import confluence_integration, datadog_integration, email_integration
 
 app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
@@ -181,6 +182,7 @@ app.include_router(diff_viewer.router)
 # Mentrix platform
 app.include_router(lattice_router.router)
 app.include_router(mentrix_router.router)
+app.include_router(voice_clone.router)
 app.include_router(confluence_integration.router)
 app.include_router(datadog_integration.router)
 app.include_router(email_integration.router)

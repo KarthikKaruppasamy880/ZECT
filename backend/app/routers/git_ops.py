@@ -9,17 +9,18 @@ import subprocess
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/git", tags=["git-ops"])
+from app.core.allowed_paths import path_under_allowed_roots
 
-ALLOWED_ROOTS = ["/home", "/tmp", "/var", "/opt"]
+router = APIRouter(prefix="/api/git", tags=["git-ops"])
 
 
 def _validate_repo(path: str) -> str:
     """Validate that path is a git repo under allowed roots."""
     from pathlib import Path
-    p = Path(path).resolve()
-    if not any(str(p).startswith(root) for root in ALLOWED_ROOTS):
-        raise HTTPException(status_code=403, detail="Access denied: path not allowed")
+    try:
+        p = path_under_allowed_roots(path)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     if not (p / ".git").is_dir():
         raise HTTPException(status_code=400, detail="Not a git repository")
     return str(p)

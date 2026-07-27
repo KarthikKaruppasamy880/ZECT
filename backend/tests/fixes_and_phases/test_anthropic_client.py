@@ -124,8 +124,37 @@ class TestCreateFnShape:
             ])
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
-        assert call_kwargs["system"] == "You are a build agent."
+        assert call_kwargs["system"] == [
+            {"type": "text", "text": "You are a build agent.", "cache_control": {"type": "ephemeral"}}
+        ]
         assert call_kwargs["messages"] == [{"role": "user", "content": "generate code"}]
+
+    def test_system_prompt_marked_cacheable(self, monkeypatch):
+        """Cost-tree lever #11 — the same system prompt is sent on every
+        Build/review call; marking it cacheable avoids reprocessing it fresh
+        each time within Anthropic's cache TTL."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        mock_client = Mock()
+        mock_client.messages.create.return_value = self._mock_anthropic_response()
+
+        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+            create_fn(messages=[
+                {"role": "system", "content": "You are ZECT Build Agent."},
+                {"role": "user", "content": "generate code"},
+            ])
+
+        system_param = mock_client.messages.create.call_args.kwargs["system"]
+        assert system_param[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_no_system_message_passes_none(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        mock_client = Mock()
+        mock_client.messages.create.return_value = self._mock_anthropic_response()
+
+        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+            create_fn(messages=[{"role": "user", "content": "generate code"}])
+
+        assert mock_client.messages.create.call_args.kwargs["system"] is None
 
     def test_multiple_text_blocks_are_concatenated(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")

@@ -855,7 +855,13 @@ def run_mentrix(
 
         elif agent in ("build", "builder"):
             _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
-            if mode in ("upgrade", "bugfix"):
+            # upgrade/bugfix always generate. deliver also generates when a real
+            # workspace/repo is available — Agent Mode previously used deliver +
+            # stub builder and wrote zero files.
+            can_write_build = mode in ("upgrade", "bugfix") or (
+                mode == "deliver" and bool(workspace or repo_id)
+            )
+            if can_write_build:
                 from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
@@ -922,7 +928,7 @@ def run_mentrix(
             }
             if builder.get("generated_code"):
                 result["builder"]["code_chars"] = len(builder["generated_code"])
-            if mode not in ("upgrade", "bugfix") and (builder.get("truncated") or builder.get("incomplete")):
+            if not can_write_build and (builder.get("truncated") or builder.get("incomplete")):
                 rejected_files.append(builder.get("file_path") or "(generated)")
             if rule_violations:
                 result["builder"]["rule_violations"] = rule_violations
@@ -1319,6 +1325,7 @@ def run_mentrix(
         run.status = "completed"
         push("orchestrator", "Mentrix run completed")
 
+    result["workspace"] = workspace or ""
     run.next_step = next_step
     run.gates_json = json.dumps(gates)
     run.result_json = json.dumps(result)

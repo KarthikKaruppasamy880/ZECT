@@ -1,9 +1,19 @@
-"""Deployment Phase — Deployment orchestration and checklist management."""
+"""Deployment Phase — Deployment orchestration, checklist management, and
+real GitHub Actions triggering.
+
+/checklist and /runbook only ever generated advice text — nothing here
+actually deployed anything. /trigger-workflow is the first thing that does:
+it fires a real workflow_dispatch run, gated by the Permissions Protocol's
+deploy_.* -> require_approval rule (seeded in permissions.py but previously
+enforced by nothing, since nothing in ZECT deployed anything to gate)."""
 
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
+from app.core.auth.deps import CurrentUser, get_current_user
+from app.database import get_db
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/deploy", tags=["deploy"])
@@ -55,6 +65,22 @@ class DeployRunbookResponse(BaseModel):
     risk_level: str
     model: str
     tokens_used: int
+
+
+class DeployTriggerRequest(BaseModel):
+    owner: str
+    repo: str
+    workflow_file: str  # e.g. "deploy.yml", or the numeric workflow id as a string
+    ref: str = "main"
+    environment: str = "production"
+    inputs: dict[str, str] = {}
+    audit_id: int | None = None  # set when retrying after the approval step below granted it
+
+
+class DeployTriggerResponse(BaseModel):
+    status: str  # "dispatched", "pending_approval"
+    audit_id: int | None = None
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -223,3 +249,63 @@ def generate_runbook(req: DeployRunbookRequest):
         )
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
+
+
+@router.post("/trigger-workflow", response_model=DeployTriggerResponse)
+def trigger_workflow(
+    req: DeployTriggerRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fire a real GitHub Actions deployment run — gated by the deploy_.*
+    permission rule. First call (no audit_id) checks policy: allowed rules
+    dispatch immediately, require_approval rules come back pending with an
+    audit_id to approve via POST /api/permissions/audits/{id}/approve, then
+    retry this call with that audit_id."""
+    from app.models import PermissionAudit
+    from app.routers.audit_trail import log_audit
+    from app.routers.permissions import PermissionCheck, check_permission
+
+    action = f"deploy_{req.environment}"
+
+    if req.audit_id is not None:
+        audit = db.query(PermissionAudit).filter(PermissionAudit.id == req.audit_id).first()
+        if not audit or audit.action != action or audit.result != "granted":
+            raise HTTPException(
+                status_code=403,
+                detail="Approval not found or not granted for this deploy request — approve it first via /api/permissions/audits/{id}/approve",
+            )
+    else:
+        check = check_permission(PermissionCheck(action=action, user_id=current_user.user_id), db=db)
+        if check["result"] == "denied":
+            raise HTTPException(status_code=403, detail=f"Deploy denied by policy: {action}")
+        if check["result"] == "pending_approval":
+            return DeployTriggerResponse(
+                status="pending_approval",
+                audit_id=check["audit_id"],
+                message=(
+                    f"Deploy requires approval — POST /api/permissions/audits/{check['audit_id']}/approve, "
+                    "then retry this call with that audit_id."
+                ),
+            )
+
+    from app import github_service
+
+    try:
+        result = github_service.trigger_workflow_dispatch(
+            req.owner, req.repo, req.workflow_file, req.ref, req.inputs
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GitHub Actions dispatch failed: {e}")
+
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="deploy_trigger_workflow",
+        resource_type="deploy",
+        details={"owner": req.owner, "repo": req.repo, "workflow": req.workflow_file, "ref": req.ref},
+    )
+
+    return DeployTriggerResponse(
+        status="dispatched", audit_id=req.audit_id, message=result.get("message", "Workflow dispatched")
+    )

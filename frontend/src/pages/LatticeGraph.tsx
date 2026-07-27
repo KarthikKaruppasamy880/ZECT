@@ -11,10 +11,13 @@ import {
   latticeQuery,
   latticeRagSearch,
 } from "@/lib/api";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { readMentrixWorkspace } from "@/lib/workspaceContext";
 import LatticeForceGraph from "@/components/LatticeForceGraph";
 
 export default function LatticeGraph() {
   const [searchParams] = useSearchParams();
+  const { latticeStatus: idxStatus, projectKey: wsKey } = useWorkspaceRepoContext();
   const [path, setPath] = useState("");
   const [projectKey, setProjectKey] = useState("");
   const [layer, setLayer] = useState<"combined" | "code" | "docs">(
@@ -51,6 +54,18 @@ export default function LatticeGraph() {
       setGraph(res.graph);
       const pk = res.graph?.project_key || key;
       setProjectKey(pk);
+      if (path.trim()) {
+        localStorage.setItem(
+          "zect_mentrix_workspace",
+          JSON.stringify({
+            path: path.trim(),
+            workspace: path.trim(),
+            project_key: pk,
+            projectKey: pk,
+          }),
+        );
+        localStorage.setItem("zect_lattice_key", pk);
+      }
       if (res.blueprint && !res.blueprint.error) {
         setBlueprint({ stats: res.blueprint.stats, tech_stack: res.blueprint.tech_stack, ...res.blueprint });
       }
@@ -80,6 +95,27 @@ export default function LatticeGraph() {
     const l = searchParams.get("layer");
     if (l === "code" || l === "docs" || l === "combined") setLayer(l);
   }, [searchParams]);
+
+  useEffect(() => {
+    const ws = readMentrixWorkspace();
+    const pk = ws?.projectKey || localStorage.getItem("zect_lattice_key") || "";
+    if (pk && !projectKey) setProjectKey(pk);
+    if (ws?.path && !path) setPath(ws.path);
+  }, []);
+
+  useEffect(() => {
+    const pk = projectKey || wsKey;
+    if (!pk || graph) return;
+    void (async () => {
+      try {
+        const res = await latticeGraph(pk, layer);
+        setGraph(res);
+        await loadBlueprint(pk);
+      } catch {
+        /* not indexed yet — user can ingest manually */
+      }
+    })();
+  }, [projectKey, wsKey, layer]);
 
   const runQuery = async () => {
     setError("");
@@ -155,6 +191,15 @@ export default function LatticeGraph() {
             Mentrix code intelligence — symbols, imports, calls, path/explain + RAG (Graphify-class,
             ZECT-native Lattice).
           </p>
+          {(projectKey || wsKey) && (
+            <p className="text-xs mt-1" data-testid="lattice-index-badge">
+              {idxStatus?.indexed ? (
+                <span className="text-teal-700">Graph loaded for {projectKey || wsKey}</span>
+              ) : (
+                <span className="text-amber-700">Key {projectKey || wsKey} — ingest or Load graph</span>
+              )}
+            </p>
+          )}
         </div>
       </div>
 

@@ -271,6 +271,38 @@ def blueprint_get(project_key: str, db: Session = Depends(get_db), _user: Curren
     return bp
 
 
+@router.get("/status")
+def lattice_status_api(
+    project_key: str,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Whether a project_key has an indexed Lattice graph and structural blueprint."""
+    graph = get_graph(project_key)
+    bp = get_structural_blueprint(db, project_key)
+    stats: dict = {}
+    if graph:
+        stats = {
+            "files_indexed": graph.files_indexed,
+            "symbols": graph.symbols,
+            "nodes": len(graph.nodes),
+            "edges": len(graph.edges),
+            "languages": graph.languages,
+        }
+    updated_at = None
+    if bp and bp.get("updated_at"):
+        updated_at = bp["updated_at"]
+    elif bp and bp.get("created_at"):
+        updated_at = bp["created_at"]
+    return {
+        "indexed": graph is not None,
+        "project_key": project_key,
+        "has_blueprint": bp is not None,
+        "graph_stats": stats if stats else None,
+        "blueprint_updated_at": updated_at,
+    }
+
+
 @router.post("/blueprint/prompt")
 def blueprint_prompt(
     req: BlueprintPromptRequest,

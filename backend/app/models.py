@@ -1354,3 +1354,33 @@ class ContextStoreEntry(Base):
     value = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ClonedVoice(Base):
+    """A user's cloned voice profile — backs Mentrix voice cloning. One row
+    per user; Realtime switches to text-only output and this voice_id
+    synthesizes the response instead of an OpenAI stock voice. Default
+    provider is Voicebox (local, no API key); voice_id is that provider's
+    own profile/voice identifier."""
+    __tablename__ = "cloned_voices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    provider = Column(String, default="voicebox")
+    voice_id = Column(String, nullable=False)
+    name = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LLMResponseCache(Base):
+    """Exact-match cache for repeated identical LLM calls — cost-tree lever
+    #10: re-reviewing the same unchanged code/diff/repo shouldn't re-hit the
+    API for a response that would come back identical."""
+    __tablename__ = "llm_response_caches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(String, unique=True, nullable=False, index=True)
+    response_json = Column(Text, nullable=False)
+    model = Column(String, default="")
+    tokens_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

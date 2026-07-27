@@ -123,15 +123,33 @@ export const generateDocs = (owner: string, repo: string, sections?: string[]) =
   });
 
 // LLM
-export const askQuestion = (question: string, repo_context?: string) =>
+export const askQuestion = (
+  question: string,
+  repo_context?: string,
+  repo_id?: number,
+) =>
   request<AskResponse>("/api/llm/ask", {
     method: "POST",
-    body: JSON.stringify({ question, ...(repo_context ? { repo_context } : {}) }),
+    body: JSON.stringify({
+      question,
+      ...(repo_context ? { repo_context } : {}),
+      ...(repo_id != null ? { repo_id } : {}),
+    }),
   });
-export const generatePlan = (project_description: string, repo_context?: string, constraints?: string) =>
+export const generatePlan = (
+  project_description: string,
+  repo_context?: string,
+  constraints?: string,
+  repo_id?: number,
+) =>
   request<PlanResponse>("/api/llm/plan", {
     method: "POST",
-    body: JSON.stringify({ project_description, ...(repo_context ? { repo_context } : {}), ...(constraints ? { constraints } : {}) }),
+    body: JSON.stringify({
+      project_description,
+      ...(repo_context ? { repo_context } : {}),
+      ...(constraints ? { constraints } : {}),
+      ...(repo_id != null ? { repo_id } : {}),
+    }),
   });
 export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =>
   request<EnhanceBlueprintResponse>("/api/llm/enhance-blueprint", {
@@ -141,6 +159,32 @@ export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =
 export const configureLLMKey = (openai_api_key: string) =>
   request<LLMKeyStatus>("/api/llm/configure-key", { method: "POST", body: JSON.stringify({ openai_api_key }) });
 export const getLLMStatus = () => request<LLMKeyStatus>("/api/llm/status");
+
+// Context store (cross-page workflow persistence)
+export type ContextEntry = { key: string; value: string; page: string; expires_at?: string | null };
+export type SessionContext = { page: string; entries: ContextEntry[]; total_tokens_estimated: number };
+
+export const saveContext = (page: string, key: string, value: string) =>
+  request<{ saved: boolean; page: string; key: string }>("/api/context/save", {
+    method: "POST",
+    body: JSON.stringify({ page, key, value }),
+  });
+
+export const loadContext = (page: string, keys?: string[]) =>
+  request<SessionContext>("/api/context/load", {
+    method: "POST",
+    body: JSON.stringify({ page, keys: keys ?? null }),
+  });
+
+export const clearContext = (page: string) =>
+  request<{ cleared: boolean; page: string }>(`/api/context/clear/${encodeURIComponent(page)}`, {
+    method: "DELETE",
+  });
+
+export const getContextRecommendations = (page: string) =>
+  request<{ page: string; recommended_keys: string[]; currently_loaded: string[] }>(
+    `/api/context/recommendations/${encodeURIComponent(page)}`,
+  );
 
 // Code Review
 export const reviewPR = (owner: string, repo: string, pr_number: number) =>
@@ -285,6 +329,20 @@ export const latticeExplain = (
   });
 export const latticeBlueprint = (project_key: string) =>
   request<any>(`/api/lattice/blueprint?project_key=${encodeURIComponent(project_key)}`);
+
+export type LatticeStatusResponse = {
+  indexed: boolean;
+  project_key: string;
+  has_blueprint: boolean;
+  graph_stats?: Record<string, unknown>;
+  blueprint_updated_at?: string | null;
+};
+
+export const latticeStatus = (project_key: string) =>
+  request<LatticeStatusResponse>(
+    `/api/lattice/status?project_key=${encodeURIComponent(project_key)}`,
+  );
+
 export const latticeBlueprintPrompt = (
   project_key: string,
   path = "",
@@ -455,6 +513,34 @@ export const mentrixRealtimeTool = (tool: string, args: Record<string, unknown>,
       project_key: typeof localStorage !== "undefined" ? localStorage.getItem("zect_lattice_key") || "" : "",
     }),
   });
+// Mentrix voice cloning — Realtime handles speech understanding unchanged;
+// this is the hosted-TTS output swap once a voice is cloned.
+export const cloneMyVoice = async (
+  name: string,
+  referenceText: string,
+  file: File,
+): Promise<{ voice_id: string; name: string; provider: string }> => {
+  const form = new FormData();
+  form.append("name", name);
+  form.append("reference_text", referenceText);
+  form.append("sample", file);
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  // Deliberately not using apiFetch here — it hardcodes Content-Type: application/json,
+  // which breaks multipart form uploads (the browser must set its own boundary).
+  const res = await fetch(`${API}/api/mentrix/voice/clone`, { method: "POST", body: form, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : res.statusText);
+  }
+  return res.json();
+};
+export const getMyClonedVoice = () =>
+  request<{ voice_id: string; name: string; provider: string } | null>("/api/mentrix/voice/my-voice");
+export const resetMyClonedVoice = () =>
+  request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
+
 export const mentrixMediaList = () => request<{ items: any[] }>("/api/mentrix/companion/media");
 export const mentrixMediaUrl = (number: number) => {
   const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -527,6 +613,32 @@ export const deployRunbook = (project_name: string, tech_stack?: string, infrast
   request<any>("/api/deploy/runbook", {
     method: "POST",
     body: JSON.stringify({ project_name, ...(tech_stack ? { tech_stack } : {}), ...(infrastructure ? { infrastructure } : {}), ...(services ? { services } : {}) }),
+  });
+export const deployTriggerWorkflow = (
+  owner: string,
+  repo: string,
+  workflow_file: string,
+  ref?: string,
+  environment?: string,
+  inputs?: Record<string, string>,
+  audit_id?: number,
+) =>
+  request<{ status: string; audit_id: number | null; message: string }>("/api/deploy/trigger-workflow", {
+    method: "POST",
+    body: JSON.stringify({
+      owner,
+      repo,
+      workflow_file,
+      ref: ref || "main",
+      environment: environment || "production",
+      inputs: inputs || {},
+      ...(audit_id ? { audit_id } : {}),
+    }),
+  });
+export const approvePermissionAudit = (auditId: number, approved: boolean, reason?: string) =>
+  request<any>(`/api/permissions/audits/${auditId}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ approved, reason: reason || "" }),
   });
 
 // Skills

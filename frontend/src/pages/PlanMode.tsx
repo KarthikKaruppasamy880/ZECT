@@ -1,5 +1,7 @@
-import { useState, useRef } from "react";
-import { generatePlan } from "@/lib/api";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { generatePlan, saveContext, loadContext } from "@/lib/api";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
@@ -17,6 +19,8 @@ import {
   FolderGit2,
   FileCode,
   Upload,
+  ArrowRight,
+  Hammer,
 } from "lucide-react";
 
 interface AttachedFile {
@@ -27,6 +31,9 @@ interface AttachedFile {
 }
 
 export default function PlanMode() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { activeRepoId, projectKey, blueprintPrompt, loadSavedBlueprint } = useWorkspaceRepoContext();
   const [description, setDescription] = useState("");
   const [repoContext, setRepoContext] = useState("");
   const [constraints, setConstraints] = useState("");
@@ -45,6 +52,40 @@ export default function PlanMode() {
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const state = location.state as { projectDescription?: string; repoContext?: string } | null;
+      if (state?.projectDescription) setDescription(state.projectDescription);
+      if (state?.repoContext) {
+        setRepoContext(state.repoContext);
+        setShowAdvanced(true);
+        return;
+      }
+      const session = await loadContext("plan", ["project_description", "repo_context"]).catch(() => null);
+      const savedDesc = session?.entries.find((e) => e.key === "project_description")?.value;
+      const savedCtx = session?.entries.find((e) => e.key === "repo_context")?.value;
+      if (savedDesc && !state?.projectDescription) setDescription(savedDesc);
+      if (savedCtx) {
+        setRepoContext(savedCtx);
+        setShowAdvanced(true);
+        return;
+      }
+      const ws = await loadContext("workspace", ["blueprint_prompt", "last_ask_summary"]).catch(() => null);
+      const bp =
+        ws?.entries.find((e) => e.key === "blueprint_prompt")?.value ||
+        blueprintPrompt ||
+        (await loadSavedBlueprint());
+      const askSummary = ws?.entries.find((e) => e.key === "last_ask_summary")?.value;
+      if (bp && !savedCtx) {
+        setRepoContext(bp);
+        setShowAdvanced(true);
+      }
+      if (askSummary && !state?.projectDescription && !savedDesc) {
+        setDescription(`Continue from Ask triage:\n\n${askSummary.slice(0, 4000)}`);
+      }
+    })();
+  }, [location.state, blueprintPrompt, loadSavedBlueprint]);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -95,12 +136,16 @@ export default function PlanMode() {
       const res = await generatePlan(
         description.trim(),
         context || undefined,
-        constraints.trim() || undefined
+        constraints.trim() || undefined,
+        activeRepoId ?? undefined,
       );
       setPlan(res.plan);
       setPhases(res.phases);
       setTokensUsed(res.tokens_used);
       setModelUsed(res.model || selectedModel);
+      await saveContext("workspace", "last_plan", res.plan).catch(() => {});
+      await saveContext("plan", "repo_context", context).catch(() => {});
+      await saveContext("plan", "project_description", description.trim()).catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Plan generation failed.");
     } finally {
@@ -113,6 +158,18 @@ export default function PlanMode() {
     await navigator.clipboard.writeText(plan);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleOpenBuild = async () => {
+    if (!plan) return;
+    await saveContext("workspace", "last_plan", plan).catch(() => {});
+    navigate("/build", { state: { planStep: plan.slice(0, 6000) } });
+  };
+
+  const handleOpenMentrix = async () => {
+    if (!plan) return;
+    await saveContext("workspace", "last_plan", plan).catch(() => {});
+    navigate("/mentrix", { state: { agentContext: plan.slice(0, 4000) } });
   };
 
   return (
@@ -129,6 +186,11 @@ export default function PlanMode() {
         <p className="text-gray-500 mt-1">
           Generate a detailed, phased engineering plan for any project or feature.
         </p>
+        {projectKey && (
+          <p className="text-xs text-teal-600 mt-1 font-mono" data-testid="plan-workspace-key">
+            {projectKey}
+          </p>
+        )}
       </div>
 
       {/* Prompt Hygiene Tips */}
@@ -142,6 +204,7 @@ export default function PlanMode() {
             Project / Feature Description
           </label>
           <textarea
+            data-testid="plan-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Describe the project or feature you want to plan. Be as specific as possible — include goals, scope, and tech stack preferences..."
@@ -253,6 +316,7 @@ export default function PlanMode() {
                 Repo Context (optional)
               </label>
               <textarea
+                data-testid="plan-repo-context"
                 value={repoContext}
                 onChange={(e) => setRepoContext(e.target.value)}
                 placeholder="Paste repo analysis or README content for context-aware planning..."
@@ -274,6 +338,7 @@ export default function PlanMode() {
         )}
 
         <button
+          data-testid="plan-generate"
           onClick={handleGenerate}
           disabled={loading}
           className="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
@@ -305,6 +370,7 @@ export default function PlanMode() {
                 {phases.length} phases &middot; ~{tokensUsed.toLocaleString()} tokens{modelUsed ? ` • ${modelUsed}` : ""}
               </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleCopy}
               className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition ${
@@ -316,6 +382,23 @@ export default function PlanMode() {
               {copied ? <Check size={16} /> : <Copy size={16} />}
               {copied ? "Copied!" : "Copy Plan"}
             </button>
+            <button
+              type="button"
+              data-testid="plan-open-build"
+              onClick={handleOpenBuild}
+              className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              <Hammer size={16} /> Open in Build
+            </button>
+            <button
+              type="button"
+              data-testid="plan-open-mentrix"
+              onClick={handleOpenMentrix}
+              className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 border border-teal-600 text-teal-700 hover:bg-teal-50"
+            >
+              Mentrix bugfix <ArrowRight size={16} />
+            </button>
+            </div>
           </div>
 
           {/* Phases sidebar */}

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { getProjects, getClonedRepos, getRepoBranches } from "@/lib/api";
+import { deriveProjectKey, writeMentrixWorkspace } from "@/lib/workspaceContext";
 
 interface RepoInfo {
   repo_id: number;
@@ -35,6 +36,8 @@ interface ActiveProjectState {
   refresh: () => Promise<void>;
   activeRepo: RepoInfo | null;
   activeProject: ProjectInfo | null;
+  activeProjectKey: string;
+  activeLocalPath: string | null;
 }
 
 const ActiveProjectContext = createContext<ActiveProjectState | null>(null);
@@ -143,6 +146,19 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
 
   const activeRepo = repos.find((r) => r.repo_id === activeRepoId) || null;
   const activeProject = projects.find((p) => p.id === activeProjectId) || null;
+  const activeProjectKey = activeRepo
+    ? deriveProjectKey(activeRepo.owner, activeRepo.repo_name)
+    : "";
+  const activeLocalPath = activeRepo?.local_path ?? null;
+
+  useEffect(() => {
+    if (activeRepo?.local_path) {
+      writeMentrixWorkspace(
+        activeRepo.local_path,
+        deriveProjectKey(activeRepo.owner, activeRepo.repo_name),
+      );
+    }
+  }, [activeRepo?.repo_id, activeRepo?.local_path, activeRepo?.owner, activeRepo?.repo_name]);
 
   return (
     <ActiveProjectContext.Provider
@@ -160,6 +176,8 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
         refresh,
         activeRepo,
         activeProject,
+        activeProjectKey,
+        activeLocalPath,
       }}
     >
       {children}

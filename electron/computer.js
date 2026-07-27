@@ -66,9 +66,45 @@ $g.Dispose(); $bmp.Dispose()
   }
 }
 
-async function clickAt(x, y) {
+// SendKeys treats these as key-modifier/grouping syntax — must be individually
+// wrapped in braces to be sent as literal characters. Braces themselves go
+// first so the wrapping braces just added aren't re-escaped by the second pass.
+function escapeSendKeys(text) {
+  return String(text)
+    .replace(/[{}]/g, (c) => `{${c}}`)
+    .replace(/[+^%~()[\]]/g, (c) => `{${c}}`);
+}
+
+// Best-effort foreground-window activation before click/type — without this,
+// both previously acted on whatever window happened to already have focus,
+// which is why "type into Notepad" was unreliable right after "open Notepad".
+async function focusApp(appName) {
+  const base = String(appName || "").split(/[/\\]/).pop().replace(/\.exe$/i, "");
+  if (!base) return { ok: false, error: "no_app_name" };
+  try {
+    if (process.platform === "darwin") {
+      await execFileAsync("osascript", ["-e", `tell application "${base.replace(/"/g, '\\"')}" to activate`]);
+      return { ok: true };
+    }
+    const ps = `
+Add-Type @"
+using System; using System.Runtime.InteropServices;
+public class F { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd); }
+"@
+$p = Get-Process -Name '${base.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if ($p) { [F]::SetForegroundWindow($p.MainWindowHandle) }
+`;
+    await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function clickAt(x, y, appName) {
   const xi = Number(x) || 0;
   const yi = Number(y) || 0;
+  if (appName) await focusApp(appName);
   try {
     if (process.platform === "darwin") {
       const script = `tell application "System Events" to click at {${xi}, ${yi}}`;
@@ -94,20 +130,23 @@ public class M {
   }
 }
 
-async function typeText(text) {
-  const t = String(text || "").slice(0, 200).replace(/"/g, "");
-  if (!t) return { ok: false, error: "empty_text" };
+async function typeText(text, appName) {
+  const raw = String(text || "").slice(0, 200);
+  if (!raw) return { ok: false, error: "empty_text" };
+  if (appName) await focusApp(appName);
   try {
     if (process.platform === "darwin") {
-      await execFileAsync("osascript", ["-e", `tell application "System Events" to keystroke "${t}"`]);
-      return { ok: true, desktop: "computer_type", chars: t.length, platform: "darwin" };
+      const escaped = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      await execFileAsync("osascript", ["-e", `tell application "System Events" to keystroke "${escaped}"`]);
+      return { ok: true, desktop: "computer_type", chars: raw.length, platform: "darwin" };
     }
+    const sendKeysEscaped = escapeSendKeys(raw).replace(/'/g, "''");
     const ps = `
 Add-Type -AssemblyName System.Windows.Forms
-[System.Windows.Forms.SendKeys]::SendWait('${t.replace(/'/g, "''")}')
+[System.Windows.Forms.SendKeys]::SendWait('${sendKeysEscaped}')
 `;
     await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true });
-    return { ok: true, desktop: "computer_type", chars: t.length, platform: "win32" };
+    return { ok: true, desktop: "computer_type", chars: raw.length, platform: "win32" };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -183,6 +222,8 @@ module.exports = {
   MAC_APPS,
   allowlisted,
   openApp,
+  focusApp,
+  escapeSendKeys,
   screenshotDesktop,
   clickAt,
   typeText,

@@ -86,6 +86,7 @@ function armDictation(durationMs = 15000) {
 
 let computerMode = false;
 let computerModeIdleTimer = null;
+let lastOpenedApp = null;
 const COMPUTER_MODE_IDLE_MS = Number(process.env.MENTRIX_COMPUTER_IDLE_MS || 10 * 60 * 1000);
 const ALLOWLISTED_APPS =
   process.platform === "darwin" ? computer.MAC_APPS : computer.WIN_APPS;
@@ -103,6 +104,7 @@ function armComputerModeIdle() {
   if (!computerMode) return;
   computerModeIdleTimer = setTimeout(() => {
     computerMode = false;
+    lastOpenedApp = null;
     clearComputerModeIdle();
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("mentrix-computer-mode", { computerMode: false, reason: "idle_auto_off" });
@@ -324,7 +326,10 @@ ipcMain.handle("mentrix-dictation-pause", (_e, paused) => {
 ipcMain.handle("mentrix-computer-mode", (_e, enabled) => {
   computerMode = Boolean(enabled);
   if (computerMode) armComputerModeIdle();
-  else clearComputerModeIdle();
+  else {
+    clearComputerModeIdle();
+    lastOpenedApp = null;
+  }
   return { computerMode, idleMs: COMPUTER_MODE_IDLE_MS };
 });
 ipcMain.handle("mentrix-get-policy", () => ({
@@ -349,6 +354,7 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   if (action === "open_app" || action === "open") {
     const appName =
       a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
+    lastOpenedApp = appName;
     return computer.openApp(appName);
   }
   if (action === "screenshot" || action === "desktop_screenshot") {
@@ -381,10 +387,10 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     }
   }
   if (action === "click" || action === "computer_click") {
-    return computer.clickAt(a.x, a.y);
+    return computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);
   }
   if (action === "type" || action === "computer_type") {
-    return computer.typeText(a.text);
+    return computer.typeText(a.text, a.app || a.appName || lastOpenedApp);
   }
   if (action === "scroll" || action === "computer_scroll") {
     return computer.scroll(a.direction || "down");

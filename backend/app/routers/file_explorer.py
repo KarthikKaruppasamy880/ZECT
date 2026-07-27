@@ -9,18 +9,17 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/files", tags=["file-explorer"])
+from app.core.allowed_paths import path_under_allowed_roots
 
-# Safety: only allow access under these roots
-ALLOWED_ROOTS = ["/home", "/tmp", "/var", "/opt"]
+router = APIRouter(prefix="/api/files", tags=["file-explorer"])
 
 
 def _safe_path(raw: str) -> Path:
     """Resolve and validate that the path is under an allowed root."""
-    p = Path(raw).resolve()
-    if not any(str(p).startswith(root) for root in ALLOWED_ROOTS):
-        raise HTTPException(status_code=403, detail=f"Access denied: path must be under {ALLOWED_ROOTS}")
-    return p
+    try:
+        return path_under_allowed_roots(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
 
 
 # ── Models ────────────────────────────────────────────────────────────────

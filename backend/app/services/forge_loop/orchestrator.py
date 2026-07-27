@@ -71,6 +71,23 @@ MODE_PIPELINE: dict[str, list[str]] = {
         "fixer",
         "integrator",
     ],
+    # Issue -> load blueprint/graph -> reproduce -> trace impacted components
+    # -> root-cause + fix plan -> build -> regression tests -> review -> PR.
+    # Reuses "build"/"incomplete"/"sandbox"/"ultra_review"/"integrator" from
+    # "upgrade" unchanged — root_cause populates `plan` in the same shape
+    # run_plan() would, so Build needs no bugfix-specific branch.
+    "bugfix": [
+        "lattice",
+        "blueprint",
+        "reproduce",
+        "trace_impacted",
+        "root_cause",
+        "build",
+        "incomplete",
+        "sandbox",
+        "ultra_review",
+        "integrator",
+    ],
 }
 
 
@@ -82,7 +99,7 @@ def _lint_strict(mode: str) -> bool:
     raw = os.getenv("MENTRIX_LINT_STRICT", "")
     if raw:
         return raw.lower() not in ("0", "false", "no")
-    return mode == "upgrade"
+    return mode in ("upgrade", "bugfix")
 
 
 def _load_rules_text(db: Session) -> str:
@@ -353,7 +370,7 @@ def _run_sandbox_check(
     path, via autofix.py's run_and_fix so a failing run gets AI-assisted retries
     before giving up) when the workspace's stack is recognized, instead of only
     ever estimating readiness from the review score."""
-    test_cmd = _detect_test_command(workspace) if mode == "upgrade" else None
+    test_cmd = _detect_test_command(workspace) if mode in ("upgrade", "bugfix") else None
     if not test_cmd:
         return _run_sandbox_gate(review_score, critical, events)
 
@@ -634,6 +651,9 @@ def run_mentrix(
     review: dict = {}
     blueprint: dict = {}
     ask: dict = {}
+    reproduction: dict = {}
+    trace: dict = {}
+    root_cause: dict = {}
     api_inv: dict = {}
     api_eval: dict = {"ok": True, "note": "skipped"}
     incomplete: dict = {"ok": True}
@@ -695,6 +715,74 @@ def run_mentrix(
                 "design_contract": blueprint.get("design_contract"),
             }
             push("orchestrator", "Blueprint ready", phase="blueprint", next_step="ask")
+
+        elif agent == "reproduce":
+            _emit_phase(events, "reproduce", 0.25, "trace_impacted", "Reproduce the reported issue")
+            test_cmd = _detect_test_command(workspace) if workspace else None
+            if test_cmd:
+                from app.routers.autofix import _run_command
+
+                run_result = _run_command(test_cmd, workspace)
+                reproduction = {
+                    "attempted": True,
+                    "command": test_cmd,
+                    "success": bool(run_result.get("success")),
+                    "output": (run_result.get("stdout", "") + run_result.get("stderr", ""))[:4000],
+                }
+            else:
+                reproduction = {"attempted": False, "command": None, "success": None, "output": ""}
+            result["reproduce"] = {k: v for k, v in reproduction.items() if k != "output"}
+            push(
+                "orchestrator",
+                "Reproduce: confirmed failing" if reproduction.get("success") is False
+                else "Reproduce: no repro command detected or already passing",
+                phase="reproduce",
+                next_step="trace_impacted",
+            )
+
+        elif agent == "trace_impacted":
+            _emit_phase(events, "trace_impacted", 0.32, "root_cause", "Trace impacted components")
+            traced_nodes: list[dict] = []
+            seeds = [
+                h.get("name") or h.get("path")
+                for h in (scout.get("graph_hits") or [])[:5]
+                if h.get("name") or h.get("path")
+            ]
+            if project_key:
+                for seed in seeds[:3]:
+                    try:
+                        neigh = lattice_neighbors(project_key, str(seed), depth=1, limit=20)
+                        traced_nodes.extend(neigh.get("nodes") or [])
+                    except Exception:
+                        continue
+            trace = {"nodes": traced_nodes, "seeds": seeds}
+            result["trace_impacted"] = {"count": len(traced_nodes), "seeds": seeds}
+            push("scout", f"Traced {len(traced_nodes)} impacted component(s)", phase="trace_impacted", next_step="root_cause")
+
+        elif agent == "root_cause":
+            _emit_phase(events, "root_cause", 0.4, "build", "Root-cause analysis + fix plan")
+            from app.services.phases.bugfix_phase import run_root_cause_analysis
+
+            root_cause = run_root_cause_analysis(
+                goal=goal, reproduction=reproduction, trace=trace, blueprint=blueprint, db=db,
+            )
+            result["root_cause"] = {
+                "analysis": (root_cause.get("analysis") or "")[:2000],
+                "fix_steps": root_cause.get("fix_steps"),
+                "model": root_cause.get("model"),
+            }
+            # Feed the fix plan into `plan` — the exact shape run_plan() would
+            # produce — so the existing "build" stage needs zero changes to
+            # consume it.
+            fix_steps = root_cause.get("fix_steps") or ["Fix the reported issue based on the root-cause analysis"]
+            plan = {
+                "plan": root_cause.get("fix_plan_text") or root_cause.get("analysis") or goal,
+                "phases": fix_steps,
+                "steps": [{"step": i + 1, "title": s, "action": s, "files": []} for i, s in enumerate(fix_steps)],
+                "model": root_cause.get("model"),
+                "tokens_used": root_cause.get("tokens_used", 0),
+            }
+            push("planner", f"Fix plan has {len(fix_steps)} step(s)", phase="root_cause", next_step="build")
 
         elif agent == "ask":
             _emit_phase(events, "ask", 0.3, "plan", "Ask Mode — clarifying requirements")
@@ -767,7 +855,7 @@ def run_mentrix(
 
         elif agent in ("build", "builder"):
             _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
-            if mode == "upgrade":
+            if mode in ("upgrade", "bugfix"):
                 from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
@@ -834,7 +922,7 @@ def run_mentrix(
             }
             if builder.get("generated_code"):
                 result["builder"]["code_chars"] = len(builder["generated_code"])
-            if not (mode == "upgrade") and (builder.get("truncated") or builder.get("incomplete")):
+            if mode not in ("upgrade", "bugfix") and (builder.get("truncated") or builder.get("incomplete")):
                 rejected_files.append(builder.get("file_path") or "(generated)")
             if rule_violations:
                 result["builder"]["rule_violations"] = rule_violations
@@ -944,7 +1032,7 @@ def run_mentrix(
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
                 plan_text = plan.get("plan") or goal
-                retry_step_index = (num_steps - 1) if mode == "upgrade" else 0
+                retry_step_index = (num_steps - 1) if mode in ("upgrade", "bugfix") else 0
                 builder = run_build_from_plan(
                     plan_text,
                     step_index=retry_step_index,
@@ -962,7 +1050,7 @@ def run_mentrix(
                     generated_code=builder.get("generated_code") or "",
                 )
                 result["incomplete"] = incomplete
-                if mode == "upgrade":
+                if mode in ("upgrade", "bugfix"):
                     for f in builder.get("files_written") or (
                         [builder["file_path"]] if builder.get("file_path") else []
                     ):
@@ -1169,12 +1257,12 @@ def run_mentrix(
         run.next_step = next_step
         db.commit()
 
-    review_ok = bool((review or {}).get("passed", True)) if mode in ("deliver", "review_only", "upgrade") else True
-    incomplete_ok = bool(incomplete.get("ok", True)) if mode == "upgrade" else True
-    api_eval_ok = bool(api_eval.get("ok", True)) if mode == "upgrade" else True
-    grounding_ok = bool(grounding.get("ok", True)) if mode == "upgrade" else True
-    contract_ok = bool(contract_check.get("ok", True)) if mode == "upgrade" else True
-    acceptance_ok = bool(acceptance.get("ok", True)) if mode == "upgrade" else True
+    review_ok = bool((review or {}).get("passed", True)) if mode in ("deliver", "review_only", "upgrade", "bugfix") else True
+    incomplete_ok = bool(incomplete.get("ok", True)) if mode in ("upgrade", "bugfix") else True
+    api_eval_ok = bool(api_eval.get("ok", True)) if mode in ("upgrade", "bugfix") else True
+    grounding_ok = bool(grounding.get("ok", True)) if mode in ("upgrade", "bugfix") else True
+    contract_ok = bool(contract_check.get("ok", True)) if mode in ("upgrade", "bugfix") else True
+    acceptance_ok = bool(acceptance.get("ok", True)) if mode in ("upgrade", "bugfix") else True
 
     security_critical = any(
         (f.get("severity") == "critical" and (f.get("category") or "").lower() in ("security", "secrets"))

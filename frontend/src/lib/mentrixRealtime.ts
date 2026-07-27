@@ -21,6 +21,8 @@ export type RealtimeHandlers = {
   onDesktopOutput?: (output: string) => void | Promise<void>;
 };
 
+export type ClonedVoiceInfo = { voice_id: string; name: string };
+
 export type RealtimePreflight = {
   ready: boolean;
   reason?: string;
@@ -30,6 +32,7 @@ export type RealtimePreflight = {
   model?: string;
   openai_ws_url?: string;
   voice?: string;
+  cloned_voice?: ClonedVoiceInfo | null;
 };
 
 export type RealtimeSessionHandle = {
@@ -118,6 +121,7 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     model: session.model,
     openai_ws_url: session.openai_ws_url,
     voice: session.voice,
+    cloned_voice: session.cloned_voice || null,
     api: session.api ? String(session.api) : "client_secrets",
   };
 }
@@ -263,6 +267,7 @@ export async function startMentrixRealtime(
       model: opts.preflight.model,
       openai_ws_url: opts.preflight.openai_ws_url,
       voice: opts.preflight.voice,
+      cloned_voice: opts.preflight.cloned_voice || null,
     };
   } else {
     const sessionRes = await apiFetch("/api/mentrix/companion/realtime/session", { method: "POST" });
@@ -281,7 +286,12 @@ export async function startMentrixRealtime(
     }
   }
 
-  handlers.onLog?.("Connect Voice — OpenAI Realtime");
+  const clonedVoice = (session.cloned_voice as ClonedVoiceInfo | null) || null;
+  const clonedVoiceActive = Boolean(clonedVoice);
+
+  handlers.onLog?.(
+    clonedVoiceActive ? `Connect Voice — OpenAI Realtime (cloned voice: ${clonedVoice!.name})` : "Connect Voice — OpenAI Realtime",
+  );
   handlers.onOrb?.("listening");
 
   const wsUrl =
@@ -439,27 +449,39 @@ export async function startMentrixRealtime(
       });
       source = attached.source;
       captureDispose = attached.dispose;
+      const audioInputConfig = {
+        transcription: { model: "whisper-1" },
+        turn_detection: {
+          type: "server_vad",
+          create_response: true,
+          interrupt_response: true,
+        },
+      };
       ws.send(
         JSON.stringify({
           type: "session.update",
-          session: {
-            type: "realtime",
-            audio: {
-              input: {
-                transcription: { model: "whisper-1" },
-                turn_detection: {
-                  type: "server_vad",
-                  create_response: true,
-                  interrupt_response: true,
+          session: clonedVoiceActive
+            ? {
+                type: "realtime",
+                // Lock output to text — OpenAI's own audio synthesis stays off so
+                // the cloned voice (via /api/mentrix/voice/speak) is the only thing
+                // that speaks. Any audio.output key here — even an empty one — has
+                // been observed re-enabling audio synthesis regardless of
+                // output_modalities, so it's omitted entirely, not just left voiceless.
+                output_modalities: ["text"],
+                audio: { input: audioInputConfig },
+              }
+            : {
+                type: "realtime",
+                audio: {
+                  input: audioInputConfig,
+                  // Re-assert the mint-time voice explicitly — if this session.update's
+                  // `audio` object were treated as a full replace rather than a merge,
+                  // omitting `output` here would silently reset the voice to the API
+                  // default mid-conversation instead of keeping MENTRIX_REALTIME_VOICE.
+                  output: { voice: (session.voice as string) || "alloy" },
                 },
               },
-              // Re-assert the mint-time voice explicitly — if this session.update's
-              // `audio` object were treated as a full replace rather than a merge,
-              // omitting `output` here would silently reset the voice to the API
-              // default mid-conversation instead of keeping MENTRIX_REALTIME_VOICE.
-              output: { voice: (session.voice as string) || "alloy" },
-            },
-          },
         }),
       );
       // Inject Skills/Dream context without replacing mint-time Mentrix instructions.
@@ -497,6 +519,31 @@ export async function startMentrixRealtime(
       }
       handlers.onFallback?.("mic_failed");
       stop();
+    }
+  };
+
+  const speakWithClonedVoice = async (text: string) => {
+    if (!text.trim() || !audioCtx || stopped) return;
+    try {
+      const res = await apiFetch("/api/mentrix/voice/speak", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok || stopped || !audioCtx) return;
+      const arrayBuf = await res.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
+      if (stopped || !audioCtx) return;
+      const node = audioCtx.createBufferSource();
+      node.buffer = audioBuffer;
+      node.connect(audioCtx.destination);
+      handlers.onOrb?.("speaking");
+      node.onended = () => {
+        if (!stopped) handlers.onOrb?.("listening");
+      };
+      node.start();
+    } catch {
+      // Best-effort — the assistant's text still reaches onTranscript even if
+      // cloned-voice synthesis fails (e.g. provider outage).
     }
   };
 
@@ -544,9 +591,23 @@ export async function startMentrixRealtime(
       await runFunctionCall(msg.name || msg.tool_name, msg.call_id, msg.arguments || "{}");
     }
     if (t === "response.done") {
-      for (const item of msg.response?.output || []) {
+      const outputs = msg.response?.output || [];
+      for (const item of outputs) {
         if (item?.type !== "function_call" || !item.call_id || !item.name) continue;
         await runFunctionCall(item.name, item.call_id, item.arguments ?? "{}");
+      }
+      if (clonedVoiceActive) {
+        const text = outputs
+          .filter((item: any) => item?.type === "message")
+          .flatMap((item: any) => item.content || [])
+          .filter((c: any) => c?.type === "output_text" && c.text)
+          .map((c: any) => c.text)
+          .join(" ")
+          .trim();
+        if (text) {
+          handlers.onTranscript?.("assistant", text);
+          await speakWithClonedVoice(text);
+        }
       }
     }
     if (t === "error") {

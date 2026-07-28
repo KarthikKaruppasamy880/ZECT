@@ -610,10 +610,16 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         and (os.getenv("JIRA_API_TOKEN") or "").strip()
     )
     openai = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    datadog = bool(
+        (os.getenv("DATADOG_API_KEY") or "").strip() and (os.getenv("DATADOG_APP_KEY") or "").strip()
+    )
+    github = bool((os.getenv("GITHUB_TOKEN") or "").strip())
     return {
         "slack": slack,
         "jira": jira,
         "openai": openai,
+        "datadog": datadog,
+        "github": github,
         "slack_channel": (os.getenv("SLACK_DEFAULT_CHANNEL") or "#engineering") if slack else "",
     }
 

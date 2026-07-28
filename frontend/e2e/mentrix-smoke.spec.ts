@@ -85,5 +85,6 @@ test.describe("Mentrix smoke", () => {
     await page.goto("/integrations");
     await expect(page.getByRole("heading", { name: /Integrations/i })).toBeVisible();
     await expect(page.getByText(/MCP|Jira|Slack/i).first()).toBeVisible();
+    await expect(page.getByText(/Playwright|Datadog|GitHub/i).first()).toBeVisible();
   });
 });

@@ -237,6 +237,10 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "media_generate",
                 "media_list",
                 "media_edit",
+                "jira_get_issue",
+                "jira_search_incidents",
+                "datadog_query_logs",
+                "jira_comment_pr",
             }
         )
         prompt = (
@@ -417,6 +421,28 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if "send email" in m or "email send" in m:
         tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
 
+    # Jira incident / issue tools
+    issue_key_m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", message)
+    if issue_key_m and any(
+        w in m for w in ("jira", "ticket", "incident", "issue", "load", "fetch", "get")
+    ):
+        tools.append({"name": "jira_get_issue", "args": {"issue_key": issue_key_m.group(1)}})
+    if any(w in m for w in ("search incidents", "list incidents", "open incidents", "jira incidents")):
+        tools.append({"name": "jira_search_incidents", "args": {}})
+    if "datadog" in m or ("logs" in m and any(w in m for w in ("query", "search", "incident", "error"))):
+        q = re.sub(r".*?(datadog|logs|errors?)\s*", "", m, count=1).strip() or "status:error"
+        tools.append({"name": "datadog_query_logs", "args": {"query": q[:200]}})
+    if "comment" in m and ("pr" in m or "pull request" in m) and issue_key_m:
+        pr_m = re.search(r"https?://[^\s]+", message)
+        tools.append(
+            {
+                "name": "jira_comment_pr",
+                "args": {
+                    "issue_key": issue_key_m.group(1),
+                    "pr_url": pr_m.group(0) if pr_m else "",
+                },
+            }
+        )
     if any(w in m for w in ("avatar", "generate image", "my photo", "thumbnail", "image board")):
         if "list" in m or "show board" in m:
             tools.append({"name": "media_list", "args": {}})
@@ -646,6 +672,192 @@ def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", create
                 "body": f"# Draft\n\n{args.get('body') or args.get('query') or 'Outline.'}\n",
             },
         }
+    if name == "jira_get_issue":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            key = (args.get("issue_key") or "").strip().upper()
+            if not key:
+                return {"ok": False, "error": "issue_key required"}
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="get_issue",
+                arguments={"issue_key": key},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if out.get("status") in ("not_configured", "disabled") or result.get("status") in (
+                "not_configured",
+                "disabled",
+            ):
+                return {
+                    "ok": False,
+                    "error": result.get("message") or "Jira not configured — set MCP_JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN",
+                    "result": result,
+                }
+            fields = result.get("fields") or {}
+            summary = fields.get("summary") or ""
+            status = (fields.get("status") or {}).get("name") or ""
+            itype = (fields.get("issuetype") or {}).get("name") or ""
+            desc = fields.get("description")
+            desc_text = ""
+            if isinstance(desc, str):
+                desc_text = desc[:2000]
+            elif isinstance(desc, dict):
+                # flatten ADF lightly
+                def _walk(n: Any) -> str:
+                    if isinstance(n, dict):
+                        if n.get("type") == "text":
+                            return str(n.get("text") or "")
+                        return "".join(_walk(c) for c in (n.get("content") or []))
+                    if isinstance(n, list):
+                        return "".join(_walk(c) for c in n)
+                    return ""
+
+                desc_text = _walk(desc)[:2000]
+            spoken = f"Jira {key}: {summary}. Status {status or 'unknown'}."
+            md = (
+                f"# {key} — {summary}\n\n"
+                f"**Type:** {itype}  \n**Status:** {status}\n\n"
+                f"## Description\n\n{desc_text or '_No description_'}\n"
+            )
+            return {
+                "ok": True,
+                "issue_key": key,
+                "summary": summary,
+                "status": status,
+                "issuetype": itype,
+                "description": desc_text,
+                "result": result,
+                "spoken_summary": spoken,
+                "board": {"type": "markdown", "title": f"Jira {key}", "body": md},
+                "delivery_goal": f"Fix incident {key}: {summary}\n\n{desc_text[:1500]}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "jira_search_incidents":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            jql = (
+                args.get("jql")
+                or os.getenv("JIRA_INCIDENT_JQL")
+                or 'issuetype = Incident ORDER BY updated DESC'
+            )
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="search_issues",
+                arguments={"jql": jql, "max_results": int(args.get("max_results") or 20)},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled"):
+                return {
+                    "ok": False,
+                    "error": result.get("message") or "Jira not configured",
+                    "result": result,
+                }
+            issues = result.get("issues") or result.get("values") or []
+            rows = []
+            for iss in issues[:20]:
+                f = iss.get("fields") or {}
+                rows.append(
+                    [
+                        iss.get("key") or "",
+                        f.get("summary") or "",
+                        (f.get("status") or {}).get("name") or "",
+                    ]
+                )
+            return {
+                "ok": True,
+                "jql": jql,
+                "count": len(rows),
+                "spoken_summary": f"Found {len(rows)} Jira incident(s).",
+                "board": {
+                    "type": "table",
+                    "title": "Jira incidents",
+                    "data": {"columns": ["key", "summary", "status"], "rows": rows},
+                },
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "datadog_query_logs":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            query = args.get("query") or "status:error"
+            out = execute_tool(
+                db,
+                server_id="datadog",
+                tool_name="query_logs",
+                arguments={"query": query},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled"):
+                return {
+                    "ok": False,
+                    "error": result.get("message") or "Datadog not configured",
+                    "result": result,
+                }
+            data = result.get("data") or []
+            rows = []
+            for ev in data[:15]:
+                attrs = (ev.get("attributes") or {}) if isinstance(ev, dict) else {}
+                rows.append(
+                    [
+                        str(attrs.get("timestamp") or attrs.get("service") or "")[:40],
+                        str(attrs.get("message") or attrs.get("status") or ev)[:120],
+                    ]
+                )
+            return {
+                "ok": True,
+                "query": query,
+                "spoken_summary": f"Datadog returned {len(rows)} log event(s) for '{query[:60]}'.",
+                "board": {
+                    "type": "table",
+                    "title": f"Datadog — {query[:40]}",
+                    "data": {"columns": ["meta", "message"], "rows": rows},
+                },
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "jira_comment_pr":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            key = (args.get("issue_key") or "").strip().upper()
+            pr_url = (args.get("pr_url") or "").strip()
+            if not key or not pr_url:
+                return {"ok": False, "error": "issue_key and pr_url required"}
+            body = args.get("body") or f"Mentrix Delivery PR: {pr_url}"
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="add_comment",
+                arguments={"issue_key": key, "body": body},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled") or out.get("status") == "error":
+                return {
+                    "ok": False,
+                    "error": result.get("message") or result.get("error") or "Jira comment failed",
+                    "result": result,
+                }
+            return {
+                "ok": True,
+                "issue_key": key,
+                "pr_url": pr_url,
+                "spoken_summary": f"Commented PR link on {key}.",
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
     if name == "weather_report":
         from app.services.mentrix.weather import weather_report as _weather
 

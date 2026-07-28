@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import httpx
@@ -37,4 +38,15 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
             r = client.get(f"{base}/api/v1/monitor")
             r.raise_for_status()
             return {"monitors": r.json()[:50] if isinstance(r.json(), list) else r.json()}
+        if tool_name == "query_metrics":
+            query = arguments.get("query", "avg:system.cpu.user{*}")
+            now = int(time.time())
+            from_ts = int(arguments.get("from") or now - 3600)
+            to_ts = int(arguments.get("to") or now)
+            r = client.get(
+                f"{base}/api/v1/query",
+                params={"query": query, "from": from_ts, "to": to_ts},
+            )
+            r.raise_for_status()
+            return r.json()
     return {"status": "unknown_tool", "tool": tool_name}

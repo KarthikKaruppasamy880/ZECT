@@ -242,6 +242,49 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
                 "required": ["app"],
             },
         },
+        {
+            "type": "function",
+            "name": "jira_get_issue",
+            "description": "Fetch a Jira issue by key (e.g. INC-123)",
+            "parameters": {
+                "type": "object",
+                "properties": {"issue_key": {"type": "string"}},
+                "required": ["issue_key"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "jira_search_incidents",
+            "description": "Search Jira incidents via JQL",
+            "parameters": {
+                "type": "object",
+                "properties": {"jql": {"type": "string"}},
+            },
+        },
+        {
+            "type": "function",
+            "name": "datadog_query_logs",
+            "description": "Query Datadog logs for incident context",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "jira_comment_pr",
+            "description": "Comment a PR URL onto a Jira issue (needs Allow)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "issue_key": {"type": "string"},
+                    "pr_url": {"type": "string"},
+                    "body": {"type": "string"},
+                },
+                "required": ["issue_key", "pr_url"],
+            },
+        },
     ]
 
 

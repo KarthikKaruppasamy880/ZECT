@@ -21,6 +21,7 @@ import MentrixConfirmModal from "@/components/MentrixConfirmModal";
 import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
 import CloneVoicePanel from "@/components/CloneVoicePanel";
+import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
@@ -28,12 +29,19 @@ export default function MentrixCompanion() {
   const s = useMentrixSession();
   const [searchParams] = useSearchParams();
   const openVoice = searchParams.get("voice") === "1";
+  const openIncident = searchParams.get("incident") === "1";
   const voiceSectionRef = useRef<HTMLDivElement>(null);
+  const incidentSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!openVoice) return;
     voiceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [openVoice]);
+
+  useEffect(() => {
+    if (!openIncident) return;
+    incidentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [openIncident]);
 
   return (
     <div
@@ -97,6 +105,16 @@ export default function MentrixCompanion() {
           <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
             {!s.displayMode && (
               <>
+                {(openIncident || openVoice) && (
+                  <div
+                    ref={incidentSectionRef}
+                    id="mentrix-incident-runbook"
+                    data-testid="mentrix-incident-section"
+                    className="mb-3 space-y-3"
+                  >
+                    {openIncident && <IncidentRunbookPanel defaultExpanded />}
+                  </div>
+                )}
                 {openVoice && (
                   <div
                     ref={voiceSectionRef}
@@ -140,6 +158,10 @@ export default function MentrixCompanion() {
                       OpenAI {s.integrations.openai ? "ready" : "missing"} · Slack{" "}
                       {s.integrations.slack ? "ready" : "not set"} · Jira{" "}
                       {s.integrations.jira ? "ready" : "not set"}
+                      {" · DD "}
+                      {(s.integrations as { datadog?: boolean }).datadog ? "ready" : "not set"}
+                      {" · GH "}
+                      {(s.integrations as { github?: boolean }).github ? "ready" : "not set"}
                       {" · Skill "}
                       {s.activeSkillId
                         ? s.skills.find((sk) => String(sk.id) === s.activeSkillId)?.name ||
@@ -336,6 +358,21 @@ export default function MentrixCompanion() {
                   />
                   Speak replies (TTS) — uses your cloned voice when set
                 </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="mentrix-present-narrate"
+                    className="rounded-lg border border-teal-700 px-3 py-1.5 text-xs text-teal-200 hover:bg-teal-950"
+                    onClick={() => void s.presentNarrate?.()}
+                  >
+                    Present / Narrate
+                  </button>
+                </div>
+                {!openIncident && (
+                  <div className="mt-3" data-testid="mentrix-incident-section-inline">
+                    <IncidentRunbookPanel />
+                  </div>
+                )}
                 {!openVoice && (
                   <div
                     ref={voiceSectionRef}
@@ -349,13 +386,24 @@ export default function MentrixCompanion() {
                     <CloneVoicePanel variant="dark" />
                   </div>
                 )}
+                {s.displayMode && (
+                  <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>
+                )}
               </>
             )}
             {s.displayMode && (
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-xs uppercase tracking-widest text-teal-500">
-                  Artifacts · Display
+                  Artifacts · Present
                 </span>
+                <button
+                  type="button"
+                  data-testid="mentrix-present-narrate-display"
+                  className="rounded border border-teal-600 px-2 py-1 text-xs text-teal-200"
+                  onClick={() => void s.presentNarrate?.()}
+                >
+                  Narrate
+                </button>
                 <button
                   type="button"
                   className="rounded border border-slate-600 px-2 py-1 text-xs"

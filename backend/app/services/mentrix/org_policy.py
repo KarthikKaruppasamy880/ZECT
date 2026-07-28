@@ -38,6 +38,9 @@ COMPANION_SEED_RULES = [
     {"action_pattern": "companion_diagnose", "permission_level": "allow", "category": "companion", "description": "Diagnose and fix planning"},
     {"action_pattern": "companion_notes_read", "permission_level": "allow", "category": "companion", "description": "List Mentrix notes"},
     {"action_pattern": "companion_notes_write", "permission_level": "allow", "category": "companion", "description": "Add Mentrix notes"},
+    {"action_pattern": "companion_jira_read", "permission_level": "allow", "category": "companion", "description": "Read Jira issues and search incidents"},
+    {"action_pattern": "companion_jira_write", "permission_level": "require_approval", "category": "companion", "description": "Comment on Jira issues (e.g. PR link)"},
+    {"action_pattern": "companion_datadog_read", "permission_level": "allow", "category": "companion", "description": "Query Datadog logs for incidents"},
 ]
 
 

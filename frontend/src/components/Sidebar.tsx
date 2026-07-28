@@ -48,12 +48,14 @@ import {
   FlaskConical,
   Box,
   Mic,
+  AlertTriangle,
 } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 const workflowItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
+  { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: AlertTriangle },
   { href: "/mentrix", label: "Mentrix Delivery", icon: Bot },
 ];
 
@@ -173,13 +175,17 @@ export default function Sidebar({
           const itemUrl = new URL(item.href, "http://local");
           const pathMatch = location.pathname === itemUrl.pathname;
           const voiceDeepLink = itemUrl.searchParams.get("voice");
+          const incidentDeepLink = itemUrl.searchParams.get("incident");
+          const search = new URLSearchParams(location.search);
           const active = voiceDeepLink
-            ? pathMatch && new URLSearchParams(location.search).get("voice") === voiceDeepLink
-            : pathMatch &&
-              !(
-                itemUrl.pathname === "/mentrix-home" &&
-                new URLSearchParams(location.search).get("voice")
-              );
+            ? pathMatch && search.get("voice") === voiceDeepLink
+            : incidentDeepLink
+              ? pathMatch && search.get("incident") === incidentDeepLink
+              : pathMatch &&
+                !(
+                  itemUrl.pathname === "/mentrix-home" &&
+                  (search.get("voice") || search.get("incident"))
+                );
           return (
             <li key={item.href}>
               <Link

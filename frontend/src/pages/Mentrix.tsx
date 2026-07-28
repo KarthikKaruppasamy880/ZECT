@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Bot, Check, GitPullRequest, Play, Sparkles } from "lucide-react";
 import {
   mentrixAgents,
@@ -7,6 +7,7 @@ import {
   mentrixCreatePr,
   mentrixGetRun,
   mentrixListRuns,
+  mentrixRealtimeTool,
   mentrixStartRun,
 } from "@/lib/api";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
@@ -86,10 +87,12 @@ export default function Mentrix() {
   // whenever it's connected — this page's browser speechSynthesis must yield to it,
   // otherwise both speak at once ("multiple voices").
   const { voiceConnected } = useMentrixSession();
+  const location = useLocation();
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState("upgrade");
   const [projectKey, setProjectKey] = useState("");
   const [workspace, setWorkspace] = useState("");
+  const [issueKey, setIssueKey] = useState("");
   const [sourceLang, setSourceLang] = useState("");
   const [targetLang, setTargetLang] = useState("");
   const [agents, setAgents] = useState<any>(null);
@@ -102,6 +105,7 @@ export default function Mentrix() {
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [sttListening, setSttListening] = useState(false);
   const [wakeHint, setWakeHint] = useState("");
+  const [jiraCommentNote, setJiraCommentNote] = useState("");
   const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenStatus = useRef<string>("");
@@ -140,6 +144,23 @@ export default function Mentrix() {
       if (pollRef.current) window.clearInterval(pollRef.current);
     };
   }, []);
+
+  // Incident / Ask / Plan handoff into Delivery
+  useEffect(() => {
+    const st = (location.state || {}) as {
+      goal?: string;
+      issue_key?: string;
+      projectKey?: string;
+      workspace?: string;
+    };
+    const params = new URLSearchParams(location.search);
+    if (st.goal) setGoal(st.goal);
+    else if (params.get("goal")) setGoal(params.get("goal") || "");
+    if (st.issue_key) setIssueKey(st.issue_key);
+    else if (params.get("issue_key")) setIssueKey(params.get("issue_key") || "");
+    if (st.projectKey) setProjectKey(st.projectKey);
+    if (st.workspace) setWorkspace(st.workspace);
+  }, [location.state, location.search]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -377,12 +398,37 @@ export default function Mentrix() {
   const createPr = async () => {
     if (!active?.id) return;
     setError("");
+    setJiraCommentNote("");
     setLoading(true);
     try {
       const run = await mentrixCreatePr(active.id, { dry_run: true });
       setActive(run);
       setMessages(eventsToMessages(run));
       await refresh();
+      const pr =
+        run?.pr_url ||
+        run?.result?.pr_url ||
+        (typeof run?.result?.pr === "object" ? run.result.pr?.html_url : "") ||
+        "";
+      const key = issueKey.trim().toUpperCase();
+      if (key && pr) {
+        try {
+          await mentrixRealtimeTool(
+            "jira_comment_pr",
+            { issue_key: key, pr_url: String(pr) },
+            true,
+          );
+          setJiraCommentNote(`Commented PR on ${key}`);
+        } catch (ce) {
+          setJiraCommentNote(
+            ce instanceof Error ? `Jira comment skipped: ${ce.message}` : "Jira comment skipped",
+          );
+        }
+      } else if (key && !pr) {
+        setJiraCommentNote(
+          `Dry-run PR — paste a real PR URL on Incident Runbook to comment ${key}`,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create PR failed");
     } finally {
@@ -512,6 +558,23 @@ export default function Mentrix() {
               placeholder="e.g. Port this C service to Java with REST parity and API evals"
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
+            <div className="flex flex-wrap gap-2 items-center">
+              <label className="text-xs text-slate-600 flex items-center gap-2">
+                Jira issue
+                <input
+                  data-testid="mentrix-issue-key"
+                  value={issueKey}
+                  onChange={(e) => setIssueKey(e.target.value)}
+                  placeholder="INC-123"
+                  className="rounded border border-slate-300 px-2 py-1 text-sm w-28"
+                />
+              </label>
+              {jiraCommentNote && (
+                <span data-testid="mentrix-jira-comment-note" className="text-xs text-teal-700">
+                  {jiraCommentNote}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap gap-4 text-xs text-slate-600">
               <label className="inline-flex items-center gap-2" data-testid="mentrix-tts-toggle">
                 <input

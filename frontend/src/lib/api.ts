@@ -541,6 +541,33 @@ export const getMyClonedVoice = () =>
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
+/** Speak text with the user's cloned Mentrix voice (Voicebox). Returns audio blob URL or null. */
+export async function mentrixSpeakCloned(text: string): Promise<string | null> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API}/api/mentrix/voice/speak`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ text: text.slice(0, 4000) }),
+  });
+  if (!res.ok) return null;
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export const mcpExecute = (server_id: string, tool_name: string, arguments_: Record<string, unknown> = {}) =>
+  request<{
+    server_id: string;
+    tool_name: string;
+    status: string;
+    result: any;
+    execution_time_ms?: number;
+  }>("/api/mcp/execute", {
+    method: "POST",
+    body: JSON.stringify({ server_id, tool_name, arguments: arguments_ }),
+  });
+
 export const mentrixMediaList = () => request<{ items: any[] }>("/api/mentrix/companion/media");
 export const mentrixMediaUrl = (number: number) => {
   const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";

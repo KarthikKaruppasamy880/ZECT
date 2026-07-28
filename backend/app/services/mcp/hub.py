@@ -10,7 +10,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import MCPServerConfig, MCPToolAudit, Rule
-from app.services.mcp.adapters import confluence, datadog, email_adapter, filesystem, github, jira, slack
+from app.services.mcp.adapters import (
+    confluence,
+    datadog,
+    email_adapter,
+    filesystem,
+    github,
+    jira,
+    playwright_adapter,
+    slack,
+)
 
 ADAPTERS = {
     "github": github,
@@ -20,6 +29,7 @@ ADAPTERS = {
     "datadog": datadog,
     "filesystem": filesystem,
     "email": email_adapter,
+    "playwright": playwright_adapter,
 }
 
 

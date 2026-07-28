@@ -100,6 +100,13 @@ BUILTIN_SERVERS: list[MCPServer] = [
         status="available",
         tools_count=2,
     ),
+    MCPServer(
+        id="playwright",
+        name="Playwright",
+        description="ZECT Mentrix browser automation — navigate, snapshot, click, fill (local Chromium)",
+        status="available",
+        tools_count=5,
+    ),
 ]
 
 # Tools for each server
@@ -121,11 +128,9 @@ BUILTIN_TOOLS: dict[str, list[MCPTool]] = {
     "jira": [
         MCPTool(name="list_projects", description="List Jira projects", server_id="jira"),
         MCPTool(name="create_issue", description="Create a Jira issue", server_id="jira", parameters={"project": "string", "summary": "string", "type": "string"}),
-        MCPTool(name="update_issue", description="Update a Jira issue", server_id="jira", parameters={"issue_key": "string", "fields": "object"}),
-        MCPTool(name="search_issues", description="Search issues with JQL", server_id="jira", parameters={"jql": "string"}),
+        MCPTool(name="search_issues", description="Search issues with JQL (POST /search/jql)", server_id="jira", parameters={"jql": "string"}),
         MCPTool(name="get_issue", description="Get issue details", server_id="jira", parameters={"issue_key": "string"}),
         MCPTool(name="add_comment", description="Add comment to an issue", server_id="jira", parameters={"issue_key": "string", "body": "string"}),
-        MCPTool(name="list_sprints", description="List sprints for a board", server_id="jira", parameters={"board_id": "string"}),
         MCPTool(name="transition_issue", description="Transition issue status", server_id="jira", parameters={"issue_key": "string", "transition_id": "string"}),
     ],
     "slack": [
@@ -149,22 +154,20 @@ BUILTIN_TOOLS: dict[str, list[MCPTool]] = {
     ],
     "datadog": [
         MCPTool(name="query_logs", description="Query Datadog logs", server_id="datadog", parameters={"query": "string"}),
-        MCPTool(name="query_metrics", description="Query Datadog metrics", server_id="datadog", parameters={"query": "string"}),
+        MCPTool(name="list_monitors", description="List Datadog monitors", server_id="datadog"),
+        MCPTool(name="query_metrics", description="Query Datadog metrics", server_id="datadog", parameters={"query": "string", "from": "number", "to": "number"}),
     ],
     "confluence": [
         MCPTool(name="search", description="Search Confluence", server_id="confluence", parameters={"query": "string"}),
         MCPTool(name="get_page", description="Get Confluence page", server_id="confluence", parameters={"page_id": "string"}),
     ],
-    "postgres": [
-        MCPTool(name="query", description="Execute a SQL query", server_id="postgres", parameters={"sql": "string"}),
-        MCPTool(name="list_tables", description="List all tables in the database", server_id="postgres"),
-        MCPTool(name="describe_table", description="Get table schema", server_id="postgres", parameters={"table": "string"}),
-        MCPTool(name="list_indexes", description="List indexes on a table", server_id="postgres", parameters={"table": "string"}),
-        MCPTool(name="run_migration", description="Run a database migration", server_id="postgres", parameters={"migration_file": "string"}),
-        MCPTool(name="export_data", description="Export table data as CSV", server_id="postgres", parameters={"table": "string", "format": "string"}),
-        MCPTool(name="connection_info", description="Get database connection details", server_id="postgres"),
+    "playwright": [
+        MCPTool(name="status", description="Playwright engine readiness", server_id="playwright"),
+        MCPTool(name="navigate", description="Open a URL in Chromium", server_id="playwright", parameters={"url": "string"}),
+        MCPTool(name="snapshot", description="Capture page text snapshot", server_id="playwright", parameters={"url": "string"}),
+        MCPTool(name="click", description="Click a selector", server_id="playwright", parameters={"selector": "string"}),
+        MCPTool(name="fill", description="Fill an input", server_id="playwright", parameters={"selector": "string", "value": "string"}),
     ],
-    # Browser E2E is via frontend Playwright Test / Cursor Playwright MCP — not Mentrix hub adapters.
 }
 
 
@@ -204,7 +207,7 @@ def call_tool(
     from app.services.mcp.hub import execute_tool
 
     if server_id not in BUILTIN_TOOLS and server_id not in {
-        "github", "jira", "confluence", "slack", "datadog", "filesystem", "email",
+        "github", "jira", "confluence", "slack", "datadog", "filesystem", "email", "playwright",
     }:
         raise HTTPException(status_code=404, detail=f"MCP server '{server_id}' not found")
 
@@ -287,7 +290,9 @@ async def mcp_status():
         "servers_available": len(BUILTIN_SERVERS),
         "total_tools": sum(len(tools) for tools in BUILTIN_TOOLS.values()),
         "version": "2.0.0-mentrix",
-        "live_adapters": ["github", "jira", "confluence", "slack", "datadog", "filesystem", "email"],
-        "outbound_wave1": ["slack.send_message", "email.send_email", "datadog.query_logs"],
+        "live_adapters": [
+            "github", "jira", "confluence", "slack", "datadog", "filesystem", "email", "playwright",
+        ],
+        "outbound_wave1": ["slack.send_message", "email.send_email", "datadog.query_logs", "jira.search_issues"],
         "wave2": ["slack_events_inbound", "email_inbox_poll"],
     }

@@ -48,7 +48,7 @@ import {
   isOpenAiQuotaError,
   OPENAI_QUOTA_STATUS,
 } from "@/mentrix/desktopBridge";
-import { cancelBrowserSpeech, speakBrowser } from "@/mentrix/speak";
+import { cancelBrowserSpeech, speakMentrix } from "@/mentrix/speak";
 
 export type AvatarState =
   | "idle"
@@ -78,7 +78,7 @@ export const ORB: Record<AvatarState, string> = {
 };
 
 function speak(text: string, enabled: boolean) {
-  speakBrowser(text, enabled);
+  void speakMentrix(text, enabled);
 }
 
 function loadPersistedMessages(): ChatMsg[] {
@@ -168,7 +168,7 @@ type MentrixSessionValue = {
   micDevices: MicDevice[];
   micDeviceId: string;
   setMicDeviceId: (id: string) => void;
-  integrations: { slack: boolean; jira: boolean; openai: boolean } | null;
+  integrations: { slack: boolean; jira: boolean; openai: boolean; datadog?: boolean; github?: boolean } | null;
   dockExpanded: boolean;
   setDockExpanded: Dispatch<SetStateAction<boolean>>;
   wakeQueued: boolean;
@@ -182,6 +182,7 @@ type MentrixSessionValue = {
   toggleVoice: () => void;
   runTurn: (message: string, confirmed?: string[], resumeId?: string) => Promise<void>;
   onSend: () => Promise<void>;
+  presentNarrate: () => Promise<void>;
   onAllow: (tools: string[]) => Promise<void>;
   applyNavPath: (path: string | null | undefined) => void;
   chatEndRef: RefObject<HTMLDivElement>;
@@ -216,6 +217,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     slack: boolean;
     jira: boolean;
     openai: boolean;
+    datadog?: boolean;
+    github?: boolean;
   } | null>(null);
   const [dockExpanded, setDockExpanded] = useState(false);
   const [wakeQueued, setWakeQueued] = useState(false);
@@ -641,6 +644,38 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     await runTurn(msg);
   }, [input, loading, runTurn]);
 
+  const presentNarrate = useCallback(async () => {
+    setDisplayMode(true);
+    setTts(true);
+    const chunks: string[] = [];
+    for (const item of board.slice(0, 5)) {
+      const title = (item as { title?: string }).title || (item as { type?: string }).type || "Artifact";
+      const body =
+        (item as { body?: string }).body ||
+        (typeof (item as { data?: unknown }).data === "string"
+          ? String((item as { data?: string }).data)
+          : "") ||
+        "";
+      const text = `${title}. ${body}`.replace(/\s+/g, " ").trim().slice(0, 800);
+      if (text) chunks.push(text);
+    }
+    if (!chunks.length) {
+      const last = [...messages].reverse().find((m) => m.role === "assistant")?.text;
+      if (last) chunks.push(last.slice(0, 800));
+    }
+    if (!chunks.length) {
+      chunks.push(
+        "Mentrix Present mode. Add artifacts or ask Mentrix for a brief, then Narrate again.",
+      );
+    }
+    setAvatar("speaking");
+    setStatusLine("Present / Narrate");
+    for (const chunk of chunks) {
+      await speakMentrix(chunk, true);
+    }
+    setAvatar("idle");
+  }, [board, messages]);
+
   const onAllow = useCallback(
     async (tools: string[]) => {
       setPending([]);
@@ -812,6 +847,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       toggleVoice,
       runTurn,
       onSend,
+      presentNarrate,
       onAllow,
       applyNavPath,
       chatEndRef,
@@ -853,6 +889,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       toggleVoice,
       runTurn,
       onSend,
+      presentNarrate,
       onAllow,
       applyNavPath,
     ],

@@ -28,6 +28,12 @@ test.describe("Mentrix voice clone", () => {
     await expect(page.getByTestId("clone-voice-expand")).toHaveCount(0);
   });
 
+  test("Present / Narrate control visible on Companion", async ({ page }) => {
+    await page.goto("/mentrix-home");
+    await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("mentrix-present-narrate")).toBeVisible();
+  });
+
   test("Clone submit shows Voicebox error when offline", async ({ page }) => {
     await page.route("**/api/mentrix/voice/clone", async (route) => {
       await route.fulfill({

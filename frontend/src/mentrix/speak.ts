@@ -1,4 +1,22 @@
-/** Browser speechSynthesis — only when Realtime voice is not active. */
+/** Mentrix speech — browser TTS fallback or cloned Voicebox when available. */
+import { getMyClonedVoice, mentrixSpeakCloned } from "@/lib/api";
+
+let lastAudio: HTMLAudioElement | null = null;
+
+export function cancelBrowserSpeech() {
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    /* ignore */
+  }
+  try {
+    lastAudio?.pause();
+    lastAudio = null;
+  } catch {
+    /* ignore */
+  }
+}
+
 export function speakBrowser(text: string, enabled: boolean) {
   if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
   try {
@@ -11,10 +29,25 @@ export function speakBrowser(text: string, enabled: boolean) {
   }
 }
 
-export function cancelBrowserSpeech() {
+/**
+ * Prefer cloned Mentrix voice via /api/mentrix/voice/speak; fall back to speechSynthesis.
+ */
+export async function speakMentrix(text: string, enabled: boolean): Promise<void> {
+  if (!enabled || !text.trim()) return;
+  cancelBrowserSpeech();
   try {
-    window.speechSynthesis?.cancel();
+    const voice = await getMyClonedVoice();
+    if (voice?.voice_id) {
+      const url = await mentrixSpeakCloned(text);
+      if (url && typeof Audio !== "undefined") {
+        const audio = new Audio(url);
+        lastAudio = audio;
+        await audio.play();
+        return;
+      }
+    }
   } catch {
-    /* ignore */
+    /* fall through to browser TTS */
   }
+  speakBrowser(text, true);
 }

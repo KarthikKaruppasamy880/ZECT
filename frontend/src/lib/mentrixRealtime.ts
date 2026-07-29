@@ -5,6 +5,10 @@
 import { apiFetch, authHeaders } from "@/lib/api";
 import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
+import {
+  shouldAppendAssistantTranscript,
+  shouldFinalizeClonedResponse,
+} from "@/lib/mentrixRealtimeFinalize";
 
 export type RealtimeHandlers = {
   onOrb?: (state: string) => void;
@@ -522,6 +526,9 @@ export async function startMentrixRealtime(
     }
   };
 
+  /** One finalize per OpenAI response id — prevents double bubble + double speak. */
+  const finalizedResponseIds = new Set<string>();
+
   const speakWithClonedVoice = async (text: string) => {
     if (!text.trim() || !audioCtx || stopped) return;
     try {
@@ -568,10 +575,20 @@ export async function startMentrixRealtime(
     const t = msg.type as string;
     if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
     if (t === "response.created") handlers.onOrb?.("thinking");
-    if ((t === "response.output_audio.delta" || t === "response.audio.delta") && msg.delta) {
+    // When cloned voice is active, never play OpenAI stock PCM — Chatterbox /speak is sole TTS.
+    if (
+      !clonedVoiceActive &&
+      (t === "response.output_audio.delta" || t === "response.audio.delta") &&
+      msg.delta
+    ) {
       if (playQueue.length >= MAX_PLAY_QUEUE) playQueue.shift();
       playQueue.push(base64ToInt16(msg.delta));
       playNext();
+    } else if (
+      clonedVoiceActive &&
+      (t === "response.output_audio.delta" || t === "response.audio.delta")
+    ) {
+      playQueue.length = 0;
     }
     const userTranscript = msg.transcript || msg.item?.content?.[0]?.transcript || "";
     if (
@@ -581,8 +598,10 @@ export async function startMentrixRealtime(
     ) {
       handlers.onTranscript?.("user", String(userTranscript));
     }
+    // Non-cloned: chat text comes from audio transcript.done.
+    // Cloned: wait for response.done (text modality) so we don't double-append.
     if (
-      (t === "response.output_audio_transcript.done" || t === "response.audio_transcript.done") &&
+      shouldAppendAssistantTranscript({ clonedVoiceActive, eventType: t }) &&
       msg.transcript
     ) {
       handlers.onTranscript?.("assistant", msg.transcript);
@@ -591,12 +610,19 @@ export async function startMentrixRealtime(
       await runFunctionCall(msg.name || msg.tool_name, msg.call_id, msg.arguments || "{}");
     }
     if (t === "response.done") {
+      const responseId = String(msg.response?.id || msg.response_id || "");
       const outputs = msg.response?.output || [];
       for (const item of outputs) {
         if (item?.type !== "function_call" || !item.call_id || !item.name) continue;
         await runFunctionCall(item.name, item.call_id, item.arguments ?? "{}");
       }
-      if (clonedVoiceActive) {
+      if (
+        shouldFinalizeClonedResponse({
+          clonedVoiceActive,
+          responseId,
+          finalizedIds: finalizedResponseIds,
+        })
+      ) {
         const text = outputs
           .filter((item: any) => item?.type === "message")
           .flatMap((item: any) => item.content || [])

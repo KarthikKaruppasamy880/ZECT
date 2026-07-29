@@ -1,11 +1,13 @@
-"""Mentrix voice cloning — /api/mentrix/voice/*."""
+"""Mentrix Chatterbox voice cloning — /api/mentrix/voice/*."""
 
 from __future__ import annotations
 
 import os
 import re
 import threading
+import uuid
 from collections import defaultdict
+from pathlib import Path
 from time import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -26,6 +28,9 @@ MAX_REFERENCE_TEXT_LEN = 2000
 MAX_SPEAK_TEXT_LEN = 4000
 SPEAK_RATE_LIMIT = 30  # per user per hour
 CLONE_RATE_LIMIT = 5
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+VOICES_DIR = _BACKEND_ROOT / "data" / "voices"
 
 ALLOWED_AUDIO_MIME = frozenset({
     "audio/wav",
@@ -67,14 +72,113 @@ def _validate_audio_mime(content_type: str | None) -> None:
         )
 
 
+def _ext_for_mime(content_type: str | None, filename: str) -> str:
+    name = (filename or "").lower()
+    if "." in name:
+        return Path(name).suffix[:10] or ".wav"
+    ct = (content_type or "").lower()
+    if "mpeg" in ct or "mp3" in ct:
+        return ".mp3"
+    if "ogg" in ct:
+        return ".ogg"
+    if "webm" in ct:
+        return ".webm"
+    if "mp4" in ct:
+        return ".mp4"
+    return ".wav"
+
+
+def _save_sample(user_id: int, voice_id: str, audio_bytes: bytes, filename: str, content_type: str | None) -> str:
+    user_dir = VOICES_DIR / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    path = user_dir / f"{voice_id}{_ext_for_mime(content_type, filename)}"
+    path.write_bytes(audio_bytes)
+    return str(path)
+
+
+def _delete_sample_file(sample_path: str | None) -> None:
+    if not sample_path:
+        return
+    try:
+        p = Path(sample_path)
+        if p.is_file():
+            p.unlink()
+    except Exception:
+        pass
+
+
+def _default_voice(db: Session, user_id: int) -> ClonedVoice | None:
+    row = (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == user_id, ClonedVoice.is_default.is_(True))
+        .first()
+    )
+    if row:
+        return row
+    return (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == user_id)
+        .order_by(ClonedVoice.created_at.desc())
+        .first()
+    )
+
+
+def _clear_defaults(db: Session, user_id: int) -> None:
+    for row in db.query(ClonedVoice).filter(ClonedVoice.user_id == user_id, ClonedVoice.is_default.is_(True)):
+        row.is_default = False
+
+
+def _row_out(row: ClonedVoice) -> "ClonedVoiceOut":
+    return ClonedVoiceOut(
+        id=row.id,
+        voice_id=row.voice_id,
+        name=row.name or "",
+        provider=row.provider or "chatterbox",
+        is_default=bool(row.is_default),
+        has_sample=bool(row.sample_path),
+    )
+
+
+def _ensure_engine_profile(row: ClonedVoice) -> str:
+    """Return engine profile id, re-provisioning from stored sample if needed."""
+    from app.services.llm.chatterbox_client import chatterbox_available, clone_voice
+
+    if row.external_voice_id:
+        return row.external_voice_id
+    if not row.sample_path or not Path(row.sample_path).is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Voice sample missing — clone again to restore Present/session audio",
+        )
+    if not chatterbox_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Chatterbox engine offline — start the local synthesis service to speak.",
+        )
+    audio_bytes = Path(row.sample_path).read_bytes()
+    filename = Path(row.sample_path).name
+    result = clone_voice(
+        row.name or "Mentrix Voice",
+        audio_bytes,
+        filename,
+        "application/octet-stream",
+        reference_text=(row.reference_text or "").strip() or "Hello, this is my voice sample.",
+    )
+    return result["voice_id"]
+
+
 class ClonedVoiceOut(BaseModel):
+    id: int | None = None
     voice_id: str
     name: str
     provider: str
+    is_default: bool = False
+    has_sample: bool = False
 
 
 class SpeakRequest(BaseModel):
     text: str = Field(..., max_length=MAX_SPEAK_TEXT_LEN)
+    voice_id: str | None = None
 
 
 @router.post("/clone", response_model=ClonedVoiceOut)
@@ -85,21 +189,19 @@ async def clone_my_voice(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.voicebox_client import clone_voice, delete_voice, voicebox_available
+    from app.services.llm.chatterbox_client import chatterbox_available, clone_voice
 
     _rate_limit(_clone_hits, current_user.user_id, CLONE_RATE_LIMIT)
 
-    if not voicebox_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Voicebox isn't reachable — start it locally (see github.com/jamiepine/voicebox) to enable voice cloning.",
-        )
     if not name.strip():
         raise HTTPException(status_code=400, detail="name is required")
     if len(name.strip()) > MAX_NAME_LEN:
         raise HTTPException(status_code=400, detail=f"name too long (max {MAX_NAME_LEN} chars)")
     if not reference_text.strip():
-        raise HTTPException(status_code=400, detail="reference_text is required — it must match what the sample says")
+        raise HTTPException(
+            status_code=400,
+            detail="reference_text is required — it must match what the sample says",
+        )
     if len(reference_text.strip()) > MAX_REFERENCE_TEXT_LEN:
         raise HTTPException(status_code=400, detail=f"reference_text too long (max {MAX_REFERENCE_TEXT_LEN} chars)")
 
@@ -112,74 +214,165 @@ async def clone_my_voice(
         raise HTTPException(status_code=400, detail="Sample too large (max 10MB)")
 
     safe_name = _sanitize_filename(sample.filename)
+    zect_voice_id = uuid.uuid4().hex
+    sample_path = _save_sample(
+        current_user.user_id,
+        zect_voice_id,
+        audio_bytes,
+        safe_name,
+        sample.content_type,
+    )
 
-    try:
-        result = clone_voice(
-            name.strip(),
-            audio_bytes,
-            safe_name,
-            sample.content_type or "audio/wav",
-            reference_text=reference_text.strip(),
-        )
-    except (RuntimeError, ValueError) as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    external_id: str | None = None
+    if chatterbox_available():
+        try:
+            result = clone_voice(
+                name.strip(),
+                audio_bytes,
+                safe_name,
+                sample.content_type or "audio/wav",
+                reference_text=reference_text.strip(),
+            )
+            external_id = result["voice_id"]
+        except (RuntimeError, ValueError) as e:
+            _delete_sample_file(sample_path)
+            raise HTTPException(status_code=502, detail=str(e)) from e
+    # Engine offline: still persist sample in ZECT DB for later provision/speak.
 
-    existing = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).first()
-    old_voice_id = existing.voice_id if existing else None
-    if existing:
-        existing.voice_id = result["voice_id"]
-        existing.name = name.strip()
-        existing.provider = "voicebox"
-    else:
-        existing = ClonedVoice(
-            user_id=current_user.user_id,
-            voice_id=result["voice_id"],
-            name=name.strip(),
-            provider="voicebox",
-        )
-        db.add(existing)
+    _clear_defaults(db, current_user.user_id)
+    row = ClonedVoice(
+        user_id=current_user.user_id,
+        voice_id=zect_voice_id,
+        external_voice_id=external_id,
+        name=name.strip(),
+        provider="chatterbox",
+        sample_path=sample_path,
+        reference_text=reference_text.strip(),
+        is_default=True,
+    )
+    db.add(row)
     db.commit()
-    db.refresh(existing)
-
-    if old_voice_id and old_voice_id != existing.voice_id:
-        delete_voice(old_voice_id)
+    db.refresh(row)
 
     log_audit(
         db=db,
         user_id=current_user.user_id,
         action="voice_clone",
         resource_type="cloned_voice",
-        details={"name": name.strip()[:50], "bytes": len(audio_bytes), "filename": safe_name},
+        details={
+            "name": name.strip()[:50],
+            "bytes": len(audio_bytes),
+            "filename": safe_name,
+            "voice_id": zect_voice_id,
+            "engine_provisioned": bool(external_id),
+        },
     )
 
-    return ClonedVoiceOut(voice_id=existing.voice_id, name=existing.name, provider=existing.provider)
+    return _row_out(row)
+
+
+@router.get("/voices", response_model=list[ClonedVoiceOut])
+def list_my_voices(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == current_user.user_id)
+        .order_by(ClonedVoice.is_default.desc(), ClonedVoice.created_at.desc())
+        .all()
+    )
+    return [_row_out(r) for r in rows]
 
 
 @router.get("/my-voice")
 def get_my_voice(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    row = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).first()
+    row = _default_voice(db, current_user.user_id)
     if not row:
         return None
-    return ClonedVoiceOut(voice_id=row.voice_id, name=row.name, provider=row.provider)
+    return _row_out(row)
+
+
+@router.post("/voices/{voice_id}/default", response_model=ClonedVoiceOut)
+def set_default_voice(
+    voice_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == current_user.user_id, ClonedVoice.voice_id == voice_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    _clear_defaults(db, current_user.user_id)
+    row.is_default = True
+    db.commit()
+    db.refresh(row)
+    return _row_out(row)
+
+
+@router.delete("/voices/{voice_id}")
+def delete_voice_by_id(
+    voice_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.services.llm.chatterbox_client import delete_voice
+
+    row = (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == current_user.user_id, ClonedVoice.voice_id == voice_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Voice not found")
+    was_default = bool(row.is_default)
+    ext = row.external_voice_id
+    sample_path = row.sample_path
+    db.delete(row)
+    db.commit()
+    _delete_sample_file(sample_path)
+    if ext:
+        delete_voice(ext)
+    if was_default:
+        nxt = (
+            db.query(ClonedVoice)
+            .filter(ClonedVoice.user_id == current_user.user_id)
+            .order_by(ClonedVoice.created_at.desc())
+            .first()
+        )
+        if nxt:
+            nxt.is_default = True
+            db.commit()
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="voice_delete",
+        resource_type="cloned_voice",
+        details={"voice_id": voice_id[:32]},
+    )
+    return {"deleted": True}
 
 
 @router.delete("/my-voice")
 def reset_my_voice(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
-    from app.services.llm.voicebox_client import delete_voice
+    """Delete all clones for the user (legacy reset)."""
+    from app.services.llm.chatterbox_client import delete_voice
 
-    row = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).first()
-    if not row:
+    rows = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).all()
+    if not rows:
         return {"cleared": False}
-    voice_id = row.voice_id
-    db.delete(row)
+    for row in rows:
+        if row.external_voice_id:
+            delete_voice(row.external_voice_id)
+        _delete_sample_file(row.sample_path)
+        db.delete(row)
     db.commit()
-    delete_voice(voice_id)
     log_audit(
         db=db,
         user_id=current_user.user_id,
         action="voice_reset",
         resource_type="cloned_voice",
-        details={"voice_id": voice_id[:32]},
+        details={"count": len(rows)},
     )
     return {"cleared": True}
 
@@ -190,7 +383,7 @@ def speak(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.voicebox_client import synthesize_speech
+    from app.services.llm.chatterbox_client import synthesize_speech
 
     _rate_limit(_speak_hits, current_user.user_id, SPEAK_RATE_LIMIT)
 
@@ -198,12 +391,25 @@ def speak(
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    row = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).first()
+    if req.voice_id:
+        row = (
+            db.query(ClonedVoice)
+            .filter(ClonedVoice.user_id == current_user.user_id, ClonedVoice.voice_id == req.voice_id)
+            .first()
+        )
+    else:
+        row = _default_voice(db, current_user.user_id)
     if not row:
         raise HTTPException(status_code=404, detail="No cloned voice configured for this user")
 
     try:
-        audio = synthesize_speech(text, row.voice_id)
+        engine_id = _ensure_engine_profile(row)
+        if engine_id != row.external_voice_id:
+            row.external_voice_id = engine_id
+            db.commit()
+        audio = synthesize_speech(text, engine_id)
+    except HTTPException:
+        raise
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 

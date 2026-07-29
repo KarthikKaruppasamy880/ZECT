@@ -408,7 +408,11 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           onLog: pushLog,
           onTranscript: (role, text) => {
             if (!text?.trim()) return;
-            setMessages((m) => [...m, { role, text }]);
+            setMessages((m) => {
+              const last = m[m.length - 1];
+              if (last?.role === role && last?.text === text) return m;
+              return [...m, { role, text }];
+            });
             if (role === "user") setLastMessageKeep(text);
           },
           onNavigate: (path) => applyNavPath(path),
@@ -571,15 +575,20 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       const controller = new AbortController();
       abortRef.current = controller;
       const kill = window.setTimeout(() => controller.abort(), 45_000);
+      let streamFinalized = false;
       const agentContext = await fetchMentrixAgentContext({
         skillId: activeSkillId,
         projectId: readActiveProjectId(),
       });
+      const onStreamEvent = (ev: MentrixStreamEvent) => {
+        if (ev.event === "done" || ev.event === "error") streamFinalized = true;
+        handleStreamEvent(ev);
+      };
       try {
         if (resumeId) {
           await mentrixCompanionStreamResume(resumeId, confirmed, {
             signal: controller.signal,
-            onEvent: handleStreamEvent,
+            onEvent: onStreamEvent,
           });
         } else {
           try {
@@ -588,9 +597,11 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               confirmed_tools: confirmed,
               agent_context: agentContext,
               signal: controller.signal,
-              onEvent: handleStreamEvent,
+              onEvent: onStreamEvent,
             });
           } catch {
+            // Stream already emitted done/error — do not append or speak again.
+            if (streamFinalized || controller.signal.aborted) return;
             const res = await mentrixCompanionTurn(message, {
               confirmed_tools: confirmed,
               project_key: localStorage.getItem("zect_lattice_key") || "",
@@ -606,7 +617,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               speak("I need your permission to continue.", speakAllowed());
             } else {
               setPending([]);
-              setMessages((m) => [...m, { role: "assistant", text: res.reply || "Done." }]);
+              setMessages((m) => {
+                const reply = res.reply || "Done.";
+                const last = m[m.length - 1];
+                if (last?.role === "assistant" && last?.text === reply) return m;
+                return [...m, { role: "assistant", text: reply }];
+              });
               if (res.board?.length) setBoard((b) => [...res.board, ...b].slice(0, 16));
               setAvatar("speaking");
               speak(res.reply || "", speakAllowed());

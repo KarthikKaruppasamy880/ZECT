@@ -1,15 +1,19 @@
 /**
- * Mentrix Companion voice cloning — record or upload a sample for personal
- * assistant, presentations, reading docs, and agent meetings (local Voicebox).
+ * Mentrix Companion Chatterbox voice — record/upload a sample stored in ZECT.
+ * Default voice is used for Present, narrate, and Connect Voice sessions.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Trash2, Loader2, CheckCircle2, Upload } from "lucide-react";
-import { cloneMyVoice, getMyClonedVoice, resetMyClonedVoice } from "@/lib/api";
-
-type ClonedVoice = { voice_id: string; name: string; provider: string };
+import { Mic, MicOff, Trash2, Loader2, CheckCircle2, Upload, Star } from "lucide-react";
+import {
+  cloneMyVoice,
+  deleteClonedVoice,
+  listMyClonedVoices,
+  setDefaultClonedVoice,
+  type ClonedVoiceInfo,
+} from "@/lib/api";
 
 type Props = {
-  /** Open the full form immediately (e.g. Labs → Voice Cloning deep link). */
+  /** Open the full form immediately (e.g. Companion Voice tab deep link). */
   defaultExpanded?: boolean;
   /** Companion HUD uses dark surfaces. */
   variant?: "light" | "dark";
@@ -31,23 +35,25 @@ export default function CloneVoicePanel({
   variant = "light",
 }: Props) {
   const dark = variant === "dark";
-  const [voice, setVoice] = useState<ClonedVoice | null>(null);
+  const [voices, setVoices] = useState<ClonedVoiceInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
   const [referenceText, setReferenceText] = useState(SAMPLE_SCRIPT);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [voiceboxOk, setVoiceboxOk] = useState<boolean | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordSecs, setRecordSecs] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [readyNote, setReadyNote] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+
+  const defaultVoice = voices.find((v) => v.is_default) || voices[0] || null;
 
   useEffect(() => {
     if (defaultExpanded) setExpanded(true);
@@ -78,13 +84,15 @@ export default function CloneVoicePanel({
 
   const refresh = useCallback(async () => {
     try {
-      const v = await getMyClonedVoice();
-      setVoice(v);
-      setVoiceboxOk(true);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      if (msg.includes("503") || msg.toLowerCase().includes("voicebox")) {
-        setVoiceboxOk(false);
+      const list = await listMyClonedVoices();
+      setVoices(Array.isArray(list) ? list : []);
+    } catch {
+      try {
+        const { getMyClonedVoice } = await import("@/lib/api");
+        const v = await getMyClonedVoice();
+        setVoices(v ? [{ ...v, is_default: true }] : []);
+      } catch {
+        /* ignore */
       }
     }
   }, []);
@@ -158,30 +166,45 @@ export default function CloneVoicePanel({
     if (!name.trim() || !referenceText.trim() || !file) return;
     setLoading(true);
     setError("");
+    setReadyNote("");
     try {
-      const v = await cloneMyVoice(name.trim(), referenceText.trim(), file);
-      setVoice(v);
-      setVoiceboxOk(true);
+      await cloneMyVoice(name.trim(), referenceText.trim(), file);
+      await refresh();
       setSampleFile(null);
       setName("");
       setReferenceText(SAMPLE_SCRIPT);
+      setReadyNote("Ready for Present & voice sessions.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to clone voice";
       setError(msg);
-      if (msg.toLowerCase().includes("voicebox")) setVoiceboxOk(false);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleReset = async () => {
+  const handleDelete = async (voiceId: string) => {
     setLoading(true);
     setError("");
     try {
-      await resetMyClonedVoice();
-      setVoice(null);
+      await deleteClonedVoice(voiceId);
+      await refresh();
+      setReadyNote("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to reset voice");
+      setError(e instanceof Error ? e.message : "Failed to delete voice");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetDefault = async (voiceId: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      await setDefaultClonedVoice(voiceId);
+      await refresh();
+      setReadyNote("Default voice updated for Present & sessions.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set default");
     } finally {
       setLoading(false);
     }
@@ -191,7 +214,7 @@ export default function CloneVoicePanel({
     ? "border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500"
     : "border-slate-300 bg-white text-slate-900";
 
-  if (!expanded && !voice) {
+  if (!expanded && !defaultVoice) {
     return (
       <button
         data-testid="clone-voice-expand"
@@ -216,165 +239,191 @@ export default function CloneVoicePanel({
         <div className="flex items-center gap-2">
           <Mic className={`h-4 w-4 ${dark ? "text-teal-400" : "text-teal-600"}`} />
           <h3 className={`text-sm font-semibold ${dark ? "text-teal-100" : "text-slate-900"}`}>
-            Your Mentrix voice
+            Mentrix Chatterbox voice
           </h3>
         </div>
-        {voiceboxOk === false && (
+        {defaultVoice && (
           <span
-            data-testid="clone-voice-voicebox-status"
-            className="text-[10px] text-amber-200 bg-amber-900/40 px-2 py-0.5 rounded"
-          >
-            Voicebox offline
-          </span>
-        )}
-        {voiceboxOk === true && !voice && (
-          <span
-            data-testid="clone-voice-voicebox-status"
+            data-testid="clone-voice-chatterbox-status"
             className={`text-[10px] px-2 py-0.5 rounded ${
               dark ? "text-teal-200 bg-teal-900/40" : "text-teal-700 bg-teal-50"
             }`}
           >
-            Voicebox ready
+            Default ready
           </span>
         )}
       </div>
 
       <p className={`text-xs ${dark ? "text-slate-400" : "text-slate-500"}`}>
-        Record 10–60 seconds reading the script below (or upload a clean sample). Mentrix then
-        speaks as you for personal assistance, presentations, docs, and meetings via{" "}
-        <a
-          href="https://github.com/jamiepine/voicebox"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          Voicebox
-        </a>
-        .
+        Record 10–60 seconds reading the script (or upload a clean sample). ZECT stores the clone
+        in your account — use it for Present, narrate, and Connect Voice sessions. Delete anytime.
       </p>
 
-      {voice ? (
-        <div className="flex items-center justify-between gap-3" data-testid="clone-voice-active">
-          <div
-            className={`flex items-center gap-2 text-sm ${dark ? "text-slate-200" : "text-slate-700"}`}
-          >
-            <CheckCircle2 className="h-4 w-4 text-green-500" />
-            Speaking as <strong>{voice.name}</strong>
-          </div>
-          <button
-            data-testid="clone-voice-reset"
-            onClick={handleReset}
-            disabled={loading}
-            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            Reset
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <input
-            data-testid="clone-voice-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Voice name (e.g. Karthik)"
-            className={`w-full p-2 rounded-lg text-sm border ${fieldClass}`}
-          />
-          <div>
-            <label className={`mb-1 block text-[11px] font-medium ${dark ? "text-slate-400" : "text-slate-600"}`}>
-              Read this aloud while recording (edit if you say something else)
-            </label>
-            <textarea
-              data-testid="clone-voice-transcript"
-              value={referenceText}
-              onChange={(e) => setReferenceText(e.target.value)}
-              rows={3}
-              className={`w-full p-2 rounded-lg text-sm border ${fieldClass}`}
-            />
-          </div>
-
-          <div
-            className={`rounded-lg border p-3 space-y-2 ${
-              dark ? "border-teal-900/60 bg-slate-900/80" : "border-teal-100 bg-teal-50/40"
-            }`}
-          >
-            <p className={`text-[11px] font-semibold uppercase tracking-wide ${dark ? "text-teal-400" : "text-teal-700"}`}>
-              Record sample
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {!recording ? (
-                <button
-                  type="button"
-                  data-testid="clone-voice-record"
-                  onClick={() => void startRecording()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-2 text-sm font-medium text-white"
-                >
-                  <Mic className="h-4 w-4" />
-                  Start recording
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  data-testid="clone-voice-stop"
-                  onClick={stopRecording}
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm font-medium text-white"
-                >
-                  <MicOff className="h-4 w-4" />
-                  Stop ({recordSecs}s)
-                </button>
-              )}
-              {recording && (
-                <span data-testid="clone-voice-recording" className="text-xs text-rose-400 animate-pulse">
-                  ● Recording — speak clearly for 10–60s
+      {voices.length > 0 && (
+        <ul className="space-y-2" data-testid="clone-voice-list">
+          {voices.map((v) => (
+            <li
+              key={v.voice_id}
+              className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${
+                dark ? "border-slate-700 text-slate-200" : "border-slate-200 text-slate-700"
+              }`}
+              data-testid="clone-voice-active"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                {v.is_default ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                ) : (
+                  <Mic className="h-4 w-4 text-slate-500 shrink-0" />
+                )}
+                <span className="truncate">
+                  <strong>{v.name}</strong>
+                  {v.is_default ? " · Present/sessions default" : ""}
                 </span>
-              )}
-            </div>
-            {file && !recording && (
-              <div className="space-y-1" data-testid="clone-voice-sample-ready">
-                <p className={`text-xs ${dark ? "text-emerald-400" : "text-emerald-700"}`}>
-                  Sample ready: {file.name} ({Math.max(1, Math.round(file.size / 1024))} KB)
-                </p>
-                {previewUrl && (
-                  <audio data-testid="clone-voice-preview" controls src={previewUrl} className="w-full h-8" />
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {!v.is_default && (
+                  <button
+                    type="button"
+                    data-testid="clone-voice-set-default"
+                    onClick={() => void handleSetDefault(v.voice_id)}
+                    disabled={loading}
+                    className="flex items-center gap-1 text-xs text-teal-400 hover:text-teal-300 disabled:opacity-50"
+                    title="Use for Present and sessions"
+                  >
+                    <Star className="h-3.5 w-3.5" /> Use
+                  </button>
                 )}
                 <button
                   type="button"
-                  className="text-xs text-slate-400 hover:text-slate-200 underline"
-                  onClick={() => setSampleFile(null)}
+                  data-testid="clone-voice-reset"
+                  onClick={() => void handleDelete(v.voice_id)}
+                  disabled={loading}
+                  className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
                 >
-                  Clear sample
+                  {loading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Delete
                 </button>
               </div>
-            )}
-            <label
-              className={`inline-flex items-center gap-2 text-xs cursor-pointer ${
-                dark ? "text-slate-400 hover:text-teal-300" : "text-slate-600 hover:text-teal-700"
-              }`}
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Or upload WAV / MP3 / WebM
-              <input
-                data-testid="clone-voice-file"
-                type="file"
-                accept="audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/webm,audio/x-wav"
-                className="hidden"
-                onChange={(e) => setSampleFile(e.target.files?.[0] || null)}
-              />
-            </label>
-          </div>
-
-          <button
-            data-testid="clone-voice-submit"
-            onClick={handleClone}
-            disabled={loading || recording || !name.trim() || !referenceText.trim() || !file}
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
-            {loading ? "Cloning..." : "Clone My Voice"}
-          </button>
-        </div>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {readyNote && (
+        <p data-testid="clone-voice-ready" className="text-xs text-emerald-400">
+          {readyNote}
+        </p>
+      )}
+
+      <div className="space-y-3">
+        <p className={`text-[11px] font-semibold uppercase tracking-wide ${dark ? "text-teal-400" : "text-teal-700"}`}>
+          {voices.length ? "Add another voice" : "Clone a voice"}
+        </p>
+        <input
+          data-testid="clone-voice-name"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Voice name (e.g. Karthik)"
+          className={`w-full p-2 rounded-lg text-sm border ${fieldClass}`}
+        />
+        <div>
+          <label className={`mb-1 block text-[11px] font-medium ${dark ? "text-slate-400" : "text-slate-600"}`}>
+            Read this aloud while recording (edit if you say something else)
+          </label>
+          <textarea
+            data-testid="clone-voice-transcript"
+            value={referenceText}
+            onChange={(e) => setReferenceText(e.target.value)}
+            rows={3}
+            className={`w-full p-2 rounded-lg text-sm border ${fieldClass}`}
+          />
+        </div>
+
+        <div
+          className={`rounded-lg border p-3 space-y-2 ${
+            dark ? "border-teal-900/60 bg-slate-900/80" : "border-teal-100 bg-teal-50/40"
+          }`}
+        >
+          <p className={`text-[11px] font-semibold uppercase tracking-wide ${dark ? "text-teal-400" : "text-teal-700"}`}>
+            Record sample
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {!recording ? (
+              <button
+                type="button"
+                data-testid="clone-voice-record"
+                onClick={() => void startRecording()}
+                className="inline-flex items-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-2 text-sm font-medium text-white"
+              >
+                <Mic className="h-4 w-4" />
+                Start recording
+              </button>
+            ) : (
+              <button
+                type="button"
+                data-testid="clone-voice-stop"
+                onClick={stopRecording}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm font-medium text-white"
+              >
+                <MicOff className="h-4 w-4" />
+                Stop ({recordSecs}s)
+              </button>
+            )}
+            {recording && (
+              <span data-testid="clone-voice-recording" className="text-xs text-rose-400 animate-pulse">
+                ● Recording — speak clearly for 10–60s
+              </span>
+            )}
+          </div>
+          {file && !recording && (
+            <div className="space-y-1" data-testid="clone-voice-sample-ready">
+              <p className={`text-xs ${dark ? "text-emerald-400" : "text-emerald-700"}`}>
+                Sample ready: {file.name} ({Math.max(1, Math.round(file.size / 1024))} KB)
+              </p>
+              {previewUrl && (
+                <audio data-testid="clone-voice-preview" controls src={previewUrl} className="w-full h-8" />
+              )}
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-200 underline"
+                onClick={() => setSampleFile(null)}
+              >
+                Clear sample
+              </button>
+            </div>
+          )}
+          <label
+            className={`inline-flex items-center gap-2 text-xs cursor-pointer ${
+              dark ? "text-slate-400 hover:text-teal-300" : "text-slate-600 hover:text-teal-700"
+            }`}
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Or upload WAV / MP3 / WebM
+            <input
+              data-testid="clone-voice-file"
+              type="file"
+              accept="audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/webm,audio/x-wav"
+              className="hidden"
+              onChange={(e) => setSampleFile(e.target.files?.[0] || null)}
+            />
+          </label>
+        </div>
+
+        <button
+          data-testid="clone-voice-submit"
+          onClick={() => void handleClone()}
+          disabled={loading || recording || !name.trim() || !referenceText.trim() || !file}
+          className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-slate-600 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
+          {loading ? "Saving..." : "Save voice to ZECT"}
+        </button>
+      </div>
 
       {error && (
         <div data-testid="clone-voice-error" className="text-xs text-red-400">

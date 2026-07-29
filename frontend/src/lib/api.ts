@@ -515,11 +515,20 @@ export const mentrixRealtimeTool = (tool: string, args: Record<string, unknown>,
   });
 // Mentrix voice cloning — Realtime handles speech understanding unchanged;
 // this is the hosted-TTS output swap once a voice is cloned.
+export type ClonedVoiceInfo = {
+  id?: number | null;
+  voice_id: string;
+  name: string;
+  provider: string;
+  is_default?: boolean;
+  has_sample?: boolean;
+};
+
 export const cloneMyVoice = async (
   name: string,
   referenceText: string,
   file: File,
-): Promise<{ voice_id: string; name: string; provider: string }> => {
+): Promise<ClonedVoiceInfo> => {
   const form = new FormData();
   form.append("name", name);
   form.append("reference_text", referenceText);
@@ -537,11 +546,21 @@ export const cloneMyVoice = async (
   return res.json();
 };
 export const getMyClonedVoice = () =>
-  request<{ voice_id: string; name: string; provider: string } | null>("/api/mentrix/voice/my-voice");
+  request<ClonedVoiceInfo | null>("/api/mentrix/voice/my-voice");
+export const listMyClonedVoices = () =>
+  request<ClonedVoiceInfo[]>("/api/mentrix/voice/voices");
+export const setDefaultClonedVoice = (voiceId: string) =>
+  request<ClonedVoiceInfo>(`/api/mentrix/voice/voices/${encodeURIComponent(voiceId)}/default`, {
+    method: "POST",
+  });
+export const deleteClonedVoice = (voiceId: string) =>
+  request<{ deleted: boolean }>(`/api/mentrix/voice/voices/${encodeURIComponent(voiceId)}`, {
+    method: "DELETE",
+  });
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
-/** Speak text with the user's cloned Mentrix voice (Voicebox). Returns audio blob URL or null. */
+/** Speak text with the user's default Chatterbox voice. Returns audio blob URL or null. */
 export async function mentrixSpeakCloned(text: string): Promise<string | null> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -601,6 +620,24 @@ export const mentrixApproveRun = (runId: number, acknowledge_issues = false) =>
     method: "POST",
     body: JSON.stringify({ acknowledge_issues }),
   });
+export const mentrixGetRunPlan = (runId: number) =>
+  request<any>(`/api/mentrix/runs/${runId}/plan`);
+export const mentrixPatchRunPlan = (
+  runId: number,
+  data: { summary?: string; steps?: any[]; phases?: any[] },
+) =>
+  request<any>(`/api/mentrix/runs/${runId}/plan`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+export const mentrixConfirmPlan = (
+  runId: number,
+  data?: { summary?: string; steps?: any[]; phases?: any[] },
+) =>
+  request<any>(`/api/mentrix/runs/${runId}/confirm-plan`, {
+    method: "POST",
+    body: JSON.stringify(data || {}),
+  });
 export const mentrixCreatePr = (
   runId: number,
   data?: { title?: string; body?: string; dry_run?: boolean; repo_path?: string }
@@ -609,6 +646,23 @@ export const mentrixCreatePr = (
     method: "POST",
     body: JSON.stringify({ dry_run: true, ...data }),
   });
+export const mentrixSastStatus = (owner: string, repo: string, ref: string) =>
+  request<any>(
+    `/api/code-review/sast-status?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&ref=${encodeURIComponent(ref)}`,
+  );
+export const mentrixRefreshSast = (
+  runId: number,
+  params?: { owner?: string; repo?: string; ref?: string },
+) => {
+  const q = new URLSearchParams();
+  if (params?.owner) q.set("owner", params.owner);
+  if (params?.repo) q.set("repo", params.repo);
+  if (params?.ref) q.set("ref", params.ref);
+  const qs = q.toString();
+  return request<any>(`/api/mentrix/runs/${runId}/refresh-sast${qs ? `?${qs}` : ""}`, {
+    method: "POST",
+  });
+};
 export const mentrixFineTuneExport = () =>
   request<any>("/api/mentrix/fine-tune/export");
 

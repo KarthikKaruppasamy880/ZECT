@@ -9,6 +9,16 @@ def gates_allow_approve(gates: dict[str, Any], acknowledge: bool = False) -> tup
     blockers: list[str] = []
     if gates.get("security_critical"):
         blockers.append("security_critical=true (never waive — human must fix)")
+    # When plan gate is in use, plan_confirmed must be true (never waive).
+    if "plan_confirmed" in gates and gates.get("plan_confirmed") is False:
+        blockers.append("plan_confirmed=false (confirm plan before Build/Approve)")
+    # Only block after we have actually checked GitHub SAST (avoid false fail pre-PR).
+    if (
+        gates.get("sast_required")
+        and gates.get("sast_checked")
+        and gates.get("sast_ok") is False
+    ):
+        blockers.append("sast_ok=false (Semgrep/GitHub SAST check not successful)")
     if not gates.get("lint_ok"):
         blockers.append("lint_ok=false")
     if not gates.get("sandbox_ready") and not acknowledge:

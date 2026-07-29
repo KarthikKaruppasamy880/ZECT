@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 
-type GraphNode = {
+export type GraphNode = {
   id: string;
   name?: string;
   kind?: string;
@@ -38,14 +38,51 @@ type Props = {
   edges: GraphEdge[];
   width?: number;
   height?: number;
+  /** Controlled selection id (optional). */
+  selectedId?: string | null;
+  onSelect?: (node: GraphNode | null, neighborCount: number) => void;
 };
 
-export default function LatticeForceGraph({ nodes, edges, width = 720, height = 420 }: Props) {
+export default function LatticeForceGraph({
+  nodes,
+  edges,
+  width = 720,
+  height = 420,
+  selectedId = null,
+  onSelect,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simRef = useRef<SimNode[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(selectedId);
   const [search, setSearch] = useState("");
   const dragRef = useRef<{ id: string; ox: number; oy: number } | null>(null);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    setSelected(selectedId);
+  }, [selectedId]);
+
+  const emitSelect = useCallback((id: string | null) => {
+    setSelected(id);
+    if (!id) {
+      onSelectRef.current?.(null, 0);
+      return;
+    }
+    const node = simRef.current.find((n) => n.id === id) || nodes.find((n) => n.id === id) || null;
+    let neighborCount = 0;
+    if (node) {
+      const seen = new Set<string>();
+      for (const e of edges) {
+        if (e.source === id) seen.add(e.target);
+        if (e.target === id) seen.add(e.source);
+      }
+      neighborCount = seen.size;
+      onSelectRef.current?.(node, neighborCount);
+    } else {
+      onSelectRef.current?.(null, 0);
+    }
+  }, [edges, nodes]);
 
   useEffect(() => {
     const cx = width / 2;
@@ -63,7 +100,6 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
     let raf = 0;
     const tick = () => {
       const sim = simRef.current;
-      const edgeSet = new Set(edges.map((e) => `${e.source}|${e.target}`));
       for (let i = 0; i < sim.length; i++) {
         for (let j = i + 1; j < sim.length; j++) {
           const dx = sim[j].x - sim[i].x;
@@ -88,7 +124,6 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
         a.vy += (dy / dist) * pull;
         b.vx -= (dx / dist) * pull;
         b.vy -= (dy / dist) * pull;
-        edgeSet.add(`${e.source}|${e.target}`);
       }
       for (const n of sim) {
         n.vx += (width / 2 - n.x) * 0.0008;
@@ -137,6 +172,12 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
               ctx.strokeStyle = "#fbbf24";
               ctx.lineWidth = 2;
               ctx.stroke();
+              const label = (n.name || n.id || "").slice(0, 40);
+              if (label) {
+                ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+                ctx.fillStyle = "#fef3c7";
+                ctx.fillText(label, n.x + r + 4, n.y + 4);
+              }
             }
           }
         }
@@ -174,10 +215,11 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
     const hit = simRef.current.find(
       (n) =>
         (n.name || "").toLowerCase().includes(q) ||
-        (n.path || "").toLowerCase().includes(q),
+        (n.path || "").toLowerCase().includes(q) ||
+        (n.id || "").toLowerCase().includes(q),
     );
     if (hit) {
-      setSelected(hit.id);
+      emitSelect(hit.id);
       hit.x = width / 2;
       hit.y = height / 2;
       hit.vx = 0;
@@ -206,7 +248,7 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
         <button
           type="button"
           className="rounded border border-slate-600 px-2 py-1 text-xs"
-          onClick={() => setSelected(null)}
+          onClick={() => emitSelect(null)}
         >
           Reset
         </button>
@@ -219,7 +261,7 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
         onMouseDown={(e) => {
           const n = pickNode(e.clientX, e.clientY);
           if (n) {
-            setSelected(n.id);
+            emitSelect(n.id);
             dragRef.current = { id: n.id, ox: e.clientX, oy: e.clientY };
           }
         }}
@@ -234,7 +276,9 @@ export default function LatticeForceGraph({ nodes, edges, width = 720, height = 
           dragRef.current = null;
         }}
       />
-      <p className="text-xs text-slate-400">Click a node to highlight neighbors. Drag to rearrange.</p>
+      <p className="text-xs text-slate-400">
+        Click a node to select and open details. Drag to rearrange. Fly to search by name/path.
+      </p>
     </div>
   );
 }

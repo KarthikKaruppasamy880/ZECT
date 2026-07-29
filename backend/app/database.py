@@ -85,12 +85,101 @@ def _add_missing_columns():
                 print(f"[ZECT DB] Could not add {table.name}.{col.name}: {exc}")
 
 
+def _migrate_cloned_voices():
+    """Chatterbox multi-voice: drop per-user UNIQUE, backfill new columns."""
+    inspector = inspect(engine)
+    if "cloned_voices" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("cloned_voices")}
+    try:
+        with engine.begin() as conn:
+            if "external_voice_id" in cols:
+                conn.execute(
+                    text(
+                        "UPDATE cloned_voices SET external_voice_id = voice_id "
+                        "WHERE external_voice_id IS NULL AND voice_id IS NOT NULL"
+                    )
+                )
+            if "is_default" in cols:
+                conn.execute(
+                    text(
+                        "UPDATE cloned_voices SET is_default = 1 "
+                        "WHERE is_default IS NULL OR is_default = 0"
+                    )
+                )
+                # Keep one default per user (highest id) after backfill
+                if engine.dialect.name == "sqlite":
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE cloned_voices SET is_default = 0
+                            WHERE id NOT IN (
+                              SELECT MAX(id) FROM cloned_voices GROUP BY user_id
+                            )
+                            """
+                        )
+                    )
+            if "provider" in cols:
+                conn.execute(
+                    text(
+                        "UPDATE cloned_voices SET provider = 'chatterbox' "
+                        "WHERE provider IN ('voicebox', '') OR provider IS NULL"
+                    )
+                )
+        # SQLite: rebuild table if user_id still has a unique index (blocks multi-voice)
+        if engine.dialect.name == "sqlite":
+            indexes = inspector.get_indexes("cloned_voices")
+            unique_on_user = any(
+                ix.get("unique") and ix.get("column_names") == ["user_id"] for ix in indexes
+            )
+            # Also check unique constraints
+            try:
+                uqs = inspector.get_unique_constraints("cloned_voices")
+                unique_on_user = unique_on_user or any(
+                    uc.get("column_names") == ["user_id"] for uc in uqs
+                )
+            except Exception:
+                pass
+            if unique_on_user:
+                with engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE cloned_voices RENAME TO cloned_voices_old"))
+                # Recreate from current model metadata
+                from app.models import ClonedVoice  # noqa: F401
+
+                ClonedVoice.__table__.create(bind=engine)
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO cloned_voices
+                              (id, user_id, provider, voice_id, external_voice_id, name,
+                               sample_path, reference_text, is_default, created_at)
+                            SELECT
+                              id, user_id,
+                              COALESCE(NULLIF(provider, ''), 'chatterbox'),
+                              voice_id,
+                              COALESCE(external_voice_id, voice_id),
+                              COALESCE(name, ''),
+                              sample_path, reference_text,
+                              COALESCE(is_default, 1),
+                              created_at
+                            FROM cloned_voices_old
+                            """
+                        )
+                    )
+                    conn.execute(text("DROP TABLE cloned_voices_old"))
+                print("[ZECT DB] Migrated cloned_voices for multi-voice Chatterbox")
+    except Exception as exc:
+        print(f"[ZECT DB] cloned_voices migrate skipped/failed: {exc}")
+
+
 def init_db():
     try:
         # Import models so they are registered with Base.metadata before create_all
         import app.models  # noqa: F401
         Base.metadata.create_all(bind=engine)
         _add_missing_columns()
+        _migrate_cloned_voices()
         print("[ZECT DB] All tables created/verified successfully")
     except Exception as exc:
         print(f"[ZECT DB] Error during init_db: {exc}")

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Network, Search, Upload } from "lucide-react";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
-import LatticeForceGraph from "@/components/LatticeForceGraph";
+import LatticeForceGraph, { type GraphNode } from "@/components/LatticeForceGraph";
 
 export default function LatticeGraph() {
   const [searchParams] = useSearchParams();
@@ -35,6 +35,8 @@ export default function LatticeGraph() {
   const [explainResult, setExplainResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [neighborCount, setNeighborCount] = useState(0);
 
   const key = projectKey || path;
 
@@ -147,26 +149,43 @@ export default function LatticeGraph() {
     }
   };
 
-  const runExplain = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      if (pathSource && pathTarget) {
-        setExplainResult(await latticeExplain(key, { source: pathSource, target: pathTarget }));
-      } else {
-        const node = explainNode || pathSource || query;
-        const [exp, nb] = await Promise.all([
-          latticeExplain(key, { node }),
-          latticeNeighbors(key, node),
-        ]);
-        setExplainResult({ ...exp, neighbors: nb });
+  const runExplain = useCallback(
+    async (nodeOverride?: string) => {
+      setError("");
+      setLoading(true);
+      try {
+        const nodeArg = nodeOverride || explainNode || pathSource || query;
+        if (pathSource && pathTarget && !nodeOverride) {
+          setExplainResult(await latticeExplain(key, { source: pathSource, target: pathTarget }));
+        } else {
+          const node = nodeArg;
+          const [exp, nb] = await Promise.all([
+            latticeExplain(key, { node }),
+            latticeNeighbors(key, node),
+          ]);
+          setExplainResult({ ...exp, neighbors: nb });
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Explain failed");
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Explain failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [explainNode, key, pathSource, pathTarget, query],
+  );
+
+  const onGraphSelect = useCallback(
+    (node: GraphNode | null, neighbors: number) => {
+      setSelectedNode(node);
+      setNeighborCount(neighbors);
+      if (!node) return;
+      const label = node.name || node.id;
+      setExplainNode(label);
+      setPathSource(label);
+      if (key) void runExplain(label);
+    },
+    [key, runExplain],
+  );
 
   const nodes = graph?.nodes?.slice(0, 80) || [];
   const edges = graph?.edges || [];
@@ -190,6 +209,13 @@ export default function LatticeGraph() {
           <p className="text-sm text-slate-600">
             Mentrix code intelligence — symbols, imports, calls, path/explain + RAG (Graphify-class,
             ZECT-native Lattice).
+          </p>
+          <p className="text-xs text-slate-500 mt-2 max-w-3xl">
+            <strong>Ingest + RAG</strong> indexes a path; <strong>Load graph</strong> reloads an
+            existing key; <strong>layers</strong> switch code/docs/combined; <strong>Query</strong>{" "}
+            searches symbols + RAG; click the graph for the inspector + Explain; use{" "}
+            <strong>Path / Explain</strong> for A→B routes. Prefer Lattice for relationships; use{" "}
+            <strong>Code Index</strong> for flat symbol lookup.
           </p>
           {(projectKey || wsKey) && (
             <p className="text-xs mt-1" data-testid="lattice-index-badge">
@@ -298,9 +324,72 @@ export default function LatticeGraph() {
       )}
 
       {graph && nodes.length > 0 && (
-        <div className="rounded-xl border border-slate-200 bg-slate-900 p-3">
+        <div className="rounded-xl border border-slate-200 bg-slate-900 p-3 space-y-3">
           <h2 className="mb-2 text-sm font-semibold text-teal-200">Interactive graph</h2>
-          <LatticeForceGraph nodes={graph.nodes || []} edges={edges} />
+          <LatticeForceGraph
+            nodes={graph.nodes || []}
+            edges={edges}
+            selectedId={selectedNode?.id ?? null}
+            onSelect={onGraphSelect}
+          />
+          {selectedNode && (
+            <div
+              data-testid="lattice-node-inspector"
+              className="rounded-lg border border-teal-800/60 bg-slate-950/90 p-3 text-sm text-slate-200 space-y-2"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-teal-200">Node details</h3>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="lattice-inspector-explain"
+                    className="rounded bg-teal-700 px-2 py-1 text-xs text-white"
+                    onClick={() => void runExplain(selectedNode.name || selectedNode.id)}
+                    disabled={!key || loading}
+                  >
+                    Explain
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="lattice-inspector-copy"
+                    className="rounded border border-slate-600 px-2 py-1 text-xs"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(selectedNode.id);
+                    }}
+                  >
+                    Copy id
+                  </button>
+                </div>
+              </div>
+              <dl className="grid gap-1 text-xs sm:grid-cols-2">
+                <div>
+                  <dt className="text-slate-500">Name</dt>
+                  <dd className="font-mono text-amber-100">{selectedNode.name || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Kind</dt>
+                  <dd>{selectedNode.kind || "—"}</dd>
+                </div>
+                <div className="sm:col-span-2">
+                  <dt className="text-slate-500">Path</dt>
+                  <dd className="font-mono break-all text-slate-300">{selectedNode.path || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Id</dt>
+                  <dd className="font-mono break-all text-slate-400">{selectedNode.id}</dd>
+                </div>
+                <div>
+                  <dt className="text-slate-500">Neighbors</dt>
+                  <dd>{neighborCount}</dd>
+                </div>
+              </dl>
+              {explainResult?.summary && (
+                <p className="text-xs text-slate-300 border-t border-slate-800 pt-2" data-testid="lattice-inspector-summary">
+                  {explainResult.summary}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -409,9 +498,17 @@ export default function LatticeGraph() {
           ) : (
             <ul className="space-y-1 text-sm max-h-80 overflow-auto">
               {nodes.map((n: any) => (
-                <li key={n.id} className="font-mono text-slate-700">
-                  <span className="text-teal-700">{n.kind}</span> {n.name}
-                  <span className="text-slate-400"> — {n.path}</span>
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    className={`w-full text-left font-mono rounded px-1 py-0.5 hover:bg-slate-100 ${
+                      selectedNode?.id === n.id ? "bg-teal-50 text-teal-900" : "text-slate-700"
+                    }`}
+                    onClick={() => onGraphSelect(n, 0)}
+                  >
+                    <span className="text-teal-700">{n.kind}</span> {n.name}
+                    <span className="text-slate-400"> — {n.path}</span>
+                  </button>
                 </li>
               ))}
             </ul>

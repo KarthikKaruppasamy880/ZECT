@@ -1,24 +1,30 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("Mentrix voice clone", () => {
-  test("Clone voice panel on Mentrix Companion", async ({ page }) => {
+test.describe("Mentrix Chatterbox voice", () => {
+  test("Voice tab opens clone panel on Companion", async ({ page }) => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
-    const expand = page.getByTestId("clone-voice-expand");
-    if (await expand.isVisible().catch(() => false)) {
-      await expand.click();
-    }
+    await expect(page.getByTestId("mentrix-companion-modes")).toBeVisible();
+    await page.getByTestId("mentrix-mode-voice").click();
+    await expect(page).toHaveURL(/voice=1/);
+    await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
   });
 
-  test("Voice Cloning Labs link opens Mentrix Companion with form expanded", async ({ page }) => {
-    await page.goto("/");
-    await page.getByRole("link", { name: /Voice Cloning/i }).click();
-    await expect(page).toHaveURL(/\/mentrix-home\?voice=1/, { timeout: 15_000 });
+  test("Deep link ?voice=1 expands Chatterbox form", async ({ page }) => {
+    await page.goto("/mentrix-home?voice=1");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("clone-voice-record")).toBeVisible();
+  });
+
+  test("Labs no longer lists Voice Cloning; Incident shortcut remains", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: /Voice Cloning/i })).toHaveCount(0);
+    await page.getByRole("link", { name: /Incident Runbook/i }).click();
+    await expect(page).toHaveURL(/\/mentrix-home\?incident=1/, { timeout: 15_000 });
+    await expect(page.getByTestId("mentrix-incident-section")).toBeVisible({ timeout: 15_000 });
   });
 
   test("Delivery page does not host voice cloning", async ({ page }) => {
@@ -34,12 +40,12 @@ test.describe("Mentrix voice clone", () => {
     await expect(page.getByTestId("mentrix-present-narrate")).toBeVisible();
   });
 
-  test("Clone submit shows Voicebox error when offline", async ({ page }) => {
+  test("Clone submit surfaces API error when clone fails", async ({ page }) => {
     await page.route("**/api/mentrix/voice/clone", async (route) => {
       await route.fulfill({
-        status: 503,
+        status: 502,
         contentType: "application/json",
-        body: JSON.stringify({ detail: "Voicebox isn't reachable" }),
+        body: JSON.stringify({ detail: "Chatterbox generation failed (502)" }),
       });
     });
 
@@ -47,9 +53,9 @@ test.describe("Mentrix voice clone", () => {
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
 
-    const reset = page.getByTestId("clone-voice-reset");
-    if (await reset.isVisible().catch(() => false)) {
-      await reset.click();
+    const del = page.getByTestId("clone-voice-reset").first();
+    if (await del.isVisible().catch(() => false)) {
+      await del.click();
     }
 
     await expect(page.getByTestId("clone-voice-name")).toBeVisible({ timeout: 10_000 });
@@ -63,8 +69,54 @@ test.describe("Mentrix voice clone", () => {
     });
 
     await page.getByTestId("clone-voice-submit").click();
-    await expect(page.getByTestId("clone-voice-error")).toContainText(/Voicebox|503|reachable/i, {
+    await expect(page.getByTestId("clone-voice-error")).toContainText(/Chatterbox|502|failed/i, {
       timeout: 10_000,
     });
+  });
+
+  test("Successful clone lists voice and ready note", async ({ page }) => {
+    await page.route("**/api/mentrix/voice/clone", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: 1,
+          voice_id: "abc123",
+          name: "Test Voice",
+          provider: "chatterbox",
+          is_default: true,
+          has_sample: true,
+        }),
+      });
+    });
+    await page.route("**/api/mentrix/voice/voices", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: 1,
+            voice_id: "abc123",
+            name: "Test Voice",
+            provider: "chatterbox",
+            is_default: true,
+            has_sample: true,
+          },
+        ]),
+      });
+    });
+
+    await page.goto("/mentrix-home?voice=1");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("clone-voice-name").fill("Test Voice");
+    await page.getByTestId("clone-voice-transcript").fill("Hello this is a test sample for cloning.");
+    await page.setInputFiles("input[data-testid='clone-voice-file']", {
+      name: "sample.wav",
+      mimeType: "audio/wav",
+      buffer: Buffer.from("RIFFfake"),
+    });
+    await page.getByTestId("clone-voice-submit").click();
+    await expect(page.getByTestId("clone-voice-ready")).toContainText(/Present/i, { timeout: 10_000 });
+    await expect(page.getByTestId("clone-voice-list")).toBeVisible();
   });
 });

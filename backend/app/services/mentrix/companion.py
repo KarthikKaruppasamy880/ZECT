@@ -292,7 +292,9 @@ def _llm_answer(question: str, context: str = "") -> str:
                 "role": "system",
                 "content": (
                     "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences. "
-                    "Never claim you sent messages or controlled the desktop without confirmation."
+                    "Never claim you sent messages or controlled the desktop without confirmation. "
+                    "Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing. "
+                    "For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
                 ),
             }
         ]
@@ -466,11 +468,46 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if re.search(r"\b(add note|save note|remember|note that)\b", m):
         tools.append({"name": "note_add", "args": {"text": message[:800]}})
 
+    # Prefer writing an allowlisted Desktop/Documents file over Notepad for docs/notes.
+    if re.search(
+        r"\b(write|create|save)\b.{0,40}\b(note|notes|doc|docs|document|markdown|txt)\b",
+        m,
+    ) or re.search(r"\b(on (my )?desktop|to (my )?desktop|in documents)\b", m) and re.search(
+        r"\b(write|create|save|note)\b", m
+    ):
+        folder = "Documents" if "document" in m else "Desktop"
+        tools.append(
+            {
+                "name": "desktop_write_note",
+                "args": {
+                    "content": message[:4000],
+                    "folder": folder,
+                    "filename": "mentrix-note.md",
+                },
+            }
+        )
+
     if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find", "wiki", "doc", "markdown")):
         tools.append({"name": "lattice_query", "args": {"q": message[:120], "project_key": ""}})
 
     if any(w in m for w in ("start deliver", "engage delivery", "run upgrade", "start upgrade", "start mentrix")):
         tools.append({"name": "start_delivery", "args": {"goal": message[:400], "mode": "deliver"}})
+
+    if re.search(
+        r"\b(open (my )?(deck|pptx|powerpoint|presentation)|present on zoom|narrate my slides|open zoom)\b",
+        m,
+    ):
+        path_m = re.search(
+            r"([A-Za-z]:\\[^\s\"']+\.(?:pptx|ppt|pdf)|/(?:Users|home)/[^\s\"']+\.(?:pptx|ppt|pdf))",
+            message,
+            re.I,
+        )
+        if path_m:
+            tools.append({"name": "desktop_open_presentation", "args": {"path": path_m.group(1)}})
+        if "zoom" in m or "present on zoom" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "Zoom.exe"}})
+        if any(w in m for w in ("powerpoint", "pptx", "deck", "presentation")) and not path_m:
+            tools.append({"name": "computer_open_app", "args": {"app": "POWERPNT.EXE"}})
 
     if "computer mode" in m or "open notepad" in m or "screenshot" in m or "ui inspect" in m:
         if "screenshot" in m:
@@ -1097,8 +1134,69 @@ def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", create
         if any(b in path.lower() for b in blocked):
             return {"ok": False, "error": "path_blocked_default_deny", "path": path}
         return {"ok": True, "path": path, "desktop": "desktop_read"}
+    if name in ("desktop_delete", "delete_file"):
+        return {
+            "ok": False,
+            "error": "delete_never_allowed",
+            "note": "Mentrix never deletes files. Create/read only.",
+        }
+    if name == "desktop_write_note":
+        content = str(args.get("content") or "")
+        if not content.strip():
+            return {"ok": False, "error": "empty_content"}
+        folder_name = str(args.get("folder") or "Desktop").strip() or "Desktop"
+        if folder_name.lower() not in ("desktop", "documents"):
+            folder_name = "Desktop"
+        home = Path.home()
+        base = home / ("Desktop" if folder_name.lower() == "desktop" else "Documents")
+        raw_name = str(args.get("filename") or "mentrix-note.md").strip() or "mentrix-note.md"
+        safe = Path(raw_name).name
+        if not safe.lower().endswith((".md", ".txt")):
+            safe = f"{safe}.md"
+        target = (base / safe).resolve()
+        try:
+            target.relative_to(base.resolve())
+        except ValueError:
+            return {"ok": False, "error": "path_outside_allowlist"}
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            target.write_text(content[:50_000], encoding="utf-8")
+            return {
+                "ok": True,
+                "desktop": "desktop_write_note",
+                "path": str(target),
+                "bytes": len(content.encode("utf-8")),
+                "note": "Wrote allowlisted note file (prefer over Notepad)",
+                "electron_action": "write_note",
+                "electron_args": {"path": str(target), "content": content[:50_000]},
+            }
+        except OSError as exc:
+            return {
+                "ok": True,
+                "desktop": "desktop_write_note",
+                "queued": True,
+                "path": str(target),
+                "error_local": str(exc)[:200],
+                "note": "Confirm Allow — Electron will write under Desktop/Documents",
+                "electron_action": "write_note",
+                "electron_args": {
+                    "folder": folder_name,
+                    "filename": safe,
+                    "content": content[:50_000],
+                },
+            }
     if name == "computer_open_app":
         return {"ok": True, "app": args.get("app") or "notepad.exe", "desktop": "open_app"}
+    if name == "desktop_open_presentation":
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "missing_path"}
+        return {
+            "ok": True,
+            "path": path,
+            "desktop": "open_presentation",
+            "note": "Open presentation; user shares PowerPoint in Zoom",
+        }
     if name in ("computer_click", "computer_type", "computer_scroll", "computer_ui_inspect"):
         return {"ok": True, "desktop": name, "args": args}
     if name == "diagnose_fix":

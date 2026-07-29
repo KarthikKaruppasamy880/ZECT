@@ -4,6 +4,7 @@ import { Bot, Check, GitPullRequest, Play, Sparkles } from "lucide-react";
 import {
   mentrixAgents,
   mentrixApproveRun,
+  mentrixConfirmPlan,
   mentrixCreatePr,
   mentrixGetRun,
   mentrixListRuns,
@@ -15,8 +16,8 @@ const MODES = ["upgrade", "bugfix", "chat", "understand", "deliver", "review_onl
 
 const WORKFLOW_STEPS = [
   { id: "lattice", label: "Lattice" },
-  { id: "plan_build", label: "Plan/Build" },
-  { id: "gates", label: "Gates" },
+  { id: "plan", label: "Plan" },
+  { id: "build_gates", label: "Build/Gates" },
   { id: "ultra_review", label: "Ultra Review" },
   { id: "approve", label: "Approve" },
   { id: "pr", label: "PR" },
@@ -37,7 +38,7 @@ function workflowStepIndex(run: any): number {
   const phases = new Set(events.map((e: any) => e.phase).filter(Boolean));
   const agents = new Set(events.map((e: any) => e.agent).filter(Boolean));
   if (
-    gates.review_ok != null ||
+    (gates.review_ok != null && run.status !== "awaiting_plan_confirm") ||
     phases.has("review") ||
     agents.has("reviewer") ||
     run.result?.ultra_review
@@ -45,25 +46,26 @@ function workflowStepIndex(run: any): number {
     return 3;
   }
   if (
-    gates.lint_ok != null ||
-    gates.sandbox_ready != null ||
-    gates.incomplete_ok != null ||
-    phases.has("lint") ||
-    phases.has("sandbox")
+    run.status !== "awaiting_plan_confirm" &&
+    (gates.lint_ok != null ||
+      gates.sandbox_ready != null ||
+      phases.has("lint") ||
+      phases.has("sandbox") ||
+      phases.has("build") ||
+      agents.has("builder"))
   ) {
     return 2;
   }
   if (
+    run.status === "awaiting_plan_confirm" ||
     phases.has("plan") ||
-    phases.has("build") ||
+    phases.has("root_cause") ||
     phases.has("ask") ||
-    phases.has("blueprint") ||
-    agents.has("planner") ||
-    agents.has("builder")
+    agents.has("planner")
   ) {
     return 1;
   }
-  if (phases.has("lattice") || agents.has("scout") || agents.has("lattice")) {
+  if (phases.has("lattice") || agents.has("scout") || agents.has("lattice") || phases.has("blueprint")) {
     return 0;
   }
   if (run.status === "running") return 0;
@@ -106,6 +108,7 @@ export default function Mentrix() {
   const [sttListening, setSttListening] = useState(false);
   const [wakeHint, setWakeHint] = useState("");
   const [jiraCommentNote, setJiraCommentNote] = useState("");
+  const [planSummary, setPlanSummary] = useState("");
   const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenStatus = useRef<string>("");
@@ -379,6 +382,32 @@ export default function Mentrix() {
     }
   };
 
+  useEffect(() => {
+    const p = active?.result?.plan;
+    if (p?.summary) setPlanSummary(String(p.summary));
+    else if (active?.status !== "awaiting_plan_confirm") setPlanSummary("");
+  }, [active?.id, active?.status, active?.result?.plan]);
+
+  const confirmPlan = async () => {
+    if (!active?.id) return;
+    setError("");
+    setLoading(true);
+    try {
+      const run = await mentrixConfirmPlan(active.id, {
+        summary: planSummary || undefined,
+        steps: active?.result?.plan?.steps,
+      });
+      setActive(run);
+      setMessages(eventsToMessages(run));
+      if (run.status === "running") startPolling(run.id);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Confirm plan failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const approve = async () => {
     if (!active?.id) return;
     setError("");
@@ -457,7 +486,8 @@ export default function Mentrix() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Mentrix</h1>
           <p className="text-sm text-slate-600">
-            Primary delivery workflow — Lattice → Plan/Build → Gates → Ultra Review → Approve → PR
+            Primary delivery — Lattice → Confirm plan → Build → Gates → Ultra Review → Approve → PR
+            (scorecard: grounded plan + gates green)
           </p>
           {agents?.wake_phrases && (
             <p className="text-xs text-slate-500 mt-1">
@@ -688,11 +718,49 @@ export default function Mentrix() {
                     <span className="text-slate-500">Next:</span> {active.next_step || "—"}
                   </div>
                 </div>
+                {active.status === "awaiting_plan_confirm" && (
+                  <div
+                    className="rounded-lg border border-teal-200 bg-teal-50/50 p-3 space-y-2"
+                    data-testid="mentrix-plan-confirm"
+                  >
+                    <div className="font-semibold text-sm text-teal-900">Confirm plan before Build</div>
+                    <p className="text-xs text-slate-600">
+                      Edit the grounded plan if needed, then confirm. Build will not start until you confirm.
+                    </p>
+                    <textarea
+                      data-testid="mentrix-plan-summary"
+                      value={planSummary}
+                      onChange={(e) => setPlanSummary(e.target.value)}
+                      rows={5}
+                      className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-mono"
+                    />
+                    {(active.result?.plan?.steps || []).length > 0 && (
+                      <ol className="text-xs text-slate-700 list-decimal pl-4 space-y-0.5 max-h-28 overflow-auto">
+                        {(active.result.plan.steps as any[]).slice(0, 12).map((s, i) => (
+                          <li key={i}>{s.title || s.action || s.step || JSON.stringify(s)}</li>
+                        ))}
+                      </ol>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="mentrix-confirm-plan"
+                      onClick={() => void confirmPlan()}
+                      disabled={loading}
+                      className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-white text-xs disabled:opacity-40"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      Confirm plan and continue
+                    </button>
+                  </div>
+                )}
                 <div
                   className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs space-y-1"
                   data-testid="mentrix-gates"
                 >
-                  <div className="font-semibold text-slate-700">Gates (100% green to ship)</div>
+                  <div className="font-semibold text-slate-700">
+                    Gates (grounded plan + gates green to ship)
+                  </div>
+                  <div>plan_confirmed: {String(gates.plan_confirmed ?? "—")}</div>
                   <div>lint_ok: {String(gates.lint_ok ?? "—")}</div>
                   <div>sandbox_ready: {String(gates.sandbox_ready ?? "—")}</div>
                   <div>review_ok: {String(gates.review_ok ?? "—")}</div>
@@ -701,6 +769,7 @@ export default function Mentrix() {
                   <div>contract_ok: {String(gates.contract_ok ?? "—")}</div>
                   <div>acceptance_ok: {String(gates.acceptance_ok ?? "—")}</div>
                   <div>api_eval_ok: {String(gates.api_eval_ok ?? "—")}</div>
+                  <div>sast_ok: {String(gates.sast_ok ?? "—")}</div>
                   {active.pr_url && (
                     <div className="text-teal-800 break-all">PR: {active.pr_url}</div>
                   )}
@@ -712,13 +781,13 @@ export default function Mentrix() {
                     checked={ack}
                     onChange={(e) => setAck(e.target.checked)}
                   />
-                  Acknowledge issues (override sandbox / Ultra Review / API eval)
+                  Acknowledge issues (override sandbox / Ultra Review / API eval — not plan/SAST/security)
                 </label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     data-testid="mentrix-approve"
                     onClick={approve}
-                    disabled={!canApprove || loading}
+                    disabled={!canApprove || loading || active.status === "awaiting_plan_confirm"}
                     className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-white text-xs disabled:opacity-40"
                   >
                     <Check className="h-3.5 w-3.5" />

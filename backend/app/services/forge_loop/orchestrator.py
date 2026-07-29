@@ -33,7 +33,15 @@ from app.services.quality.lint_runner import run_lint
 from app.services.rag.retriever import hybrid_retrieve
 
 # Re-export for mentrix router / tests
-__all__ = ["run_mentrix", "gates_allow_approve", "gates_allow_create_pr", "MODE_PIPELINE", "AGENT_ROLES"]
+__all__ = [
+    "run_mentrix",
+    "continue_mentrix_after_plan",
+    "validate_context_pack",
+    "gates_allow_approve",
+    "gates_allow_create_pr",
+    "MODE_PIPELINE",
+    "AGENT_ROLES",
+]
 
 AGENT_ROLES = (
     "orchestrator",
@@ -100,6 +108,38 @@ def _lint_strict(mode: str) -> bool:
     if raw:
         return raw.lower() not in ("0", "false", "no")
     return mode in ("upgrade", "bugfix")
+
+
+def _plan_confirm_required(mode: str) -> bool:
+    """Human must confirm the plan before Build (upgrade + bugfix by default)."""
+    raw = os.getenv("MENTRIX_REQUIRE_PLAN_CONFIRM", "")
+    if raw:
+        return raw.lower() not in ("0", "false", "no")
+    return mode in ("upgrade", "bugfix")
+
+
+def validate_context_pack(*, workspace: str, project_key: str, mode: str) -> list[str]:
+    """Preflight before Engage — require workspace + Lattice key for ship modes."""
+    errors: list[str] = []
+    if mode not in ("upgrade", "bugfix", "deliver"):
+        return errors
+    ws = (workspace or "").strip()
+    pk = (project_key or "").strip()
+    if not ws and not pk:
+        errors.append("workspace path or project_key is required (context pack)")
+    if not pk:
+        errors.append("project_key (Lattice key) is required for grounded plans")
+    elif os.getenv("LATTICE_ENABLED", "true").lower() not in ("0", "false", "no"):
+        try:
+            from app.services.lattice.indexer import get_graph
+
+            if get_graph(pk) is None:
+                errors.append(
+                    f"Lattice not indexed for key '{pk}' — Ingest + RAG on Lattice Graph first"
+                )
+        except Exception as e:
+            errors.append(f"Lattice status check failed: {e}")
+    return errors
 
 
 def _load_rules_text(db: Session) -> str:
@@ -612,28 +652,41 @@ def run_mentrix(
     target_lang: str = "",
     repo_id: int | None = None,
     on_event: Callable[[dict], None] | None = None,
+    existing_run: MentrixRun | None = None,
+    resume_from: str | None = None,
+    resume_state: dict[str, Any] | None = None,
 ) -> MentrixRun:
     max_steps = int(os.getenv("MENTRIX_MAX_STEPS", "40"))
-    pipeline = list(MODE_PIPELINE.get(mode, MODE_PIPELINE["chat"]))
+    full_pipeline = list(MODE_PIPELINE.get(mode, MODE_PIPELINE["chat"]))
+    if resume_from and resume_from in full_pipeline:
+        pipeline = full_pipeline[full_pipeline.index(resume_from) :]
+    else:
+        pipeline = full_pipeline
     events: list[dict] = []
     rules = _load_rules_text(db)
     workspace = workspace or os.getenv("MENTRIX_WORKSPACE", "") or project_key
     source_lang, target_lang = _parse_lang_hints(goal, source_lang, target_lang)
 
-    run = MentrixRun(
-        project_id=project_id,
-        mode=mode,
-        goal=goal,
-        status="running",
-        current_agent="orchestrator",
-        events_json="[]",
-        gates_json="{}",
-        next_step="",
-        created_by=created_by,
-    )
-    db.add(run)
-    db.commit()
-    db.refresh(run)
+    if existing_run is not None:
+        run = existing_run
+        run.status = "running"
+        events = json.loads(run.events_json or "[]")
+        db.commit()
+    else:
+        run = MentrixRun(
+            project_id=project_id,
+            mode=mode,
+            goal=goal,
+            status="running",
+            current_agent="orchestrator",
+            events_json="[]",
+            gates_json="{}",
+            next_step="",
+            created_by=created_by,
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
 
     def push(agent: str, message: str, **extra: Any) -> None:
         _emit(events, agent, message, **extra)
@@ -644,17 +697,27 @@ def run_mentrix(
         if on_event:
             on_event(events[-1])
 
-    push("orchestrator", f"Mentrix starting mode={mode} (ForgeLoop, not LangGraph)", pipeline=pipeline)
-    scout: dict = {}
-    plan: dict = {}
+    if resume_from:
+        push(
+            "orchestrator",
+            f"Mentrix resuming after plan confirm from={resume_from}",
+            pipeline=pipeline,
+            next_step=resume_from,
+        )
+    else:
+        push("orchestrator", f"Mentrix starting mode={mode} (ForgeLoop, not LangGraph)", pipeline=pipeline)
+
+    rs = resume_state or {}
+    scout: dict = rs.get("scout") or {}
+    plan: dict = rs.get("plan") or {}
     builder: dict = {}
     review: dict = {}
-    blueprint: dict = {}
-    ask: dict = {}
-    reproduction: dict = {}
-    trace: dict = {}
-    root_cause: dict = {}
-    api_inv: dict = {}
+    blueprint: dict = rs.get("blueprint") or {}
+    ask: dict = rs.get("ask") or {}
+    reproduction: dict = rs.get("reproduction") or {}
+    trace: dict = rs.get("trace") or {}
+    root_cause: dict = rs.get("root_cause") or {}
+    api_inv: dict = rs.get("api_inv") or {}
     api_eval: dict = {"ok": True, "note": "skipped"}
     incomplete: dict = {"ok": True}
     grounding: dict = {"ok": True}
@@ -663,10 +726,14 @@ def run_mentrix(
     rejected_files: list[str] = []
     lint: dict = {"ok": True, "skipped": True}
     sandbox: dict = {"ready": True, "blockers": []}
-    result: dict[str, Any] = {"mode": mode, "agents_run": [], "engine": "forge_loop"}
+    result: dict[str, Any] = rs.get("result") or {"mode": mode, "agents_run": [], "engine": "forge_loop"}
+    if resume_from:
+        result.setdefault("agents_run", [])
+        result["plan_confirmed"] = True
     recovery_attempt = 0
     next_step = ""
     strict_lint = _lint_strict(mode)
+    paused_for_plan = False
 
     steps = 0
     for agent in pipeline:
@@ -782,7 +849,25 @@ def run_mentrix(
                 "model": root_cause.get("model"),
                 "tokens_used": root_cause.get("tokens_used", 0),
             }
+            result["plan"] = {
+                "summary": (plan.get("plan") or "")[:1500],
+                "phases": plan.get("phases"),
+                "steps": plan.get("steps"),
+                "model": plan.get("model"),
+                "source": "root_cause",
+            }
             push("planner", f"Fix plan has {len(fix_steps)} step(s)", phase="root_cause", next_step="build")
+            if _plan_confirm_required(mode) and not resume_from:
+                paused_for_plan = True
+                next_step = "await_plan_confirm"
+                push(
+                    "orchestrator",
+                    "Plan ready — confirm before Build (grounded plan + gates green)",
+                    phase="plan",
+                    next_step=next_step,
+                    event="awaiting_plan_confirm",
+                )
+                break
 
         elif agent == "ask":
             _emit_phase(events, "ask", 0.3, "plan", "Ask Mode — clarifying requirements")
@@ -818,8 +903,20 @@ def run_mentrix(
                 "steps": plan.get("steps"),
                 "model": plan.get("model"),
                 "design_contract": contract,
+                "source": "plan",
             }
             push("planner", f"Plan ready with {len(plan.get('phases') or [])} phases", phase="plan", next_step="api_analyze")
+            if _plan_confirm_required(mode) and not resume_from:
+                paused_for_plan = True
+                next_step = "await_plan_confirm"
+                push(
+                    "orchestrator",
+                    "Plan ready — confirm before Build (grounded plan + gates green)",
+                    phase="plan",
+                    next_step=next_step,
+                    event="awaiting_plan_confirm",
+                )
+                break
 
         elif agent == "planner":
             plan = _run_planner(goal, scout, rules, events)
@@ -854,6 +951,13 @@ def run_mentrix(
             push("reviewer", "Mentrix Ultra Review preflight complete", phase="ultra_review", brand="Mentrix Ultra Review")
 
         elif agent in ("build", "builder"):
+            if _plan_confirm_required(mode) and not (result.get("plan_confirmed") or resume_from):
+                gates_peek = json.loads(run.gates_json or "{}")
+                if not gates_peek.get("plan_confirmed"):
+                    push("orchestrator", "Build refused — plan not confirmed", phase="build", event="plan_not_confirmed")
+                    paused_for_plan = True
+                    next_step = "await_plan_confirm"
+                    break
             _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
             # upgrade/bugfix always generate. deliver also generates when a real
             # workspace/repo is available — Agent Mode previously used deliver +
@@ -1263,6 +1367,74 @@ def run_mentrix(
         run.next_step = next_step
         db.commit()
 
+    if paused_for_plan:
+        resume_agent = "api_analyze" if mode == "upgrade" else "build"
+        result["workspace"] = workspace or ""
+        result["project_key"] = project_key or ""
+        result["source_lang"] = source_lang
+        result["target_lang"] = target_lang
+        result["repo_id"] = repo_id
+        result["_checkpoint"] = {
+            "scout": scout,
+            "blueprint": blueprint,
+            "ask": ask,
+            "plan": plan,
+            "reproduction": reproduction,
+            "trace": trace,
+            "root_cause": root_cause,
+            "api_inv": api_inv,
+            "resume_from": resume_agent,
+            "workspace": workspace,
+            "project_key": project_key,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "repo_id": repo_id,
+            "result": {
+                "mode": mode,
+                "agents_run": result.get("agents_run") or [],
+                "engine": "forge_loop",
+                "plan": result.get("plan"),
+                "root_cause": result.get("root_cause"),
+                "scout": result.get("scout"),
+                "ask": result.get("ask"),
+            },
+        }
+        gates = {
+            "plan_confirmed": False,
+            "lint_ok": True,
+            "sandbox_ready": True,
+            "review_ok": True,
+            "incomplete_ok": True,
+            "api_eval_ok": True,
+            "grounding_ok": True,
+            "contract_ok": True,
+            "acceptance_ok": True,
+            "acknowledge_issues": False,
+            "ultra_review_critical": 0,
+            "security_critical": False,
+            "rejected_files": [],
+            "sast_ok": True,
+            "sast_checked": False,
+            "sast_required": False,
+        }
+        try:
+            from app.github_service import sast_required as _sast_required
+
+            gates["sast_required"] = bool(_sast_required())
+        except Exception:
+            gates["sast_required"] = False
+        result["gates"] = gates
+        result["next_step"] = "await_plan_confirm"
+        run.status = "awaiting_plan_confirm"
+        run.next_step = "await_plan_confirm"
+        run.gates_json = json.dumps(gates)
+        run.result_json = json.dumps(result)
+        run.events_json = json.dumps(events)
+        run.completed_at = None
+        db.commit()
+        db.refresh(run)
+        return run
+
     review_ok = bool((review or {}).get("passed", True)) if mode in ("deliver", "review_only", "upgrade", "bugfix") else True
     incomplete_ok = bool(incomplete.get("ok", True)) if mode in ("upgrade", "bugfix") else True
     api_eval_ok = bool(api_eval.get("ok", True)) if mode in ("upgrade", "bugfix") else True
@@ -1277,6 +1449,7 @@ def run_mentrix(
         for f in (review or {}).get("findings") or []
     )
 
+    prior_gates = json.loads(run.gates_json or "{}")
     gates = {
         "lint_ok": bool(lint.get("ok")),
         "sandbox_ready": bool(sandbox.get("ready")),
@@ -1290,17 +1463,27 @@ def run_mentrix(
         "ultra_review_critical": int((review or {}).get("critical_findings") or 0),
         "security_critical": security_critical,
         "rejected_files": list(dict.fromkeys(rejected_files)),
+        "plan_confirmed": bool(prior_gates.get("plan_confirmed") or result.get("plan_confirmed") or not _plan_confirm_required(mode)),
+        "sast_ok": prior_gates.get("sast_ok", True),
+        "sast_checked": bool(prior_gates.get("sast_checked", False)),
+        "sast_required": bool(prior_gates.get("sast_required")),
     }
+    try:
+        from app.github_service import sast_required as _sast_required
+
+        gates["sast_required"] = bool(_sast_required())
+    except Exception:
+        pass
     result["gates"] = gates
     result["rejected_files"] = gates["rejected_files"]
     result["next_step"] = next_step or (
-        "await_approve" if mode in ("deliver", "upgrade") else ""
+        "await_approve" if mode in ("deliver", "upgrade", "bugfix") else ""
     )
     result["recovery_attempts"] = recovery_attempt
     result["source_lang"] = source_lang
     result["target_lang"] = target_lang
 
-    ship_modes = ("deliver", "upgrade")
+    ship_modes = ("deliver", "upgrade", "bugfix")
     if mode in ship_modes:
         all_green = (
             gates["lint_ok"]
@@ -1334,5 +1517,87 @@ def run_mentrix(
     db.commit()
     db.refresh(run)
     return run
+
+
+def continue_mentrix_after_plan(
+    db: Session,
+    run: MentrixRun,
+    *,
+    plan_patch: dict[str, Any] | None = None,
+    confirmed_by: str = "",
+) -> MentrixRun:
+    """Resume Build (and remaining gates) after human confirms/edits the plan."""
+    if run.status != "awaiting_plan_confirm":
+        raise ValueError(f"Run is not awaiting plan confirm (status={run.status})")
+    result = json.loads(run.result_json or "{}")
+    cp = result.get("_checkpoint") or {}
+    if not cp.get("resume_from"):
+        raise ValueError("Missing plan checkpoint — cannot resume")
+
+    plan_obj = cp.get("plan") or {}
+    plan_view = result.get("plan") or {}
+    if plan_patch:
+        if "steps" in plan_patch and isinstance(plan_patch["steps"], list):
+            plan_obj["steps"] = plan_patch["steps"]
+            plan_view["steps"] = plan_patch["steps"]
+        if "summary" in plan_patch or "plan" in plan_patch:
+            text = plan_patch.get("summary") or plan_patch.get("plan") or ""
+            plan_obj["plan"] = text
+            plan_view["summary"] = text[:1500]
+        if "phases" in plan_patch:
+            plan_obj["phases"] = plan_patch["phases"]
+            plan_view["phases"] = plan_patch["phases"]
+        result["plan"] = plan_view
+        cp["plan"] = plan_obj
+
+    gates = json.loads(run.gates_json or "{}")
+    gates["plan_confirmed"] = True
+    run.gates_json = json.dumps(gates)
+    result["plan_confirmed"] = True
+    result["_checkpoint"] = cp
+    run.result_json = json.dumps(result)
+    events = json.loads(run.events_json or "[]")
+    _emit(
+        events,
+        "orchestrator",
+        f"Plan confirmed by {confirmed_by or 'human'} — resuming Build",
+        event="plan_confirmed",
+        next_step=cp["resume_from"],
+        phase="plan",
+    )
+    run.events_json = json.dumps(events)
+    db.commit()
+
+    resume_state = {
+        "scout": cp.get("scout") or {},
+        "blueprint": cp.get("blueprint") or {},
+        "ask": cp.get("ask") or {},
+        "plan": plan_obj,
+        "reproduction": cp.get("reproduction") or {},
+        "trace": cp.get("trace") or {},
+        "root_cause": cp.get("root_cause") or {},
+        "api_inv": cp.get("api_inv") or {},
+        "result": {
+            **(cp.get("result") or {}),
+            "plan": result.get("plan"),
+            "plan_confirmed": True,
+            "agents_run": result.get("agents_run") or [],
+        },
+    }
+    return run_mentrix(
+        db,
+        goal=run.goal or "",
+        mode=run.mode or "upgrade",
+        project_key=cp.get("project_key") or result.get("project_key") or "",
+        project_id=run.project_id,
+        created_by=run.created_by or "",
+        workspace=cp.get("workspace") or result.get("workspace") or "",
+        source_lang=cp.get("source_lang") or "",
+        target_lang=cp.get("target_lang") or "",
+        repo_id=cp.get("repo_id") or result.get("repo_id"),
+        existing_run=run,
+        resume_from=str(cp["resume_from"]),
+        resume_state=resume_state,
+    )
 
 

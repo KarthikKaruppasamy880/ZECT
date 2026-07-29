@@ -47,8 +47,15 @@ def mentrix_instructions() -> str:
         "Dashboard (/) is the ZECT app home — not the OS desktop. "
         "For 'go to desktop' / Computer Mode, use computer_open_app or desktop_screenshot — do not navigate to /. "
         "'Desktop app' or 'control tower' means Mentrix HUD at /mentrix-home. "
+        "NEVER delete, unlink, or rmdir any file or folder — delete is forbidden. Create and read only. "
+        "When the user asks to write notes or docs on the desktop, prefer desktop_write_note "
+        "(allowlisted Desktop/Documents .md/.txt) over fragile Notepad click/type. "
+        "Notepad (computer_open_app + computer_type) is secondary; if type fails, fall back to desktop_write_note. "
         "Launch Slack desktop app with computer_open_app Slack.exe; use slack_digest for channel summaries (API). "
         "Open browser with computer_open_app chrome.exe or msedge.exe. "
+        "For prepared PPTX in Zoom: desktop_open_presentation with a Desktop/Documents/Downloads .pptx path, "
+        "computer_open_app Zoom.exe (or POWERPNT.EXE), then the user shares the PowerPoint window in Zoom; "
+        "never auto-join Zoom or delete files. Narrate talking points with the cloned voice. "
         "Use lattice_query for code symbols and documentation wikilinks. "
         "For documentation graphs, prefer doc-kind hits and mention backlinks when available. "
         "When a tool needs permission, tell the user to Allow in the Mentrix overlay. "
@@ -234,12 +241,36 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "desktop_write_note",
+            "description": "Write a .md/.txt note under allowlisted Desktop or Documents (prefer over Notepad typing)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "e.g. mentrix-note.md"},
+                    "content": {"type": "string"},
+                    "folder": {"type": "string", "description": "Desktop or Documents"},
+                },
+                "required": ["content"],
+            },
+        },
+        {
+            "type": "function",
             "name": "computer_open_app",
-            "description": "Open allowlisted app (Computer Mode + Allow)",
+            "description": "Open allowlisted app (Computer Mode + Allow). Includes POWERPNT.EXE and Zoom.exe.",
             "parameters": {
                 "type": "object",
                 "properties": {"app": {"type": "string"}},
                 "required": ["app"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "desktop_open_presentation",
+            "description": "Open a .pptx/.ppt/.pdf under Desktop/Documents/Downloads in PowerPoint (Computer Mode + Allow). User shares screen in Zoom.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Absolute path to presentation file"}},
+                "required": ["path"],
             },
         },
         {
@@ -293,10 +324,21 @@ def _cloned_voice_for_user(db: Any, user_id: int | None) -> dict[str, Any] | Non
         return None
     from app.models import ClonedVoice
 
-    row = db.query(ClonedVoice).filter(ClonedVoice.user_id == user_id).first()
+    row = (
+        db.query(ClonedVoice)
+        .filter(ClonedVoice.user_id == user_id, ClonedVoice.is_default.is_(True))
+        .first()
+    )
+    if not row:
+        row = (
+            db.query(ClonedVoice)
+            .filter(ClonedVoice.user_id == user_id)
+            .order_by(ClonedVoice.created_at.desc())
+            .first()
+        )
     if not row:
         return None
-    return {"voice_id": row.voice_id, "name": row.name}
+    return {"voice_id": row.voice_id, "name": row.name or ""}
 
 
 def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[str, Any]:
@@ -321,23 +363,32 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
     try:
         with httpx.Client(timeout=20.0) as client:
             for model in REALTIME_MODEL_FALLBACKS:
+                audio_cfg: dict[str, Any] = {
+                    "input": {
+                        "transcription": {"model": "whisper-1"},
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "create_response": True,
+                            "interrupt_response": True,
+                        },
+                    },
+                }
+                # Cloned/Chatterbox voice: omit audio.output so mint stays text-capable;
+                # client session.update locks output_modalities to ["text"].
+                if not cloned_voice:
+                    audio_cfg["output"] = {"voice": voice}
                 body = {
                     "session": {
                         "type": "realtime",
                         "model": model,
                         "instructions": mentrix_instructions(),
                         "tools": realtime_tool_schemas(),
-                        "audio": {
-                            "input": {
-                                "transcription": {"model": "whisper-1"},
-                                "turn_detection": {
-                                    "type": "server_vad",
-                                    "create_response": True,
-                                    "interrupt_response": True,
-                                },
-                            },
-                            "output": {"voice": voice},
-                        },
+                        "audio": audio_cfg,
+                        **(
+                            {"output_modalities": ["text"]}
+                            if cloned_voice
+                            else {}
+                        ),
                     }
                 }
                 resp = client.post(

@@ -31,6 +31,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/review", tags=["code-review"])
+# Alias used by frontend mentrixSastStatus (/api/code-review/...)
+code_review_alias = APIRouter(prefix="/api/code-review", tags=["code-review"])
 
 
 def get_db():
@@ -39,6 +41,24 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+@router.get("/sast-status")
+@code_review_alias.get("/sast-status")
+def get_sast_status(
+    owner: str,
+    repo: str,
+    ref: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Return Semgrep / SAST GitHub Check Run status for a commit SHA or branch ref."""
+    if not owner or not repo or not ref:
+        raise HTTPException(status_code=400, detail="owner, repo, and ref are required")
+    try:
+        return github_service.sast_checks_ok(owner, repo, ref)
+    except Exception as e:
+        logger.warning("sast-status failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to list SAST checks: {e}") from e
 
 
 # ---------------------------------------------------------------------------

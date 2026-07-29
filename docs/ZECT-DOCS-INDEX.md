@@ -14,6 +14,7 @@
 | Executive overview for management | `ZECT-ONE-SHEET.md` |
 | Full technical white paper | `ZECT-WHITE-PAPER.md` |
 | Demo/presentation content | `ZECT-DEMO-PPT-CONTENT.md` |
+| MinionBot MSTF / Code Red architecture demo | `MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` |
 | How to use every screen | `ZECT_USER_MANUAL.md` |
 | Gap analysis (all gaps closed) | `ZECT-GAP-ANALYSIS.md` |
 | How to deploy to AWS | `AWS_DEPLOYMENT_GUIDE.md` |
@@ -33,6 +34,7 @@
 | **Tech Details** | `docs/ZECT-TECH-DETAILS-ONE-PAGE.md` | Complete tech stack, all gaps fixed, data integrity, deployment, usefulness to Zinnia |
 | **One-Sheet** | `docs/ZECT-ONE-SHEET.md` | Single-page executive summary — at-a-glance metrics, differentiators, roadmap |
 | **Demo PPT Content** | `docs/ZECT-DEMO-PPT-CONTENT.md` | Slide-by-slide content for live demo presentations with speaker notes |
+| **MSTF Architecture (MinionBot / Code Red)** | `docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` | Multi-Surface Transaction Fabric — demo talk track, NGC/CDS/Tango, Blueprint+KG+Playbooks, PRs #118/#96, phases; also in Docs Center |
 | **Gap Analysis v3.0** | `docs/ZECT-GAP-ANALYSIS.md` | Feature-by-feature comparison with industry tools — all gaps CLOSED (except 2.7 Integrations) |
 | **Feature Roadmap** | `docs/ZECT_FEATURE_ROADMAP_AND_GAP_ANALYSIS.md` | Earlier roadmap with phase-by-phase feature plan |
 | **Vision & Integrations** | `docs/ZECT_VISION_AND_INTEGRATIONS.md` | Long-term vision and integration strategy |

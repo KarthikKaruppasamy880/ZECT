@@ -10,8 +10,27 @@ const { promisify } = require("util");
 
 const execFileAsync = promisify(execFile);
 
-const WIN_APPS = ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe", "calc.exe", "Slack.exe"];
-const MAC_APPS = ["TextEdit", "Finder", "Safari", "Google Chrome", "Visual Studio Code", "Calculator"];
+const WIN_APPS = [
+  "notepad.exe",
+  "code.exe",
+  "explorer.exe",
+  "msedge.exe",
+  "chrome.exe",
+  "calc.exe",
+  "slack.exe",
+  "powerpnt.exe",
+  "zoom.exe",
+];
+const MAC_APPS = [
+  "TextEdit",
+  "Finder",
+  "Safari",
+  "Google Chrome",
+  "Visual Studio Code",
+  "Calculator",
+  "Microsoft PowerPoint",
+  "zoom.us",
+];
 
 function allowlisted(appName) {
   const raw = String(appName || "");
@@ -217,11 +236,116 @@ $sb.ToString()
   }
 }
 
+function refuseDelete(action, detail) {
+  console.warn("[computer] refuse delete", action, detail || "");
+  return {
+    ok: false,
+    error: "delete_never_allowed",
+    action,
+    audited: true,
+    note: "Mentrix never deletes, unlinks, or rmdirs files",
+  };
+}
+
+function presentationPathAllowed(resolved) {
+  const home = os.homedir();
+  const docs = path.resolve(path.join(home, "Documents"));
+  const desk = path.resolve(path.join(home, "Desktop"));
+  const downloads = path.resolve(path.join(home, "Downloads"));
+  const lower = resolved.toLowerCase();
+  return [docs, desk, downloads].some(
+    (root) => lower === root.toLowerCase() || lower.startsWith(root.toLowerCase() + path.sep),
+  );
+}
+
+async function openPresentation(filePath) {
+  const target = String(filePath || "").trim();
+  if (!target) return { ok: false, error: "missing_path" };
+  const resolved = path.resolve(target);
+  const ext = path.extname(resolved).toLowerCase();
+  if (![".pptx", ".ppt", ".pdf"].includes(ext)) {
+    return { ok: false, error: "unsupported_presentation_type", path: resolved };
+  }
+  const blocked = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
+  if (blocked.some((b) => resolved.toLowerCase().includes(b))) {
+    return { ok: false, error: "path_blocked", path: resolved };
+  }
+  if (!presentationPathAllowed(resolved)) {
+    return { ok: false, error: "path_outside_allowlist", path: resolved };
+  }
+  if (!fs.existsSync(resolved)) {
+    return { ok: false, error: "not_found", path: resolved };
+  }
+  try {
+    if (process.platform === "darwin") {
+      await execFileAsync("open", [resolved]);
+    } else if (process.platform === "win32") {
+      spawn("cmd", ["/c", "start", "", resolved], { detached: true, stdio: "ignore" }).unref();
+    } else {
+      spawn("xdg-open", [resolved], { detached: true, stdio: "ignore" }).unref();
+    }
+    return {
+      ok: true,
+      desktop: "open_presentation",
+      path: resolved,
+      audited: true,
+      platform: process.platform,
+    };
+  } catch (err) {
+    return { ok: false, error: String(err), path: resolved };
+  }
+}
+
+function writeNoteFile(args) {
+  const a = args || {};
+  const content = String(a.content || "");
+  if (!content.trim()) return { ok: false, error: "empty_content" };
+  const home = os.homedir();
+  const folderRaw = String(a.folder || "Desktop");
+  const folderName = /document/i.test(folderRaw) ? "Documents" : "Desktop";
+  const base = path.join(home, folderName);
+  let target = a.path ? String(a.path) : "";
+  if (!target) {
+    let name = path.basename(String(a.filename || "mentrix-note.md"));
+    if (!/\.(md|txt)$/i.test(name)) name = `${name}.md`;
+    target = path.join(base, name);
+  }
+  const resolved = path.resolve(target);
+  const docs = path.resolve(path.join(home, "Documents"));
+  const desk = path.resolve(path.join(home, "Desktop"));
+  const allowed = [docs, desk].some(
+    (root) =>
+      resolved.toLowerCase() === root.toLowerCase() ||
+      resolved.toLowerCase().startsWith(root.toLowerCase() + path.sep)
+  );
+  if (!allowed) {
+    return { ok: false, error: "path_outside_allowlist", path: resolved };
+  }
+  const blocked = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
+  if (blocked.some((b) => resolved.toLowerCase().includes(b))) {
+    return { ok: false, error: "path_blocked", path: resolved };
+  }
+  try {
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, content.slice(0, 50000), "utf8");
+    return {
+      ok: true,
+      desktop: "write_note",
+      path: resolved,
+      bytes: Buffer.byteLength(content.slice(0, 50000), "utf8"),
+      audited: true,
+    };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 module.exports = {
   WIN_APPS,
   MAC_APPS,
   allowlisted,
   openApp,
+  openPresentation,
   focusApp,
   escapeSendKeys,
   screenshotDesktop,
@@ -229,4 +353,6 @@ module.exports = {
   typeText,
   scroll,
   uiInspect,
+  refuseDelete,
+  writeNoteFile,
 };

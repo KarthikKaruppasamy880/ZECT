@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
+from typing import Any
+
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -17,9 +19,11 @@ from app.models import FineTuneSample, MentrixRun
 from app.services.forge_loop.orchestrator import (
     AGENT_ROLES,
     MODE_PIPELINE,
+    continue_mentrix_after_plan,
     gates_allow_approve,
     gates_allow_create_pr,
     run_mentrix,
+    validate_context_pack,
 )
 
 router = APIRouter(prefix="/api/mentrix", tags=["mentrix"])
@@ -58,6 +62,20 @@ class CreatePRRequest(BaseModel):
     head_branch: str = ""
     base_branch: str = "main"
     dry_run: bool | None = None
+
+
+class PlanPatchRequest(BaseModel):
+    summary: str | None = None
+    plan: str | None = None
+    phases: list[Any] | None = None
+    steps: list[dict[str, Any]] | None = None
+
+
+class ConfirmPlanRequest(BaseModel):
+    summary: str | None = None
+    plan: str | None = None
+    phases: list[Any] | None = None
+    steps: list[dict[str, Any]] | None = None
 
 
 def _run_to_dict(run: MentrixRun) -> dict:
@@ -109,6 +127,13 @@ def start_run(
         raise HTTPException(status_code=400, detail="goal is required")
     if req.mode not in MODE_PIPELINE:
         raise HTTPException(status_code=400, detail=f"Unknown mode. Use one of {list(MODE_PIPELINE)}")
+    pack_errors = validate_context_pack(
+        workspace=req.workspace or "",
+        project_key=req.project_key or "",
+        mode=req.mode,
+    )
+    if pack_errors:
+        raise HTTPException(status_code=400, detail="; ".join(pack_errors))
     run = run_mentrix(
         db,
         goal=req.goal.strip(),
@@ -121,6 +146,95 @@ def start_run(
         target_lang=req.target_lang,
         repo_id=req.repo_id,
     )
+    return _run_to_dict(run)
+
+
+@router.get("/runs/{run_id}/plan")
+def get_run_plan(run_id: int, db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    result = json.loads(run.result_json or "{}")
+    plan = result.get("plan") or {}
+    return {
+        "run_id": run.id,
+        "status": run.status,
+        "plan_confirmed": bool(json.loads(run.gates_json or "{}").get("plan_confirmed")),
+        "plan": plan,
+        "root_cause": result.get("root_cause"),
+    }
+
+
+@router.patch("/runs/{run_id}/plan")
+def patch_run_plan(
+    run_id: int,
+    req: PlanPatchRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "awaiting_plan_confirm":
+        raise HTTPException(status_code=400, detail="Plan can only be edited while awaiting_plan_confirm")
+    result = json.loads(run.result_json or "{}")
+    plan = dict(result.get("plan") or {})
+    if req.summary is not None:
+        plan["summary"] = req.summary
+    if req.plan is not None:
+        plan["summary"] = req.plan
+    if req.phases is not None:
+        plan["phases"] = req.phases
+    if req.steps is not None:
+        plan["steps"] = req.steps
+    result["plan"] = plan
+    cp = result.get("_checkpoint") or {}
+    if cp.get("plan") is not None:
+        inner = dict(cp["plan"])
+        if req.steps is not None:
+            inner["steps"] = req.steps
+        if req.summary is not None or req.plan is not None:
+            inner["plan"] = req.summary or req.plan or ""
+        if req.phases is not None:
+            inner["phases"] = req.phases
+        cp["plan"] = inner
+        result["_checkpoint"] = cp
+    run.result_json = json.dumps(result)
+    db.commit()
+    db.refresh(run)
+    return {"run_id": run.id, "plan": plan}
+
+
+@router.post("/runs/{run_id}/confirm-plan")
+def confirm_run_plan(
+    run_id: int,
+    req: ConfirmPlanRequest,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "awaiting_plan_confirm":
+        raise HTTPException(status_code=400, detail="Run is not awaiting plan confirmation")
+    patch: dict[str, Any] = {}
+    if req.summary is not None:
+        patch["summary"] = req.summary
+    if req.plan is not None:
+        patch["plan"] = req.plan
+    if req.phases is not None:
+        patch["phases"] = req.phases
+    if req.steps is not None:
+        patch["steps"] = req.steps
+    try:
+        run = continue_mentrix_after_plan(
+            db,
+            run,
+            plan_patch=patch or None,
+            confirmed_by=user.email or user.username or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return _run_to_dict(run)
 
 
@@ -339,10 +453,126 @@ def create_pr_for_run(
     run.events_json = json.dumps(events)
     result = json.loads(run.result_json or "{}")
     result["pr"] = pr_meta if not dry else {"dry_run": True, "html_url": pr_url}
+
+    # Semgrep / GitHub Checks SAST after PR exists (never blocks pre-check create).
+    owner = (req.owner or "").strip()
+    repo_name = (req.repo_name or "").strip()
+    ref = (req.head_branch or "").strip() or "HEAD"
+    if not dry and owner and repo_name:
+        try:
+            from app.github_service import sast_checks_ok, sast_required
+
+            sast = sast_checks_ok(owner, repo_name, ref)
+            gates["sast_required"] = bool(sast.get("required", sast_required()))
+            gates["sast_checked"] = True
+            gates["sast_ok"] = bool(sast.get("ok"))
+            gates["sast_detail"] = {
+                "note": sast.get("note"),
+                "matched": sast.get("matched") or [],
+                "pending": sast.get("pending"),
+                "error": sast.get("error"),
+                "ref": ref,
+                "owner": owner,
+                "repo": repo_name,
+            }
+            result["sast"] = gates["sast_detail"]
+            events.append({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "agent": "integrator",
+                "message": f"SAST check: ok={gates['sast_ok']} ({sast.get('note') or ''})",
+                "event": "sast_check",
+            })
+            run.events_json = json.dumps(events)
+            if gates["sast_required"] and not gates["sast_ok"]:
+                run.status = "awaiting_sast"
+                run.next_step = "await_sast"
+                events.append({
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "agent": "integrator",
+                    "message": "Awaiting Semgrep/GitHub SAST success — use POST /refresh-sast",
+                    "event": "awaiting_sast",
+                })
+                run.events_json = json.dumps(events)
+        except Exception as exc:
+            gates["sast_checked"] = True
+            gates["sast_ok"] = False if gates.get("sast_required") else True
+            gates["sast_detail"] = {"error": str(exc)[:300]}
+            if gates.get("sast_required"):
+                run.status = "awaiting_sast"
+                run.next_step = "await_sast"
+
+    run.gates_json = json.dumps(gates)
     run.result_json = json.dumps(result)
     db.commit()
     db.refresh(run)
     return _run_to_dict(run)
+
+
+@router.post("/runs/{run_id}/refresh-sast")
+def refresh_sast_for_run(
+    run_id: int,
+    owner: str = "",
+    repo: str = "",
+    ref: str = "",
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Re-poll GitHub Check Runs for Semgrep/SAST and update gates."""
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    gates = json.loads(run.gates_json or "{}")
+    result = json.loads(run.result_json or "{}")
+    detail = gates.get("sast_detail") or result.get("sast") or {}
+    owner = (owner or detail.get("owner") or "").strip()
+    repo = (repo or detail.get("repo") or "").strip()
+    ref = (ref or detail.get("ref") or "").strip() or "HEAD"
+    if not owner or not repo:
+        raise HTTPException(
+            status_code=400,
+            detail="owner and repo required (query params or prior sast_detail on run)",
+        )
+    try:
+        from app.github_service import sast_checks_ok, sast_required
+
+        sast = sast_checks_ok(owner, repo, ref)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SAST refresh failed: {exc}") from exc
+
+    gates["sast_required"] = bool(sast.get("required", sast_required()))
+    gates["sast_checked"] = True
+    gates["sast_ok"] = bool(sast.get("ok"))
+    gates["sast_detail"] = {
+        "note": sast.get("note"),
+        "matched": sast.get("matched") or [],
+        "pending": sast.get("pending"),
+        "error": sast.get("error"),
+        "ref": ref,
+        "owner": owner,
+        "repo": repo,
+    }
+    result["sast"] = gates["sast_detail"]
+    result["gates"] = gates
+    events = json.loads(run.events_json or "[]")
+    events.append({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "agent": "integrator",
+        "message": f"SAST refresh: ok={gates['sast_ok']} ({sast.get('note') or ''})",
+        "event": "refresh_sast",
+        "by": user.email,
+    })
+    if gates.get("sast_required") and not gates["sast_ok"]:
+        run.status = "awaiting_sast"
+        run.next_step = "await_sast"
+    elif run.pr_url:
+        run.status = "pr_created"
+        run.next_step = "done"
+    run.gates_json = json.dumps(gates)
+    run.result_json = json.dumps(result)
+    run.events_json = json.dumps(events)
+    db.commit()
+    db.refresh(run)
+    return {**_run_to_dict(run), "sast": gates["sast_detail"]}
 
 
 @router.post("/fine-tune/samples")

@@ -117,6 +117,18 @@ function pathBlocked(p) {
   return BLOCKED_PATH_FRAGMENTS.some((frag) => s.includes(frag));
 }
 
+const DELETE_ACTIONS = new Set([
+  "delete",
+  "delete_file",
+  "desktop_delete",
+  "unlink",
+  "rmdir",
+  "rm",
+  "remove",
+  "remove_file",
+  "remove_dir",
+]);
+
 async function waitForDevServer(url, attempts = 20, delayMs = 500) {
   const http = require("http");
   const target = new URL(url);
@@ -351,11 +363,28 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   }
   armComputerModeIdle();
   const a = args || {};
+  if (DELETE_ACTIONS.has(String(action || "").toLowerCase())) {
+    console.warn("[mentrix-computer] refuse delete", action, a.path || a.file || "");
+    return {
+      ok: false,
+      error: "delete_never_allowed",
+      action,
+      audited: true,
+      note: "Mentrix never deletes, unlinks, or rmdirs files",
+    };
+  }
   if (action === "open_app" || action === "open") {
     const appName =
       a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
     lastOpenedApp = appName;
     return computer.openApp(appName);
+  }
+  if (
+    action === "open_presentation" ||
+    action === "desktop_open_presentation" ||
+    action === "open_path"
+  ) {
+    return computer.openPresentation(a.path || a.file || "");
   }
   if (action === "screenshot" || action === "desktop_screenshot") {
     const desk = await computer.screenshotDesktop();
@@ -385,6 +414,9 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     } catch (err) {
       return { ok: false, error: String(err) };
     }
+  }
+  if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
+    return computer.writeNoteFile(a);
   }
   if (action === "click" || action === "computer_click") {
     return computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);

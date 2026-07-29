@@ -1357,18 +1357,24 @@ class ContextStoreEntry(Base):
 
 
 class ClonedVoice(Base):
-    """A user's cloned voice profile — backs Mentrix voice cloning. One row
-    per user; Realtime switches to text-only output and this voice_id
-    synthesizes the response instead of an OpenAI stock voice. Default
-    provider is Voicebox (local, no API key); voice_id is that provider's
-    own profile/voice identifier."""
+    """A user's cloned voice profile — ZECT Chatterbox persistence.
+
+    Users may store multiple clones; Present / Realtime sessions use the row
+    with is_default=True. Sample audio is stored under backend/data/voices/;
+    external_voice_id is the optional local engine profile id used for synth.
+    voice_id is ZECT's stable id (uuid string).
+    """
     __tablename__ = "cloned_voices"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
-    provider = Column(String, default="voicebox")
-    voice_id = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String, default="chatterbox")
+    voice_id = Column(String, nullable=False, unique=True, index=True)
+    external_voice_id = Column(String, nullable=True)
     name = Column(String, default="")
+    sample_path = Column(String, nullable=True)
+    reference_text = Column(Text, nullable=True)
+    is_default = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

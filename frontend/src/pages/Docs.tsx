@@ -13,6 +13,7 @@ import {
   Layers,
   Users,
   Map,
+  Network,
 } from "lucide-react";
 
 interface DocSection {
@@ -26,6 +27,46 @@ interface DocSection {
 
 const resources: DocSection[] = [
   {
+    title: "MSTF — Multi-Surface Transaction Fabric",
+    description: "Demo brief for MinionBot / Code Red: NGC vs CDS/Tango surfaces, Blueprint+KG+Playbooks (not Lattice), PRs #118/#96 quality spine, AI-agnostic Jira→repo flow. Full markdown: docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md",
+    icon: Network,
+    color: "bg-violet-100 text-violet-700",
+    content: [
+      {
+        heading: "Demo talk track (5–7 min)",
+        body: "1. Problem — MinionBot works for NGC/BPM exemplar-like tickets (e.g. Authorized Signatory). CDS/Tango still force manual. Old POC ~50% accuracy.\n2. Already fixed — PR #118 (truncation) + PR #96 (codegen gates) are REAL CODE, not docs-only.\n3. Do NOT add ZECT Lattice into MinionBot — use Blueprint + Neo4j KG + KnowledgeDocs + Playbook bundles.\n4. MSTF — Jira → classify surfaces (ngc/bpm/cds/tango) → index+playbooks → MultiSurfaceRecipe → generate → hard gates → scorecard.\n5. AI-agnostic — models pluggable; truth in recipes/KB/gates.\n6. Repo selection — capability-scoped, not “LLM picks any repo.”\n7. Ship in MinionBot — ZECT Mentrix may later call MinionBot APIs.\n8. Ask — merge PRs → CDS/Tango repo glossary → refresh/index → one pilot → golden suite “100%”.",
+      },
+      {
+        heading: "NGC vs CDS vs Tango",
+        body: "NGC — rules/config near an exemplar; bot-ready (proven).\nBPM PI — controllers/services/BPMN via TransactionRecipe; ready for template-like.\nCDS — cross-system data/API/contracts; gap until surface registry + index + recipe.\nTango — platform/service beyond NGC; same gap.\n\nExact repo lists come from domain owners (Lasya/Anubhav/Siddartha).",
+      },
+      {
+        heading: "Architecture (MSTF)",
+        body: "Intake: Jira → RFC → Scope classifier → surfaces_required[].\nKnowledge fabric (existing): Blueprint, Neo4j KG/HLD, KnowledgeDocs, agent-index Playbooks.\nControl plane (new): Surface registry, MultiSurfaceRecipe, cross-repo plan, Refuse path.\nExecution: per-surface generators → #118 truncation → #96 quality gates → PRs → scorecard.\n\nRefuse > hallucinate: if CDS/Tango required but not registered/indexed → hard stop with checklist.",
+      },
+      {
+        heading: "Quality spine — PR #118 + #96",
+        body: "https://github.com/zinnia/minionbot-common/pull/118 — generate_with_status / finish_reason.\nhttps://github.com/zinnia/minionbot-code-generator/pull/96 — truncation continuation, AC verifier, coverage tracer, invented-API xref, missing-LLD block, manifest refs.\n\nThese raise accuracy on the CURRENT path. They do NOT alone add CDS/Tango domain coverage.",
+      },
+      {
+        heading: "What “100%” means",
+        body: "Not “LLM never errs.” Closed loop on a golden suite:\n• Completeness — no truncated/missing critical files\n• Grounding — no blocking invented APIs/contracts\n• Satisfaction — AC + requirement coverage thresholds\n• Scope honesty — missing surface → refuse\n• Human rework under agreed ceiling\n\nSeeds: Authorized Signatory, pure NGC, one CDS+Tango pilot, one must-refuse ticket.",
+      },
+      {
+        heading: "Phases P0–P5",
+        body: "P0 — Merge #118/#96; NGC goldens green.\nP1 — Classifier + refuse for CDS/Tango.\nP2 — Index CDS+Tango repos; ship KnowledgeDocs/Playbooks in-repo.\nP3 — MultiSurfaceRecipe v1 for one real Code Red ticket.\nP4 — Extend #96 gates to those surfaces.\nP5 — Adoption playbook + metrics for leadership.\n\nP0 alone ≠ Anubhav gap closed. P1–P4 close CDS/Tango.",
+      },
+      {
+        heading: "ZECT vs MinionBot",
+        body: "Build MSTF in MinionBot — YES (system of record for Code Red codegen).\nBuild MSTF in ZECT — NO for this gap.\nMinionBot has Lattice? NO.\nMinionBot has Blueprint + Neo4j graph + KB + Playbooks? YES.\nFull brief on disk: docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md (also copied under minionbot-code-generator/docs/).\n\nOperator reminder: ZECT Mentrix Delivery/Semgrep/plan-confirm are the ZECT quality spine; MSTF multi-surface fabric stays MinionBot-only.",
+      },
+      {
+        heading: "Meeting close / asks",
+        body: "1. Confirm merge path for #118 and #96.\n2. One-page repo list per surface (NGC, CDS, Tango).\n3. Refresh + index those repos.\n4. Pick one paused CDS+Tango Code Red ticket as P3 pilot.\n5. Agree scorecard wording: leverage MinionBot now on NGC-like; CDS/Tango via MSTF phases.",
+      },
+    ],
+  },
+  {
     title: "ZECT Management Guide",
     description: "Complete workflow reference for every ZECT feature — how each page works, what it does, and how to use it step by step.",
     icon: Map,
@@ -35,12 +76,17 @@ const resources: DocSection[] = [
       { heading: "Ask Mode (/ask)", body: "Ask any engineering question — architecture, debugging, code review, best practices.\n\nWorkflow:\n1. Select an AI Model — GPT-4o Mini (default), GPT-4o, GPT-3.5 Turbo, Claude 3.5 Sonnet, Claude 3 Haiku\n2. Attach Context (optional) — Click '+ Add files, repos, snippets' to add code context\n3. Type your question — Or click a quick prompt\n4. Press Enter — AI responds with a detailed answer\n5. Conversation History — Previous sessions in left sidebar, click to resume\n\nAll conversations are saved to the database and accessible from the sidebar." },
       { heading: "Plan Mode (/plan)", body: "Generate detailed, phased engineering plans for any project or feature.\n\nWorkflow:\n1. Select Model — Choose AI model (pricing shown per 1K tokens)\n2. Describe Your Project — Enter detailed description in the textarea\n3. Attach Context (optional) — Add files/repos/snippets\n4. Show Advanced Options (optional) — Configure plan output format\n5. Click 'Generate Engineering Plan' — AI creates phased plan\n\nOutput includes: phased timeline, tech stack recommendations, risk assessment, resource allocation, dependency mapping." },
       { heading: "Build Phase (/build)", body: "Generate production-ready code from plan steps using AI.\n\nWorkflow:\n1. Describe the Plan Step — What code to generate\n2. Set Tech Stack — e.g. 'TypeScript, React, FastAPI'\n3. Set Target File Path — e.g. 'src/api/auth.ts'\n4. Select Model — With pricing info\n5. Add Context Files — Click '+' to add existing code\n6. Click 'Generate Code' — AI produces code\n7. Auto-Fix Loop — Run lint/test/fix cycles automatically\n8. Create PR — Create a GitHub PR directly from generated code\n\n6 Quick Templates: REST API, React component, Unit tests, DB migration, CI/CD pipeline, Auth middleware." },
-      { heading: "Mentrix Ultra Review (/code-review)", body: "Best-in-class Mentrix code analysis — bugs, vulnerabilities, performance issues.\n\n5 Tabs:\n• PR Review — Enter owner/repo/PR#, click 'Run Mentrix Ultra Review', optionally post comments to GitHub\n• Snippet Review — Paste code, select language, get instant analysis\n• Full Repo Scan — Comprehensive codebase security + quality analysis\n• Auto-Fix Loop — AI identifies issues and generates fixes automatically\n• Webhook — Configure automatic PR reviews on push events" },
+      { heading: "Mentrix Ultra Review (/code-review)", body: "Best-in-class Mentrix code analysis — bugs, vulnerabilities, performance issues.\n\nTabs:\n• PR Review — Enter owner/repo/PR#, click 'Run Mentrix Ultra Review', optionally post comments to GitHub. Under PR Review: SAST (Semgrep) panel reads GitHub Check conclusions (not an in-app Semgrep scan). Enable Semgrep on the repo; set MENTRIX_SAST_REQUIRED / MENTRIX_SAST_CHECK_NAMES.\n• Snippet Review — Paste code for ad-hoc LLM analysis. Not a substitute for PR/CI SAST.\n• Full Repo Scan — Comprehensive codebase security + quality analysis\n• Auto-Fix Loop — AI identifies issues and generates fixes automatically\n• Webhook — Configure automatic PR reviews on push events" },
+      { heading: "Mentrix Delivery — ZOAS path (/mentrix)", body: "Clone → Lattice ingest → Engage (context pack: workspace + Lattice key) → Confirm plan → Build/gates → Approve → Create PR → Ultra Review + Semgrep → fix residuals.\n\nScorecard = grounded plan + gates green (never claim 100%/0 error). Plan confirm is required before Build for upgrade/bugfix. Semgrep gate uses GitHub Check Runs after PR when MENTRIX_SAST_REQUIRED=true (awaiting_sast + refresh-sast)." },
+      { heading: "Browser vs Electron", body: "Browser — engineering Delivery, Lattice, Ultra Review, Plan/Build; Board Present/Narrate (artifacts + Chatterbox).\nElectron — personal OS assistant (Computer Mode): screenshot, allowlisted apps (incl. PowerPoint + Zoom), Present Deck (.pptx open), write notes under Desktop/Documents. Delete/unlink/rmdir is never allowed. Semgrep is GitHub Checks only — not inside Build." },
+      { heading: "Vulnerability operating model", body: "1. Full Repo/PR Ultra Review → findings\n2. Jira Security/Incident ticket\n3. Mentrix bugfix + Confirm plan + gates + Semgrep\n4. Platform review (Audit Trail + PR + Deploy checklist)\n5. Non-prod → QA → prod via GitHub Actions environments\n\nGap: no auto Dependabot/Snyk feed into Mentrix yet." },
       { heading: "Knowledge Base (/knowledge-base)", body: "Persistent tips, instructions, project notes — your team's engineering knowledge.\n\nCRUD Operations:\n• Create — Click '+ New Entry', fill title/category/content/tags, click Save\n• Search — Type in search bar to filter by keyword\n• Filter — Use category dropdown (General, Coding, Review, Deploy, Architecture, Testing, Debug)\n• Edit/Delete — Click entry to expand, then Edit or Delete\n\nAll entries stored in SQLite/PostgreSQL database with timestamps." },
       { heading: "Playbooks (/playbooks)", body: "Reusable prompt templates and multi-step automated workflows.\n\nCategory Tabs: All, General, Onboarding, Review, Deploy, Debug, Migration, Testing\n\nCreate a Playbook:\n1. Click '+ New Playbook'\n2. Fill name, description, category\n3. Add ordered steps with prompt templates (supports {{variable}} placeholders)\n4. Click Save\n\nRun a Playbook: Click a playbook → Run → executes all steps in sequence. View run history with timestamps and results." },
       { heading: "Scheduled Tasks (/scheduled-tasks)", body: "Cron-based recurring automated tasks.\n\nCreate a Schedule:\n1. Click '+ New Schedule'\n2. Fill name, cron expression (e.g. '0 2 * * *' = daily at 2 AM), task type, config\n3. Click Save\n\nManage: Toggle enable/disable, Manual Trigger (run immediately), View Runs (execution history), Edit/Delete." },
       { heading: "Secrets Manager (/secrets)", body: "Encrypted storage for API keys, tokens, and credentials.\n\nSecurity: Fernet symmetric encryption at rest. Set ZECT_ENCRYPT_KEY in .env for production.\n\nAdd a Secret:\n1. Click '+ Add Secret'\n2. Fill name (e.g. OPENAI_API_KEY), value (encrypted before storage), scope (org/user/repo)\n3. Click Save\n\nValues always masked (••••••••). Rotate to set new value. Delete is irreversible." },
-      { heading: "Code Index (/code-index)", body: "Search functions, classes, variables across your codebase.\n\nIndex a Repo: Click 'Index Repo' → enter repo path → Start Indexing (parses all source files)\n\nSearch: Type symbol name, filter by Type (Function/Class/Variable/Import/Interface/Type/Method) and Language (Python/TypeScript/JavaScript/Java/Go/Rust/Ruby/C/C++). Results show file path, line number, and code preview.\n\nView Stats: Click 'Stats' for total symbols breakdown by type and language." },
+      { heading: "Code Index (/code-index)", body: "Flat “go to symbol” search — functions, classes, variables.\n\nIndex a Repo: Click 'Index Repo' → enter repo path → Start Indexing.\n\nSearch: Type symbol name, filter by Type and Language. Results show file path, line number, and code preview.\n\nWhen to use: know a symbol name → Code Index. Need relationships, docs links, RAG, or Explain paths → Lattice Graph (/lattice)." },
+      { heading: "Lattice Graph (/lattice)", body: "Mentrix code intelligence graph.\n\n• Ingest + RAG / Load graph — index or reload a project key\n• Layers — combined / code / docs\n• Query — symbols + RAG citations\n• Interactive graph — click a node or Fly to → Node details inspector (name, kind, path, neighbors) + Explain\n• Path / Explain — A→B routes or single-node summary\n• Structural blueprint — tech stack, endpoints, god nodes\n\nFull operator path: see ZECT Operator Workflow Guide in repo docs." },
+      { heading: "Mentrix Companion (/mentrix-home)", body: "One operator shell with tabs: Chat | Incident | Voice.\n\n• Incident — Jira/Datadog runbook (sidebar Incident Runbook deep-links here)\n• Voice (Chatterbox) — record/upload sample; ZECT stores clones in DB; Use = default for Present & Connect Voice; Delete anytime\n• Present / Narrate — Mentrix Board artifacts + default Chatterbox voice (not PowerPoint files)\n• Present Deck (Voice tab) — prepared .pptx under Desktop/Documents/Downloads → Open presentation + Open Zoom (Electron) → you share screen → Narrate talking points with clone\n• Connect Voice — Realtime; long replies finalize once (no double bubble)\n\nOptional local engine: CHATTERBOX_BASE_URL (legacy VOICEBOX_BASE_URL still works). UI does not require “Voicebox”." },
       { heading: "Session Insights (/session-insights)", body: "Usage analytics, cost tracking, and quality metrics.\n\n4 Metric Cards: Total Sessions, Total Tokens, Total Cost, Quality Score\nTime Range: Last 7/14/30/90 days\nModel Usage: Which AI models consumed the most tokens\nFeature Usage: Which ZECT features your team uses most\n\nAll data from real database — updates as you use the tool." },
       { heading: "Conversations (/conversations)", body: "Session history across all modes (Ask, Plan, Build, Review, Deploy).\n\nMode Tabs: All, Ask, Plan, Build, Review, Deploy\nSplit-pane layout: conversation list (left) + message thread (right)\n\nCreate: Click '+ New Conversation' → select mode → start messaging\nArchive: Hide conversations (restorable via 'Show Archived')\nDelete: Permanently remove conversations" },
       { heading: "Settings (/settings)", body: "Configure ZECT behavior and integrations.\n\nAPI Keys: GitHub API Key, OpenAI API Key, Token Usage log\nSecrets Manager: Quick link to /secrets page\n\n6 Feature Toggles:\n• Automated Code Review, Token Usage Tracking, Deployment Gate Enforcement\n• Risk Alert Notifications, Auto-Generate Plan, Session Context Memory\n\n4 Config Options:\n• Default Starting Stage, Minimum Review Severity, Deployment Approval Mode, Monthly Token Budget Alert" },
@@ -150,7 +196,7 @@ const resources: DocSection[] = [
 ];
 
 export default function Docs() {
-  const [expanded, setExpanded] = useState<string | null>("Getting Started");
+  const [expanded, setExpanded] = useState<string | null>("MSTF — Multi-Surface Transaction Fabric");
   const toggle = (title: string) => setExpanded(expanded === title ? null : title);
 
   return (

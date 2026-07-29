@@ -167,6 +167,94 @@ def create_pull_request(owner: str, repo: str, title: str, body: str, head: str,
     }
 
 
+def _sast_name_patterns() -> list[str]:
+    import fnmatch
+    import os
+
+    raw = os.getenv("MENTRIX_SAST_CHECK_NAMES", "Semgrep*,semgrep*,*semgrep*")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def sast_required() -> bool:
+    import os
+
+    return os.getenv("MENTRIX_SAST_REQUIRED", "").lower() in ("1", "true", "yes")
+
+
+def list_check_runs(owner: str, repo: str, ref: str) -> list[dict]:
+    """List GitHub Check Runs for a commit SHA or branch ref."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    runs = repo_obj.get_commit(ref).get_check_runs()
+    out: list[dict] = []
+    for c in runs:
+        out.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "status": c.status,
+                "conclusion": c.conclusion,
+                "html_url": getattr(c, "html_url", None),
+                "app": getattr(getattr(c, "app", None), "slug", None)
+                or getattr(getattr(c, "app", None), "name", None),
+            }
+        )
+    return out
+
+
+def sast_checks_ok(owner: str, repo: str, ref: str) -> dict:
+    """Evaluate Semgrep / SAST check runs (scanSuccessful ≈ conclusion success)."""
+    import fnmatch
+
+    patterns = _sast_name_patterns()
+    try:
+        checks = list_check_runs(owner, repo, ref)
+    except Exception as e:
+        return {
+            "ok": False,
+            "required": sast_required(),
+            "matched": [],
+            "error": str(e)[:300],
+            "note": "Failed to list GitHub check runs",
+        }
+
+    matched = []
+    for c in checks:
+        name = c.get("name") or ""
+        app = str(c.get("app") or "")
+        if any(fnmatch.fnmatch(name, p) or fnmatch.fnmatch(app, p) for p in patterns):
+            matched.append(c)
+        elif "semgrep" in name.lower() or "semgrep" in app.lower():
+            matched.append(c)
+
+    if not matched:
+        return {
+            "ok": False if sast_required() else True,
+            "required": sast_required(),
+            "matched": [],
+            "note": "No Semgrep/SAST check runs found for this ref",
+        }
+
+    # Prefer completed success (Semgrep Cloud scanSuccessful)
+    successes = [c for c in matched if c.get("conclusion") == "success"]
+    pending = [c for c in matched if c.get("status") != "completed"]
+    failures = [
+        c
+        for c in matched
+        if c.get("status") == "completed" and c.get("conclusion") not in ("success", "neutral", "skipped")
+    ]
+    ok = bool(successes) and not failures and not pending
+    if pending and not failures:
+        ok = False
+    return {
+        "ok": ok,
+        "required": sast_required(),
+        "matched": matched,
+        "pending": len(pending) > 0,
+        "note": "Semgrep check success" if ok else "SAST not green yet",
+    }
+
+
 def create_check_run(
     owner: str,
     repo: str,

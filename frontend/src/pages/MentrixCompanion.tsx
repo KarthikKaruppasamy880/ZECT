@@ -1,9 +1,10 @@
 /**
  * Mentrix Companion HUD — full operator shell over shared MentrixSessionContext.
+ * Modes (Chat | Incident | Voice) share one shell; deep links ?incident=1 / ?voice=1.
  */
-import { useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  AlertTriangle,
   Bot,
   Eye,
   Maximize2,
@@ -21,27 +22,31 @@ import MentrixConfirmModal from "@/components/MentrixConfirmModal";
 import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
 import CloneVoicePanel from "@/components/CloneVoicePanel";
+import PresentDeckPanel from "@/components/PresentDeckPanel";
 import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
+type CompanionMode = "chat" | "incident" | "voice";
+
 export default function MentrixCompanion() {
   const s = useMentrixSession();
-  const [searchParams] = useSearchParams();
-  const openVoice = searchParams.get("voice") === "1";
-  const openIncident = searchParams.get("incident") === "1";
-  const voiceSectionRef = useRef<HTMLDivElement>(null);
-  const incidentSectionRef = useRef<HTMLDivElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const mode: CompanionMode =
+    searchParams.get("voice") === "1"
+      ? "voice"
+      : searchParams.get("incident") === "1"
+        ? "incident"
+        : "chat";
 
-  useEffect(() => {
-    if (!openVoice) return;
-    voiceSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [openVoice]);
-
-  useEffect(() => {
-    if (!openIncident) return;
-    incidentSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [openIncident]);
+  const setMode = (next: CompanionMode) => {
+    const sp = new URLSearchParams(searchParams);
+    sp.delete("voice");
+    sp.delete("incident");
+    if (next === "voice") sp.set("voice", "1");
+    if (next === "incident") sp.set("incident", "1");
+    setSearchParams(sp, { replace: true });
+  };
 
   return (
     <div
@@ -56,6 +61,36 @@ export default function MentrixCompanion() {
             <p className="text-sm text-slate-400">
               Company personal agent — research, content, reporting, docs, Delivery
             </p>
+            <div
+              className="mt-3 flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/80 p-1"
+              data-testid="mentrix-companion-modes"
+              role="tablist"
+            >
+              {(
+                [
+                  { id: "chat" as const, label: "Chat", icon: Sparkles },
+                  { id: "incident" as const, label: "Incident", icon: AlertTriangle },
+                  { id: "voice" as const, label: "Voice", icon: Mic },
+                ] as const
+              ).map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === id}
+                  data-testid={`mentrix-mode-${id}`}
+                  onClick={() => setMode(id)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                    mode === id
+                      ? "bg-teal-800/80 text-teal-50"
+                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
             <button
@@ -103,31 +138,32 @@ export default function MentrixCompanion() {
           className={`grid flex-1 gap-3 ${s.showArtifacts && !s.displayMode ? "lg:grid-cols-[1fr_380px]" : "grid-cols-1"}`}
         >
           <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+            {!s.displayMode && mode === "incident" && (
+              <div
+                id="mentrix-incident-runbook"
+                data-testid="mentrix-incident-section"
+                className="mb-3 space-y-3"
+              >
+                <IncidentRunbookPanel defaultExpanded />
+              </div>
+            )}
+            {!s.displayMode && mode === "voice" && (
+              <div
+                id="mentrix-voice-cloning"
+                data-testid="mentrix-voice-section"
+                className="mb-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+              >
+                <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
+                  Chatterbox — Present & sessions
+                </p>
+                <CloneVoicePanel defaultExpanded variant="dark" />
+                <div className="mt-3">
+                  <PresentDeckPanel variant="dark" />
+                </div>
+              </div>
+            )}
             {!s.displayMode && (
               <>
-                {(openIncident || openVoice) && (
-                  <div
-                    ref={incidentSectionRef}
-                    id="mentrix-incident-runbook"
-                    data-testid="mentrix-incident-section"
-                    className="mb-3 space-y-3"
-                  >
-                    {openIncident && <IncidentRunbookPanel defaultExpanded />}
-                  </div>
-                )}
-                {openVoice && (
-                  <div
-                    ref={voiceSectionRef}
-                    id="mentrix-voice-cloning"
-                    data-testid="mentrix-voice-section"
-                    className="mb-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
-                  >
-                    <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
-                      Voice cloning — record here
-                    </p>
-                    <CloneVoicePanel defaultExpanded variant="dark" />
-                  </div>
-                )}
                 <div className="flex flex-col items-center gap-2 py-4">
                   <div
                     data-testid="mentrix-avatar"
@@ -368,23 +404,20 @@ export default function MentrixCompanion() {
                     Present / Narrate
                   </button>
                 </div>
-                {!openIncident && (
-                  <div className="mt-3" data-testid="mentrix-incident-section-inline">
-                    <IncidentRunbookPanel />
-                  </div>
-                )}
-                {!openVoice && (
-                  <div
-                    ref={voiceSectionRef}
-                    id="mentrix-voice-cloning"
-                    data-testid="mentrix-voice-section"
-                    className="mt-3 rounded-xl border border-teal-900/50 bg-slate-900/60 p-3"
-                  >
-                    <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-500/80">
-                      Voice cloning
-                    </p>
-                    <CloneVoicePanel variant="dark" />
-                  </div>
+                <p
+                  data-testid="mentrix-present-hint"
+                  className="mt-1.5 text-[11px] text-slate-500"
+                >
+                  Uses Mentrix Board artifacts + your default Chatterbox voice (not PowerPoint files).
+                  For a prepared deck, open the Voice tab → Present Deck.
+                </p>
+                {mode === "chat" && (
+                  <p className="mt-3 text-[11px] text-slate-500">
+                    Use the <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>Incident</button>
+                    {" "}or{" "}
+                    <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>Voice</button>
+                    {" "}tabs for runbook and Chatterbox — same Companion shell.
+                  </p>
                 )}
                 {s.displayMode && (
                   <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>

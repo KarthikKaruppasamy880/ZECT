@@ -32,7 +32,8 @@ DEFAULT_RULES = [
     # Requires approval
     {"action_pattern": "merge_pr", "permission_level": "require_approval", "category": "git", "description": "Merge pull requests to main/develop"},
     {"action_pattern": "deploy_.*", "permission_level": "require_approval", "category": "deploy", "description": "Deploy to any environment"},
-    {"action_pattern": "delete_file", "permission_level": "require_approval", "category": "file", "description": "Delete files from workspace"},
+    {"action_pattern": "delete_file", "permission_level": "never", "category": "file", "description": "Delete files from workspace — never allowed"},
+    {"action_pattern": "companion_desktop_delete", "permission_level": "never", "category": "desktop", "description": "Delete OS desktop files — never allowed"},
     {"action_pattern": "install_dependency", "permission_level": "require_approval", "category": "package", "description": "Install new dependencies"},
     {"action_pattern": "modify_ci", "permission_level": "require_approval", "category": "ci", "description": "Modify CI/CD pipelines"},
     {"action_pattern": "run_migration", "permission_level": "require_approval", "category": "database", "description": "Run database migrations"},
@@ -62,6 +63,8 @@ DEFAULT_RULES = [
     {"action_pattern": "companion_create_pr", "permission_level": "require_approval", "category": "companion", "description": "Create pull request"},
     {"action_pattern": "companion_desktop_read", "permission_level": "require_approval", "category": "desktop", "description": "Read allowlisted desktop paths"},
     {"action_pattern": "companion_desktop_screenshot", "permission_level": "require_approval", "category": "desktop", "description": "Capture screenshot"},
+    {"action_pattern": "companion_desktop_write", "permission_level": "require_approval", "category": "desktop", "description": "Write allowlisted Desktop/Documents note files"},
+    {"action_pattern": "companion_desktop_delete", "permission_level": "never", "category": "desktop", "description": "Delete OS desktop files — never allowed"},
     {"action_pattern": "companion_computer_open", "permission_level": "require_approval", "category": "desktop", "description": "Open allowlisted apps"},
     {"action_pattern": "companion_computer_control", "permission_level": "require_approval", "category": "desktop", "description": "Computer Mode click/type"},
     {"action_pattern": "companion_diagnose", "permission_level": "allow", "category": "companion", "description": "Diagnose and fix planning"},

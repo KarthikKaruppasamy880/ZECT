@@ -47,7 +47,6 @@ import {
   Network,
   FlaskConical,
   Box,
-  Mic,
   AlertTriangle,
 } from "lucide-react";
 
@@ -104,7 +103,6 @@ const enterpriseItems: NavItem[] = [
 ];
 
 const labsItems: NavItem[] = [
-  { href: "/mentrix-home?voice=1", label: "Voice Cloning", icon: Mic },
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/memory", label: "Memory System", icon: Brain },

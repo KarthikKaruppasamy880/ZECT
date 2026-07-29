@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments, reviewRepo, reviewAutoFixLoop, reviewEvaluateRules, configureWebhook, getWebhookConfig } from "@/lib/api";
+import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments, reviewRepo, reviewAutoFixLoop, reviewEvaluateRules, configureWebhook, getWebhookConfig, mentrixSastStatus } from "@/lib/api";
 import type { ReviewResponse, ReviewFinding } from "@/types";
 import {
   Shield,
@@ -202,6 +202,29 @@ export default function CodeReview() {
   const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookSaved, setWebhookSaved] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
+  // Semgrep / GitHub Checks SAST panel (PR Review)
+  const [sastRef, setSastRef] = useState("main");
+  const [sastLoading, setSastLoading] = useState(false);
+  const [sastResult, setSastResult] = useState<any>(null);
+  const [sastError, setSastError] = useState<string | null>(null);
+
+  const loadSastStatus = async () => {
+    if (!owner || !repo || !sastRef.trim()) {
+      setSastError("Owner, repo, and ref (branch or SHA) are required for SAST.");
+      return;
+    }
+    setSastError(null);
+    setSastLoading(true);
+    try {
+      const result = await mentrixSastStatus(owner, repo, sastRef.trim());
+      setSastResult(result);
+    } catch (e: any) {
+      setSastResult(null);
+      setSastError(e?.message || "Failed to load SAST check status");
+    } finally {
+      setSastLoading(false);
+    }
+  };
 
   const runReview = async () => {
     setError(null);
@@ -517,6 +540,82 @@ export default function CodeReview() {
               <Shield className="h-3.5 w-3.5 text-indigo-500" />
               Also evaluate Rules Engine rules
             </label>
+
+            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 space-y-3" data-testid="sast-panel">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-emerald-600" />
+                    SAST (Semgrep)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Reads GitHub Check Runs (Semgrep Cloud / Action). Snippet Review stays LLM-only — this is PR/CI SAST, not an in-app scan.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Ref (branch or SHA)</label>
+                  <input
+                    type="text"
+                    value={sastRef}
+                    onChange={(e) => setSastRef(e.target.value)}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="main or commit SHA"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    data-testid="sast-refresh"
+                    onClick={loadSastStatus}
+                    disabled={sastLoading || !owner || !repo}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                  >
+                    {sastLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    Refresh Semgrep checks
+                  </button>
+                </div>
+              </div>
+              {sastError && (
+                <p className="text-xs text-red-600">{sastError}</p>
+              )}
+              {sastResult && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-medium ${sastResult.ok ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                      {sastResult.ok ? <CheckCircle2 className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                      {sastResult.ok ? "SAST ok" : "SAST not green"}
+                    </span>
+                    <span className="text-slate-500">required: {String(sastResult.required)}</span>
+                    {sastResult.pending ? <span className="text-slate-500">pending checks</span> : null}
+                    {sastResult.note ? <span className="text-slate-600">{sastResult.note}</span> : null}
+                  </div>
+                  {(sastResult.matched || []).length === 0 ? (
+                    <p className="text-xs text-slate-500">No Semgrep/SAST check runs matched for this ref.</p>
+                  ) : (
+                    <ul className="divide-y divide-slate-200 border border-slate-200 rounded-md bg-white">
+                      {(sastResult.matched || []).map((c: any) => (
+                        <li key={c.id || c.name} className="px-3 py-2 text-xs flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-medium text-slate-800">{c.name}</div>
+                            <div className="text-slate-500">
+                              status: {c.status || "—"} · conclusion: {c.conclusion || "—"}
+                              {c.app ? ` · app: ${c.app}` : ""}
+                            </div>
+                          </div>
+                          {c.html_url ? (
+                            <a href={c.html_url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline shrink-0">
+                              Open check
+                            </a>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

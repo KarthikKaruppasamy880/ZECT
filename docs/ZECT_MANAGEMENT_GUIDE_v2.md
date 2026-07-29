@@ -383,7 +383,9 @@ ZECT_ENCRYPT_KEY=your-fernet-key   # For secrets encryption
 ## 11. Code Index
 
 **Route:** `/code-index`  
-**Purpose:** Search functions, classes, variables across your codebase.
+**Purpose:** Flat “go to symbol” search — functions, classes, variables across your codebase.
+
+**When to use Code Index vs Lattice:** Use **Code Index** when you know a symbol name and want file/line/preview. Use **Lattice Graph** (`/lattice`) when you need relationships, docs/wikilinks, RAG Query, path A→B, or click-to-Explain on the interactive graph.
 
 ### What You See
 - **Search Bar** — Type to search symbols
@@ -414,6 +416,49 @@ ZECT_ENCRYPT_KEY=your-fernet-key   # For secrets encryption
 - `POST /api/code-index/index` — Index a repository
 - `GET /api/code-index/stats` — Get indexing statistics
 - `GET /api/code-index/file/{path}` — Get symbols in a specific file
+
+---
+
+## 11b. Lattice Graph
+
+**Route:** `/lattice`  
+**Purpose:** Mentrix code intelligence — symbols, imports, calls, docs layer, path/explain + RAG.
+
+### Screen sections
+| Control | Use |
+|---------|-----|
+| Local path / Project key | Target repo / lattice key (often from Mentrix workspace) |
+| Layers | `combined` / `code` / `docs` |
+| Ingest + RAG | First-time (or refresh) index |
+| Load graph | Reload existing index without re-ingest |
+| Query | Symbol + RAG hits |
+| Stats strip | Files, docs, wikilinks, symbols, edges, endpoints |
+| Interactive graph | Click / Fly to → **Node details** inspector (name, kind, path, neighbors) + Explain |
+| Structural blueprint | Tech stack, functions, endpoints, god nodes |
+| Path / Explain | A→B path or single-node explanation |
+
+### Operator tip
+Clicking a node fills Explain and runs Explain automatically. Prefer Lattice for coupling and docs; Code Index for exact symbol lookup.
+
+---
+
+## 11c. Mentrix Companion & Chatterbox voice
+
+**Route:** `/mentrix-home`  
+**Modes (tabs):** Chat | Incident | Voice (`?incident=1` / `?voice=1`)
+
+Incident Runbook in the sidebar is a deep link into the same Companion shell — not a second product. Voice is only inside Companion (no Labs “Voice Cloning” entry).
+
+### Chatterbox (ZECT-owned clones)
+1. Companion → **Voice** → record or upload a sample + reference transcript → **Save voice to ZECT**
+2. Clones persist in DB (`cloned_voices`) + sample files under `backend/data/voices/`
+3. **Use** sets the default for Present / Narrate and Connect Voice sessions
+4. **Delete** removes DB row + sample anytime
+5. Speak API: `POST /api/mentrix/voice/speak` (default voice). List: `GET /api/mentrix/voice/voices`
+
+Local synthesis uses `CHATTERBOX_BASE_URL` (legacy `VOICEBOX_BASE_URL` accepted). UI branding is Chatterbox — not Voicebox.
+
+See also: [ZECT Operator Workflow Guide](./ZECT_OPERATOR_WORKFLOW_GUIDE.md).
 
 ---
 
@@ -587,7 +632,10 @@ ZECT_ENCRYPT_KEY=your-fernet-key   # For secrets encryption
 | Blueprint | `/blueprint` | Architecture design and API planning |
 | Doc Generator | `/doc-generator` | Auto-generate documentation from code |
 | Analytics | `/analytics` | Project-level analytics dashboard |
-| Docs Center | `/docs` | Browse generated documentation |
+| Docs Center | `/docs` | Browse generated documentation + operator guides |
+| Lattice Graph | `/lattice` | Interactive code/docs graph, Query, Path/Explain |
+| Mentrix Companion | `/mentrix-home` | Personal agent — Chat / Incident / Voice (Chatterbox) |
+| Code Index | `/code-index` | Flat symbol search (see §11) |
 
 ### Workflow Stages Section
 | Page | Route | Description |

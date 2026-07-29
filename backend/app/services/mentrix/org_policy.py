@@ -32,6 +32,8 @@ COMPANION_SEED_RULES = [
     {"action_pattern": "companion_create_pr", "permission_level": "require_approval", "category": "companion", "description": "Create pull request"},
     {"action_pattern": "companion_desktop_read", "permission_level": "require_approval", "category": "desktop", "description": "Read allowlisted desktop paths"},
     {"action_pattern": "companion_desktop_screenshot", "permission_level": "require_approval", "category": "desktop", "description": "Capture screenshot"},
+    {"action_pattern": "companion_desktop_write", "permission_level": "require_approval", "category": "desktop", "description": "Write allowlisted Desktop/Documents note files"},
+    {"action_pattern": "companion_desktop_delete", "permission_level": "never", "category": "desktop", "description": "Delete OS desktop files — never allowed"},
     {"action_pattern": "companion_computer_open", "permission_level": "require_approval", "category": "desktop", "description": "Open allowlisted apps"},
     {"action_pattern": "companion_computer_control", "permission_level": "require_approval", "category": "desktop", "description": "Computer Mode click/type/scroll"},
     {"action_pattern": "companion_computer_inspect", "permission_level": "require_approval", "category": "desktop", "description": "Computer Mode UI inspect"},
@@ -41,6 +43,7 @@ COMPANION_SEED_RULES = [
     {"action_pattern": "companion_jira_read", "permission_level": "allow", "category": "companion", "description": "Read Jira issues and search incidents"},
     {"action_pattern": "companion_jira_write", "permission_level": "require_approval", "category": "companion", "description": "Comment on Jira issues (e.g. PR link)"},
     {"action_pattern": "companion_datadog_read", "permission_level": "allow", "category": "companion", "description": "Query Datadog logs for incidents"},
+    {"action_pattern": "delete_file", "permission_level": "never", "category": "file", "description": "Delete files from workspace — never allowed"},
 ]
 
 
@@ -74,6 +77,8 @@ DEFAULT_DESKTOP_POLICY = {
         "chrome.exe",
         "calc.exe",
         "Slack.exe",
+        "POWERPNT.EXE",
+        "Zoom.exe",
     ],
     "allowlisted_apps_macos": [
         "TextEdit",
@@ -82,8 +87,19 @@ DEFAULT_DESKTOP_POLICY = {
         "Google Chrome",
         "Visual Studio Code",
         "Calculator",
+        "Microsoft PowerPoint",
+        "zoom.us",
     ],
-    "allowlisted_apps": ["notepad.exe", "code.exe", "explorer.exe", "msedge.exe", "chrome.exe", "Slack.exe"],
+    "allowlisted_apps": [
+        "notepad.exe",
+        "code.exe",
+        "explorer.exe",
+        "msedge.exe",
+        "chrome.exe",
+        "Slack.exe",
+        "POWERPNT.EXE",
+        "Zoom.exe",
+    ],
     "allowlisted_folders": [],
     "deny_globs": ["**/.env", "**/.env.*", "**/id_rsa", "**/*.pem", "**/credentials*"],
     "enabled_connectors": ["slack", "email", "news", "confluence"],

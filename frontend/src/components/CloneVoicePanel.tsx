@@ -11,6 +11,7 @@ import {
   setDefaultClonedVoice,
   type ClonedVoiceInfo,
 } from "@/lib/api";
+import { speakMentrix } from "@/mentrix/speak";
 
 type Props = {
   /** Open the full form immediately (e.g. Companion Voice tab deep link). */
@@ -210,6 +211,27 @@ export default function CloneVoicePanel({
     }
   };
 
+  const handleTestSpeak = async () => {
+    setLoading(true);
+    setError("");
+    setReadyNote("");
+    try {
+      const result = await speakMentrix(
+        "Mentrix voice check. If you hear this, TTS output is working.",
+        true,
+      );
+      if (result.ok) {
+        setReadyNote(`Voice check OK via ${result.engine}.`);
+      } else {
+        setError(result.error);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Test speak failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fieldClass = dark
     ? "border-slate-700 bg-slate-900 text-slate-100 placeholder:text-slate-500"
     : "border-slate-300 bg-white text-slate-900";
@@ -313,11 +335,26 @@ export default function CloneVoicePanel({
         </ul>
       )}
 
-      {readyNote && (
-        <p data-testid="clone-voice-ready" className="text-xs text-emerald-400">
-          {readyNote}
-        </p>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-testid="clone-voice-test-speak"
+          disabled={loading}
+          onClick={() => void handleTestSpeak()}
+          className={`rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${
+            dark
+              ? "border-teal-700 text-teal-200 hover:bg-teal-950"
+              : "border-teal-300 text-teal-800 hover:bg-teal-50"
+          }`}
+        >
+          Test speak
+        </button>
+        {readyNote && (
+          <p data-testid="clone-voice-ready" className="text-xs text-emerald-400">
+            {readyNote}
+          </p>
+        )}
+      </div>
 
       <div className="space-y-3">
         <p className={`text-[11px] font-semibold uppercase tracking-wide ${dark ? "text-teal-400" : "text-teal-700"}`}>

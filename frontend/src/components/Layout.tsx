@@ -70,7 +70,14 @@ export default function Layout({ onLogout }: LayoutProps) {
               <ProjectRepoSelector />
               <div className="flex items-center gap-3">
                 <MentrixWakeBridge />
-                <CollaborationPanel room="zect-global" user="admin" />
+                <CollaborationPanel
+                  room="zect-global"
+                  user={
+                    (typeof localStorage !== "undefined" &&
+                      localStorage.getItem("zect_username")) ||
+                    "operator"
+                  }
+                />
                 <div className="text-xs text-slate-400">ZECT v2.0</div>
               </div>
             </div>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  chunkSpeakText,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
 } from "./mentrixRealtimeFinalize";
@@ -49,5 +50,18 @@ describe("mentrixRealtimeFinalize", () => {
         finalizedIds: new Set(),
       }),
     ).toBe(false);
+  });
+
+  it("chunks long replies on sentence boundaries for faster first TTS", () => {
+    const text =
+      "First sentence is ready. Second sentence follows after. Third wraps up the answer cleanly.";
+    const chunks = chunkSpeakText(text, 40);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks[0]).toMatch(/First sentence/);
+    expect(chunks.join(" ")).toContain("Third wraps");
+  });
+
+  it("keeps short replies as a single chunk", () => {
+    expect(chunkSpeakText("Short reply.")).toEqual(["Short reply."]);
   });
 });

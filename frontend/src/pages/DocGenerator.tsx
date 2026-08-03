@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { generateDocs } from "@/lib/api";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import type { DocGenResult } from "@/types";
 import {
   FileText,
@@ -22,6 +23,7 @@ const AVAILABLE_SECTIONS = [
 ];
 
 export default function DocGenerator() {
+  const { activeRepo } = useActiveProject();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
   const [selectedSections, setSelectedSections] = useState<string[]>(
@@ -32,6 +34,13 @@ export default function DocGenerator() {
   const [error, setError] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeRepo?.owner && activeRepo?.repo_name) {
+      setOwner(activeRepo.owner);
+      setRepo(activeRepo.repo_name);
+    }
+  }, [activeRepo?.owner, activeRepo?.repo_name]);
 
   const toggleSection = (key: string) => {
     setSelectedSections((prev) =>
@@ -86,6 +95,11 @@ export default function DocGenerator() {
           Generate granular documentation for any GitHub repository — overview, architecture, API
           reference, setup guide, testing, and deployment.
         </p>
+        <p className="text-xs text-slate-500 mt-2" data-testid="doc-generator-help">
+          Uses the GitHub API + LLM (<code className="font-mono">GITHUB_TOKEN</code> required). Not
+          Mentrix Delivery and not Lattice Blueprint — pick sections, generate, then copy into Confluence
+          or a PR.
+        </p>
       </div>
 
       {/* Input */}
@@ -94,16 +108,18 @@ export default function DocGenerator() {
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-1">Owner</label>
             <input
+              data-testid="doc-generator-owner"
               type="text"
               value={owner}
               onChange={(e) => setOwner(e.target.value)}
-              placeholder="e.g. KarthikKaruppasamy880"
+              placeholder="e.g. zinnia"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             />
           </div>
           <div className="flex-1">
             <label className="block text-sm font-medium text-gray-700 mb-1">Repository</label>
             <input
+              data-testid="doc-generator-repo"
               type="text"
               value={repo}
               onChange={(e) => {
@@ -116,7 +132,7 @@ export default function DocGenerator() {
                   setRepo(val);
                 }
               }}
-              placeholder="e.g. ZECT or https://github.com/owner/repo"
+              placeholder="e.g. zoas or https://github.com/owner/repo"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
             />
           </div>
@@ -142,6 +158,7 @@ export default function DocGenerator() {
         </div>
 
         <button
+          data-testid="doc-generator-submit"
           onClick={handleGenerate}
           disabled={loading}
           className="px-5 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"

@@ -46,6 +46,11 @@ export default function Login({ onLogin }: LoginProps) {
     setLoading(true);
     try {
       const res = await login(username, password);
+      try {
+        localStorage.setItem("zect_username", res.username || username);
+      } catch {
+        /* ignore */
+      }
       onLogin(res.token);
     } catch (e) {
       const msg =

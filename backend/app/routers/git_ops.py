@@ -363,6 +363,14 @@ def create_pull_request(req: CreatePRRequest):
         br = _run_git(path, ["rev-parse", "--abbrev-ref", "HEAD"])
         head = br["stdout"].strip()
 
+    # Push head so GitHub can open the PR (no silent local-only ship)
+    push = _run_git(path, ["push", "-u", "origin", head], timeout=120)
+    if push["exit_code"] != 0:
+        raise HTTPException(
+            status_code=502,
+            detail=f"git push failed before PR create: {push['stderr'] or push['stdout']}",
+        )
+
     # Use PyGithub to create PR
     try:
         from app import github_service

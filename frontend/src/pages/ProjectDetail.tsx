@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { getProject, getGitHubPulls, getGitHubCommits, getGitHubWorkflowRuns } from "@/lib/api";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import type { Project, GitHubPR, GitHubCommit, GitHubWorkflowRun } from "@/types";
 import { STAGES } from "@/types";
 import {
@@ -37,6 +38,7 @@ function relativeTime(dateStr: string) {
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
+  const { activeBranch, activeRepo } = useActiveProject();
   const [project, setProject] = useState<Project | null>(null);
   const [pulls, setPulls] = useState<GitHubPR[]>([]);
   const [commits, setCommits] = useState<GitHubCommit[]>([]);
@@ -162,7 +164,16 @@ export default function ProjectDetail() {
                   <GitBranch className="h-5 w-5 text-slate-400" />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-slate-900">{r.owner}/{r.repo_name}</p>
-                    <p className="text-xs text-slate-500">Branch: {r.default_branch}</p>
+                    <p className="text-xs text-slate-500">
+                      Workspace:{" "}
+                      {activeRepo &&
+                      activeRepo.owner === r.owner &&
+                      activeRepo.repo_name === r.repo_name &&
+                      activeBranch
+                        ? activeBranch
+                        : r.default_branch || "—"}
+                      {r.default_branch ? ` · default: ${r.default_branch}` : ""}
+                    </p>
                   </div>
                   <a
                     href={`https://github.com/${r.owner}/${r.repo_name}`}

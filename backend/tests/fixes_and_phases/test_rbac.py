@@ -271,7 +271,7 @@ class TestLogAudit:
         assert captured_entry.action == "delete_secret"
         assert captured_entry.resource_id == 5
         assert captured_entry.resource_type == "secret"
-        assert captured_entry.details == {"name": "api_key"}
+        assert captured_entry.details == '{"name": "api_key"}'
 
 
 class TestGetUserFromCurrentUser:

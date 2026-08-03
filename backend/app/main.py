@@ -98,12 +98,15 @@ async def global_exception_handler(request: Request, exc: Exception):
     blocks the response entirely, showing a misleading 'CORS error'.
     """
     tb = traceback.format_exc()
-    print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
+    try:
+        print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
+    except UnicodeEncodeError:
+        print(f"[ZECT ERROR] {request.method} {request.url}: {type(exc).__name__}")
     origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
         content={
-            "detail": str(exc),
+            "detail": str(exc).encode("ascii", "replace").decode("ascii"),
             "error_type": type(exc).__name__,
         },
         headers={
@@ -194,7 +197,36 @@ async def healthz():
     return {"status": "ok", "product": "ZECT", "agent": "Mentrix"}
 
 
+DEMO_PROJECT_NAMES = frozenset(
+    {
+        "Policy Admin Modernization",
+        "Claims Processing API",
+        "Agent Portal Redesign",
+        "Underwriting Rules Engine",
+        "Customer Notifications Service",
+        "Document Intelligence Pipeline",
+    }
+)
+
+
+def purge_demo_projects():
+    """Remove seeded demo projects by known name so dashboards show real work only."""
+    db = SessionLocal()
+    try:
+        rows = db.query(Project).filter(Project.name.in_(DEMO_PROJECT_NAMES)).all()
+        for p in rows:
+            db.delete(p)
+        if rows:
+            db.commit()
+            print(f"[ZECT] Purged {len(rows)} demo project(s)")
+    finally:
+        db.close()
+
+
 def seed_demo_projects():
+    """Only when ZECT_SEED_DEMO_PROJECTS=true (off by default)."""
+    if os.getenv("ZECT_SEED_DEMO_PROJECTS", "").strip().lower() not in ("1", "true", "yes"):
+        return
     db = SessionLocal()
     if db.query(Project).count() > 0:
         db.close()
@@ -333,5 +365,6 @@ def seed_default_rules():
 @app.on_event("startup")
 def on_startup():
     init_db()
+    purge_demo_projects()
     seed_demo_projects()
     seed_default_rules()

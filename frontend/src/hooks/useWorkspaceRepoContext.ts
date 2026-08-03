@@ -72,6 +72,12 @@ export function useWorkspaceRepoContext() {
     }
   }, []);
 
+  const clearBlueprintContext = useCallback(async () => {
+    setBlueprintPrompt("");
+    await saveContext("workspace", "blueprint_prompt", "").catch(() => {});
+    await saveContext("workspace", "repo_analysis", "").catch(() => {});
+  }, []);
+
   const syncFromActiveRepo = useCallback(() => {
     if (!activeRepo?.local_path) return;
     const pk = deriveProjectKey(activeRepo.owner, activeRepo.repo_name);
@@ -104,6 +110,7 @@ export function useWorkspaceRepoContext() {
     refreshStatus,
     loadBlueprintPrompt,
     loadSavedBlueprint,
+    clearBlueprintContext,
     syncFromActiveRepo,
   };
 }

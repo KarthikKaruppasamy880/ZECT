@@ -239,17 +239,36 @@ function createWindow() {
   }
 
   // Recover from blank screen after Connect Voice / audio renderer crashes.
+  // Cap + debounce — ACCESS_VIOLATION (0xC0000005 / -1073741819) during WebAudio
+  // TTS used to reload on every Mentrix turn and looked like a restart loop.
+  let rendererCrashReloads = 0;
+  let rendererCrashReloadTimer = null;
+  mainWindow.webContents.on("did-finish-load", () => {
+    rendererCrashReloads = 0;
+  });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     console.error("ZECT renderer gone:", details.reason, details.exitCode);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.reload();
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (rendererCrashReloads >= 2) {
+      console.error(
+        "ZECT renderer crash loop — not auto-reloading again. Use View → Reload if the window is blank.",
+      );
+      return;
     }
+    rendererCrashReloads += 1;
+    if (rendererCrashReloadTimer) clearTimeout(rendererCrashReloadTimer);
+    rendererCrashReloadTimer = setTimeout(() => {
+      rendererCrashReloadTimer = null;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        console.warn("ZECT recovering from renderer crash — reloading once");
+        mainWindow.webContents.reload();
+      }
+    }, 750);
   });
+  // Do not auto-reload on "unresponsive" — Mentrix TTS/Realtime can briefly block
+  // the renderer without it being permanently stuck.
   mainWindow.webContents.on("unresponsive", () => {
-    console.warn("ZECT renderer unresponsive — reloading");
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.reload();
-    }
+    console.warn("ZECT renderer unresponsive — not auto-reloading");
   });
 
   mainWindow.on("closed", () => {
@@ -373,11 +392,15 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
       note: "Mentrix never deletes, unlinks, or rmdirs files",
     };
   }
+  if (action === "open_zoom" || action === "desktop_open_zoom") {
+    lastOpenedApp = process.platform === "darwin" ? "zoom.us" : "Zoom.exe";
+    return computer.openZoom(a);
+  }
   if (action === "open_app" || action === "open") {
     const appName =
       a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
     lastOpenedApp = appName;
-    return computer.openApp(appName);
+    return computer.openApp(appName, a);
   }
   if (
     action === "open_presentation" ||

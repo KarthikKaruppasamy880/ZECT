@@ -833,6 +833,8 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     """Non-secret readiness for Mentrix tools (env-backed Slack/Jira). Never returns tokens."""
     import os
 
+    from app.services.presenton_client import presenton_configured
+
     slack = bool((os.getenv("SLACK_BOT_TOKEN") or "").strip())
     jira = bool(
         (os.getenv("MCP_JIRA_URL") or os.getenv("JIRA_BASE_URL") or "").strip()
@@ -844,14 +846,60 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         (os.getenv("DATADOG_API_KEY") or "").strip() and (os.getenv("DATADOG_APP_KEY") or "").strip()
     )
     github = bool((os.getenv("GITHUB_TOKEN") or "").strip())
+    zoom_join = (os.getenv("ZOOM_DEFAULT_JOIN_URL") or "").strip()
     return {
         "slack": slack,
         "jira": jira,
         "openai": openai,
         "datadog": datadog,
         "github": github,
+        "presenton": presenton_configured(),
+        "presenton_base_url": (os.getenv("PRESENTON_BASE_URL") or "").strip() or "",
+        "zoom_join_url_configured": bool(zoom_join),
+        "zoom_desktop_path_configured": bool((os.getenv("ZOOM_DESKTOP_PATH") or "").strip()),
         "slack_channel": (os.getenv("SLACK_DEFAULT_CHANNEL") or "#engineering") if slack else "",
     }
+
+
+class PresentonGenerateRequest(BaseModel):
+    content: str
+    n_slides: int = 6
+    template: str = "general"
+    instructions: str = ""
+    filename: str = ""
+
+
+@router.get("/presenton/status")
+def presenton_status(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.presenton_client import presenton_base_url, presenton_configured
+
+    return {
+        "configured": presenton_configured(),
+        "base_url": presenton_base_url() or "",
+    }
+
+
+@router.post("/presenton/generate")
+def presenton_generate(
+    req: PresentonGenerateRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Proxy Presenton generate → save PPTX under Documents/Desktop for Present Deck."""
+    from app.services.presenton_client import generate_presentation
+
+    out = generate_presentation(
+        req.content,
+        n_slides=req.n_slides,
+        template=req.template or None,
+        instructions=req.instructions or None,
+        filename=req.filename or None,
+    )
+    if not out.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=out.get("detail") or out.get("hint") or out.get("error") or "presenton_failed",
+        )
+    return out
 
 
 @router.post("/companion/realtime/session")

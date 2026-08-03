@@ -1,5 +1,6 @@
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { checkoutRepoBranch } from "@/lib/api";
 import { GitBranch, FolderOpen, RefreshCw, ChevronDown, Network } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
@@ -24,6 +25,8 @@ export default function ProjectRepoSelector() {
   const [showProjectDD, setShowProjectDD] = useState(false);
   const [showRepoDD, setShowRepoDD] = useState(false);
   const [showBranchDD, setShowBranchDD] = useState(false);
+  const [branchBusy, setBranchBusy] = useState(false);
+  const [branchError, setBranchError] = useState("");
   const projectRef = useRef<HTMLDivElement>(null);
   const repoRef = useRef<HTMLDivElement>(null);
   const branchRef = useRef<HTMLDivElement>(null);
@@ -132,14 +135,36 @@ export default function ProjectRepoSelector() {
               {branches.map((b) => (
                 <button
                   key={b}
-                  onClick={() => { setActiveBranch(b); setShowBranchDD(false); }}
-                  className={`w-full text-left px-3 py-2 hover:bg-slate-50 text-sm ${activeBranch === b ? "bg-purple-50 text-purple-700 font-medium" : "text-slate-700"}`}
+                  disabled={branchBusy}
+                  onClick={() => {
+                    void (async () => {
+                      if (!activeRepoId) return;
+                      setBranchBusy(true);
+                      setBranchError("");
+                      try {
+                        await checkoutRepoBranch(activeRepoId, b);
+                        setActiveBranch(b);
+                        setShowBranchDD(false);
+                        await refresh();
+                      } catch (e) {
+                        setBranchError(e instanceof Error ? e.message : "Checkout failed");
+                      } finally {
+                        setBranchBusy(false);
+                      }
+                    })();
+                  }}
+                  className={`w-full text-left px-3 py-2 hover:bg-slate-50 text-sm disabled:opacity-50 ${activeBranch === b ? "bg-purple-50 text-purple-700 font-medium" : "text-slate-700"}`}
                 >
                   {b}
                 </button>
               ))}
               {branches.length === 0 && (
                 <div className="px-3 py-2 text-xs text-slate-400">No branches</div>
+              )}
+              {branchError && (
+                <div className="px-3 py-2 text-[11px] text-red-600 border-t border-slate-100">
+                  {branchError}
+                </div>
               )}
             </div>
           )}

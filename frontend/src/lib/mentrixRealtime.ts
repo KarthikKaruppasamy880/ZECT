@@ -6,6 +6,7 @@ import { apiFetch, authHeaders } from "@/lib/api";
 import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 import {
+  chunkSpeakText,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
 } from "@/lib/mentrixRealtimeFinalize";
@@ -326,6 +327,33 @@ export async function startMentrixRealtime(
     handlers.onReady?.(ok);
   };
 
+  /** HTMLAudio for cloned TTS — never decode MP3 into the 24 kHz Realtime AudioContext. */
+  let clonedSpeakEl: HTMLAudioElement | null = null;
+  let clonedSpeakUrl: string | null = null;
+
+  const stopClonedSpeakEl = () => {
+    try {
+      if (clonedSpeakEl) {
+        clonedSpeakEl.onended = null;
+        clonedSpeakEl.onerror = null;
+        clonedSpeakEl.pause();
+        clonedSpeakEl.removeAttribute("src");
+        clonedSpeakEl.load();
+      }
+    } catch {
+      /* ignore */
+    }
+    clonedSpeakEl = null;
+    if (clonedSpeakUrl) {
+      try {
+        URL.revokeObjectURL(clonedSpeakUrl);
+      } catch {
+        /* ignore */
+      }
+      clonedSpeakUrl = null;
+    }
+  };
+
   const runFunctionCall = async (name: string, callId: string, rawArgs: unknown) => {
     if (!name || !callId || handledCallIds.has(callId)) return;
     handledCallIds.add(callId);
@@ -374,6 +402,7 @@ export async function startMentrixRealtime(
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    stopClonedSpeakEl();
     try {
       captureDispose?.();
     } catch {
@@ -528,29 +557,94 @@ export async function startMentrixRealtime(
 
   /** One finalize per OpenAI response id — prevents double bubble + double speak. */
   const finalizedResponseIds = new Set<string>();
+  /** Streaming text for cloned (text-only) modality — painted before TTS finishes. */
+  let clonedTextAcc = "";
 
-  const speakWithClonedVoice = async (text: string) => {
-    if (!text.trim() || !audioCtx || stopped) return;
-    try {
-      const res = await apiFetch("/api/mentrix/voice/speak", {
-        method: "POST",
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok || stopped || !audioCtx) return;
-      const arrayBuf = await res.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
-      if (stopped || !audioCtx) return;
-      const node = audioCtx.createBufferSource();
-      node.buffer = audioBuffer;
-      node.connect(audioCtx.destination);
-      handlers.onOrb?.("speaking");
-      node.onended = () => {
-        if (!stopped) handlers.onOrb?.("listening");
+  const fetchClonedSpeakBuffer = async (text: string): Promise<ArrayBuffer | null> => {
+    const res = await apiFetch("/api/mentrix/voice/speak", {
+      method: "POST",
+      body: JSON.stringify({ text: text.slice(0, 4000) }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      const detail =
+        typeof err.detail === "string" ? err.detail : `Speak failed (${res.status})`;
+      handlers.onLog?.(`cloned TTS failed: ${detail}`);
+      handlers.onError?.(`Voice output: ${detail}`);
+      return null;
+    }
+    const arrayBuf = await res.arrayBuffer();
+    if (!arrayBuf.byteLength) {
+      handlers.onError?.("Voice output: empty audio from /voice/speak");
+      return null;
+    }
+    return arrayBuf;
+  };
+
+  const playClonedMpeg = (arrayBuf: ArrayBuffer): Promise<void> =>
+    new Promise((resolve, reject) => {
+      stopClonedSpeakEl();
+      const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      clonedSpeakEl = audio;
+      clonedSpeakUrl = url;
+      audio.onended = () => {
+        stopClonedSpeakEl();
+        resolve();
       };
-      node.start();
-    } catch {
-      // Best-effort — the assistant's text still reaches onTranscript even if
-      // cloned-voice synthesis fails (e.g. provider outage).
+      audio.onerror = () => {
+        stopClonedSpeakEl();
+        reject(new Error("HTMLAudio playback failed"));
+      };
+      void audio.play().catch(reject);
+    });
+
+  /**
+   * Speak cloned TTS via HTMLAudio only (never decodeAudioData into the 24 kHz
+   * Realtime AudioContext — that crashes Electron on Windows).
+   * Chunk + prefetch so the first sentence starts playing sooner than one big MP3.
+   */
+  const speakWithClonedVoice = async (text: string) => {
+    if (!text.trim() || stopped) return;
+    try {
+      if (audioCtx?.state === "suspended") {
+        await audioCtx.resume().catch(() => undefined);
+      }
+      const chunks = chunkSpeakText(text);
+      if (!chunks.length) return;
+      handlers.onOrb?.("speaking");
+      let nextFetch: Promise<ArrayBuffer | null> = fetchClonedSpeakBuffer(chunks[0]);
+      for (let i = 0; i < chunks.length; i++) {
+        if (stopped) return;
+        const buf = await nextFetch;
+        if (i + 1 < chunks.length) {
+          nextFetch = fetchClonedSpeakBuffer(chunks[i + 1]);
+        }
+        if (!buf) continue;
+        try {
+          await playClonedMpeg(buf);
+        } catch (playErr) {
+          const msg = playErr instanceof Error ? playErr.message : "playback failed";
+          if (/NotAllowedError|user interaction/i.test(msg)) {
+            handlers.onError?.(
+              "Voice output blocked — click the Mentrix window, then speak again",
+            );
+            return;
+          }
+          handlers.onError?.(`Voice output: ${msg}`);
+        }
+      }
+      if (!stopped) handlers.onOrb?.("listening");
+    } catch (e) {
+      stopClonedSpeakEl();
+      const msg = e instanceof Error ? e.message : "cloned TTS failed";
+      handlers.onLog?.(`cloned TTS error: ${msg}`);
+      handlers.onError?.(
+        /NotAllowedError|user interaction/i.test(msg)
+          ? "Voice output blocked — click the Mentrix window, then speak again"
+          : `Voice output: ${msg}`,
+      );
     }
   };
 
@@ -574,7 +668,20 @@ export async function startMentrixRealtime(
     }
     const t = msg.type as string;
     if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
-    if (t === "response.created") handlers.onOrb?.("thinking");
+    if (t === "response.created") {
+      handlers.onOrb?.("thinking");
+      if (clonedVoiceActive) clonedTextAcc = "";
+    }
+    // Paint cloned text as it streams so the bubble is not stuck waiting for TTS.
+    if (
+      clonedVoiceActive &&
+      (t === "response.output_text.delta" || t === "response.text.delta") &&
+      typeof msg.delta === "string" &&
+      msg.delta
+    ) {
+      clonedTextAcc += msg.delta;
+      handlers.onTranscript?.("assistant", clonedTextAcc);
+    }
     // When cloned voice is active, never play OpenAI stock PCM — Chatterbox /speak is sole TTS.
     if (
       !clonedVoiceActive &&
@@ -623,17 +730,20 @@ export async function startMentrixRealtime(
           finalizedIds: finalizedResponseIds,
         })
       ) {
-        const text = outputs
-          .filter((item: any) => item?.type === "message")
-          .flatMap((item: any) => item.content || [])
-          .filter((c: any) => c?.type === "output_text" && c.text)
-          .map((c: any) => c.text)
-          .join(" ")
-          .trim();
+        const text =
+          outputs
+            .filter((item: any) => item?.type === "message")
+            .flatMap((item: any) => item.content || [])
+            .filter((c: any) => c?.type === "output_text" && c.text)
+            .map((c: any) => c.text)
+            .join(" ")
+            .trim() || clonedTextAcc.trim();
         if (text) {
           handlers.onTranscript?.("assistant", text);
-          await speakWithClonedVoice(text);
+          // Fire TTS without blocking the WS handler — next turns can still arrive.
+          void speakWithClonedVoice(text);
         }
+        clonedTextAcc = "";
       }
     }
     if (t === "error") {

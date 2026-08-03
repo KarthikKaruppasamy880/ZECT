@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { askQuestion, saveContext, loadContext } from "@/lib/api";
+import { askQuestion, saveContext, loadContext, clearContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
@@ -41,7 +41,14 @@ interface AttachedFile {
 export default function AskMode() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeRepoId, projectKey, blueprintPrompt, loadSavedBlueprint } = useWorkspaceRepoContext();
+  const {
+    activeRepoId,
+    projectKey,
+    blueprintPrompt,
+    loadSavedBlueprint,
+    clearBlueprintContext,
+    loadBlueprintPrompt,
+  } = useWorkspaceRepoContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [repoContext, setRepoContext] = useState("");
@@ -193,7 +200,38 @@ export default function AskMode() {
       )}
 
       <div className="mb-3">
-        <label className="block text-xs font-medium text-gray-600 mb-1">Repo / Blueprint context</label>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <label className="block text-xs font-medium text-gray-600">Repo / Blueprint context</label>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="ask-clear-context"
+              onClick={() => {
+                void (async () => {
+                  setRepoContext("");
+                  await clearBlueprintContext();
+                  await clearContext("ask").catch(() => {});
+                })();
+              }}
+              className="text-[11px] text-slate-500 hover:text-red-600 underline"
+            >
+              Clear context
+            </button>
+            <button
+              type="button"
+              data-testid="ask-reload-blueprint"
+              onClick={() => {
+                void (async () => {
+                  const prompt = await loadBlueprintPrompt(false);
+                  if (prompt) setRepoContext(prompt);
+                })();
+              }}
+              className="text-[11px] text-teal-700 hover:text-teal-900 underline"
+            >
+              Reload from Lattice
+            </button>
+          </div>
+        </div>
         <textarea
           data-testid="ask-repo-context"
           value={repoContext}

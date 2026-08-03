@@ -20,7 +20,19 @@ const USER_COLORS = [
   "text-pink-400", "text-cyan-400", "text-red-400", "text-indigo-400",
 ];
 
-export default function CollaborationPanel({ room, user = "anonymous" }: CollaborationPanelProps) {
+function resolvePresenceUser(explicit?: string): string {
+  if (explicit && explicit !== "admin" && explicit !== "anonymous") return explicit;
+  try {
+    const stored = localStorage.getItem("zect_username");
+    if (stored?.trim()) return stored.trim();
+  } catch {
+    /* ignore */
+  }
+  return explicit || "operator";
+}
+
+export default function CollaborationPanel({ room, user }: CollaborationPanelProps) {
+  const presenceUser = resolvePresenceUser(user);
   const [connected, setConnected] = useState(false);
   const [users, setUsers] = useState<PresenceUser[]>([]);
   const [activeCount, setActiveCount] = useState(0);
@@ -32,9 +44,8 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   const connect = useCallback(() => {
     if (!backendReady) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    if (failCountRef.current >= 3) return;
 
-    const ws = new WebSocket(`${WS_BASE}/ws/${room}?user=${encodeURIComponent(user)}`);
+    const ws = new WebSocket(`${WS_BASE}/ws/${room}?user=${encodeURIComponent(presenceUser)}`);
 
     ws.onopen = () => {
       failCountRef.current = 0;
@@ -47,19 +58,18 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
         const data = JSON.parse(event.data);
         if (data.type === "presence") {
           setActiveCount(data.active_users || 0);
-          fetchPresence();
-        } else if (data.type === "pong") {
-          // keep-alive
+          void fetchPresence();
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
 
     ws.onclose = () => {
       setConnected(false);
       failCountRef.current += 1;
-      if (failCountRef.current < 3) {
-        reconnectRef.current = setTimeout(connect, 8000);
-      }
+      const delay = Math.min(30_000, 3000 * failCountRef.current);
+      reconnectRef.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => {
@@ -67,7 +77,7 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
     };
 
     wsRef.current = ws;
-  }, [backendReady, room, user]);
+  }, [backendReady, room, presenceUser]);
 
   const fetchPresence = async () => {
     try {
@@ -99,7 +109,15 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
   useEffect(() => {
     if (!backendReady) return;
     connect();
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        failCountRef.current = 0;
+        connect();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
+      document.removeEventListener("visibilitychange", onVis);
       clearTimeout(reconnectRef.current);
       wsRef.current?.close();
     };
@@ -121,17 +139,24 @@ export default function CollaborationPanel({ room, user = "anonymous" }: Collabo
     return () => clearInterval(id);
   }, [connected]);
 
-  const colorClass = USER_COLORS[user.length % USER_COLORS.length];
+  const colorClass = USER_COLORS[presenceUser.length % USER_COLORS.length];
+  const count = activeCount || users.length;
 
   return (
-    <div className="flex items-center gap-2 text-xs text-slate-500" data-testid="collaboration-panel">
+    <div
+      className="flex items-center gap-2 text-xs text-slate-500"
+      data-testid="collaboration-panel"
+      title="Live presence — who is currently using ZECT (not Wi‑Fi or Zoom)"
+    >
       {connected ? (
-        <Wifi className={`h-3.5 w-3.5 ${colorClass}`} />
+        <Wifi className={`h-3.5 w-3.5 ${colorClass}`} aria-hidden />
       ) : (
-        <WifiOff className="h-3.5 w-3.5 text-slate-400" />
+        <WifiOff className="h-3.5 w-3.5 text-slate-400" aria-hidden />
       )}
-      <Users className="h-3.5 w-3.5" />
-      <span>{activeCount || users.length} online</span>
+      <Users className="h-3.5 w-3.5" aria-hidden />
+      <span data-testid="presence-label">
+        {connected ? `Presence: ${count}` : "Presence: Offline"}
+      </span>
     </div>
   );
 }

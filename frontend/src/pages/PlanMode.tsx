@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { generatePlan, saveContext, loadContext } from "@/lib/api";
+import { generatePlan, saveContext, loadContext, clearContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
@@ -33,7 +33,14 @@ interface AttachedFile {
 export default function PlanMode() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { activeRepoId, projectKey, blueprintPrompt, loadSavedBlueprint } = useWorkspaceRepoContext();
+  const {
+    activeRepoId,
+    projectKey,
+    blueprintPrompt,
+    loadSavedBlueprint,
+    clearBlueprintContext,
+    loadBlueprintPrompt,
+  } = useWorkspaceRepoContext();
   const [description, setDescription] = useState("");
   const [repoContext, setRepoContext] = useState("");
   const [constraints, setConstraints] = useState("");
@@ -312,9 +319,43 @@ export default function PlanMode() {
         {showAdvanced && (
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Repo Context (optional)
-              </label>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <label className="block text-sm font-medium text-gray-700">
+                  Repo Context (optional)
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="plan-clear-context"
+                    onClick={() => {
+                      void (async () => {
+                        setRepoContext("");
+                        await clearBlueprintContext();
+                        await clearContext("plan").catch(() => {});
+                      })();
+                    }}
+                    className="text-[11px] text-slate-500 hover:text-red-600 underline"
+                  >
+                    Clear context
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="plan-reload-blueprint"
+                    onClick={() => {
+                      void (async () => {
+                        const prompt = await loadBlueprintPrompt(false);
+                        if (prompt) {
+                          setRepoContext(prompt);
+                          setShowAdvanced(true);
+                        }
+                      })();
+                    }}
+                    className="text-[11px] text-teal-700 hover:text-teal-900 underline"
+                  >
+                    Reload from Lattice
+                  </button>
+                </div>
+              </div>
               <textarea
                 data-testid="plan-repo-context"
                 value={repoContext}

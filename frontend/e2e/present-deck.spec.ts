@@ -55,5 +55,49 @@ test.describe("Present Deck (PPTX + Zoom)", () => {
       return (window as unknown as { __presentDeckCalls?: { action: string }[] }).__presentDeckCalls || [];
     });
     expect(recorded.some((c) => c.action === "open_presentation")).toBeTruthy();
+
+    await page.getByTestId("present-deck-open-zoom").click();
+    await expect(page.getByTestId("present-deck-status")).toContainText(/Zoom|share|Narrate/i, {
+      timeout: 5_000,
+    });
+    const afterZoom = await page.evaluate(() => {
+      return (window as unknown as { __presentDeckCalls?: { action: string }[] }).__presentDeckCalls || [];
+    });
+    expect(afterZoom.some((c) => c.action === "open_zoom")).toBeTruthy();
+  });
+
+  test("Generate deck button calls Presenton proxy and fills path", async ({ page }) => {
+    await page.route("**/api/mentrix/companion/integrations", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          slack: false,
+          jira: false,
+          openai: true,
+          presenton: true,
+          presenton_base_url: "http://127.0.0.1:5000",
+        }),
+      });
+    });
+    await page.route("**/api/mentrix/presenton/generate", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          path: "C:\\\\Users\\\\test\\\\Documents\\\\mentrix-deck.pptx",
+          bytes: 1024,
+        }),
+      });
+    });
+
+    await page.goto("/mentrix-home?voice=1");
+    await expect(page.getByTestId("present-deck-generate")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("present-deck-prompt").fill("ZOAS status brief for leadership");
+    await page.getByTestId("present-deck-generate").click();
+    await expect(page.getByTestId("present-deck-path")).toHaveValue(/mentrix-deck\.pptx/i, {
+      timeout: 10_000,
+    });
   });
 });

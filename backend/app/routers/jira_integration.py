@@ -123,6 +123,32 @@ def configure_jira(req: JiraConfigCreate, db: Session = Depends(get_db)):
     )
 
 
+def _create_real_issue(base_url: str, project_key: str, summary: str, issue_type: str, db: Session) -> tuple[str, str] | None:
+    """Try to create a real Jira issue via the MCP jira adapter. Returns
+    (ticket_key, ticket_url) on success, None if Jira isn't reachable/
+    configured — callers fall back to a local placeholder in that case."""
+    from app.services.mcp.hub import execute_tool
+
+    try:
+        outcome = execute_tool(
+            db,
+            server_id="jira",
+            tool_name="create_issue",
+            arguments={"project": project_key, "summary": summary, "type": issue_type},
+        )
+    except Exception:
+        return None
+
+    if outcome.get("status") != "success":
+        return None
+    result = outcome.get("result") or {}
+    key = result.get("key")
+    if not key:
+        return None
+    base = (base_url or "").rstrip("/")
+    return key, f"{base}/browse/{key}"
+
+
 @router.post("/tickets", response_model=JiraTicketOut)
 def create_ticket(req: JiraTicketCreate, db: Session = Depends(get_db)):
     """Create a Jira ticket and link it to a ZECT resource."""
@@ -130,15 +156,21 @@ def create_ticket(req: JiraTicketCreate, db: Session = Depends(get_db)):
     if not config:
         raise HTTPException(status_code=400, detail="Jira not configured. Set up Jira first.")
 
-    ticket_key = f"{req.project_key}-{db.query(JiraTicketLink).count() + 1}"
-    ticket_url = f"{config.base_url}/browse/{ticket_key}"
+    real = _create_real_issue(config.base_url, req.project_key, req.summary, req.issue_type, db)
+    if real:
+        ticket_key, ticket_url = real
+        ticket_status = "To Do"
+    else:
+        ticket_key = f"{req.project_key}-{db.query(JiraTicketLink).count() + 1}"
+        ticket_url = f"{config.base_url}/browse/{ticket_key}"
+        ticket_status = "To Do (local placeholder — Jira create failed or not reachable)"
 
     link = JiraTicketLink(
         jira_config_id=config.id,
         ticket_key=ticket_key,
         ticket_url=ticket_url,
         ticket_summary=req.summary,
-        ticket_status="To Do",
+        ticket_status=ticket_status,
         ticket_type=req.issue_type,
         resource_type=req.resource_type,
         resource_id=req.resource_id,

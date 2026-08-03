@@ -156,6 +156,66 @@ class TestExecuteHeavyTool:
         result = assistant_phase.execute_heavy_tool("not_a_real_tool", {})
         assert result["ok"] is False
 
+    def test_scan_for_anomalies_runs_inline_against_real_scan(self, monkeypatch):
+        db = _session()
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr(
+            "app.services.security.threat_detection.run_anomaly_scan",
+            lambda db, lookback_hours=24: {"findings": [{"kind": "ip_churn"}], "scanned": {"audit_logs": 3}},
+        )
+
+        result = assistant_phase.execute_heavy_tool("scan_for_anomalies", {"lookback_hours": 12})
+
+        assert result["ok"] is True
+        assert result["findings"] == [{"kind": "ip_churn"}]
+        assert result["scanned"] == {"audit_logs": 3}
+
+    def test_scan_for_anomalies_handles_exception(self, monkeypatch):
+        db = _session()
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr(
+            "app.services.security.threat_detection.run_anomaly_scan",
+            Mock(side_effect=RuntimeError("db exploded")),
+        )
+
+        result = assistant_phase.execute_heavy_tool("scan_for_anomalies", {})
+
+        assert result["ok"] is False
+        assert "db exploded" in result["error"]
+
+    def test_file_security_ticket_creates_real_issue(self, monkeypatch):
+        db = _session()
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr(
+            "app.services.mcp.hub.execute_tool",
+            lambda db, server_id, tool_name, arguments, user_email="": {
+                "status": "success",
+                "result": {"key": "SEC-42"},
+            },
+        )
+
+        result = assistant_phase.execute_heavy_tool(
+            "file_security_ticket", {"summary": "IP churn for user 5", "description": "3 distinct IPs in 24h"},
+        )
+
+        assert result["ok"] is True
+        assert result["ticket_key"] == "SEC-42"
+
+    def test_file_security_ticket_reports_when_jira_not_configured(self, monkeypatch):
+        db = _session()
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr(
+            "app.services.mcp.hub.execute_tool",
+            lambda db, server_id, tool_name, arguments, user_email="": {
+                "status": "error",
+                "result": {"message": "not configured"},
+            },
+        )
+
+        result = assistant_phase.execute_heavy_tool("file_security_ticket", {"summary": "test"})
+
+        assert result["ok"] is False
+
 
 class TestRunAssistantLoop:
     def test_light_tool_executes_inline_via_permission_broker(self, monkeypatch):

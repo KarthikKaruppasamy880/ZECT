@@ -29,6 +29,8 @@ _HEAVY_TOOL_NAMES = {
     "trigger_build",
     "request_review",
     "trigger_deploy",
+    "scan_for_anomalies",
+    "file_security_ticket",
 }
 
 
@@ -104,6 +106,44 @@ def _heavy_tool_schemas() -> list[dict[str, Any]]:
                     "environment": {"type": "string"},
                 },
                 "required": ["owner", "repo", "workflow_file"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "scan_for_anomalies",
+            "description": (
+                "Scan ZECT's own audit trail (PermissionAudit + AuditLog) for signs "
+                "someone is probing or misusing access: permission-denial spikes, "
+                "logins from multiple IPs, bursts of activity on secrets/users/"
+                "permissions, and off-hours access to sensitive resources. Read-only, "
+                "fast enough to not background. Only looks at data ZECT already has "
+                "— it does not monitor anything outside this app."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lookback_hours": {"type": "integer", "description": "How far back to scan. Defaults to 24."},
+                },
+                "required": [],
+            },
+        },
+        {
+            "type": "function",
+            "name": "file_security_ticket",
+            "description": (
+                "File a real Jira ticket for a security finding (e.g. from "
+                "scan_for_anomalies). Requires Jira to be configured "
+                "(JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN) — creates an actual issue, "
+                "not a placeholder."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "description": {"type": "string"},
+                    "project_key": {"type": "string"},
+                },
+                "required": ["summary"],
             },
         },
     ]
@@ -212,7 +252,53 @@ def execute_heavy_tool(
         return {"ok": True, "score": result.get("quality_score"), "summary": result.get("summary")}
     if name == "trigger_deploy":
         return _trigger_deploy(args, created_by=created_by)
+    if name == "scan_for_anomalies":
+        return _scan_for_anomalies(args)
+    if name == "file_security_ticket":
+        return _file_security_ticket(args, created_by=created_by)
     return {"ok": False, "error": f"unknown heavy tool: {name}"}
+
+
+def _scan_for_anomalies(args: dict[str, Any]) -> dict[str, Any]:
+    from app.database import SessionLocal
+    from app.services.security.threat_detection import run_anomaly_scan
+
+    lookback_hours = int(args.get("lookback_hours") or 24)
+    db = SessionLocal()
+    try:
+        result = run_anomaly_scan(db, lookback_hours=lookback_hours)
+        return {"ok": True, **result}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def _file_security_ticket(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:
+    from app.database import SessionLocal
+    from app.services.mcp.hub import execute_tool
+
+    project_key = args.get("project_key") or os.getenv("SECURITY_JIRA_PROJECT_KEY", "SEC")
+    summary = args.get("summary", "")[:250]
+    description = args.get("description", "")
+    db = SessionLocal()
+    try:
+        outcome = execute_tool(
+            db,
+            server_id="jira",
+            tool_name="create_issue",
+            arguments={"project": project_key, "summary": summary, "type": "Bug"},
+            user_email=created_by,
+        )
+        if outcome.get("status") != "success":
+            return {"ok": False, "error": outcome.get("result", {}).get("message") or "Jira not configured or unreachable"}
+        result = outcome.get("result") or {}
+        key = result.get("key")
+        return {"ok": bool(key), "ticket_key": key, "description": description}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
 
 
 def _trigger_deploy(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:

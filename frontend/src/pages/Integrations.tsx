@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Plug, CheckCircle, XCircle, Send, Settings, Info } from "lucide-react";
+import { mentrixCompanionIntegrations } from "@/lib/api";
 
 interface JiraStatus {
   configured: boolean;
@@ -41,6 +42,11 @@ export default function Integrations() {
   const [jiraForm, setJiraForm] = useState({ base_url: "", email: "", api_token: "", default_project_key: "" });
   const [slackForm, setSlackForm] = useState({ bot_token: "", workspace_name: "", default_channel: "#zect-notifications" });
   const [testMsg, setTestMsg] = useState("");
+  const [githubReady, setGithubReady] = useState(false);
+  const [presentonReady, setPresentonReady] = useState(false);
+  const [presentonUrl, setPresentonUrl] = useState("");
+  const [zoomJoinReady, setZoomJoinReady] = useState(false);
+  const [zoomPathReady, setZoomPathReady] = useState(false);
 
   const fetchStatus = async () => {
     try {
@@ -60,6 +66,16 @@ export default function Integrations() {
       if (cRes.ok) {
         const data = await cRes.json();
         setMcpConfigs(Array.isArray(data) ? data : data.configs || []);
+      }
+      try {
+        const integ = await mentrixCompanionIntegrations();
+        setGithubReady(!!integ.github);
+        setPresentonReady(!!integ.presenton);
+        setPresentonUrl(integ.presenton_base_url || "");
+        setZoomJoinReady(!!integ.zoom_join_url_configured);
+        setZoomPathReady(!!integ.zoom_desktop_path_configured);
+      } catch {
+        /* ignore */
       }
     } catch { /* API not available */ }
   };
@@ -132,16 +148,57 @@ export default function Integrations() {
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 space-y-2">
           <h3 className="font-semibold text-indigo-900">How to use Integrations</h3>
           <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
-            <li><strong>Jira</strong> — Connect your Atlassian instance to create tickets from code review findings. You need a Jira API token (Settings &rarr; API tokens in Atlassian).</li>
+            <li><strong>GitHub</strong> — Set <code>GITHUB_TOKEN</code> in <code>backend/.env</code> (repo read + PR create). Status card below shows readiness (never shows the token).</li>
+            <li><strong>Jira</strong> — UI form below <em>or</em> env: <code>JIRA_BASE_URL</code> / <code>MCP_JIRA_URL</code>, <code>JIRA_EMAIL</code>, <code>JIRA_API_TOKEN</code>. Same credentials power Mentrix Incident + MCP.</li>
             <li><strong>Slack</strong> — Get notifications when reviews complete, deployments happen, or budget alerts trigger. Create a Slack bot at api.slack.com/apps.</li>
-            <li><strong>Test notifications</strong> — After configuring Slack, use the test message box to verify the connection works.</li>
-            <li><strong>GitHub</strong> — Set GITHUB_TOKEN in your backend .env file for repo analysis and PR review features.</li>
+            <li><strong>Presenton</strong> — Self-host Docker; set <code>PRESENTON_BASE_URL</code>. Mentrix Companion → Present Deck → Generate deck → PPTX path.</li>
+            <li><strong>Zoom (Present Deck)</strong> — Optional <code>ZOOM_DESKTOP_PATH</code> / <code>ZOOM_DEFAULT_JOIN_URL</code>. Mentrix opens Zoom only; you join and share PowerPoint (no Meeting SDK).</li>
             <li><strong>MCP hub</strong> — Mentrix Integrator/Ops <em>execute</em> outbound tools via <code>/api/mcp</code> (Rules Engine gates every call).</li>
-            <li><strong>Slack / Email / Datadog (Wave 1 outbound)</strong> — Enable below; set <code>SLACK_BOT_TOKEN</code>, <code>SMTP_*</code>, <code>DATADOG_*</code> in backend <code>.env</code>.</li>
-            <li><strong>Wave 2</strong> — Slack Events inbound reply bot and email inbox poll (not in this ship).</li>
           </ul>
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6" data-testid="integrations-readiness">
+        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-github-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-900 font-semibold">GitHub</h3>
+              <p className="text-xs text-slate-500">Repo analysis, Mentrix Create PR, Actions</p>
+            </div>
+            {githubReady ? (
+              <CheckCircle className="h-5 w-5 text-green-500" data-testid="github-ready" />
+            ) : (
+              <XCircle className="h-5 w-5 text-slate-300" data-testid="github-missing" />
+            )}
+          </div>
+          <p className="text-sm text-slate-600">
+            {githubReady
+              ? "GITHUB_TOKEN is set in backend env (value never shown)."
+              : "Not ready — add GITHUB_TOKEN to backend/.env and restart uvicorn."}
+          </p>
+          <p className="text-xs text-slate-500">
+            Token needs repo + pull_request write for real Mentrix PRs. Keep MENTRIX_PR_DRY_RUN=true until you intend a live PR.
+          </p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-zoom-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-900 font-semibold">Zoom + Presenton</h3>
+              <p className="text-xs text-slate-500">Present Deck assist (no auto-share)</p>
+            </div>
+            {presentonReady || zoomJoinReady || zoomPathReady ? (
+              <CheckCircle className="h-5 w-5 text-green-500" />
+            ) : (
+              <XCircle className="h-5 w-5 text-slate-300" />
+            )}
+          </div>
+          <ul className="text-sm text-slate-600 space-y-1">
+            <li>Presenton: {presentonReady ? `ready (${presentonUrl || "configured"})` : "set PRESENTON_BASE_URL"}</li>
+            <li>Zoom path: {zoomPathReady ? "ZOOM_DESKTOP_PATH set" : "auto-detect Zoom.exe / set path"}</li>
+            <li>Join URL: {zoomJoinReady ? "ZOOM_DEFAULT_JOIN_URL set" : "optional — paste in Present Deck"}</li>
+          </ul>
+        </div>
+      </div>
 
       {mcpServers.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="mcp-enable-panel">

@@ -1,5 +1,6 @@
 // Prefer 127.0.0.1 — Electron/Windows can hang on localhost → IPv6 (::1)
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+// Local Mentrix TTS-fixed stack often runs on :8020 when :8000 is occupied by a stale process.
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8020";
 
 /** Bearer + JSON headers for authenticated API calls. */
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -490,8 +491,30 @@ export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, repl
   });
 export const mentrixCompanionTools = () => request<any>("/api/mentrix/companion/tools");
 export const mentrixCompanionIntegrations = () =>
-  request<{ slack: boolean; jira: boolean; openai: boolean; slack_channel?: string }>(
-    "/api/mentrix/companion/integrations",
+  request<{
+    slack: boolean;
+    jira: boolean;
+    openai: boolean;
+    datadog?: boolean;
+    github?: boolean;
+    presenton?: boolean;
+    presenton_base_url?: string;
+    zoom_join_url_configured?: boolean;
+    zoom_desktop_path_configured?: boolean;
+    slack_channel?: string;
+  }>("/api/mentrix/companion/integrations");
+export const mentrixPresentonStatus = () =>
+  request<{ configured: boolean; base_url: string }>("/api/mentrix/presenton/status");
+export const mentrixPresentonGenerate = (data: {
+  content: string;
+  n_slides?: number;
+  template?: string;
+  instructions?: string;
+  filename?: string;
+}) =>
+  request<{ ok: boolean; path: string; bytes?: number; presentation_id?: string }>(
+    "/api/mentrix/presenton/generate",
+    { method: "POST", body: JSON.stringify(data) },
   );
 export const mentrixRealtimeSession = () =>
   request<{
@@ -538,10 +561,19 @@ export const cloneMyVoice = async (
   if (token) headers.Authorization = `Bearer ${token}`;
   // Deliberately not using apiFetch here — it hardcodes Content-Type: application/json,
   // which breaks multipart form uploads (the browser must set its own boundary).
-  const res = await fetch(`${API}/api/mentrix/voice/clone`, { method: "POST", body: form, headers });
+  const url = `${API}/api/mentrix/voice/clone`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", body: form, headers });
+  } catch {
+    throw new Error(`Cannot reach ZECT API at ${API} — is the backend running on :8000?`);
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === "string" ? err.detail : res.statusText);
+    const detail = err.detail;
+    throw new Error(
+      typeof detail === "string" ? detail : detail?.message || res.statusText || `Clone failed (${res.status})`,
+    );
   }
   return res.json();
 };
@@ -560,18 +592,33 @@ export const deleteClonedVoice = (voiceId: string) =>
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
-/** Speak text with the user's default Chatterbox voice. Returns audio blob URL or null. */
-export async function mentrixSpeakCloned(text: string): Promise<string | null> {
+/** Speak text via Mentrix TTS (Chatterbox clone or OpenAI fallback). Returns audio blob URL. */
+export async function mentrixSpeakCloned(text: string): Promise<string> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API}/api/mentrix/voice/speak`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ text: text.slice(0, 4000) }),
-  });
-  if (!res.ok) return null;
+  const url = `${API}/api/mentrix/voice/speak`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: text.slice(0, 4000) }),
+    });
+  } catch {
+    throw new Error(`Cannot reach ZECT API at ${API} — is the backend running?`);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = err.detail;
+    throw new Error(
+      typeof detail === "string"
+        ? detail
+        : detail?.message || res.statusText || `Speak failed (${res.status})`,
+    );
+  }
   const blob = await res.blob();
+  if (!blob.size) throw new Error("Speak returned empty audio");
   return URL.createObjectURL(blob);
 }
 
@@ -640,7 +687,16 @@ export const mentrixConfirmPlan = (
   });
 export const mentrixCreatePr = (
   runId: number,
-  data?: { title?: string; body?: string; dry_run?: boolean; repo_path?: string }
+  data?: {
+    title?: string;
+    body?: string;
+    dry_run?: boolean;
+    repo_path?: string;
+    owner?: string;
+    repo_name?: string;
+    head_branch?: string;
+    base_branch?: string;
+  },
 ) =>
   request<any>(`/api/mentrix/runs/${runId}/create-pr`, {
     method: "POST",

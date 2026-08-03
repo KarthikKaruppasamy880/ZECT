@@ -77,8 +77,13 @@ export const ORB: Record<AvatarState, string> = {
   needs_permission: "from-amber-950 to-slate-950 border-amber-500 shadow-amber-600/60",
 };
 
-function speak(text: string, enabled: boolean) {
-  void speakMentrix(text, enabled);
+function speak(text: string, enabled: boolean, onFail?: (err: string) => void) {
+  void speakMentrix(text, enabled).then((r) => {
+    if (!r.ok) {
+      console.warn("[mentrix TTS]", r.error);
+      onFail?.(r.error);
+    }
+  });
 }
 
 function loadPersistedMessages(): ChatMsg[] {
@@ -241,12 +246,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   computerModeRef.current = computerMode;
   const voiceConnectedRef = useRef(voiceConnected);
   voiceConnectedRef.current = voiceConnected;
-  const browserTtsEnabled = tts && !voiceConnected;
+  // Typed Companion replies use Mentrix /voice/speak when TTS is on.
+  // Connect Voice synthesizes separately via speakWithClonedVoice — do not
+  // mute chat TTS just because the mic session is connected.
+  const browserTtsEnabled = tts;
 
-  const speakAllowed = useCallback(
-    () => ttsRef.current && !voiceConnectedRef.current,
-    [],
-  );
+  const speakAllowed = useCallback(() => ttsRef.current, []);
 
   const pushLog = useCallback((text: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -442,7 +447,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             setAvatar("needs_permission");
             speak("I need your permission to continue.", speakAllowed());
           },
-          onError: (err) => handleQuotaError(err),
+          onError: (err) => {
+            if (/Voice output:/i.test(String(err))) {
+              setStatusLine(String(err));
+              pushLog(String(err));
+              return;
+            }
+            handleQuotaError(err);
+          },
           onFallback: (reason) => {
             pushLog(`realtime_unavailable ${reason}`);
             if (isOpenAiQuotaError(String(reason))) {
@@ -541,7 +553,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             setAvatar("needs_permission");
           } else {
             setAvatar("speaking");
-            speak(reply, ttsRef.current && !voiceConnectedRef.current);
+            speak(reply, ttsRef.current, (err) => setStatusLine(`Voice: ${err}`));
           }
           setStatusLine(d.latency_mode === "fast_tools" ? "Replied (instant)" : "SYSTEMS OPERATIONAL");
           pushLog(`done ${d.latency_ms || 0}ms`);
@@ -686,10 +698,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     }
     setAvatar("speaking");
     setStatusLine("Present / Narrate");
+    let lastErr = "";
     for (const chunk of chunks) {
-      await speakMentrix(chunk, true);
+      const result = await speakMentrix(chunk, true);
+      if (!result.ok) lastErr = result.error;
     }
     setAvatar("idle");
+    if (lastErr) setStatusLine(`Voice: ${lastErr}`);
+    else setStatusLine("Present / Narrate complete");
   }, [board, messages]);
 
   const onAllow = useCallback(

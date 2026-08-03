@@ -105,6 +105,7 @@ export default function App() {
       apiLogout(token).catch(() => {});
     }
     localStorage.removeItem("zect_token");
+    localStorage.removeItem("zect_username");
     setAuthenticated(false);
   };
 

@@ -134,7 +134,7 @@ def log_audit(
     except Exception as e:
         db.rollback()
         # Don't raise — audit logging failures shouldn't break operations
-        print(f"⚠️  Audit logging failed: {e}")
+        print(f"[audit] logging failed: {e}")
         return None
 
 

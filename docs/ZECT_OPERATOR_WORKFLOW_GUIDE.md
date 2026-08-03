@@ -60,10 +60,12 @@ Do this **once** per repo key; later Ask/Plan/Mentrix reuse it.
 Ask  →  Plan  →  Build  →  (optional) Review / Sandbox  →  Mentrix Delivery or Agent Mode  →  PR
 ```
 
-1. **Ask** (`/ask`) — questions about the codebase (pass `repo_id` / Lattice context via workspace selector).
-2. **Plan** (`/plan`) — turn the ask into an implementation plan; hand off to Build or Mentrix.
-3. **Build** (`/build`) — generate/write code into the workspace when configured.
-4. Prefer **Mentrix Delivery** (`/mentrix`) for gated upgrade/bugfix with Approve → Create PR.
+1. **Ask** (`/ask`) — questions about the codebase (pass `repo_id` / Lattice context via workspace selector). Sticky blueprint: **Clear context** / **Reload from Lattice**.
+2. **Plan** (`/plan`) — turn the ask into an implementation plan; same Clear / Reload controls as Ask.
+3. **Doc Generator** (`/doc-generator`) — prefill owner/repo from header workspace; generate section docs via GitHub API + LLM (`GITHUB_TOKEN`). Not Mentrix Delivery / not Lattice Blueprint.
+4. **Build** (`/build`) — generate/write code into the workspace when configured.
+5. Prefer **Mentrix Delivery** (`/mentrix`) for gated upgrade/bugfix with Approve → Create PR. Check **Create real GitHub PR** only when you want dry-run off. Scorecard = grounded plan + gates green (never “100% / 0 error”).
+6. Header **Presence** = collaboration WebSocket (online users), not Wi‑Fi.
 
 ---
 
@@ -158,7 +160,7 @@ One shell (`/mentrix-home`) with tabs: **Chat** | **Incident** | **Voice**. Side
 | Manage voices | List saved clones → **Use** (default for Present/sessions) or **Delete** anytime |
 | Speak as you | TTS on + **Connect Voice**; **Present / Narrate** uses the **default** DB voice |
 | Present Board (no files) | Companion → **Present / Narrate** — speaks Mentrix Board artifacts / last reply with Chatterbox (not PowerPoint files) |
-| Prepared PPTX + Zoom | Companion → **Voice** → **Present Deck** — path to `.pptx` under Desktop/Documents/Downloads → **Open presentation** → **Open Zoom** → share the PowerPoint window in Zoom yourself → **Narrate talking points** with default clone |
+| Prepared PPTX + Zoom | Companion → **Voice** → **Present Deck** — **Generate deck** (Presenton / `PRESENTON_BASE_URL`) or paste `.pptx` under Desktop/Documents/Downloads (OneDrive OK; strip quotes) → **Open presentation** → **Open Zoom** (optional join URL / `ZOOM_DEFAULT_JOIN_URL`) → **you** join the meeting and share PowerPoint → **Narrate talking points** with default clone. No Meeting SDK / auto-share. |
 | Incident | Companion → **Incident** or `?incident=1` |
 | Desktop notes | Electron Computer Mode → Allow write note file (never delete) |
 

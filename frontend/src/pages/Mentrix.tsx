@@ -109,6 +109,7 @@ export default function Mentrix() {
   const [wakeHint, setWakeHint] = useState("");
   const [jiraCommentNote, setJiraCommentNote] = useState("");
   const [planSummary, setPlanSummary] = useState("");
+  const [realGithubPr, setRealGithubPr] = useState(false);
   const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenStatus = useRef<string>("");
@@ -430,7 +431,22 @@ export default function Mentrix() {
     setJiraCommentNote("");
     setLoading(true);
     try {
-      const run = await mentrixCreatePr(active.id, { dry_run: true });
+      const pk = projectKey.trim();
+      let owner = "";
+      let repoName = "";
+      // Lattice keys are usually owner-repo (e.g. zinnia-zoas)
+      const dash = pk.lastIndexOf("-");
+      if (dash > 0) {
+        owner = pk.slice(0, dash);
+        repoName = pk.slice(dash + 1);
+      }
+      const run = await mentrixCreatePr(active.id, {
+        dry_run: !realGithubPr,
+        repo_path: workspace.trim() || undefined,
+        owner: owner || undefined,
+        repo_name: repoName || undefined,
+        base_branch: owner === "zinnia" && repoName === "zoas" ? "develop" : "main",
+      });
       setActive(run);
       setMessages(eventsToMessages(run));
       await refresh();
@@ -440,7 +456,7 @@ export default function Mentrix() {
         (typeof run?.result?.pr === "object" ? run.result.pr?.html_url : "") ||
         "";
       const key = issueKey.trim().toUpperCase();
-      if (key && pr) {
+      if (key && pr && !String(pr).includes("dry-run")) {
         try {
           await mentrixRealtimeTool(
             "jira_comment_pr",
@@ -453,9 +469,11 @@ export default function Mentrix() {
             ce instanceof Error ? `Jira comment skipped: ${ce.message}` : "Jira comment skipped",
           );
         }
-      } else if (key && !pr) {
+      } else if (key && (!pr || !realGithubPr)) {
         setJiraCommentNote(
-          `Dry-run PR — paste a real PR URL on Incident Runbook to comment ${key}`,
+          realGithubPr
+            ? `No PR URL returned for ${key}`
+            : `Dry-run PR — enable “Create real GitHub PR” for a live URL, or paste one on Incident Runbook for ${key}`,
         );
       }
     } catch (e) {
@@ -783,6 +801,15 @@ export default function Mentrix() {
                   />
                   Acknowledge issues (override sandbox / Ultra Review / API eval — not plan/SAST/security)
                 </label>
+                <label className="flex items-center gap-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    data-testid="mentrix-real-github-pr"
+                    checked={realGithubPr}
+                    onChange={(e) => setRealGithubPr(e.target.checked)}
+                  />
+                  Create real GitHub PR (dry-run off). Scorecard = grounded plan + gates green — not “100% / 0 error.”
+                </label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     data-testid="mentrix-approve"
@@ -800,7 +827,7 @@ export default function Mentrix() {
                     className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-white text-xs disabled:opacity-40"
                   >
                     <GitPullRequest className="h-3.5 w-3.5" />
-                    Create PR
+                    {realGithubPr ? "Create PR (live)" : "Create PR (dry-run)"}
                   </button>
                 </div>
               </>

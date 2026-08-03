@@ -373,11 +373,15 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
       note: "Mentrix never deletes, unlinks, or rmdirs files",
     };
   }
+  if (action === "open_zoom" || action === "desktop_open_zoom") {
+    lastOpenedApp = process.platform === "darwin" ? "zoom.us" : "Zoom.exe";
+    return computer.openZoom(a);
+  }
   if (action === "open_app" || action === "open") {
     const appName =
       a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
     lastOpenedApp = appName;
-    return computer.openApp(appName);
+    return computer.openApp(appName, a);
   }
   if (
     action === "open_presentation" ||

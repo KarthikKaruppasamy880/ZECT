@@ -1,22 +1,45 @@
 /**
- * Companion Present Deck — open prepared PPTX + Zoom (Electron) and narrate notes (Chatterbox).
+ * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (Chatterbox).
  */
 import { useEffect, useState } from "react";
-import { Presentation, Mic, MonitorPlay } from "lucide-react";
+import { Presentation, Mic, MonitorPlay, Sparkles } from "lucide-react";
+import { mentrixCompanionIntegrations, mentrixPresentonGenerate } from "@/lib/api";
 import { speakMentrix } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
+const PROMPT_KEY = "zect_mentrix_present_deck_prompt";
+const JOIN_KEY = "zect_mentrix_zoom_join_url";
 
 type Props = {
   variant?: "dark" | "light";
 };
 
+function friendlyDesktopError(code: string): string {
+  const c = String(code || "");
+  if (c === "unsupported_presentation_type") {
+    return "Need a .pptx/.ppt/.pdf path — strip quotes when pasting from Explorer.";
+  }
+  if (c === "path_outside_allowlist") {
+    return "Path must be under Desktop, Documents, or Downloads (OneDrive OK).";
+  }
+  if (c === "not_found") return "File not found at that path.";
+  if (c === "zoom_not_found") {
+    return "Zoom.exe not found — set ZOOM_DESKTOP_PATH or a Zoom join URL.";
+  }
+  if (c === "invalid_zoom_join_url") return "Join URL must be https://*.zoom.us/…";
+  if (c === "computer_mode_off") return "Turn on Computer Mode in Electron first.";
+  return c;
+}
+
 export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [path, setPath] = useState("");
   const [notes, setNotes] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [joinUrl, setJoinUrl] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [presentonReady, setPresentonReady] = useState(false);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
 
@@ -24,9 +47,19 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     try {
       setPath(localStorage.getItem(STORAGE_KEY) || "");
       setNotes(localStorage.getItem(NOTES_KEY) || "");
+      setPrompt(localStorage.getItem(PROMPT_KEY) || "");
+      setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
     } catch {
       /* ignore */
     }
+    mentrixCompanionIntegrations()
+      .then((s) => {
+        setPresentonReady(!!s.presenton);
+        if (!localStorage.getItem(JOIN_KEY) && s.zoom_join_url_configured) {
+          /* env-backed join is opened server-side via Electron env; UI field optional */
+        }
+      })
+      .catch(() => setPresentonReady(false));
   }, []);
 
   const persistPath = (value: string) => {
@@ -42,6 +75,24 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setNotes(value);
     try {
       localStorage.setItem(NOTES_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistPrompt = (value: string) => {
+    setPrompt(value);
+    try {
+      localStorage.setItem(PROMPT_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistJoin = (value: string) => {
+    setJoinUrl(value);
+    try {
+      localStorage.setItem(JOIN_KEY, value);
     } catch {
       /* ignore */
     }
@@ -65,25 +116,62 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setStatus("Electron desktop app required to open PowerPoint / Zoom.");
       return { ok: false as const, error: "not_desktop_app" };
     }
-    const res = (await computer(action, args)) as { ok?: boolean; error?: string };
+    const res = (await computer(action, args)) as {
+      ok?: boolean;
+      error?: string;
+      hint?: string;
+      note?: string;
+    };
     if (res?.ok === false) {
-      setStatus(String(res.error || "desktop_failed"));
+      const msg = friendlyDesktopError(String(res.error || "desktop_failed"));
+      setStatus(res.hint ? `${msg} (${res.hint})` : msg);
       return { ok: false as const, error: String(res.error || "desktop_failed") };
     }
-    return { ok: true as const };
+    return { ok: true as const, note: res.note };
+  };
+
+  const generateDeck = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const content = prompt.trim();
+      if (!content) {
+        setStatus("Enter a deck prompt (topic + key points) for Presenton.");
+        return;
+      }
+      const out = await mentrixPresentonGenerate({
+        content,
+        n_slides: 6,
+        template: "general",
+        filename: "mentrix-deck.pptx",
+      });
+      if (out?.path) {
+        persistPath(out.path);
+        setStatus(`Deck saved to ${out.path}. Open presentation, then join Zoom and share.`);
+      } else {
+        setStatus("Presenton returned no path — check PRESENTON_BASE_URL.");
+      }
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Generate deck failed");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const openPresentation = async () => {
     setBusy(true);
     setStatus("");
     try {
-      const target = path.trim();
+      const target = path.trim().replace(/^["']+|["']+$/g, "");
       if (!target) {
-        setStatus("Enter a .pptx path under Desktop, Documents, or Downloads.");
+        setStatus("Enter a .pptx path under Desktop, Documents, or Downloads (OneDrive OK).");
         return;
       }
+      persistPath(target);
       const res = await runComputer("open_presentation", { path: target });
-      if (res.ok) setStatus("Opened presentation in PowerPoint. Share that window in Zoom.");
+      if (res.ok) {
+        setStatus("Opened presentation in PowerPoint. Join your meeting, share PowerPoint, then Narrate.");
+      }
     } finally {
       setBusy(false);
     }
@@ -93,12 +181,14 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setBusy(true);
     setStatus("");
     try {
-      const app =
-        typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
-          ? "zoom.us"
-          : "Zoom.exe";
-      const res = await runComputer("open_app", { app });
-      if (res.ok) setStatus("Opened Zoom. Join your meeting and share the PowerPoint window.");
+      const url = joinUrl.trim();
+      const res = await runComputer("open_zoom", url ? { join_url: url } : {});
+      if (res.ok) {
+        setStatus(
+          res.note ||
+            "Opened Zoom. Join your meeting, share PowerPoint, then Narrate. (Mentrix does not auto-share.)",
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -111,8 +201,16 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       const text =
         notes.trim() ||
         "Mentrix Present Deck. Paste talking points, then Narrate again with your default Chatterbox voice.";
-      await speakMentrix(text.slice(0, 2000), true);
-      setStatus("Narrating talking points with your default Chatterbox voice.");
+      const result = await speakMentrix(text.slice(0, 2000), true);
+      if (result.ok) {
+        setStatus(
+          result.engine === "browser_speechSynthesis"
+            ? "Narrating via browser speech (Chatterbox/OpenAI unavailable)."
+            : "Narrating talking points (Mentrix TTS).",
+        );
+      } else {
+        setStatus(result.error);
+      }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Narrate failed");
     } finally {
@@ -140,8 +238,39 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         </p>
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
-        Share the PowerPoint window in Zoom yourself; Mentrix opens apps and narrates.
+        Generate with Presenton (optional), open PowerPoint + Zoom in Electron. You join the meeting
+        and share the PowerPoint window — Mentrix narrates with your clone.
       </p>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Generate deck prompt (Presenton)
+        <textarea
+          data-testid="present-deck-prompt"
+          value={prompt}
+          onChange={(e) => persistPrompt(e.target.value)}
+          rows={2}
+          placeholder="Q2 ZOAS delivery brief: status, risks, next actions…"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        />
+      </label>
+      <button
+        type="button"
+        data-testid="present-deck-generate"
+        disabled={busy}
+        onClick={() => void generateDeck()}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-700 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950 disabled:opacity-40"
+        title={
+          presentonReady
+            ? "Calls PRESENTON_BASE_URL generate API"
+            : "Set PRESENTON_BASE_URL and run Presenton Docker"
+        }
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Generate deck
+      </button>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Presentation path (.pptx)
         <input
@@ -149,6 +278,20 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           value={path}
           onChange={(e) => persistPath(e.target.value)}
           placeholder="C:\\Users\\you\\Documents\\deck.pptx"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        />
+      </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Zoom join URL (optional)
+        <input
+          data-testid="present-deck-zoom-join"
+          value={joinUrl}
+          onChange={(e) => persistJoin(e.target.value)}
+          placeholder="https://zoom.us/j/…"
           className={
             dark
               ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"

@@ -530,27 +530,68 @@ export async function startMentrixRealtime(
   const finalizedResponseIds = new Set<string>();
 
   const speakWithClonedVoice = async (text: string) => {
-    if (!text.trim() || !audioCtx || stopped) return;
+    if (!text.trim() || stopped) return;
     try {
+      if (audioCtx?.state === "suspended") {
+        await audioCtx.resume();
+      }
       const res = await apiFetch("/api/mentrix/voice/speak", {
         method: "POST",
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: text.slice(0, 4000) }),
       });
-      if (!res.ok || stopped || !audioCtx) return;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        const detail =
+          typeof err.detail === "string" ? err.detail : `Speak failed (${res.status})`;
+        handlers.onLog?.(`cloned TTS failed: ${detail}`);
+        handlers.onError?.(`Voice output: ${detail}`);
+        return;
+      }
+      if (stopped) return;
       const arrayBuf = await res.arrayBuffer();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuf);
-      if (stopped || !audioCtx) return;
-      const node = audioCtx.createBufferSource();
-      node.buffer = audioBuffer;
-      node.connect(audioCtx.destination);
+      if (!arrayBuf.byteLength) {
+        handlers.onError?.("Voice output: empty audio from /voice/speak");
+        return;
+      }
+      // Prefer AudioContext (same pipeline as Realtime PCM); fall back to HTMLAudioElement
+      if (audioCtx) {
+        try {
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuf.slice(0));
+          if (stopped || !audioCtx) return;
+          const node = audioCtx.createBufferSource();
+          node.buffer = audioBuffer;
+          node.connect(audioCtx.destination);
+          handlers.onOrb?.("speaking");
+          node.onended = () => {
+            if (!stopped) handlers.onOrb?.("listening");
+          };
+          node.start();
+          return;
+        } catch (decodeErr) {
+          handlers.onLog?.(
+            `AudioContext decode failed — HTMLAudio fallback: ${
+              decodeErr instanceof Error ? decodeErr.message : "decode error"
+            }`,
+          );
+        }
+      }
+      const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
       handlers.onOrb?.("speaking");
-      node.onended = () => {
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
         if (!stopped) handlers.onOrb?.("listening");
       };
-      node.start();
-    } catch {
-      // Best-effort — the assistant's text still reaches onTranscript even if
-      // cloned-voice synthesis fails (e.g. provider outage).
+      await audio.play();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "cloned TTS failed";
+      handlers.onLog?.(`cloned TTS error: ${msg}`);
+      handlers.onError?.(
+        /NotAllowedError|user interaction/i.test(msg)
+          ? "Voice output blocked — click the Mentrix window, then speak again"
+          : `Voice output: ${msg}`,
+      );
     }
   };
 

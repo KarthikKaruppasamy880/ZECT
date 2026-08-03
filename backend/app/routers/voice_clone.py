@@ -383,7 +383,8 @@ def speak(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.chatterbox_client import synthesize_speech
+    from app.services.llm.chatterbox_client import chatterbox_available, synthesize_speech
+    from app.services.llm.openai_tts import openai_tts_available, synthesize_openai_speech
 
     _rate_limit(_speak_hits, current_user.user_id, SPEAK_RATE_LIMIT)
 
@@ -399,26 +400,75 @@ def speak(
         )
     else:
         row = _default_voice(db, current_user.user_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="No cloned voice configured for this user")
+
+    # Prefer Chatterbox clone; if engine offline and OpenAI is configured, still speak
+    # (stock OpenAI voice — not the clone) so Present/Companion is not silent.
+    audio: bytes | None = None
+    engine_used = "none"
+    if row:
+        try:
+            if chatterbox_available():
+                engine_id = _ensure_engine_profile(row)
+                if engine_id != row.external_voice_id:
+                    row.external_voice_id = engine_id
+                    db.commit()
+                audio = synthesize_speech(text, engine_id)
+                engine_used = "chatterbox"
+            elif row.external_voice_id:
+                # Profile id exists but engine may be down — try once, then fall back
+                audio = synthesize_speech(text, row.external_voice_id)
+                engine_used = "chatterbox"
+        except HTTPException as e:
+            if e.status_code not in (502, 503, 404) or not openai_tts_available():
+                raise
+            audio = None
+        except Exception:
+            # httpx ConnectError / RuntimeError when Chatterbox is down
+            if not openai_tts_available():
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "Chatterbox speak failed — start local engine (CHATTERBOX_BASE_URL) "
+                        "or set OPENAI_API_KEY for TTS fallback"
+                    ),
+                )
+            audio = None
+
+    if audio is None:
+        if not openai_tts_available():
+            if not row:
+                raise HTTPException(
+                    status_code=404,
+                    detail="No cloned voice configured — clone a voice in Companion → Voice, or set OPENAI_API_KEY for TTS fallback",
+                )
+            raise HTTPException(
+                status_code=503,
+                detail="Chatterbox engine offline — start CHATTERBOX_BASE_URL service, or set OPENAI_API_KEY for TTS fallback",
+            )
+        try:
+            audio = synthesize_openai_speech(text)
+            engine_used = "openai_tts_fallback"
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
 
     try:
-        engine_id = _ensure_engine_profile(row)
-        if engine_id != row.external_voice_id:
-            row.external_voice_id = engine_id
-            db.commit()
-        audio = synthesize_speech(text, engine_id)
-    except HTTPException:
-        raise
-    except RuntimeError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        log_audit(
+            db=db,
+            user_id=current_user.user_id,
+            action="voice_speak",
+            resource_type="cloned_voice",
+            details={
+                "chars": len(text),
+                "voice_id": (row.voice_id[:32] if row else ""),
+                "engine": engine_used,
+            },
+        )
+    except Exception:
+        # Windows consoles (cp1252) can break on emoji in audit helpers — never block audio.
+        pass
 
-    log_audit(
-        db=db,
-        user_id=current_user.user_id,
-        action="voice_speak",
-        resource_type="cloned_voice",
-        details={"chars": len(text), "voice_id": row.voice_id[:32]},
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers={"X-Mentrix-TTS-Engine": engine_used},
     )
-
-    return Response(content=audio, media_type="audio/mpeg")

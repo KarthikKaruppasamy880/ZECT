@@ -41,7 +41,31 @@ function allowlisted(appName) {
   return WIN_APPS.includes(base);
 }
 
-async function openApp(appName) {
+function resolveZoomExe() {
+  if (process.env.ZOOM_DESKTOP_PATH && fs.existsSync(process.env.ZOOM_DESKTOP_PATH)) {
+    return process.env.ZOOM_DESKTOP_PATH;
+  }
+  const home = os.homedir();
+  const candidates = [
+    path.join(process.env.PROGRAMFILES || "C:\\Program Files", "Zoom", "bin", "Zoom.exe"),
+    path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Zoom", "bin", "Zoom.exe"),
+    path.join(home, "AppData", "Roaming", "Zoom", "bin", "Zoom.exe"),
+    path.join(home, "AppData", "Local", "Zoom", "bin", "Zoom.exe"),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+async function openApp(appName, args) {
+  const a = args || {};
+  const raw = String(appName || "");
+  const isZoom =
+    /zoom/i.test(raw) || String(a.app || "").toLowerCase().includes("zoom");
+  if (isZoom) {
+    return openZoom(a);
+  }
   if (!allowlisted(appName)) {
     return { ok: false, error: "app_not_allowlisted", app: appName };
   }
@@ -51,8 +75,66 @@ async function openApp(appName) {
       return { ok: true, opened: appName, platform: "darwin", audited: true };
     }
     const base = String(appName).split(/[/\\]/).pop();
-    spawn(base, [], { detached: true, stdio: "ignore", shell: true }).unref();
+    const child = spawn(base, [], { detached: true, stdio: "ignore", shell: true });
+    child.unref();
     return { ok: true, opened: base, platform: "win32", audited: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function openZoom(args) {
+  const a = args || {};
+  const joinUrl = String(
+    a.join_url || a.url || process.env.ZOOM_DEFAULT_JOIN_URL || "",
+  ).trim();
+  try {
+    if (joinUrl) {
+      if (!/^https?:\/\/([\w.-]+\.)?zoom\.us\//i.test(joinUrl)) {
+        return { ok: false, error: "invalid_zoom_join_url", hint: "Use a https://*.zoom.us/… link" };
+      }
+      if (process.platform === "darwin") {
+        await execFileAsync("open", [joinUrl]);
+      } else if (process.platform === "win32") {
+        spawn("cmd", ["/c", "start", "", joinUrl], { detached: true, stdio: "ignore" }).unref();
+      } else {
+        spawn("xdg-open", [joinUrl], { detached: true, stdio: "ignore" }).unref();
+      }
+      return {
+        ok: true,
+        opened: "zoom_join_url",
+        join_url: joinUrl,
+        platform: process.platform,
+        audited: true,
+        note: "Join your meeting, share PowerPoint, then Narrate.",
+      };
+    }
+    if (process.platform === "darwin") {
+      await execFileAsync("open", ["-a", "zoom.us"]);
+      return {
+        ok: true,
+        opened: "zoom.us",
+        platform: "darwin",
+        audited: true,
+        note: "Join your meeting, share PowerPoint, then Narrate.",
+      };
+    }
+    const exe = resolveZoomExe();
+    if (!exe) {
+      return {
+        ok: false,
+        error: "zoom_not_found",
+        hint: "Install Zoom or set ZOOM_DESKTOP_PATH / ZOOM_DEFAULT_JOIN_URL",
+      };
+    }
+    spawn(exe, [], { detached: true, stdio: "ignore" }).unref();
+    return {
+      ok: true,
+      opened: exe,
+      platform: "win32",
+      audited: true,
+      note: "Join your meeting, share PowerPoint, then Narrate.",
+    };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -247,34 +329,81 @@ function refuseDelete(action, detail) {
   };
 }
 
-function presentationPathAllowed(resolved) {
+function stripPathQuotes(raw) {
+  let s = String(raw || "").trim();
+  // Paste from Explorer / chat often wraps paths in quotes
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s.replace(/^["']+|["']+$/g, "").trim();
+}
+
+function presentationAllowlistRoots() {
   const home = os.homedir();
-  const docs = path.resolve(path.join(home, "Documents"));
-  const desk = path.resolve(path.join(home, "Desktop"));
-  const downloads = path.resolve(path.join(home, "Downloads"));
+  const roots = [
+    path.join(home, "Documents"),
+    path.join(home, "Desktop"),
+    path.join(home, "Downloads"),
+    // OneDrive redirected Desktop / Documents (common on corp Windows)
+    path.join(home, "OneDrive", "Documents"),
+    path.join(home, "OneDrive", "Desktop"),
+    path.join(home, "OneDrive", "Downloads"),
+    path.join(home, "OneDrive - Zinnia", "Documents"),
+    path.join(home, "OneDrive - Zinnia", "Desktop"),
+    path.join(home, "OneDrive - Zinnia", "Downloads"),
+  ];
+  try {
+    const homeEntries = fs.readdirSync(home, { withFileTypes: true });
+    for (const ent of homeEntries) {
+      if (!ent.isDirectory()) continue;
+      if (!/^OneDrive/i.test(ent.name)) continue;
+      for (const sub of ["Documents", "Desktop", "Downloads"]) {
+        roots.push(path.join(home, ent.name, sub));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return roots.map((r) => path.resolve(r));
+}
+
+function presentationPathAllowed(resolved) {
   const lower = resolved.toLowerCase();
-  return [docs, desk, downloads].some(
+  return presentationAllowlistRoots().some(
     (root) => lower === root.toLowerCase() || lower.startsWith(root.toLowerCase() + path.sep),
   );
 }
 
 async function openPresentation(filePath) {
-  const target = String(filePath || "").trim();
+  const target = stripPathQuotes(filePath);
   if (!target) return { ok: false, error: "missing_path" };
   const resolved = path.resolve(target);
   const ext = path.extname(resolved).toLowerCase();
   if (![".pptx", ".ppt", ".pdf"].includes(ext)) {
-    return { ok: false, error: "unsupported_presentation_type", path: resolved };
+    return {
+      ok: false,
+      error: "unsupported_presentation_type",
+      path: resolved,
+      hint: "Use a .pptx/.ppt/.pdf path without surrounding quotes",
+    };
   }
   const blocked = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
   if (blocked.some((b) => resolved.toLowerCase().includes(b))) {
     return { ok: false, error: "path_blocked", path: resolved };
   }
   if (!presentationPathAllowed(resolved)) {
-    return { ok: false, error: "path_outside_allowlist", path: resolved };
+    return {
+      ok: false,
+      error: "path_outside_allowlist",
+      path: resolved,
+      hint: "Allowed: Desktop, Documents, Downloads (including OneDrive copies)",
+    };
   }
   if (!fs.existsSync(resolved)) {
-    return { ok: false, error: "not_found", path: resolved };
+    return { ok: false, error: "not_found", path: resolved, hint: "File does not exist at that path" };
   }
   try {
     if (process.platform === "darwin") {
@@ -345,6 +474,7 @@ module.exports = {
   MAC_APPS,
   allowlisted,
   openApp,
+  openZoom,
   openPresentation,
   focusApp,
   escapeSendKeys,
@@ -355,4 +485,5 @@ module.exports = {
   uiInspect,
   refuseDelete,
   writeNoteFile,
+  stripPathQuotes,
 };

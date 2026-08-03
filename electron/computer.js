@@ -377,17 +377,20 @@ function presentationPathAllowed(resolved) {
   );
 }
 
-async function openPresentation(filePath) {
+function resolvePresentationPath(filePath, { pptxOnly = false } = {}) {
   const target = stripPathQuotes(filePath);
   if (!target) return { ok: false, error: "missing_path" };
   const resolved = path.resolve(target);
   const ext = path.extname(resolved).toLowerCase();
-  if (![".pptx", ".ppt", ".pdf"].includes(ext)) {
+  const allowedExt = pptxOnly ? [".pptx"] : [".pptx", ".ppt", ".pdf"];
+  if (!allowedExt.includes(ext)) {
     return {
       ok: false,
-      error: "unsupported_presentation_type",
+      error: pptxOnly ? "pptx_required_for_present_all" : "unsupported_presentation_type",
       path: resolved,
-      hint: "Use a .pptx/.ppt/.pdf path without surrounding quotes",
+      hint: pptxOnly
+        ? "Present all slides requires a .pptx file"
+        : "Use a .pptx/.ppt/.pdf path without surrounding quotes",
     };
   }
   const blocked = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
@@ -405,6 +408,13 @@ async function openPresentation(filePath) {
   if (!fs.existsSync(resolved)) {
     return { ok: false, error: "not_found", path: resolved, hint: "File does not exist at that path" };
   }
+  return { ok: true, path: resolved, ext };
+}
+
+async function openPresentation(filePath) {
+  const check = resolvePresentationPath(filePath);
+  if (!check.ok) return check;
+  const resolved = check.path;
   try {
     if (process.platform === "darwin") {
       await execFileAsync("open", [resolved]);
@@ -422,6 +432,152 @@ async function openPresentation(filePath) {
     };
   } catch (err) {
     return { ok: false, error: String(err), path: resolved };
+  }
+}
+
+function stripXmlText(xml) {
+  return String(xml || "")
+    .replace(/<a:t[^>]*>/gi, "\u0001")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\u0001/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractAtText(xml) {
+  const parts = [];
+  const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/gi;
+  let m;
+  while ((m = re.exec(String(xml || ""))) !== null) {
+    const t = String(m[1] || "")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .trim();
+    if (t) parts.push(t);
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+async function extractPptxToTemp(pptxPath) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mentrix-pptx-"));
+  try {
+    if (process.platform === "win32") {
+      const ps = `
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory('${pptxPath.replace(/'/g, "''")}', '${tmp.replace(/'/g, "''")}')
+`;
+      await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true });
+    } else {
+      await execFileAsync("unzip", ["-q", "-o", pptxPath, "-d", tmp]);
+    }
+    return { ok: true, tmp };
+  } catch (err) {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    return { ok: false, error: String(err) };
+  }
+}
+
+function listSlideFiles(tmpRoot) {
+  const slidesDir = path.join(tmpRoot, "ppt", "slides");
+  if (!fs.existsSync(slidesDir)) return [];
+  return fs
+    .readdirSync(slidesDir)
+    .filter((f) => /^slide\d+\.xml$/i.test(f))
+    .sort((a, b) => {
+      const na = Number((a.match(/\d+/) || ["0"])[0]);
+      const nb = Number((b.match(/\d+/) || ["0"])[0]);
+      return na - nb;
+    })
+    .map((f) => path.join(slidesDir, f));
+}
+
+async function parsePresentationSlides(filePath) {
+  const check = resolvePresentationPath(filePath, { pptxOnly: true });
+  if (!check.ok) return check;
+  const extracted = await extractPptxToTemp(check.path);
+  if (!extracted.ok) {
+    return { ok: false, error: "pptx_extract_failed", detail: extracted.error, path: check.path };
+  }
+  const tmp = extracted.tmp;
+  try {
+    const slideFiles = listSlideFiles(tmp);
+    const slides = [];
+    for (let i = 0; i < slideFiles.length; i++) {
+      const slideXml = fs.readFileSync(slideFiles[i], "utf8");
+      const text = extractAtText(slideXml).slice(0, 2000);
+      const num = Number((path.basename(slideFiles[i]).match(/\d+/) || [String(i + 1)])[0]);
+      let notes = "";
+      const notesPath = path.join(tmp, "ppt", "notesSlides", `notesSlide${num}.xml`);
+      if (fs.existsSync(notesPath)) {
+        notes = extractAtText(fs.readFileSync(notesPath, "utf8")).slice(0, 2000);
+        // Drop common "Click to edit Master text styles" junk if that's all we got
+        if (/click to edit master/i.test(notes) && notes.length < 80) notes = "";
+      }
+      slides.push({
+        index: i,
+        notes,
+        text: text || stripXmlText(slideXml).slice(0, 500),
+      });
+    }
+    return {
+      ok: true,
+      desktop: "parse_presentation_slides",
+      path: check.path,
+      slides,
+      count: slides.length,
+      audited: true,
+    };
+  } catch (err) {
+    return { ok: false, error: String(err), path: check.path };
+  } finally {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function powerpointKey(key, appName) {
+  const k = String(key || "").toLowerCase().trim();
+  const mapWin = { f5: "{F5}", right: "{RIGHT}", esc: "{ESC}", escape: "{ESC}" };
+  const mapMac = { f5: 96, right: 124, esc: 53, escape: 53 };
+  if (!mapWin[k]) {
+    return { ok: false, error: "unsupported_powerpoint_key", key: k, hint: "Use f5 | right | esc" };
+  }
+  const app =
+    appName ||
+    (process.platform === "darwin" ? "Microsoft PowerPoint" : "POWERPNT");
+  await focusApp(app);
+  try {
+    if (process.platform === "darwin") {
+      await execFileAsync("osascript", [
+        "-e",
+        `tell application "System Events" to key code ${mapMac[k]}`,
+      ]);
+      return { ok: true, desktop: "powerpoint_key", key: k, app, platform: "darwin", audited: true };
+    }
+    const send = mapWin[k];
+    const ps = `
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.SendKeys]::SendWait('${send}')
+`;
+    await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true });
+    return { ok: true, desktop: "powerpoint_key", key: k, app, platform: "win32", audited: true };
+  } catch (err) {
+    return { ok: false, error: String(err), key: k };
   }
 }
 
@@ -476,6 +632,8 @@ module.exports = {
   openApp,
   openZoom,
   openPresentation,
+  parsePresentationSlides,
+  powerpointKey,
   focusApp,
   escapeSendKeys,
   screenshotDesktop,

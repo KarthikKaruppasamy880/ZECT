@@ -155,9 +155,11 @@ class TestBugfixOrchestratorStages:
                  },
              ), \
              patch("app.services.phases.build_phase_svc.run_build_from_plan", side_effect=fake_build):
-            orchestrator.run_mentrix(
+            run = orchestrator.run_mentrix(
                 db, goal="Fix the login bug", mode="bugfix", project_key="", workspace=str(tmp_path), repo_id=None,
             )
+            if run.status == "awaiting_plan_confirm":
+                orchestrator.continue_mentrix_after_plan(db, run)
 
         assert len(calls) == 2
         assert calls[0][1] == 0 and calls[1][1] == 1

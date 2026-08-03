@@ -1,10 +1,11 @@
 /**
  * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (Chatterbox).
+ * Electron-only Present all slides: parse notes → F5 → speak await → Right Arrow.
  */
-import { useEffect, useState } from "react";
-import { Presentation, Mic, MonitorPlay, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Presentation, Mic, MonitorPlay, Sparkles, Square } from "lucide-react";
 import { mentrixCompanionIntegrations, mentrixPresentonGenerate } from "@/lib/api";
-import { speakMentrix } from "@/mentrix/speak";
+import { cancelMentrixSpeech, speakMentrix, speakMentrixAwait } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -15,10 +16,19 @@ type Props = {
   variant?: "dark" | "light";
 };
 
+type SlideParsed = { index: number; notes?: string; text?: string };
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function friendlyDesktopError(code: string): string {
   const c = String(code || "");
   if (c === "unsupported_presentation_type") {
     return "Need a .pptx/.ppt/.pdf path — strip quotes when pasting from Explorer.";
+  }
+  if (c === "pptx_required_for_present_all") {
+    return "Present all slides requires a .pptx file.";
   }
   if (c === "path_outside_allowlist") {
     return "Path must be under Desktop, Documents, or Downloads (OneDrive OK).";
@@ -39,7 +49,9 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [joinUrl, setJoinUrl] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [presenting, setPresenting] = useState(false);
   const [presentonReady, setPresentonReady] = useState(false);
+  const abortRef = useRef(false);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
 
@@ -121,13 +133,20 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       error?: string;
       hint?: string;
       note?: string;
+      slides?: SlideParsed[];
+      count?: number;
     };
     if (res?.ok === false) {
       const msg = friendlyDesktopError(String(res.error || "desktop_failed"));
       setStatus(res.hint ? `${msg} (${res.hint})` : msg);
       return { ok: false as const, error: String(res.error || "desktop_failed") };
     }
-    return { ok: true as const, note: res.note };
+    return {
+      ok: true as const,
+      note: res.note,
+      slides: res.slides,
+      count: res.count,
+    };
   };
 
   const generateDeck = async () => {
@@ -218,6 +237,91 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     }
   };
 
+  const stopPresentAll = () => {
+    abortRef.current = true;
+    cancelMentrixSpeech();
+    setStatus("Stopped presenting.");
+    setPresenting(false);
+    setBusy(false);
+  };
+
+  const presentAllSlides = async () => {
+    if (!isDesktop) {
+      setStatus("Present all slides requires the Electron desktop app (Computer Mode).");
+      return;
+    }
+    const target = path.trim().replace(/^["']+|["']+$/g, "");
+    if (!target) {
+      setStatus("Enter a .pptx path under Desktop, Documents, or Downloads (OneDrive OK).");
+      return;
+    }
+    if (!/\.pptx$/i.test(target)) {
+      setStatus("Present all slides requires a .pptx file.");
+      return;
+    }
+
+    abortRef.current = false;
+    setPresenting(true);
+    setBusy(true);
+    setStatus("");
+    persistPath(target);
+
+    try {
+      const parsed = await runComputer("parse_presentation_slides", { path: target });
+      if (!parsed.ok) return;
+      const slides = parsed.slides || [];
+      if (!slides.length) {
+        setStatus("No slides found in that .pptx.");
+        return;
+      }
+
+      const opened = await runComputer("open_presentation", { path: target });
+      if (!opened.ok || abortRef.current) return;
+
+      setStatus(`Starting slideshow (F5)… ${slides.length} slides`);
+      await sleep(2000);
+      if (abortRef.current) return;
+
+      const f5 = await runComputer("powerpoint_key", { key: "f5" });
+      if (!f5.ok || abortRef.current) return;
+      await sleep(400);
+
+      for (let i = 0; i < slides.length; i++) {
+        if (abortRef.current) {
+          setStatus("Stopped presenting.");
+          return;
+        }
+        const slide = slides[i];
+        const n = slides.length;
+        const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
+        setStatus(`Slide ${i + 1} / ${n}`);
+        const spoken = await speakMentrixAwait(script.slice(0, 2000), true);
+        if (abortRef.current) {
+          setStatus("Stopped presenting.");
+          return;
+        }
+        if (!spoken.ok && spoken.error !== "cancelled") {
+          setStatus(`Slide ${i + 1}: ${spoken.error}`);
+          return;
+        }
+        if (i < slides.length - 1) {
+          const right = await runComputer("powerpoint_key", { key: "right" });
+          if (!right.ok || abortRef.current) {
+            if (abortRef.current) setStatus("Stopped presenting.");
+            return;
+          }
+          await sleep(400);
+        }
+      }
+      setStatus(`Finished presenting ${slides.length} slides.`);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Present all failed");
+    } finally {
+      setPresenting(false);
+      setBusy(false);
+    }
+  };
+
   return (
     <div
       data-testid="present-deck-panel"
@@ -239,7 +343,8 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
         Generate with Presenton (optional), open PowerPoint + Zoom in Electron. You join the meeting
-        and share the PowerPoint window — Mentrix narrates with your clone.
+        and share the PowerPoint window — Mentrix narrates with your clone. Desktop: Present all
+        slides uses speaker notes (or slide text), F5, then Right after each narration ends.
       </p>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Generate deck prompt (Presenton)
@@ -300,13 +405,13 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         />
       </label>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
-        Talking points
+        Manual script (separate from your .pptx — typed here, not read from the file)
         <textarea
           data-testid="present-deck-notes"
           value={notes}
           onChange={(e) => persistNotes(e.target.value)}
           rows={3}
-          placeholder="Key points to narrate with your cloned voice…"
+          placeholder="Key points to narrate with your cloned voice — this text is NOT pulled from the PPTX above…"
           className={
             dark
               ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
@@ -340,10 +445,37 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           disabled={busy}
           onClick={() => void narrateNotes()}
           className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-40"
+          title="Speaks the Manual script text above — does not read your .pptx file"
         >
           <Mic className="h-3.5 w-3.5" />
-          Narrate talking points
+          Narrate manual script (not the PPTX)
         </button>
+        <button
+          type="button"
+          data-testid="present-deck-present-all"
+          disabled={busy || !isDesktop}
+          onClick={() => void presentAllSlides()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-700 px-2.5 py-1.5 text-xs text-amber-100 hover:bg-amber-950 disabled:opacity-40"
+          title={
+            isDesktop
+              ? "Reads real slide text + speaker notes from your .pptx, opens PowerPoint, F5 slideshow, narrates each slide, advances with Right Arrow"
+              : "Electron desktop only"
+          }
+        >
+          <Presentation className="h-3.5 w-3.5" />
+          Present &amp; narrate my PPTX (all slides)
+        </button>
+        {presenting && (
+          <button
+            type="button"
+            data-testid="present-deck-stop"
+            onClick={stopPresentAll}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-700 px-2.5 py-1.5 text-xs text-red-200 hover:bg-red-950"
+          >
+            <Square className="h-3.5 w-3.5" />
+            Stop presenting
+          </button>
+        )}
       </div>
       {status && (
         <p

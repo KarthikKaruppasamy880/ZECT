@@ -322,6 +322,66 @@ def _llm_answer(question: str, context: str = "") -> str:
         )
 
 
+def _llm_answer_stream(question: str, context: str = "") -> Generator[str, None, None]:
+    """Same behavior/fallbacks as _llm_answer, but yields text deltas as the
+    model actually generates them instead of computing the full reply first —
+    the "token" SSE events this feeds reflect real progress instead of a
+    fake post-hoc chunking of an already-complete string."""
+    key = _ensure_openai_env()
+    if not key:
+        yield (
+            "I'm Mentrix — ready. Ask for Delivery status, research, a brief, notes, "
+            "or say Open Lattice."
+            + (f"\n\n{context[:900]}" if context else "")
+        )
+        return
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences. "
+                "Never claim you sent messages or controlled the desktop without confirmation. "
+                "Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing. "
+                "For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
+            ),
+        }
+    ]
+    if context:
+        messages.append({"role": "user", "content": f"Tool results:\n{context[:3500]}"})
+    messages.append({"role": "user", "content": question})
+
+    start = time.time()
+    got_any = False
+    try:
+        stream = client.chat.completions.create(
+            model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
+            messages=messages,
+            max_tokens=280,
+            temperature=0.3,
+            stream=True,
+        )
+        for event in stream:
+            if time.time() - start > _LLM_TIMEOUT_S + 0.5:
+                if not got_any:
+                    yield "Mentrix — quick path (model timed out):\n" + (context[:900] if context else question[:300])
+                return
+            delta = event.choices[0].delta.content if event.choices else None
+            if delta:
+                got_any = True
+                yield delta
+    except Exception as exc:  # noqa: BLE001
+        if not got_any:
+            yield (
+                "I'm Mentrix — ready for status, research, briefs, notes, and Delivery."
+                + (f"\n\n{context[:700]}" if context else f"\n\nYou asked: {question[:200]}")
+                + f"\n\n({type(exc).__name__})"
+            )
+
+
 def _parse_intents(message: str) -> list[dict[str, Any]]:
     m = message.lower().strip()
     tools: list[dict[str, Any]] = []
@@ -1334,6 +1394,8 @@ def iter_companion_events(
     if pending:
         context_bits.append("Pending: " + ", ".join(p["tool"] for p in pending))
 
+    reply_streamed = False
+
     if pending and not tool_results:
         reply = (
             "I can help, but I need your permission for: "
@@ -1354,12 +1416,27 @@ def iter_companion_events(
             )
         else:
             fast = _fast_tool_reply(tool_results, board_items, navigations)
-            reply = fast or _llm_answer(message, "\n".join(context_bits))
+            if fast:
+                reply = fast
+            else:
+                # Real generation, streamed token-by-token as the model
+                # produces it — this is the only branch with something
+                # genuinely incremental to stream; every other branch below
+                # already knows its full text before any "token" event fires.
+                reply = ""
+                for delta in _llm_answer_stream(message, "\n".join(context_bits)):
+                    reply += delta
+                    yield {"event": "token", "turn_id": tid, "data": {"text": delta}}
+                reply_streamed = True
 
-    # token chunks for realtime feel
-    chunk = max(24, len(reply) // 4 or 24)
-    for i in range(0, len(reply), chunk):
-        yield {"event": "token", "turn_id": tid, "data": {"text": reply[i : i + chunk]}}
+    if not reply_streamed:
+        # Fixed/already-known text (pending/denied/desktop-clarification/fast-tool
+        # replies) — pace the reveal instead of dumping it in ~4 chunks with
+        # zero delay, which just flashed the whole reply onto the screen at once.
+        chunk = max(24, len(reply) // 4 or 24)
+        for i in range(0, len(reply), chunk):
+            yield {"event": "token", "turn_id": tid, "data": {"text": reply[i : i + chunk]}}
+            time.sleep(0.02)
 
     summary = {
         "reply": reply,

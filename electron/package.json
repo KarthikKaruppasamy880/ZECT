@@ -28,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "computer.js",
       "wake.js",
       "win-wake.js",
       "icons/**/*",

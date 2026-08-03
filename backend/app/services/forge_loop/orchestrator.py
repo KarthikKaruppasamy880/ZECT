@@ -96,6 +96,10 @@ MODE_PIPELINE: dict[str, list[str]] = {
         "ultra_review",
         "integrator",
     ],
+    # Model-driven tool-calling loop, not a fixed stage list — the fix for
+    # "it's not doing what I say." Heavy tools (start_upgrade_run etc.) kick
+    # off a background run and return immediately rather than blocking here.
+    "assistant": ["assistant_loop"],
 }
 
 
@@ -1357,6 +1361,19 @@ def run_mentrix(
 
         elif agent == "ops":
             result["ops"] = _run_ops(db, goal, events, created_by=created_by, execute=True)
+
+        elif agent == "assistant_loop":
+            _emit_phase(events, "assistant_loop", 0.5, "done", "Assistant — deciding what to do")
+            from app.services.phases.assistant_phase import run_assistant_loop
+
+            assistant_result = run_assistant_loop(db, goal, project_key=project_key, created_by=created_by)
+            result["answer"] = assistant_result.get("answer", "")
+            result["tool_calls"] = assistant_result.get("tool_calls", [])
+            push(
+                "orchestrator",
+                f"Assistant made {len(assistant_result.get('tool_calls') or [])} tool call(s)",
+                phase="assistant_loop",
+            )
 
         elif agent == "orchestrator":
             push("orchestrator", "Synthesizing Mentrix response")

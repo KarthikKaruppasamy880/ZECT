@@ -409,6 +409,15 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   ) {
     return computer.openPresentation(a.path || a.file || "");
   }
+  if (
+    action === "parse_presentation_slides" ||
+    action === "desktop_parse_presentation_slides"
+  ) {
+    return computer.parsePresentationSlides(a.path || a.file || "");
+  }
+  if (action === "powerpoint_key" || action === "desktop_powerpoint_key") {
+    return computer.powerpointKey(a.key || a.keycode, a.app || a.appName);
+  }
   if (action === "screenshot" || action === "desktop_screenshot") {
     const desk = await computer.screenshotDesktop();
     if (desk.ok) return desk;

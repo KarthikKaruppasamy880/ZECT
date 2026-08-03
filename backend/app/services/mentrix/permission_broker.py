@@ -53,6 +53,8 @@ TOOL_ACTIONS: dict[str, str] = {
     "jira_search_incidents": "companion_jira_read",
     "datadog_query_logs": "companion_datadog_read",
     "jira_comment_pr": "companion_jira_write",
+    "scan_for_anomalies": "companion_security_scan",
+    "file_security_ticket": "companion_jira_write",
 }
 
 ALWAYS_CONFIRM_TOOLS = {
@@ -75,6 +77,7 @@ ALWAYS_CONFIRM_TOOLS = {
     "computer_scroll",
     "computer_ui_inspect",
     "jira_comment_pr",
+    "file_security_ticket",
 }
 
 

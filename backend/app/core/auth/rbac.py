@@ -1,5 +1,6 @@
 """Role-Based Access Control (RBAC) decorators and helpers."""
 
+import json
 from functools import wraps
 from typing import Optional, Callable
 from fastapi import Depends, HTTPException, status
@@ -120,12 +121,19 @@ def log_audit(
         )
     """
     try:
+        # audit_logs.details is Text — SQLite cannot bind a raw dict.
+        if details is None:
+            details_value = ""
+        elif isinstance(details, str):
+            details_value = details
+        else:
+            details_value = json.dumps(details, default=str)
         audit_entry = AuditLog(
             user_id=user_id,
             action=action,
             resource_id=resource_id,
             resource_type=resource_type,
-            details=details or {},
+            details=details_value,
             created_at=datetime.now(timezone.utc)
         )
         db.add(audit_entry)

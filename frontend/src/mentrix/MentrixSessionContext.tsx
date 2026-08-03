@@ -416,6 +416,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             setMessages((m) => {
               const last = m[m.length - 1];
               if (last?.role === role && last?.text === text) return m;
+              // Grow the last assistant bubble while Realtime text deltas stream in.
+              if (
+                role === "assistant" &&
+                last?.role === "assistant" &&
+                text.startsWith(last.text)
+              ) {
+                return [...m.slice(0, -1), { role, text }];
+              }
               return [...m, { role, text }];
             });
             if (role === "user") setLastMessageKeep(text);

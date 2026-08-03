@@ -47,6 +47,16 @@ def _fake_ultra_review(*a, **kw):
     return {"score": 90, "critical_findings": 0, "summary": "ok"}
 
 
+def _run_and_confirm(db, **kwargs):
+    """Upgrade mode now stops at awaiting_plan_confirm after the plan stage
+    (human-in-the-loop plan review) — resume past it the same way the real
+    POST /runs/{id}/confirm-plan endpoint does."""
+    run = orchestrator.run_mentrix(db, **kwargs)
+    if run.status == "awaiting_plan_confirm":
+        run = orchestrator.continue_mentrix_after_plan(db, run)
+    return run
+
+
 def _make_fake_builder(calls, *, clean=True):
     def fake_run_build_from_plan(full_plan, *, step_index=0, **kw):
         calls.append(step_index)
@@ -76,7 +86,7 @@ class TestBuildLoopCoversEveryPlanStep:
              patch("app.services.forge_loop.orchestrator.run_plan", return_value=FAKE_PLAN), \
              patch("app.services.forge_loop.orchestrator.run_ultra_review", side_effect=_fake_ultra_review), \
              patch("app.services.phases.build_phase_svc.run_build_from_plan", side_effect=fake_builder):
-            orchestrator.run_mentrix(
+            _run_and_confirm(
                 db, goal="Upgrade this repo to FastAPI", mode="upgrade", project_key="", workspace="", repo_id=None,
             )
 
@@ -91,7 +101,7 @@ class TestBuildLoopCoversEveryPlanStep:
              patch("app.services.forge_loop.orchestrator.run_plan", return_value=FAKE_PLAN), \
              patch("app.services.forge_loop.orchestrator.run_ultra_review", side_effect=_fake_ultra_review), \
              patch("app.services.phases.build_phase_svc.run_build_from_plan", side_effect=fake_builder):
-            run = orchestrator.run_mentrix(
+            run = _run_and_confirm(
                 db, goal="Upgrade this repo to FastAPI", mode="upgrade", project_key="", workspace="", repo_id=None,
             )
 
@@ -127,7 +137,7 @@ class TestBuildLoopCoversEveryPlanStep:
                  "app.services.build_intel.file_ops.check_rule_violations",
                  return_value=[{"rule_name": "no-hardcoded-secrets", "severity": "critical", "matched": True}],
              ):
-            run = orchestrator.run_mentrix(
+            run = _run_and_confirm(
                 db, goal="Upgrade this repo to FastAPI", mode="upgrade", project_key="", workspace="", repo_id=None,
             )
 

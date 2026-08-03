@@ -12,7 +12,7 @@ import {
   mentrixStartRun,
 } from "@/lib/api";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
-const MODES = ["upgrade", "bugfix", "chat", "understand", "deliver", "review_only", "ops"];
+const MODES = ["upgrade", "bugfix", "assistant", "chat", "understand", "deliver", "review_only", "ops"];
 
 const WORKFLOW_STEPS = [
   { id: "lattice", label: "Lattice" },

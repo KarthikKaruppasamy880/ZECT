@@ -26,6 +26,10 @@ backend/.wheels/
 .idea/
 .DS_Store
 
+# Cursor MCP local secrets / wired credentials
+.cursor/mcp.env
+.cursor/mcp.json
+
 # Misc
 *.pem
 *.log

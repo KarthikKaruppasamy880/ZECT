@@ -610,7 +610,9 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     return out[:_MAX_TOOLS]
 
 
-def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", created_by: str = "") -> dict[str, Any]:
+def _exec_tool(
+    db: Session, name: str, args: dict, project_key: str = "", created_by: str = "", user_id: int | None = None
+) -> dict[str, Any]:
     if name == "navigate":
         return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
     if name == "go_back":
@@ -1185,7 +1187,70 @@ def _exec_tool(db: Session, name: str, args: dict, project_key: str = "", create
             },
         }
     if name in ("approve_delivery", "create_pr"):
-        return {"ok": True, "queued": True, "action": name, "note": "Confirm in Mentrix Delivery UI"}
+        # Previously a pure stub — saying "approve and ship it" in chat/voice did
+        # nothing real, just told the user to go do it in the UI. Now calls the
+        # same approve/create-pr route functions the UI calls, directly.
+        from fastapi import HTTPException
+
+        from app.core.auth.deps import CurrentUser
+        from app.routers.mentrix import ApproveRequest, CreatePRRequest, approve_run, create_pr_for_run
+
+        run_id = args.get("run_id")
+        if run_id:
+            run = db.query(MentrixRun).filter(MentrixRun.id == int(run_id)).first()
+        else:
+            q = db.query(MentrixRun)
+            if created_by:
+                q = q.filter(MentrixRun.created_by == created_by)
+            run = q.order_by(MentrixRun.id.desc()).first()
+        if not run:
+            return {"ok": False, "error": "No Mentrix Delivery run found — start one first (start_delivery)"}
+
+        stand_in_user = CurrentUser(
+            user_id=user_id,
+            username=created_by or "mentrix-companion",
+            email=created_by or "",
+            auth_mode="internal",
+            token="",
+        )
+        try:
+            if name == "approve_delivery":
+                out = approve_run(
+                    run.id,
+                    ApproveRequest(
+                        acknowledge_issues=bool(args.get("acknowledge_issues")),
+                        acknowledge_reason=str(args.get("acknowledge_reason") or ""),
+                    ),
+                    db=db,
+                    user=stand_in_user,
+                )
+            else:
+                out = create_pr_for_run(
+                    run.id,
+                    CreatePRRequest(
+                        title=str(args.get("title") or ""),
+                        body=str(args.get("body") or ""),
+                        repo_path=str(args.get("repo_path") or ""),
+                        base_branch=str(args.get("base_branch") or "main"),
+                        dry_run=args.get("dry_run"),
+                    ),
+                    db=db,
+                    user=stand_in_user,
+                )
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "run_id": run.id}
+        return {
+            "ok": True,
+            "run_id": run.id,
+            "action": name,
+            "status": out.get("status"),
+            "pr_url": out.get("pr_url"),
+            "board": {
+                "type": "mermaid",
+                "title": f"Delivery workflow #{run.id}",
+                "body": _gates_mermaid(out.get("gates"), run.id),
+            },
+        }
     if name == "desktop_screenshot":
         return {"ok": True, "desktop": "screenshot", "note": "Electron Computer Mode after confirm"}
     if name == "desktop_read":
@@ -1375,7 +1440,7 @@ def iter_companion_events(
             yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
             continue
 
-        result = _exec_tool(db, name, args, project_key=project_key, created_by=created_by)
+        result = _exec_tool(db, name, args, project_key=project_key, created_by=created_by, user_id=user_id)
         tool_results.append({"tool": name, "result": result, "permission": perm})
         log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
         if result.get("board"):

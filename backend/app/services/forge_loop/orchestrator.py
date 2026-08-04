@@ -534,6 +534,8 @@ def _goal_wants_mcp(goal: str) -> dict[str, bool]:
         "slack": any(k in g for k in ("slack", "notify channel", "#engineering")),
         "email": any(k in g for k in ("email", "smtp", "send mail")),
         "datadog": any(k in g for k in ("datadog", "dd logs", "query logs")),
+        "jira": any(k in g for k in ("jira", "ticket", "issue")),
+        "confluence": any(k in g for k in ("confluence", "wiki", "doc page")),
     }
 
 
@@ -592,6 +594,26 @@ def _run_integrator(
             )
             executed.append(out)
             _emit(events, "integrator", f"MCP datadog query_logs status={out.get('status')}", event="mcp_execute")
+        if wants["jira"]:
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="search_issues",
+                arguments={"jql": f'text ~ "{goal[:40]}" ORDER BY updated DESC', "max_results": 10},
+                user_email=created_by,
+            )
+            executed.append(out)
+            _emit(events, "integrator", f"MCP jira search_issues status={out.get('status')}", event="mcp_execute")
+        if wants["confluence"]:
+            out = execute_tool(
+                db,
+                server_id="confluence",
+                tool_name="search",
+                arguments={"query": goal[:80]},
+                user_email=created_by,
+            )
+            executed.append(out)
+            _emit(events, "integrator", f"MCP confluence search status={out.get('status')}", event="mcp_execute")
 
     return {
         "suggested_actions": suggested,
@@ -963,12 +985,14 @@ def run_mentrix(
                     next_step = "await_plan_confirm"
                     break
             _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
-            # upgrade/bugfix always generate. deliver also generates when a real
-            # workspace/repo is available — Agent Mode previously used deliver +
-            # stub builder and wrote zero files.
-            can_write_build = mode in ("upgrade", "bugfix") or (
-                mode == "deliver" and bool(workspace or repo_id)
-            )
+            # upgrade/bugfix/deliver all call the real LLM builder — run_build_from_plan
+            # itself already gates actually writing to disk on workspace/repo_id being
+            # set (write_to_repo=bool(workspace or repo_id) below), so a workspace-less
+            # deliver run still gets real generated_code back for review/approve, it
+            # just isn't written to a repo yet. Previously deliver with no workspace
+            # fell to _run_builder(), a hardcoded stub that never calls an LLM at all —
+            # Agent Mode/chat "build this" always hit that path and produced zero code.
+            can_write_build = mode in ("upgrade", "bugfix", "deliver")
             if can_write_build:
                 from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan

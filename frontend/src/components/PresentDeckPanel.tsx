@@ -4,13 +4,25 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square } from "lucide-react";
-import { mentrixCompanionIntegrations, mentrixPresentonGenerate } from "@/lib/api";
-import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait } from "@/mentrix/speak";
+import { mentrixCompanionIntegrations, mentrixPresentonGenerate, listMyClonedVoices, type ClonedVoiceInfo } from "@/lib/api";
+import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
 const PROMPT_KEY = "zect_mentrix_present_deck_prompt";
 const JOIN_KEY = "zect_mentrix_zoom_join_url";
+const VOICE_CHOICE_KEY = "zect_mentrix_present_deck_voice";
+
+// OpenAI's real TTS voice names — offered as an explicit alternative to your
+// clone, e.g. when you want a stock male/female voice for a given presentation.
+const STOCK_VOICES: { id: string; label: string }[] = [
+  { id: "alloy", label: "OpenAI — Alloy (neutral)" },
+  { id: "echo", label: "OpenAI — Echo (male)" },
+  { id: "fable", label: "OpenAI — Fable (male, British)" },
+  { id: "onyx", label: "OpenAI — Onyx (male, deep)" },
+  { id: "nova", label: "OpenAI — Nova (female)" },
+  { id: "shimmer", label: "OpenAI — Shimmer (female)" },
+];
 
 type Props = {
   variant?: "dark" | "light";
@@ -51,6 +63,8 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [busy, setBusy] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [presentonReady, setPresentonReady] = useState(false);
+  const [myVoices, setMyVoices] = useState<ClonedVoiceInfo[]>([]);
+  const [voiceChoice, setVoiceChoice] = useState("");
   const abortRef = useRef(false);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
@@ -61,6 +75,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setNotes(localStorage.getItem(NOTES_KEY) || "");
       setPrompt(localStorage.getItem(PROMPT_KEY) || "");
       setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
+      setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
     } catch {
       /* ignore */
     }
@@ -72,7 +87,28 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         }
       })
       .catch(() => setPresentonReady(false));
+    listMyClonedVoices()
+      .then((v) => setMyVoices(Array.isArray(v) ? v : []))
+      .catch(() => setMyVoices([]));
   }, []);
+
+  const persistVoiceChoice = (value: string) => {
+    setVoiceChoice(value);
+    try {
+      localStorage.setItem(VOICE_CHOICE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  /** Turns the dropdown value into what speak.ts/the /speak endpoint expects.
+   * Empty string = your default cloned voice, unchanged from before this existed. */
+  const voiceOptsFromChoice = (choice: string): SpeakVoiceOptions | undefined => {
+    if (!choice) return undefined;
+    if (choice.startsWith("clone:")) return { voiceId: choice.slice("clone:".length) };
+    if (choice.startsWith("stock:")) return { stockVoice: choice.slice("stock:".length) };
+    return undefined;
+  };
 
   const persistPath = (value: string) => {
     setPath(value);
@@ -220,7 +256,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       const text =
         notes.trim() ||
         "Mentrix Present Deck. Paste talking points, then Narrate again with your default Chatterbox voice.";
-      const result = await speakMentrix(text.slice(0, 2000), true);
+      const result = await speakMentrix(text.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
       if (result.ok) {
         setStatus(
           result.engine === "browser_speechSynthesis"
@@ -295,7 +331,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         const n = slides.length;
         const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
         setStatus(`Slide ${i + 1} / ${n}`);
-        const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true);
+        const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
         if (abortRef.current) {
           setStatus("Stopped presenting.");
           return;
@@ -418,6 +454,33 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
               : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
           }
         />
+      </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Narration voice
+        <select
+          data-testid="present-deck-voice-select"
+          value={voiceChoice}
+          onChange={(e) => persistVoiceChoice(e.target.value)}
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        >
+          <option value="">My default cloned voice</option>
+          {myVoices
+            .filter((v) => !v.is_default)
+            .map((v) => (
+              <option key={v.voice_id} value={`clone:${v.voice_id}`}>
+                My voice — {v.name}
+              </option>
+            ))}
+          {STOCK_VOICES.map((v) => (
+            <option key={v.id} value={`stock:${v.id}`}>
+              {v.label}
+            </option>
+          ))}
+        </select>
       </label>
       <div className="flex flex-wrap gap-2">
         <button

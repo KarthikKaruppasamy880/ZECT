@@ -62,7 +62,20 @@ describe("speakMentrixStreamedAwait", () => {
 
     expect(result).toEqual({ ok: true, engine: "chatterbox" });
     expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(1);
-    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledWith("Short reply.");
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledWith("Short reply.", undefined);
+  });
+
+  it("threads an explicit voice choice (e.g. a stock voice for presenting) through to every chunk", async () => {
+    const s1 = "A".repeat(150) + ".";
+    const s2 = "B".repeat(150) + ".";
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockResolvedValue({ url: "blob:x", engine: "openai_stock:nova" });
+
+    await speakMentrixStreamedAwait(`${s1} ${s2}`, true, { stockVoice: "nova" });
+
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(2);
+    for (const call of (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[1]).toEqual({ stockVoice: "nova" });
+    }
   });
 
   it("splits long text into chunks and plays each via the reported engine in order", async () => {

@@ -63,6 +63,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # ✅ Explicit methods
     allow_headers=["Content-Type", "Authorization", "Accept"],  # ✅ Explicit headers
+    # Browsers only expose a small safe-listed set of response headers to JS
+    # by default (Cache-Control, Content-Type, etc.) — any custom header,
+    # like X-Mentrix-TTS-Engine, is invisible to fetch()'s res.headers.get()
+    # unless explicitly exposed here, even though the server did send it.
+    expose_headers=["X-Mentrix-TTS-Engine"],
 )
 
 # ✅ Add additional security headers

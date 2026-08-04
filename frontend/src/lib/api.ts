@@ -592,6 +592,23 @@ export const deleteClonedVoice = (voiceId: string) =>
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
+export type MentrixNote = { id: string; text: string; tags: string[]; createdAt: string };
+
+/** Browse notes — manual (note_add) and auto-logged Companion exchanges alike. */
+export const listMentrixNotes = (limit = 200) =>
+  request<{ notes: MentrixNote[] }>(`/api/mentrix/notes?limit=${limit}`);
+
+export const createMentrixNote = (text: string, tags?: string[]) =>
+  request<MentrixNote>("/api/mentrix/notes", {
+    method: "POST",
+    body: JSON.stringify({ text, tags }),
+  });
+
+export const deleteMentrixNote = (id: string) =>
+  request<{ deleted: boolean; id: string }>(`/api/mentrix/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+
 /**
  * Auto-log a completed cloned-voice exchange to Mentrix Notes — personal-
  * assistant behavior, not gated behind a trigger phrase. Fire-and-forget:
@@ -608,8 +625,8 @@ export function logMentrixExchange(userMessage: string, assistantReply: string):
 }
 
 /** Speak text via Mentrix TTS (Chatterbox clone or OpenAI fallback). Returns audio blob URL. */
-export async function mentrixSpeakCloned(text: string): Promise<string> {
-  const { url } = await mentrixSpeakClonedDetailed(text);
+export async function mentrixSpeakCloned(text: string, voiceOpts?: SpeakVoiceOptions): Promise<string> {
+  const { url } = await mentrixSpeakClonedDetailed(text, voiceOpts);
   return url;
 }
 
@@ -621,7 +638,18 @@ export async function mentrixSpeakCloned(text: string): Promise<string> {
  * reading this header, the frontend has no way to tell your real cloned
  * voice apart from a silent fallback to a generic one.
  */
-export async function mentrixSpeakClonedDetailed(text: string): Promise<{ url: string; engine: string }> {
+export type SpeakVoiceOptions = {
+  /** A specific saved cloned voice id — omit to use your default clone. */
+  voiceId?: string;
+  /** An OpenAI stock voice ("alloy"|"echo"|"fable"|"onyx"|"nova"|"shimmer") —
+   * when set, bypasses Chatterbox/your clone entirely. */
+  stockVoice?: string;
+};
+
+export async function mentrixSpeakClonedDetailed(
+  text: string,
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<{ url: string; engine: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -631,7 +659,11 @@ export async function mentrixSpeakClonedDetailed(text: string): Promise<{ url: s
     res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ text: text.slice(0, 4000) }),
+      body: JSON.stringify({
+        text: text.slice(0, 4000),
+        voice_id: voiceOpts?.voiceId,
+        stock_voice: voiceOpts?.stockVoice,
+      }),
     });
   } catch {
     throw new Error(`Cannot reach ZECT API at ${API} — is the backend running?`);

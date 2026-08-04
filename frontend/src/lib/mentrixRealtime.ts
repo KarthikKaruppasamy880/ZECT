@@ -608,10 +608,31 @@ export async function startMentrixRealtime(
       void audio.play().catch(reject);
     });
 
+  const setMicEnabled = (enabled: boolean) => {
+    mediaStream?.getAudioTracks().forEach((t) => {
+      t.enabled = enabled;
+    });
+  };
+
   /**
    * Speak cloned TTS via HTMLAudio only (never decodeAudioData into the 24 kHz
    * Realtime AudioContext — that crashes Electron on Windows).
    * Chunk + prefetch so the first sentence starts playing sooner than one big MP3.
+   *
+   * Mic is muted only while audio is actually PLAYING, not while a chunk is
+   * being fetched/synthesized: cloned audio plays through a plain <audio>
+   * element the Realtime session's server-side VAD has no idea exists, so
+   * without muting, your speakers leaking into the mic gets transcribed as
+   * new user speech and the model replies to itself (short, generic,
+   * back-to-back non-sequiturs — "Bye.", "Have fun. Have fun. Have fun.").
+   * Muting for the *whole* reply (the first version of this fix) instead
+   * left the mic deaf during network/synthesis wait time too, when nothing
+   * was even playing yet — that's dead time with zero feedback risk, but it
+   * silently ate the start of anything you said during a slow reply,
+   * feeling like a new response-time regression. Scoping the mute to just
+   * each chunk's playback keeps that window as small as it can be. Native
+   * (non-cloned) audio doesn't need this at all — OpenAI's own pipeline
+   * already knows that audio is its own output.
    */
   const speakWithClonedVoice = async (text: string) => {
     if (!text.trim() || stopped) return;
@@ -632,6 +653,7 @@ export async function startMentrixRealtime(
         }
         if (!current) continue;
         enginesUsed.add(current.engine);
+        setMicEnabled(false);
         try {
           await playClonedMpeg(current.buf);
         } catch (playErr) {
@@ -643,6 +665,8 @@ export async function startMentrixRealtime(
             return;
           }
           handlers.onError?.(`Voice output: ${msg}`);
+        } finally {
+          setMicEnabled(true);
         }
       }
       if (enginesUsed.size) {
@@ -660,6 +684,8 @@ export async function startMentrixRealtime(
           ? "Voice output blocked — click the Mentrix window, then speak again"
           : `Voice output: ${msg}`,
       );
+    } finally {
+      setMicEnabled(true);
     }
   };
 

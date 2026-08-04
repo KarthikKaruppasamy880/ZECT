@@ -342,6 +342,43 @@ class TestVoiceCloneEndpoints:
         assert result.body == b"wav-bytes"
         assert result.media_type == "audio/mpeg"
 
+    def test_speak_stock_voice_bypasses_chatterbox_entirely(self, monkeypatch):
+        from app.routers.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        # No ClonedVoice row at all for this user — a stock voice request
+        # must not need one.
+        captured = {}
+        monkeypatch.setattr("app.services.llm.openai_tts.openai_tts_available", lambda: True)
+        monkeypatch.setattr(
+            "app.services.llm.openai_tts.synthesize_openai_speech",
+            lambda text, voice=None, model=None: (captured.setdefault("voice", voice), b"mp3-bytes")[1],
+        )
+        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+
+        result = speak(SpeakRequest(text="hello", stock_voice="nova"), current_user=USER, db=db)
+
+        assert result.body == b"mp3-bytes"
+        assert result.headers["X-Mentrix-TTS-Engine"] == "openai_stock:nova"
+        assert captured["voice"] == "nova"
+
+    def test_speak_stock_voice_rejects_unknown_name(self):
+        from app.routers.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        with pytest.raises(HTTPException) as exc:
+            speak(SpeakRequest(text="hello", stock_voice="robotic-alien-voice"), current_user=USER, db=db)
+        assert exc.value.status_code == 400
+
+    def test_speak_stock_voice_requires_openai_key(self, monkeypatch):
+        from app.routers.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        monkeypatch.setattr("app.services.llm.openai_tts.openai_tts_available", lambda: False)
+        with pytest.raises(HTTPException) as exc:
+            speak(SpeakRequest(text="hello", stock_voice="alloy"), current_user=USER, db=db)
+        assert exc.value.status_code == 503
+
     def test_clone_rejects_bad_mime(self, monkeypatch, tmp_path):
         from app.routers import voice_clone as vc
 

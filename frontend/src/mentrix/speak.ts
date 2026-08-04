@@ -1,6 +1,8 @@
 /** Mentrix speech — cloned Chatterbox / OpenAI TTS fallback / browser speechSynthesis. */
-import { getMyClonedVoice, mentrixSpeakClonedDetailed } from "@/lib/api";
+import { getMyClonedVoice, mentrixSpeakClonedDetailed, type SpeakVoiceOptions } from "@/lib/api";
 import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
+
+export type { SpeakVoiceOptions };
 
 let lastAudio: HTMLAudioElement | null = null;
 let awaitGeneration = 0;
@@ -119,7 +121,7 @@ export function speakBrowser(text: string, enabled: boolean) {
  * Prefer Mentrix /voice/speak (Chatterbox clone or OpenAI TTS fallback); then speechSynthesis.
  * Throws / returns errors so UI can show why audio is silent.
  */
-export async function speakMentrix(text: string, enabled: boolean): Promise<SpeakResult> {
+export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
   if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
   if (!text.trim()) return { ok: false, error: "Nothing to speak" };
   cancelBrowserSpeech();
@@ -127,7 +129,7 @@ export async function speakMentrix(text: string, enabled: boolean): Promise<Spea
   let apiError = "";
   try {
     // Prefer API speak whenever possible (works with OpenAI fallback even without a clone).
-    const { url, engine } = await mentrixSpeakClonedDetailed(text);
+    const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
       lastAudio = audio;
@@ -186,7 +188,7 @@ export async function speakMentrix(text: string, enabled: boolean): Promise<Spea
  * Like speakMentrix but resolves only after playback finishes (or cancel/error).
  * Used by Present all slides so Right Arrow advances after narration ends.
  */
-export async function speakMentrixAwait(text: string, enabled: boolean): Promise<SpeakResult> {
+export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
   if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
   if (!text.trim()) return { ok: false, error: "Nothing to speak" };
   cancelBrowserSpeech();
@@ -194,7 +196,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean): Promise
 
   let apiError = "";
   try {
-    const { url, engine } = await mentrixSpeakClonedDetailed(text);
+    const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
     if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
@@ -265,11 +267,15 @@ export async function speakMentrixAwait(text: string, enabled: boolean): Promise
  * played, or as soon as cancelMentrixSpeech()/a later call bumps the
  * generation counter.
  */
-export async function speakMentrixStreamedAwait(text: string, enabled: boolean): Promise<SpeakResult> {
+export async function speakMentrixStreamedAwait(
+  text: string,
+  enabled: boolean,
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<SpeakResult> {
   if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
   const chunks = chunkSpeakText(text);
   if (!chunks.length) return { ok: false, error: "Nothing to speak" };
-  if (chunks.length === 1) return speakMentrixAwait(chunks[0], enabled);
+  if (chunks.length === 1) return speakMentrixAwait(chunks[0], enabled, voiceOpts);
 
   cancelBrowserSpeech();
   const gen = awaitGeneration;
@@ -278,7 +284,7 @@ export async function speakMentrixStreamedAwait(text: string, enabled: boolean):
 
   type ChunkAudio = { url: string; engine: string };
   const fetchChunk = (chunk: string): Promise<ChunkAudio | null> =>
-    mentrixSpeakClonedDetailed(chunk).catch(() => null);
+    mentrixSpeakClonedDetailed(chunk, voiceOpts).catch(() => null);
 
   let nextChunk: Promise<ChunkAudio | null> = fetchChunk(chunks[0]);
   for (let i = 0; i < chunks.length; i++) {

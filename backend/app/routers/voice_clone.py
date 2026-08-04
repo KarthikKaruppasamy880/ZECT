@@ -176,9 +176,16 @@ class ClonedVoiceOut(BaseModel):
     has_sample: bool = False
 
 
+OPENAI_STOCK_VOICES = ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
+
+
 class SpeakRequest(BaseModel):
     text: str = Field(..., max_length=MAX_SPEAK_TEXT_LEN)
     voice_id: str | None = None
+    # When set, bypasses Chatterbox/cloned-voice lookup entirely and speaks
+    # with this specific OpenAI stock voice instead — e.g. "let me pick a
+    # male/female voice for this presentation" rather than my own clone.
+    stock_voice: str | None = None
 
 
 @router.post("/clone", response_model=ClonedVoiceOut)
@@ -391,6 +398,31 @@ def speak(
     text = req.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
+
+    if req.stock_voice:
+        if req.stock_voice not in OPENAI_STOCK_VOICES:
+            raise HTTPException(status_code=400, detail=f"stock_voice must be one of {OPENAI_STOCK_VOICES}")
+        if not openai_tts_available():
+            raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured — cannot use a stock voice")
+        try:
+            audio = synthesize_openai_speech(text, voice=req.stock_voice)
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        try:
+            log_audit(
+                db=db,
+                user_id=current_user.user_id,
+                action="voice_speak",
+                resource_type="cloned_voice",
+                details={"chars": len(text), "engine": f"openai_stock:{req.stock_voice}"},
+            )
+        except Exception:
+            pass
+        return Response(
+            content=audio,
+            media_type="audio/mpeg",
+            headers={"X-Mentrix-TTS-Engine": f"openai_stock:{req.stock_voice}"},
+        )
 
     if req.voice_id:
         row = (

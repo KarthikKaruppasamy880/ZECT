@@ -1,5 +1,6 @@
-import { useState, useRef } from "react";
-import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush } from "@/lib/api";
+import { useState, useRef, useEffect } from "react";
+import { useLocation } from "react-router-dom";
+import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush, loadContext } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import DiffViewer from "@/components/DiffViewer";
 import ModelSelector from "@/components/ModelSelector";
@@ -36,6 +37,7 @@ interface AttachedFile {
 }
 
 export default function BuildPhase() {
+  const location = useLocation();
   const [planStep, setPlanStep] = useState("");
   const [techStack, setTechStack] = useState("");
   const [filePath, setFilePath] = useState("");
@@ -54,6 +56,23 @@ export default function BuildPhase() {
   const [copied, setCopied] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Plan → Build handoff: "Open in Build" navigates here with the plan text in
+  // location.state, but a page refresh (or arriving fresh via the sidebar)
+  // loses that — fall back to what Plan persisted to the context store, same
+  // pattern PlanMode.tsx already uses for its own carried inputs.
+  useEffect(() => {
+    void (async () => {
+      const state = location.state as { planStep?: string } | null;
+      if (state?.planStep) {
+        setPlanStep(state.planStep);
+        return;
+      }
+      const ws = await loadContext("workspace", ["last_plan"]).catch(() => null);
+      const savedPlan = ws?.entries.find((e) => e.key === "last_plan")?.value;
+      if (savedPlan) setPlanStep(savedPlan.slice(0, 6000));
+    })();
+  }, [location.state]);
 
   // Auto-fix state
   const [autoFixRunning, setAutoFixRunning] = useState(false);

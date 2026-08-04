@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { askQuestion, saveContext, loadContext, clearContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { contextPageFor } from "@/lib/workspaceContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
@@ -67,8 +68,8 @@ export default function AskMode() {
     void (async () => {
       const state = location.state as { repoContext?: string; question?: string } | null;
       let ctx = state?.repoContext || "";
-      if (!ctx) {
-        const session = await loadContext("workspace", ["blueprint_prompt", "repo_analysis"]).catch(() => null);
+      if (!ctx && projectKey) {
+        const session = await loadContext(contextPageFor("workspace", projectKey), ["blueprint_prompt", "repo_analysis"]).catch(() => null);
         ctx =
           session?.entries.find((e) => e.key === "blueprint_prompt")?.value ||
           session?.entries.find((e) => e.key === "repo_analysis")?.value ||
@@ -79,10 +80,10 @@ export default function AskMode() {
         const saved = await loadSavedBlueprint();
         if (saved) ctx = saved;
       }
-      if (ctx) setRepoContext(ctx);
+      setRepoContext(ctx);
       if (state?.question) setInput(state.question);
     })();
-  }, [location.state, blueprintPrompt, loadSavedBlueprint]);
+  }, [location.state, blueprintPrompt, loadSavedBlueprint, projectKey]);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -141,9 +142,9 @@ export default function AskMode() {
         ...prev,
         { role: "assistant", content: res.answer, tokens: res.tokens_used, model: res.model || selectedModel },
       ]);
-      await saveContext("workspace", "last_ask_summary", res.answer.slice(0, 8000)).catch(() => {});
-      await saveContext("ask", "repo_context", context).catch(() => {});
-      await saveContext("ask", "last_question", question).catch(() => {});
+      await saveContext(contextPageFor("workspace", projectKey), "last_ask_summary", res.answer.slice(0, 8000)).catch(() => {});
+      await saveContext(contextPageFor("ask", projectKey), "repo_context", context).catch(() => {});
+      await saveContext(contextPageFor("ask", projectKey), "last_question", question).catch(() => {});
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to get response.";
       setError(msg);
@@ -160,9 +161,9 @@ export default function AskMode() {
     const desc = question
       ? `Based on this Ask triage:\n\n**Question:** ${question}\n\n**Answer:**\n${summary.slice(0, 4000)}`
       : summary.slice(0, 4000);
-    await saveContext("workspace", "last_ask_summary", summary.slice(0, 8000)).catch(() => {});
-    await saveContext("plan", "repo_context", repoContext).catch(() => {});
-    await saveContext("plan", "project_description", desc).catch(() => {});
+    await saveContext(contextPageFor("workspace", projectKey), "last_ask_summary", summary.slice(0, 8000)).catch(() => {});
+    await saveContext(contextPageFor("plan", projectKey), "repo_context", repoContext).catch(() => {});
+    await saveContext(contextPageFor("plan", projectKey), "project_description", desc).catch(() => {});
     navigate("/plan", { state: { projectDescription: desc, repoContext } });
   };
 

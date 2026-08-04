@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { generatePlan, saveContext, loadContext, clearContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { contextPageFor } from "@/lib/workspaceContext";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
@@ -69,7 +70,8 @@ export default function PlanMode() {
         setShowAdvanced(true);
         return;
       }
-      const session = await loadContext("plan", ["project_description", "repo_context"]).catch(() => null);
+      if (!projectKey) return;
+      const session = await loadContext(contextPageFor("plan", projectKey), ["project_description", "repo_context"]).catch(() => null);
       const savedDesc = session?.entries.find((e) => e.key === "project_description")?.value;
       const savedCtx = session?.entries.find((e) => e.key === "repo_context")?.value;
       if (savedDesc && !state?.projectDescription) setDescription(savedDesc);
@@ -78,7 +80,7 @@ export default function PlanMode() {
         setShowAdvanced(true);
         return;
       }
-      const ws = await loadContext("workspace", ["blueprint_prompt", "last_ask_summary"]).catch(() => null);
+      const ws = await loadContext(contextPageFor("workspace", projectKey), ["blueprint_prompt", "last_ask_summary"]).catch(() => null);
       const bp =
         ws?.entries.find((e) => e.key === "blueprint_prompt")?.value ||
         blueprintPrompt ||
@@ -92,7 +94,7 @@ export default function PlanMode() {
         setDescription(`Continue from Ask triage:\n\n${askSummary.slice(0, 4000)}`);
       }
     })();
-  }, [location.state, blueprintPrompt, loadSavedBlueprint]);
+  }, [location.state, blueprintPrompt, loadSavedBlueprint, projectKey]);
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -150,9 +152,9 @@ export default function PlanMode() {
       setPhases(res.phases);
       setTokensUsed(res.tokens_used);
       setModelUsed(res.model || selectedModel);
-      await saveContext("workspace", "last_plan", res.plan).catch(() => {});
-      await saveContext("plan", "repo_context", context).catch(() => {});
-      await saveContext("plan", "project_description", description.trim()).catch(() => {});
+      await saveContext(contextPageFor("workspace", projectKey), "last_plan", res.plan).catch(() => {});
+      await saveContext(contextPageFor("plan", projectKey), "repo_context", context).catch(() => {});
+      await saveContext(contextPageFor("plan", projectKey), "project_description", description.trim()).catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Plan generation failed.");
     } finally {
@@ -169,13 +171,13 @@ export default function PlanMode() {
 
   const handleOpenBuild = async () => {
     if (!plan) return;
-    await saveContext("workspace", "last_plan", plan).catch(() => {});
+    await saveContext(contextPageFor("workspace", projectKey), "last_plan", plan).catch(() => {});
     navigate("/build", { state: { planStep: plan.slice(0, 6000) } });
   };
 
   const handleOpenMentrix = async () => {
     if (!plan) return;
-    await saveContext("workspace", "last_plan", plan).catch(() => {});
+    await saveContext(contextPageFor("workspace", projectKey), "last_plan", plan).catch(() => {});
     navigate("/mentrix", { state: { agentContext: plan.slice(0, 4000) } });
   };
 

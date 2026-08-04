@@ -11,6 +11,17 @@ export function deriveProjectKey(owner: string, repo: string): string {
   return `${owner}-${repo}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
 }
 
+/**
+ * Context Store's rows are unique on (user_id, page, key) only — no project
+ * scoping. Ask/Plan used a bare page like "workspace", so whichever repo's
+ * blueprint was generated/loaded last kept showing up regardless of which
+ * project you'd since switched to. Fold projectKey into the page so each
+ * project gets its own slot.
+ */
+export function contextPageFor(base: string, projectKey: string): string {
+  return projectKey ? `${base}:${projectKey}` : base;
+}
+
 export function readMentrixWorkspace(): MentrixWorkspace | null {
   try {
     const raw = localStorage.getItem("zect_mentrix_workspace");

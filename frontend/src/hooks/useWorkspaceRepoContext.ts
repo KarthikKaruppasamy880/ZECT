@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
+  contextPageFor,
   deriveProjectKey,
   readMentrixWorkspace,
   writeMentrixWorkspace,
@@ -54,7 +55,7 @@ export function useWorkspaceRepoContext() {
       const prompt = (data.prompt || "").trim();
       if (!prompt) return "";
       setBlueprintPrompt(prompt);
-      await saveContext("workspace", "blueprint_prompt", prompt).catch(() => {});
+      await saveContext(contextPageFor("workspace", projectKey), "blueprint_prompt", prompt).catch(() => {});
       return prompt;
     } catch {
       return "";
@@ -62,21 +63,23 @@ export function useWorkspaceRepoContext() {
   }, [projectKey, localPath]);
 
   const loadSavedBlueprint = useCallback(async () => {
+    if (!projectKey) return "";
     try {
-      const session = await loadContext("workspace", ["blueprint_prompt"]);
+      const session = await loadContext(contextPageFor("workspace", projectKey), ["blueprint_prompt"]);
       const saved = session.entries.find((e) => e.key === "blueprint_prompt")?.value || "";
-      if (saved) setBlueprintPrompt(saved);
+      setBlueprintPrompt(saved);
       return saved;
     } catch {
       return "";
     }
-  }, []);
+  }, [projectKey]);
 
   const clearBlueprintContext = useCallback(async () => {
     setBlueprintPrompt("");
-    await saveContext("workspace", "blueprint_prompt", "").catch(() => {});
-    await saveContext("workspace", "repo_analysis", "").catch(() => {});
-  }, []);
+    const page = contextPageFor("workspace", projectKey);
+    await saveContext(page, "blueprint_prompt", "").catch(() => {});
+    await saveContext(page, "repo_analysis", "").catch(() => {});
+  }, [projectKey]);
 
   const syncFromActiveRepo = useCallback(() => {
     if (!activeRepo?.local_path) return;

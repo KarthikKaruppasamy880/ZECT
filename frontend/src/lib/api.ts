@@ -592,8 +592,36 @@ export const deleteClonedVoice = (voiceId: string) =>
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
+/**
+ * Auto-log a completed cloned-voice exchange to Mentrix Notes — personal-
+ * assistant behavior, not gated behind a trigger phrase. Fire-and-forget:
+ * callers should not await/block on this or let it interrupt the
+ * conversation if logging fails.
+ */
+export function logMentrixExchange(userMessage: string, assistantReply: string): Promise<void> {
+  return apiFetch("/api/mentrix/companion/log-exchange", {
+    method: "POST",
+    body: JSON.stringify({ user_message: userMessage, assistant_reply: assistantReply }),
+  })
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
 /** Speak text via Mentrix TTS (Chatterbox clone or OpenAI fallback). Returns audio blob URL. */
 export async function mentrixSpeakCloned(text: string): Promise<string> {
+  const { url } = await mentrixSpeakClonedDetailed(text);
+  return url;
+}
+
+/**
+ * Same call as mentrixSpeakCloned, but also surfaces which engine actually
+ * produced the audio (chatterbox / openai_tts_fallback / none) via the
+ * backend's X-Mentrix-TTS-Engine response header. /speak falls back
+ * transparently server-side on failure and still returns 200 — without
+ * reading this header, the frontend has no way to tell your real cloned
+ * voice apart from a silent fallback to a generic one.
+ */
+export async function mentrixSpeakClonedDetailed(text: string): Promise<{ url: string; engine: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -617,9 +645,10 @@ export async function mentrixSpeakCloned(text: string): Promise<string> {
         : detail?.message || res.statusText || `Speak failed (${res.status})`,
     );
   }
+  const engine = res.headers.get("X-Mentrix-TTS-Engine") || "unknown";
   const blob = await res.blob();
   if (!blob.size) throw new Error("Speak returned empty audio");
-  return URL.createObjectURL(blob);
+  return { url: URL.createObjectURL(blob), engine };
 }
 
 export const mcpExecute = (server_id: string, tool_name: string, arguments_: Record<string, unknown> = {}) =>

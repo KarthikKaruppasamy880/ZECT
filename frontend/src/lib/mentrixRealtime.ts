@@ -2,7 +2,7 @@
  * Mentrix OpenAI Realtime Connect Voice client (GA client_secrets + WebSocket).
  * Audio capture uses AudioWorklet (not ScriptProcessor) to avoid Electron renderer freezes.
  */
-import { apiFetch, authHeaders } from "@/lib/api";
+import { apiFetch, authHeaders, logMentrixExchange } from "@/lib/api";
 import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 import {
@@ -559,8 +559,12 @@ export async function startMentrixRealtime(
   const finalizedResponseIds = new Set<string>();
   /** Streaming text for cloned (text-only) modality — painted before TTS finishes. */
   let clonedTextAcc = "";
+  /** Last thing the user said — paired with the assistant's reply for auto-logging to Notes. */
+  let lastUserTranscript = "";
 
-  const fetchClonedSpeakBuffer = async (text: string): Promise<ArrayBuffer | null> => {
+  type ClonedSpeakBuffer = { buf: ArrayBuffer; engine: string };
+
+  const fetchClonedSpeakBuffer = async (text: string): Promise<ClonedSpeakBuffer | null> => {
     const res = await apiFetch("/api/mentrix/voice/speak", {
       method: "POST",
       body: JSON.stringify({ text: text.slice(0, 4000) }),
@@ -573,12 +577,16 @@ export async function startMentrixRealtime(
       handlers.onError?.(`Voice output: ${detail}`);
       return null;
     }
+    // /speak falls back server-side (Chatterbox -> OpenAI) and still returns
+    // 200 — this header is the only way to tell your real clone apart from a
+    // silent fallback to a generic voice.
+    const engine = res.headers.get("X-Mentrix-TTS-Engine") || "unknown";
     const arrayBuf = await res.arrayBuffer();
     if (!arrayBuf.byteLength) {
       handlers.onError?.("Voice output: empty audio from /voice/speak");
       return null;
     }
-    return arrayBuf;
+    return { buf: arrayBuf, engine };
   };
 
   const playClonedMpeg = (arrayBuf: ArrayBuffer): Promise<void> =>
@@ -614,16 +622,18 @@ export async function startMentrixRealtime(
       const chunks = chunkSpeakText(text);
       if (!chunks.length) return;
       handlers.onOrb?.("speaking");
-      let nextFetch: Promise<ArrayBuffer | null> = fetchClonedSpeakBuffer(chunks[0]);
+      const enginesUsed = new Set<string>();
+      let nextFetch: Promise<ClonedSpeakBuffer | null> = fetchClonedSpeakBuffer(chunks[0]);
       for (let i = 0; i < chunks.length; i++) {
         if (stopped) return;
-        const buf = await nextFetch;
+        const current = await nextFetch;
         if (i + 1 < chunks.length) {
           nextFetch = fetchClonedSpeakBuffer(chunks[i + 1]);
         }
-        if (!buf) continue;
+        if (!current) continue;
+        enginesUsed.add(current.engine);
         try {
-          await playClonedMpeg(buf);
+          await playClonedMpeg(current.buf);
         } catch (playErr) {
           const msg = playErr instanceof Error ? playErr.message : "playback failed";
           if (/NotAllowedError|user interaction/i.test(msg)) {
@@ -634,6 +644,11 @@ export async function startMentrixRealtime(
           }
           handlers.onError?.(`Voice output: ${msg}`);
         }
+      }
+      if (enginesUsed.size) {
+        const label = [...enginesUsed].join(" + ");
+        const isClone = enginesUsed.size === 1 && enginesUsed.has("chatterbox");
+        handlers.onLog?.(isClone ? `Spoke via your cloned voice` : `Spoke via: ${label} (not your cloned voice)`);
       }
       if (!stopped) handlers.onOrb?.("listening");
     } catch (e) {
@@ -703,7 +718,8 @@ export async function startMentrixRealtime(
         t === "conversation.item.input_audio_transcription.done") &&
       userTranscript
     ) {
-      handlers.onTranscript?.("user", String(userTranscript));
+      lastUserTranscript = String(userTranscript);
+      handlers.onTranscript?.("user", lastUserTranscript);
     }
     // Non-cloned: chat text comes from audio transcript.done.
     // Cloned: wait for response.done (text modality) so we don't double-append.
@@ -740,10 +756,14 @@ export async function startMentrixRealtime(
             .trim() || clonedTextAcc.trim();
         if (text) {
           handlers.onTranscript?.("assistant", text);
+          // Personal-assistant behavior: log every completed exchange, not
+          // just when the user says "remember"/"note that". Fire-and-forget.
+          if (lastUserTranscript) void logMentrixExchange(lastUserTranscript, text);
           // Fire TTS without blocking the WS handler — next turns can still arrive.
           void speakWithClonedVoice(text);
         }
         clonedTextAcc = "";
+        lastUserTranscript = "";
       }
     }
     if (t === "error") {

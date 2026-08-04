@@ -1290,6 +1290,22 @@ def _merge_intents(message: str) -> list[dict[str, Any]]:
     return planned[:_MAX_TOOLS]
 
 
+def _auto_log_exchange(user_message: str, reply: str, *, pending: bool = False) -> None:
+    """Personal-assistant behavior: log every completed exchange to Mentrix
+    Notes automatically, not just when the user says a trigger phrase like
+    "remember" or "note that" (note_add's fast-intent match). Skips
+    incomplete turns (still awaiting a tool confirmation, no real reply
+    yet). Never allowed to break the actual conversation turn."""
+    if pending or not (user_message or "").strip() or not (reply or "").strip():
+        return
+    try:
+        from app.services.mentrix.notes import add_note
+
+        add_note(f"You: {user_message.strip()}\nMentrix: {reply.strip()}", tags=["mentrix", "auto-log"])
+    except Exception:
+        pass
+
+
 def iter_companion_events(
     db: Session,
     message: str,
@@ -1463,6 +1479,8 @@ def iter_companion_events(
             "pending": pending,
             "history": history or [],
         }
+
+    _auto_log_exchange(message, reply, pending=bool(pending))
 
     yield {
         "event": "done",

@@ -1,5 +1,5 @@
 /** Mentrix speech — cloned Chatterbox / OpenAI TTS fallback / browser speechSynthesis. */
-import { getMyClonedVoice, mentrixSpeakCloned } from "@/lib/api";
+import { getMyClonedVoice, mentrixSpeakClonedDetailed } from "@/lib/api";
 import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
 
 let lastAudio: HTMLAudioElement | null = null;
@@ -127,13 +127,13 @@ export async function speakMentrix(text: string, enabled: boolean): Promise<Spea
   let apiError = "";
   try {
     // Prefer API speak whenever possible (works with OpenAI fallback even without a clone).
-    const url = await mentrixSpeakCloned(text);
+    const { url, engine } = await mentrixSpeakClonedDetailed(text);
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
       lastAudio = audio;
       try {
         await audio.play();
-        return { ok: true, engine: "mentrix_api" };
+        return { ok: true, engine };
       } catch (playErr) {
         const msg = playErr instanceof Error ? playErr.message : String(playErr);
         if (/NotAllowedError|user interaction/i.test(msg)) {
@@ -194,7 +194,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean): Promise
 
   let apiError = "";
   try {
-    const url = await mentrixSpeakCloned(text);
+    const { url, engine } = await mentrixSpeakClonedDetailed(text);
     if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
@@ -207,7 +207,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean): Promise
         }
         await waitForAudioEnded(audio, gen);
         if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
-        return { ok: true, engine: "mentrix_api" };
+        return { ok: true, engine };
       } catch (playErr) {
         const msg = playErr instanceof Error ? playErr.message : String(playErr);
         if (/NotAllowedError|user interaction/i.test(msg)) {
@@ -273,25 +273,27 @@ export async function speakMentrixStreamedAwait(text: string, enabled: boolean):
 
   cancelBrowserSpeech();
   const gen = awaitGeneration;
-  let engine = "mentrix_api";
-  let sawApiFailure = false;
+  const apiEngines = new Set<string>();
+  let usedBrowserFallback = false;
 
-  const fetchChunkUrl = (chunk: string): Promise<string | null> =>
-    mentrixSpeakCloned(chunk).catch(() => null);
+  type ChunkAudio = { url: string; engine: string };
+  const fetchChunk = (chunk: string): Promise<ChunkAudio | null> =>
+    mentrixSpeakClonedDetailed(chunk).catch(() => null);
 
-  let nextUrl: Promise<string | null> = fetchChunkUrl(chunks[0]);
+  let nextChunk: Promise<ChunkAudio | null> = fetchChunk(chunks[0]);
   for (let i = 0; i < chunks.length; i++) {
     if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
-    const url = await nextUrl;
-    let prefetched: Promise<string | null> | null = null;
+    const current = await nextChunk;
+    const url = current?.url ?? null;
+    let prefetched: Promise<ChunkAudio | null> | null = null;
     if (i + 1 < chunks.length) {
-      prefetched = fetchChunkUrl(chunks[i + 1]);
-      nextUrl = prefetched;
+      prefetched = fetchChunk(chunks[i + 1]);
+      nextChunk = prefetched;
     }
     if (gen !== awaitGeneration) {
       if (url) URL.revokeObjectURL(url);
       // Prefetch for the next chunk already started — don't leak its blob URL.
-      prefetched?.then((u) => u && URL.revokeObjectURL(u)).catch(() => undefined);
+      prefetched?.then((c) => c?.url && URL.revokeObjectURL(c.url)).catch(() => undefined);
       return { ok: false, error: "cancelled" };
     }
 
@@ -310,6 +312,7 @@ export async function speakMentrixStreamedAwait(text: string, enabled: boolean):
         URL.revokeObjectURL(url);
         if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
         played = true;
+        if (current) apiEngines.add(current.engine);
       } catch (playErr) {
         URL.revokeObjectURL(url);
         const msg = playErr instanceof Error ? playErr.message : String(playErr);
@@ -319,10 +322,7 @@ export async function speakMentrixStreamedAwait(text: string, enabled: boolean):
             error: "Browser blocked audio — click the page once, then Narrate / Speak again",
           };
         }
-        sawApiFailure = true;
       }
-    } else {
-      sawApiFailure = true;
     }
 
     if (!played) {
@@ -330,11 +330,18 @@ export async function speakMentrixStreamedAwait(text: string, enabled: boolean):
       if (typeof window === "undefined" || !window.speechSynthesis) {
         return { ok: false, error: "No audio output for this chunk — check TTS backend/Chatterbox/OpenAI" };
       }
-      engine = "browser_speechSynthesis";
+      usedBrowserFallback = true;
       const result = await speakBrowserAwait(chunks[i]);
       if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
       if (!result.ok) return result;
     }
   }
-  return { ok: true, engine: sawApiFailure ? `${engine}_partial_fallback` : engine };
+
+  const engines = [...apiEngines, ...(usedBrowserFallback ? ["browser_speechSynthesis"] : [])];
+  const engine = engines.length === 0
+    ? "browser_speechSynthesis"
+    : engines.length === 1
+      ? engines[0]
+      : `mixed(${engines.join("+")})`;
+  return { ok: true, engine };
 }

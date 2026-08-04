@@ -676,6 +676,27 @@ def companion_agent_context(
     return {"ok": True, "text": text}
 
 
+class LogExchangeRequest(BaseModel):
+    user_message: str
+    assistant_reply: str
+
+
+@router.post("/companion/log-exchange")
+def companion_log_exchange(
+    req: LogExchangeRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Auto-log a completed Realtime-voice exchange to Mentrix Notes — the
+    text-chat path (iter_companion_events) already does this on every turn
+    via _auto_log_exchange; the voice path has no equivalent server-side
+    turn function to hook into, so the frontend calls this once per
+    finished cloned-voice reply instead."""
+    from app.services.mentrix.companion import _auto_log_exchange
+
+    _auto_log_exchange(req.user_message, req.assistant_reply)
+    return {"ok": True}
+
+
 @router.post("/companion/turn")
 def companion_turn(
     req: CompanionTurnRequest,

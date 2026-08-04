@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api", () => ({
-  mentrixSpeakCloned: vi.fn(),
+  mentrixSpeakClonedDetailed: vi.fn(),
   getMyClonedVoice: vi.fn(async () => ({ voice_id: "v1" })),
 }));
 
-import { mentrixSpeakCloned } from "@/lib/api";
+import { mentrixSpeakClonedDetailed } from "@/lib/api";
 import { cancelMentrixSpeech, speakMentrixStreamedAwait } from "./speak";
 
 class FakeAudio extends EventTarget {
@@ -48,7 +48,7 @@ describe("speakMentrixStreamedAwait", () => {
       createObjectURL: vi.fn(() => "blob:fake"),
       revokeObjectURL: vi.fn(),
     });
-    (mentrixSpeakCloned as ReturnType<typeof vi.fn>).mockReset();
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockReset();
   });
 
   afterEach(() => {
@@ -56,53 +56,69 @@ describe("speakMentrixStreamedAwait", () => {
   });
 
   it("delegates a single short chunk straight to the non-chunked path", async () => {
-    (mentrixSpeakCloned as ReturnType<typeof vi.fn>).mockResolvedValue("blob:chunk-0");
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockResolvedValue({ url: "blob:chunk-0", engine: "chatterbox" });
 
     const result = await speakMentrixStreamedAwait("Short reply.", true);
 
-    expect(result).toEqual({ ok: true, engine: "mentrix_api" });
-    expect(mentrixSpeakCloned).toHaveBeenCalledTimes(1);
-    expect(mentrixSpeakCloned).toHaveBeenCalledWith("Short reply.");
+    expect(result).toEqual({ ok: true, engine: "chatterbox" });
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(1);
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledWith("Short reply.");
   });
 
-  it("splits long text into chunks and plays each via mentrix_api in order", async () => {
+  it("splits long text into chunks and plays each via the reported engine in order", async () => {
     const s1 = "A".repeat(150) + ".";
     const s2 = "B".repeat(150) + ".";
     const s3 = "C".repeat(150) + ".";
     const text = `${s1} ${s2} ${s3}`;
-    (mentrixSpeakCloned as ReturnType<typeof vi.fn>).mockImplementation(async (chunk: string) => `blob:${chunk.slice(0, 1)}`);
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockImplementation(async (chunk: string) => ({
+      url: `blob:${chunk.slice(0, 1)}`,
+      engine: "chatterbox",
+    }));
 
     const result = await speakMentrixStreamedAwait(text, true);
 
-    expect(result).toEqual({ ok: true, engine: "mentrix_api" });
-    expect(mentrixSpeakCloned).toHaveBeenCalledTimes(3);
-    expect((mentrixSpeakCloned as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0][0])).toEqual(["A", "B", "C"]);
+    expect(result).toEqual({ ok: true, engine: "chatterbox" });
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(3);
+    expect((mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0][0])).toEqual(["A", "B", "C"]);
+  });
+
+  it("reports mixed when chunks come back from different engines", async () => {
+    const s1 = "A".repeat(150) + ".";
+    const s2 = "B".repeat(150) + ".";
+    const text = `${s1} ${s2}`;
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ url: "blob:chunk-0", engine: "chatterbox" })
+      .mockResolvedValueOnce({ url: "blob:chunk-1", engine: "openai_tts_fallback" });
+
+    const result = await speakMentrixStreamedAwait(text, true);
+
+    expect(result).toEqual({ ok: true, engine: "mixed(chatterbox+openai_tts_fallback)" });
   });
 
   it("returns off when disabled without calling the API", async () => {
     const result = await speakMentrixStreamedAwait("Some text.", false);
 
     expect(result.ok).toBe(false);
-    expect(mentrixSpeakCloned).not.toHaveBeenCalled();
+    expect(mentrixSpeakClonedDetailed).not.toHaveBeenCalled();
   });
 
   it("stops mid-narration when cancelMentrixSpeech is called before the first chunk resolves", async () => {
     const s1 = "A".repeat(150) + ".";
     const s2 = "B".repeat(150) + ".";
-    const gate = deferred<string>();
-    (mentrixSpeakCloned as ReturnType<typeof vi.fn>)
+    const gate = deferred<{ url: string; engine: string }>();
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>)
       .mockImplementationOnce(() => gate.promise)
       // The pipeline prefetches chunk 2 as soon as chunk 1 resolves, before
-      // checking cancellation — real mentrixSpeakCloned always returns a
-      // Promise, so give this call a resolved one too.
-      .mockResolvedValue("blob:chunk-1");
+      // checking cancellation — real mentrixSpeakClonedDetailed always
+      // returns a Promise, so give this call a resolved one too.
+      .mockResolvedValue({ url: "blob:chunk-1", engine: "chatterbox" });
 
     const resultPromise = speakMentrixStreamedAwait(`${s1} ${s2}`, true);
     cancelMentrixSpeech();
-    gate.resolve("blob:chunk-0");
+    gate.resolve({ url: "blob:chunk-0", engine: "chatterbox" });
     const result = await resultPromise;
 
     expect(result).toEqual({ ok: false, error: "cancelled" });
-    expect(mentrixSpeakCloned).toHaveBeenCalledTimes(2);
+    expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(2);
   });
 });

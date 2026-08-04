@@ -4,11 +4,19 @@ import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet
 from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.models import JiraConfig, JiraTicketLink
+from app.security.vault import vault
 
 router = APIRouter(prefix="/api/jira", tags=["jira"])
+
+# api_token_encrypted was previously assigned the raw plaintext token despite
+# its name — nothing in the codebase currently reads it back (real Jira
+# calls go through app.services.mcp.hub's env/MCPServerConfig-backed path),
+# so encrypting here is a pure hardening change with no decrypt call needed.
+_cipher = Fernet(vault.get_key())
 
 
 def get_db():
@@ -95,7 +103,7 @@ def configure_jira(req: JiraConfigCreate, db: Session = Depends(get_db)):
     if existing:
         existing.base_url = req.base_url
         existing.email = req.email
-        existing.api_token_encrypted = req.api_token
+        existing.api_token_encrypted = _cipher.encrypt(req.api_token.encode()).decode()
         existing.default_project_key = req.default_project_key
         existing.is_active = True
         existing.updated_at = datetime.now(timezone.utc)
@@ -106,7 +114,7 @@ def configure_jira(req: JiraConfigCreate, db: Session = Depends(get_db)):
         config = JiraConfig(
             base_url=req.base_url,
             email=req.email,
-            api_token_encrypted=req.api_token,
+            api_token_encrypted=_cipher.encrypt(req.api_token.encode()).decode(),
             default_project_key=req.default_project_key,
         )
         db.add(config)

@@ -167,6 +167,117 @@ def create_pull_request(owner: str, repo: str, title: str, body: str, head: str,
     }
 
 
+def create_issue(owner: str, repo: str, title: str, body: str = "") -> dict:
+    """Create a GitHub issue."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    issue = repo_obj.create_issue(title=title, body=body or "")
+    return {
+        "number": issue.number,
+        "html_url": issue.html_url,
+        "title": issue.title,
+        "state": issue.state,
+    }
+
+
+def list_issues(owner: str, repo: str, state: str = "open", limit: int = 20) -> list[dict]:
+    """List GitHub issues (excludes pull requests, which the API also returns as issues)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    issues = repo_obj.get_issues(state=state)
+    result = []
+    for issue in issues[:limit]:
+        if issue.pull_request:
+            continue
+        result.append({
+            "number": issue.number,
+            "title": issue.title,
+            "state": issue.state,
+            "html_url": issue.html_url,
+            "author": issue.user.login if issue.user else "unknown",
+            "created_at": issue.created_at.isoformat() if issue.created_at else "",
+        })
+    return result
+
+
+def get_file(owner: str, repo: str, path: str, ref: str | None = None) -> dict:
+    """Fetch a file's decoded text content at an optional ref (branch/sha/tag)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    kwargs = {"ref": ref} if ref else {}
+    content_file = repo_obj.get_contents(path, **kwargs)
+    if isinstance(content_file, list):
+        raise ValueError(f"'{path}' is a directory, not a file")
+    return {
+        "path": content_file.path,
+        "sha": content_file.sha,
+        "size": content_file.size,
+        "content": content_file.decoded_content.decode("utf-8", errors="replace"),
+        "html_url": content_file.html_url,
+    }
+
+
+def get_diff(owner: str, repo: str, base: str, head: str) -> dict:
+    """Compare two refs (branches/shas/tags) and return the per-file diff."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    comparison = repo_obj.compare(base, head)
+    return {
+        "base": base,
+        "head": head,
+        "ahead_by": comparison.ahead_by,
+        "behind_by": comparison.behind_by,
+        "total_commits": comparison.total_commits,
+        "files": [
+            {
+                "filename": f.filename,
+                "status": f.status,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "patch": f.patch,
+            }
+            for f in (comparison.files or [])
+        ],
+    }
+
+
+def list_branches(owner: str, repo: str, limit: int = 50) -> list[dict]:
+    """List branches on a repo."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    branches = repo_obj.get_branches()
+    return [
+        {"name": b.name, "sha": b.commit.sha, "protected": b.protected}
+        for b in branches[:limit]
+    ]
+
+
+def create_branch(owner: str, repo: str, branch: str, from_ref: str | None = None) -> dict:
+    """Create a new branch pointing at from_ref's current commit (defaults to the repo's default branch)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    source_ref = from_ref or repo_obj.default_branch
+    source_sha = repo_obj.get_branch(source_ref).commit.sha
+    ref = repo_obj.create_git_ref(ref=f"refs/heads/{branch}", sha=source_sha)
+    return {"ref": ref.ref, "sha": ref.object.sha, "branch": branch, "from_ref": source_ref}
+
+
+def search_code(owner: str, repo: str, query: str, limit: int = 20) -> list[dict]:
+    """Search code within a single repo via GitHub's code search API."""
+    gh = get_github()
+    results = gh.search_code(query=f"{query} repo:{owner}/{repo}")
+    out = []
+    for item in results[:limit]:
+        out.append({
+            "path": item.path,
+            "name": item.name,
+            "sha": item.sha,
+            "html_url": item.html_url,
+            "repository": item.repository.full_name if item.repository else f"{owner}/{repo}",
+        })
+    return out
+
+
 def _sast_name_patterns() -> list[str]:
     import fnmatch
     import os

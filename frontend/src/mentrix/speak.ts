@@ -1,5 +1,6 @@
 /** Mentrix speech — cloned Chatterbox / OpenAI TTS fallback / browser speechSynthesis. */
 import { getMyClonedVoice, mentrixSpeakCloned } from "@/lib/api";
+import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
 
 let lastAudio: HTMLAudioElement | null = null;
 let awaitGeneration = 0;
@@ -252,4 +253,88 @@ export async function speakMentrixAwait(text: string, enabled: boolean): Promise
   }
 
   return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and Chatterbox/OpenAI" };
+}
+
+/**
+ * Like speakMentrixAwait, but splits long text into sentence-sized chunks
+ * (chunkSpeakText — the same helper the Realtime voice chat path already
+ * uses) and prefetches the next chunk's audio while the current one plays.
+ * Cuts time-to-first-audio for long text (e.g. a full slide's speaker
+ * notes) from "however long the whole paragraph takes to synthesize" down
+ * to "however long one sentence takes." Resolves once every chunk has
+ * played, or as soon as cancelMentrixSpeech()/a later call bumps the
+ * generation counter.
+ */
+export async function speakMentrixStreamedAwait(text: string, enabled: boolean): Promise<SpeakResult> {
+  if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
+  const chunks = chunkSpeakText(text);
+  if (!chunks.length) return { ok: false, error: "Nothing to speak" };
+  if (chunks.length === 1) return speakMentrixAwait(chunks[0], enabled);
+
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  let engine = "mentrix_api";
+  let sawApiFailure = false;
+
+  const fetchChunkUrl = (chunk: string): Promise<string | null> =>
+    mentrixSpeakCloned(chunk).catch(() => null);
+
+  let nextUrl: Promise<string | null> = fetchChunkUrl(chunks[0]);
+  for (let i = 0; i < chunks.length; i++) {
+    if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+    const url = await nextUrl;
+    let prefetched: Promise<string | null> | null = null;
+    if (i + 1 < chunks.length) {
+      prefetched = fetchChunkUrl(chunks[i + 1]);
+      nextUrl = prefetched;
+    }
+    if (gen !== awaitGeneration) {
+      if (url) URL.revokeObjectURL(url);
+      // Prefetch for the next chunk already started — don't leak its blob URL.
+      prefetched?.then((u) => u && URL.revokeObjectURL(u)).catch(() => undefined);
+      return { ok: false, error: "cancelled" };
+    }
+
+    let played = false;
+    if (url && typeof Audio !== "undefined") {
+      const audio = new Audio(url);
+      lastAudio = audio;
+      try {
+        await audio.play();
+        if (gen !== awaitGeneration) {
+          cancelBrowserSpeech();
+          URL.revokeObjectURL(url);
+          return { ok: false, error: "cancelled" };
+        }
+        await waitForAudioEnded(audio, gen);
+        URL.revokeObjectURL(url);
+        if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+        played = true;
+      } catch (playErr) {
+        URL.revokeObjectURL(url);
+        const msg = playErr instanceof Error ? playErr.message : String(playErr);
+        if (/NotAllowedError|user interaction/i.test(msg)) {
+          return {
+            ok: false,
+            error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+          };
+        }
+        sawApiFailure = true;
+      }
+    } else {
+      sawApiFailure = true;
+    }
+
+    if (!played) {
+      // Per-chunk fallback: one bad chunk shouldn't derail the rest of the narration.
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        return { ok: false, error: "No audio output for this chunk — check TTS backend/Chatterbox/OpenAI" };
+      }
+      engine = "browser_speechSynthesis";
+      const result = await speakBrowserAwait(chunks[i]);
+      if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+      if (!result.ok) return result;
+    }
+  }
+  return { ok: true, engine: sawApiFailure ? `${engine}_partial_fallback` : engine };
 }

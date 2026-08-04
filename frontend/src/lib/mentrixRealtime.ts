@@ -7,6 +7,7 @@ import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 import {
   chunkSpeakText,
+  nextSpeakableSentence,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
 } from "@/lib/mentrixRealtimeFinalize";
@@ -559,6 +560,13 @@ export async function startMentrixRealtime(
   const finalizedResponseIds = new Set<string>();
   /** Streaming text for cloned (text-only) modality — painted before TTS finishes. */
   let clonedTextAcc = "";
+  /** How much of clonedTextAcc has already been dispatched to speech — lets
+   * complete sentences start synthesizing as they stream in, instead of the
+   * whole reply waiting for response.done before any Chatterbox call fires. */
+  let clonedSpokenUpTo = 0;
+  /** performance.now() at response.created — used to log how much of the
+   * latency to first speech is LLM generation vs. Chatterbox synthesis. */
+  let responseStartedAt = 0;
   /** Last thing the user said — paired with the assistant's reply for auto-logging to Notes. */
   let lastUserTranscript = "";
 
@@ -634,6 +642,7 @@ export async function startMentrixRealtime(
    * (non-cloned) audio doesn't need this at all — OpenAI's own pipeline
    * already knows that audio is its own output.
    */
+  let pendingSpeakCount = 0;
   const speakWithClonedVoice = async (text: string) => {
     if (!text.trim() || stopped) return;
     try {
@@ -674,7 +683,11 @@ export async function startMentrixRealtime(
         const isClone = enginesUsed.size === 1 && enginesUsed.has("chatterbox");
         handlers.onLog?.(isClone ? `Spoke via your cloned voice` : `Spoke via: ${label} (not your cloned voice)`);
       }
-      if (!stopped) handlers.onOrb?.("listening");
+      // pendingSpeakCount still includes this call (decremented after it
+      // returns, in enqueueSpeak's .finally) — <= 1 means nothing else is
+      // queued behind it, so it's safe to show "listening" now instead of
+      // flickering back to speaking for the next queued sentence.
+      if (!stopped && pendingSpeakCount <= 1) handlers.onOrb?.("listening");
     } catch (e) {
       stopClonedSpeakEl();
       const msg = e instanceof Error ? e.message : "cloned TTS failed";
@@ -687,6 +700,27 @@ export async function startMentrixRealtime(
     } finally {
       setMicEnabled(true);
     }
+  };
+
+  /** Serializes queued sentences through speakWithClonedVoice one at a time
+   * (never concurrently — that would overlap/garble audio and mic-mute
+   * state), while letting each sentence be enqueued the instant it streams
+   * in rather than waiting for the whole reply. Also logs the latency split
+   * so it's visible whether a slow reply is LLM generation or Chatterbox
+   * synthesis, instead of that being a guess. */
+  let speakChain: Promise<void> = Promise.resolve();
+  const enqueueSpeak = (text: string) => {
+    const queuedAt = performance.now();
+    const genMs = Math.round(queuedAt - responseStartedAt);
+    pendingSpeakCount += 1;
+    speakChain = speakChain
+      .then(() => speakWithClonedVoice(text))
+      .finally(() => {
+        pendingSpeakCount -= 1;
+        const speakMs = Math.round(performance.now() - queuedAt);
+        const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+        handlers.onLog?.(`TTS latency — text ready ${genMs}ms after response start, spoke in ${speakMs}ms: "${preview}"`);
+      });
   };
 
   ws.onerror = () => {
@@ -711,7 +745,11 @@ export async function startMentrixRealtime(
     if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
     if (t === "response.created") {
       handlers.onOrb?.("thinking");
-      if (clonedVoiceActive) clonedTextAcc = "";
+      if (clonedVoiceActive) {
+        clonedTextAcc = "";
+        clonedSpokenUpTo = 0;
+      }
+      responseStartedAt = performance.now();
     }
     // Paint cloned text as it streams so the bubble is not stuck waiting for TTS.
     if (
@@ -722,6 +760,17 @@ export async function startMentrixRealtime(
     ) {
       clonedTextAcc += msg.delta;
       handlers.onTranscript?.("assistant", clonedTextAcc);
+      // Speak each completed sentence the instant it streams in, rather than
+      // waiting for the whole reply to finish generating — this is the
+      // dominant fix for "takes 10s to hear anything": previously Chatterbox
+      // synthesis for sentence 1 didn't start until the LLM had also finished
+      // generating sentences 2, 3, ... serially adding both times together.
+      const unspoken = clonedTextAcc.slice(clonedSpokenUpTo);
+      const boundary = nextSpeakableSentence(unspoken);
+      if (boundary) {
+        clonedSpokenUpTo += boundary.consumedLength;
+        enqueueSpeak(boundary.sentence);
+      }
     }
     // When cloned voice is active, never play OpenAI stock PCM — Chatterbox /speak is sole TTS.
     if (
@@ -785,8 +834,12 @@ export async function startMentrixRealtime(
           // Personal-assistant behavior: log every completed exchange, not
           // just when the user says "remember"/"note that". Fire-and-forget.
           if (lastUserTranscript) void logMentrixExchange(lastUserTranscript, text);
-          // Fire TTS without blocking the WS handler — next turns can still arrive.
-          void speakWithClonedVoice(text);
+          // Full sentences already got queued for speech as they streamed in
+          // (see the output_text.delta handler above) — only the trailing
+          // partial sentence (no terminal punctuation, or the non-cloned/
+          // fallback path where clonedSpokenUpTo never advanced) is left.
+          const remaining = clonedSpokenUpTo < text.length ? text.slice(clonedSpokenUpTo).trim() : "";
+          if (remaining) enqueueSpeak(remaining);
         }
         clonedTextAcc = "";
         lastUserTranscript = "";

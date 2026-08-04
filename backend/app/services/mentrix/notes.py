@@ -37,3 +37,19 @@ def add_note(text: str, tags: list[str] | None = None) -> dict[str, Any]:
     }
     (root / f"{note['id']}.json").write_text(json.dumps(note, indent=2), encoding="utf-8")
     return note
+
+
+def delete_note(note_id: str) -> bool:
+    """Delete one note by id. Returns False if it didn't exist (not an error)."""
+    root = _ensure_dir()
+    # note_id came from a URL path segment — reject anything that isn't a
+    # plain uuid-shaped token before it ever touches the filesystem, so this
+    # can't be used to escape NOTES_DIR via "../".
+    safe_id = "".join(c for c in (note_id or "") if c.isalnum() or c == "-")
+    if not safe_id or safe_id != note_id:
+        return False
+    path = root / f"{safe_id}.json"
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True

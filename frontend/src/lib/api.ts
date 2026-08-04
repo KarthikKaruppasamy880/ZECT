@@ -592,6 +592,23 @@ export const deleteClonedVoice = (voiceId: string) =>
 export const resetMyClonedVoice = () =>
   request<{ cleared: boolean }>("/api/mentrix/voice/my-voice", { method: "DELETE" });
 
+export type MentrixNote = { id: string; text: string; tags: string[]; createdAt: string };
+
+/** Browse notes — manual (note_add) and auto-logged Companion exchanges alike. */
+export const listMentrixNotes = (limit = 200) =>
+  request<{ notes: MentrixNote[] }>(`/api/mentrix/notes?limit=${limit}`);
+
+export const createMentrixNote = (text: string, tags?: string[]) =>
+  request<MentrixNote>("/api/mentrix/notes", {
+    method: "POST",
+    body: JSON.stringify({ text, tags }),
+  });
+
+export const deleteMentrixNote = (id: string) =>
+  request<{ deleted: boolean; id: string }>(`/api/mentrix/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+
 /**
  * Auto-log a completed cloned-voice exchange to Mentrix Notes — personal-
  * assistant behavior, not gated behind a trigger phrase. Fire-and-forget:

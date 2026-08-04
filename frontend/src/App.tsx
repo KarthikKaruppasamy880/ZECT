@@ -28,6 +28,7 @@ import FileExplorer from "@/pages/FileExplorer";
 import GitOps from "@/pages/GitOps";
 import CIMonitor from "@/pages/CIMonitor";
 import MemoryDashboard from "@/pages/MemoryDashboard";
+import MentrixNotes from "@/pages/MentrixNotes";
 import DreamEngine from "@/pages/DreamEngine";
 import DataLayer from "@/pages/DataLayer";
 import DataFlywheel from "@/pages/DataFlywheel";
@@ -158,6 +159,7 @@ export default function App() {
           <Route path="/git-ops" element={<GitOps />} />
           <Route path="/ci-monitor" element={<CIMonitor />} />
           <Route path="/memory" element={<MemoryDashboard />} />
+          <Route path="/mentrix-notes" element={<MentrixNotes />} />
           <Route path="/dream-engine" element={<DreamEngine />} />
           <Route path="/data-layer" element={<DataLayer />} />
           <Route path="/data-flywheel" element={<DataFlywheel />} />

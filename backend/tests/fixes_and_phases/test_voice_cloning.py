@@ -119,6 +119,52 @@ class TestChatterboxClient:
         assert audio == b"wav-bytes"
         mock_client.get.assert_called_once()
 
+    def test_synthesize_speech_defaults_to_qwen_engine(self, monkeypatch):
+        gen_resp = Mock(status_code=200)
+        gen_resp.json.return_value = {"status": "completed", "audio_path": "/data/out/gen-1.wav"}
+        audio_resp = Mock(status_code=200, content=b"wav-bytes")
+        mock_client = Mock()
+        mock_client.post.return_value = gen_resp
+        mock_client.get.return_value = audio_resp
+        monkeypatch.setattr(chatterbox_client.httpx, "Client", _mock_httpx_client(mock_client))
+
+        chatterbox_client.synthesize_speech("hello there", "profile-1")
+
+        assert mock_client.post.call_args.kwargs["json"]["engine"] == "qwen"
+
+    def test_synthesize_speech_honors_engine_env_override(self, monkeypatch):
+        """No streaming at this layer (POST /generate blocks until the whole
+        clip is done) — the engine's own speed is the dominant latency
+        factor, so let it be swapped without a code change. CHATTERBOX_ENGINE
+        is read once at import (same pattern as CHATTERBOX_BASE_URL) — a real
+        override takes effect on backend restart after editing .env, so the
+        module constant is what's under test here, not a live env read."""
+        monkeypatch.setattr(chatterbox_client, "DEFAULT_CHATTERBOX_ENGINE", "fast-engine")
+        gen_resp = Mock(status_code=200)
+        gen_resp.json.return_value = {"status": "completed", "audio_path": "/data/out/gen-1.wav"}
+        audio_resp = Mock(status_code=200, content=b"wav-bytes")
+        mock_client = Mock()
+        mock_client.post.return_value = gen_resp
+        mock_client.get.return_value = audio_resp
+        monkeypatch.setattr(chatterbox_client.httpx, "Client", _mock_httpx_client(mock_client))
+
+        chatterbox_client.synthesize_speech("hello there", "profile-1")
+
+        assert mock_client.post.call_args.kwargs["json"]["engine"] == "fast-engine"
+
+    def test_synthesize_speech_explicit_engine_wins_over_default(self, monkeypatch):
+        gen_resp = Mock(status_code=200)
+        gen_resp.json.return_value = {"status": "completed", "audio_path": "/data/out/gen-1.wav"}
+        audio_resp = Mock(status_code=200, content=b"wav-bytes")
+        mock_client = Mock()
+        mock_client.post.return_value = gen_resp
+        mock_client.get.return_value = audio_resp
+        monkeypatch.setattr(chatterbox_client.httpx, "Client", _mock_httpx_client(mock_client))
+
+        chatterbox_client.synthesize_speech("hello there", "profile-1", engine="explicit-engine")
+
+        assert mock_client.post.call_args.kwargs["json"]["engine"] == "explicit-engine"
+
     def test_delete_voice_swallows_errors(self, monkeypatch):
         def boom(**kw):
             raise RuntimeError("network down")

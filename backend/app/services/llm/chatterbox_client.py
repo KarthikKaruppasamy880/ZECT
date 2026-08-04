@@ -22,6 +22,11 @@ CHATTERBOX_AUDIO_PATH_TEMPLATE = os.getenv(
     "CHATTERBOX_AUDIO_PATH_TEMPLATE",
     os.getenv("VOICEBOX_AUDIO_PATH_TEMPLATE", "/audio/{filename}"),
 )
+# "qwen" was hardcoded with no way to try a faster engine your local server
+# might offer without a code change — synthesis is a fully synchronous HTTP
+# call (POST /generate blocks until the whole clip is done, no streaming),
+# so the engine's own speed is the dominant factor in perceived TTS latency.
+DEFAULT_CHATTERBOX_ENGINE = os.getenv("CHATTERBOX_ENGINE", "qwen")
 
 
 def chatterbox_available() -> bool:
@@ -84,12 +89,17 @@ def _resolve_audio_url(audio_path: str) -> str:
     return f"{CHATTERBOX_BASE_URL}{CHATTERBOX_AUDIO_PATH_TEMPLATE.format(filename=filename)}"
 
 
-def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine: str = "qwen") -> bytes:
+def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine: str | None = None) -> bytes:
     """Synthesize text in the given cloned voice profile. Returns raw audio bytes."""
     with httpx.Client(timeout=30.0) as client:
         gen_resp = client.post(
             f"{CHATTERBOX_BASE_URL}/generate",
-            json={"profile_id": voice_id, "text": text[:4000], "language": language, "engine": engine},
+            json={
+                "profile_id": voice_id,
+                "text": text[:4000],
+                "language": language,
+                "engine": engine or DEFAULT_CHATTERBOX_ENGINE,
+            },
         )
         if gen_resp.status_code >= 400:
             raise RuntimeError(

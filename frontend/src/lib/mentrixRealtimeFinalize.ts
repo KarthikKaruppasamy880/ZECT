@@ -65,3 +65,18 @@ export function chunkSpeakText(text: string, maxChars = 220): string[] {
   if (buf) parts.push(buf);
   return parts;
 }
+
+/**
+ * First complete sentence at the start of `unspoken` (streaming assistant
+ * text not yet dispatched to speech), or null if no sentence boundary has
+ * arrived yet. Lets the realtime cloned-voice path start synthesizing each
+ * sentence the instant it streams in, instead of the whole reply waiting
+ * for the LLM to finish generating before any TTS call fires at all.
+ */
+export function nextSpeakableSentence(unspoken: string): { sentence: string; consumedLength: number } | null {
+  const match = unspoken.match(/^[\s\S]*?[.!?](?:\s|$)/);
+  if (!match) return null;
+  const sentence = match[0].trim();
+  if (!sentence) return null;
+  return { sentence, consumedLength: match[0].length };
+}

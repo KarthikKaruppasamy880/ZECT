@@ -676,6 +676,49 @@ def companion_agent_context(
     return {"ok": True, "text": text}
 
 
+class NoteCreate(BaseModel):
+    text: str
+    tags: list[str] | None = None
+
+
+@router.get("/notes")
+def list_mentrix_notes(
+    limit: int = 200,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Browse notes — manual (note_add trigger phrases) and auto-logged
+    Companion exchanges alike. Was previously only viewable ephemerally by
+    asking Companion "list my notes" inline, once, per conversation."""
+    from app.services.mentrix.notes import list_notes
+
+    return {"notes": list_notes(limit=min(max(limit, 1), 500))}
+
+
+@router.post("/notes")
+def create_mentrix_note(
+    req: NoteCreate,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.notes import add_note
+
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    return add_note(text, tags=req.tags)
+
+
+@router.delete("/notes/{note_id}")
+def delete_mentrix_note(
+    note_id: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.notes import delete_note
+
+    if not delete_note(note_id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"deleted": True, "id": note_id}
+
+
 class LogExchangeRequest(BaseModel):
     user_message: str
     assistant_reply: str

@@ -48,6 +48,7 @@ import {
   FlaskConical,
   Box,
   AlertTriangle,
+  StickyNote,
 } from "lucide-react";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
@@ -106,6 +107,7 @@ const labsItems: NavItem[] = [
   { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
   { href: "/dream-engine", label: "Dream Engine", icon: Sparkles },
   { href: "/data-layer", label: "Data Layer", icon: Layers },
   { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },

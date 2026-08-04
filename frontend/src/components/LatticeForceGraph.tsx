@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
 
 export type GraphNode = {
   id: string;
@@ -21,7 +22,7 @@ type SimNode = GraphNode & {
   vy: number;
 };
 
-const KIND_COLORS: Record<string, string> = {
+export const KIND_COLORS: Record<string, string> = {
   doc: "#34d399",
   folder: "#60a5fa",
   vault: "#a78bfa",
@@ -52,16 +53,54 @@ export default function LatticeForceGraph({
   onSelect,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const simRef = useRef<SimNode[]>([]);
   const [selected, setSelected] = useState<string | null>(selectedId);
   const [search, setSearch] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [size, setSize] = useState({ width, height });
   const dragRef = useRef<{ id: string; ox: number; oy: number } | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const { width: canvasWidth, height: canvasHeight } = size;
 
   useEffect(() => {
     setSelected(selectedId);
   }, [selectedId]);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }, []);
+
+  // Fill the container when fullscreen; otherwise use the configured/default size.
+  useEffect(() => {
+    if (!isFullscreen) {
+      setSize({ width, height });
+      return;
+    }
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isFullscreen, width, height]);
+
+  const legendKinds = useMemo(
+    () => [...new Set(nodes.map((n) => n.kind || "default"))].filter((k) => KIND_COLORS[k]),
+    [nodes],
+  );
 
   const emitSelect = useCallback((id: string | null) => {
     setSelected(id);
@@ -85,8 +124,8 @@ export default function LatticeForceGraph({
   }, [edges, nodes]);
 
   useEffect(() => {
-    const cx = width / 2;
-    const cy = height / 2;
+    const cx = canvasWidth / 2;
+    const cy = canvasHeight / 2;
     simRef.current = nodes.slice(0, 180).map((n, i) => ({
       ...n,
       x: cx + Math.cos(i) * 120 + (Math.random() - 0.5) * 40,
@@ -94,7 +133,7 @@ export default function LatticeForceGraph({
       vx: 0,
       vy: 0,
     }));
-  }, [nodes, width, height]);
+  }, [nodes, canvasWidth, canvasHeight]);
 
   useEffect(() => {
     let raf = 0;
@@ -126,8 +165,8 @@ export default function LatticeForceGraph({
         b.vy -= (dy / dist) * pull;
       }
       for (const n of sim) {
-        n.vx += (width / 2 - n.x) * 0.0008;
-        n.vy += (height / 2 - n.y) * 0.0008;
+        n.vx += (canvasWidth / 2 - n.x) * 0.0008;
+        n.vy += (canvasHeight / 2 - n.y) * 0.0008;
         n.vx *= 0.86;
         n.vy *= 0.86;
         n.x += n.vx;
@@ -137,9 +176,9 @@ export default function LatticeForceGraph({
       if (canvas) {
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.clearRect(0, 0, width, height);
+          ctx.clearRect(0, 0, canvasWidth, canvasHeight);
           ctx.fillStyle = "#0f172a";
-          ctx.fillRect(0, 0, width, height);
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
           const sel = selected;
           const neighborIds = new Set<string>();
           if (sel) {
@@ -186,7 +225,7 @@ export default function LatticeForceGraph({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [edges, selected, width, height]);
+  }, [edges, selected, canvasWidth, canvasHeight]);
 
   const pickNode = useCallback(
     (clientX: number, clientY: number) => {
@@ -220,15 +259,15 @@ export default function LatticeForceGraph({
     );
     if (hit) {
       emitSelect(hit.id);
-      hit.x = width / 2;
-      hit.y = height / 2;
+      hit.x = canvasWidth / 2;
+      hit.y = canvasHeight / 2;
       hit.vx = 0;
       hit.vy = 0;
     }
   };
 
   return (
-    <div className="space-y-2" data-testid="lattice-force-graph">
+    <div ref={containerRef} className={isFullscreen ? "space-y-2 bg-slate-950 p-3" : "space-y-2"} data-testid="lattice-force-graph">
       <div className="flex gap-2">
         <input
           data-testid="lattice-graph-search"
@@ -252,12 +291,27 @@ export default function LatticeForceGraph({
         >
           Reset
         </button>
+        <button
+          type="button"
+          data-testid="lattice-graph-fullscreen"
+          className="ml-auto flex items-center gap-1 rounded border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800"
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Maximize graph"}
+        >
+          {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          {isFullscreen ? "Exit" : "Maximize"}
+        </button>
       </div>
       <canvas
         ref={canvasRef}
-        width={width}
-        height={height}
-        className="w-full rounded-lg border border-slate-700 cursor-grab active:cursor-grabbing"
+        width={canvasWidth}
+        height={canvasHeight}
+        style={isFullscreen ? { width: canvasWidth, height: canvasHeight } : undefined}
+        className={
+          isFullscreen
+            ? "rounded-lg border border-slate-700 cursor-grab active:cursor-grabbing"
+            : "w-full rounded-lg border border-slate-700 cursor-grab active:cursor-grabbing"
+        }
         onMouseDown={(e) => {
           const n = pickNode(e.clientX, e.clientY);
           if (n) {
@@ -279,6 +333,19 @@ export default function LatticeForceGraph({
       <p className="text-xs text-slate-400">
         Click a node to select and open details. Drag to rearrange. Fly to search by name/path.
       </p>
+      {legendKinds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-2" data-testid="lattice-graph-legend">
+          {legendKinds.map((kind) => (
+            <span key={kind} className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: KIND_COLORS[kind] }}
+              />
+              {kind}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

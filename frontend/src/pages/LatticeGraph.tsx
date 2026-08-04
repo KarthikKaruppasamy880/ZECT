@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Network, Search, Upload } from "lucide-react";
 import {
@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
-import LatticeForceGraph, { type GraphNode } from "@/components/LatticeForceGraph";
+import LatticeForceGraph, { KIND_COLORS, type GraphNode } from "@/components/LatticeForceGraph";
 
 export default function LatticeGraph() {
   const [searchParams] = useSearchParams();
@@ -186,6 +186,26 @@ export default function LatticeGraph() {
     },
     [key, runExplain],
   );
+
+  const nodeConnections = useMemo(() => {
+    if (!selectedNode) return [];
+    const byId = new Map((graph?.nodes || []).map((n: any) => [n.id, n]));
+    const rows: { id: string; name: string; kind: string; relation: string }[] = [];
+    for (const e of graph?.edges || []) {
+      let otherId: string | null = null;
+      if (e.source === selectedNode.id) otherId = e.target;
+      else if (e.target === selectedNode.id) otherId = e.source;
+      if (!otherId) continue;
+      const other = byId.get(otherId);
+      rows.push({
+        id: otherId,
+        name: other?.name || otherId,
+        kind: other?.kind || "unknown",
+        relation: e.kind || "related",
+      });
+    }
+    return rows.slice(0, 40);
+  }, [selectedNode, graph]);
 
   const nodes = graph?.nodes?.slice(0, 80) || [];
   const edges = graph?.edges || [];
@@ -388,6 +408,28 @@ export default function LatticeGraph() {
                   {explainResult.summary}
                 </p>
               )}
+              <div className="border-t border-slate-800 pt-2" data-testid="lattice-inspector-connections">
+                <p className="text-slate-500 text-xs mb-1">Connections ({nodeConnections.length})</p>
+                {nodeConnections.length === 0 ? (
+                  <p className="text-xs text-slate-500">No connections in the loaded graph — try Explain for API/file/mention context.</p>
+                ) : (
+                  <ul className="space-y-1 max-h-40 overflow-auto text-xs">
+                    {nodeConnections.map((c, i) => (
+                      <li key={`${c.id}-${i}`} className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="inline-block h-2 w-2 rounded-full shrink-0"
+                            style={{ backgroundColor: KIND_COLORS[c.kind] || KIND_COLORS.default }}
+                          />
+                          <span className="truncate font-mono text-slate-200">{c.name}</span>
+                          <span className="text-slate-500 shrink-0">({c.kind})</span>
+                        </span>
+                        <span className="text-teal-400 shrink-0">{c.relation}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </div>

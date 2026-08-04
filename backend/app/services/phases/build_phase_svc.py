@@ -109,18 +109,17 @@ def _generate_core(
 ) -> dict[str, Any]:
     from openai import APIError, OpenAI
 
-    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
-    from app.services.llm.anthropic_client import anthropic_available
     from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.services.llm.anthropic_client import resolve_generation_model
     from app.token_tracker import log_tokens
 
     # Prefer Claude Sonnet for generation quality when configured — current
     # benchmarks (SWE-Bench) put it ahead of gpt-4o-mini specifically on
     # real repo-editing tasks. Falls back to the existing OpenAI path
     # untouched when ANTHROPIC_API_KEY isn't set — no regression either way.
-    use_anthropic = anthropic_available()
+    # Set CODEGEN_MODEL to force a specific model (e.g. gpt-5.4) instead.
+    use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 
     context = req.project_context or ""
     if req.repo_id and db is not None and not context:

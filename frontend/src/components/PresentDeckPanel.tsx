@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square } from "lucide-react";
 import { mentrixCompanionIntegrations, mentrixPresentonGenerate } from "@/lib/api";
-import { cancelMentrixSpeech, speakMentrix, speakMentrixAwait } from "@/mentrix/speak";
+import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -295,7 +295,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         const n = slides.length;
         const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
         setStatus(`Slide ${i + 1} / ${n}`);
-        const spoken = await speakMentrixAwait(script.slice(0, 2000), true);
+        const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true);
         if (abortRef.current) {
           setStatus("Stopped presenting.");
           return;

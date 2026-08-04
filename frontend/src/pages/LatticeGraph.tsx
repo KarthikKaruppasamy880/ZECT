@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
-import LatticeForceGraph, { KIND_COLORS, type GraphNode } from "@/components/LatticeForceGraph";
+import LatticeGraphCanvas, { KIND_COLORS, type GraphNode } from "@/components/LatticeGraphCanvas";
 
 export default function LatticeGraph() {
   const [searchParams] = useSearchParams();
@@ -346,7 +346,7 @@ export default function LatticeGraph() {
       {graph && nodes.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-slate-900 p-3 space-y-3">
           <h2 className="mb-2 text-sm font-semibold text-teal-200">Interactive graph</h2>
-          <LatticeForceGraph
+          <LatticeGraphCanvas
             nodes={graph.nodes || []}
             edges={edges}
             selectedId={selectedNode?.id ?? null}

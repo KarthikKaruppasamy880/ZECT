@@ -62,6 +62,23 @@ class SecretUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class SecretRotate(BaseModel):
+    new_value: str
+
+
+def _require_secret_access(entry: SecretEntry, current_user: CurrentUser, db: Session) -> None:
+    """Admin, the secret's own creator, or resource-level (team/project) access
+    — anything short of that gets a 403, not silent success."""
+    user = get_user_from_current_user(current_user, db)
+    if user.role == "admin":
+        return
+    if entry.user_id is not None and entry.user_id == user.id:
+        return
+    if can_user_access_resource(user, "secret", entry.id, db):
+        return
+    raise PermissionDenied("You don't have permission to access this secret")
+
+
 @router.get("")
 def list_secrets(
     scope: Optional[str] = None,
@@ -99,7 +116,11 @@ def list_secrets(
 
 
 @router.post("")
-def create_secret(data: SecretCreate, db: Session = Depends(get_db)):
+def create_secret(
+    data: SecretCreate,
+    current_user: CurrentUser = Depends(get_current_user),  # RBAC: authentication required
+    db: Session = Depends(get_db),
+):
     """Create a new encrypted secret."""
     try:
         # Check for duplicate name in same scope
@@ -112,7 +133,9 @@ def create_secret(data: SecretCreate, db: Session = Depends(get_db)):
             raise HTTPException(status_code=409, detail=f"Secret '{data.name}' already exists in scope '{data.scope}'")
 
         encrypted = _encrypt(data.value)
+        user = get_user_from_current_user(current_user, db)
         entry = SecretEntry(
+            user_id=user.id,
             name=data.name,
             encrypted_value=encrypted,
             description=data.description,
@@ -137,26 +160,39 @@ def create_secret(data: SecretCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{secret_id}")
-def get_secret(secret_id: int, reveal: bool = False, db: Session = Depends(get_db)):
-    """Get a secret (optionally reveal value)."""
+def get_secret(
+    secret_id: int,
+    reveal: bool = False,
+    current_user: CurrentUser = Depends(get_current_user),  # RBAC: authentication required
+    db: Session = Depends(get_db),
+):
+    """Get a secret. Revealing the plaintext value requires admin, ownership, or resource access."""
     try:
         entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="Secret not found")
+        if reveal:
+            _require_secret_access(entry, current_user, db)
         return _to_dict(entry, mask=not reveal)
-    except HTTPException:
+    except (HTTPException, PermissionDenied):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{secret_id}")
-def update_secret(secret_id: int, data: SecretUpdate, db: Session = Depends(get_db)):
-    """Update a secret."""
+def update_secret(
+    secret_id: int,
+    data: SecretUpdate,
+    current_user: CurrentUser = Depends(get_current_user),  # RBAC: authentication required
+    db: Session = Depends(get_db),
+):
+    """Update a secret. Requires admin, ownership, or resource access."""
     try:
         entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="Secret not found")
+        _require_secret_access(entry, current_user, db)
         if data.value is not None:
             entry.encrypted_value = _encrypt(data.value)
             entry.last_rotated_at = datetime.now(timezone.utc)
@@ -214,18 +250,28 @@ def delete_secret(
 
 
 @router.post("/{secret_id}/rotate")
-def rotate_secret(secret_id: int, new_value: str, db: Session = Depends(get_db)):
-    """Rotate a secret's value."""
+def rotate_secret(
+    secret_id: int,
+    data: SecretRotate,
+    current_user: CurrentUser = Depends(get_current_user),  # RBAC: authentication required
+    db: Session = Depends(get_db),
+):
+    """Rotate a secret's value. Requires admin, ownership, or resource access.
+
+    new_value travels in the request body, not a query string — a query
+    param would land the new secret value in server/proxy access logs.
+    """
     try:
         entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id).first()
         if not entry:
             raise HTTPException(status_code=404, detail="Secret not found")
-        entry.encrypted_value = _encrypt(new_value)
+        _require_secret_access(entry, current_user, db)
+        entry.encrypted_value = _encrypt(data.new_value)
         entry.last_rotated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(entry)
         return _to_dict(entry, mask=True)
-    except HTTPException:
+    except (HTTPException, PermissionDenied):
         raise
     except Exception as e:
         db.rollback()

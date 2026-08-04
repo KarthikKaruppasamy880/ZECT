@@ -3,11 +3,19 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet
 from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.models import SlackConfig
+from app.security.vault import vault
 
 router = APIRouter(prefix="/api/slack", tags=["slack"])
+
+# bot_token_encrypted was previously assigned the raw plaintext token despite
+# its name — nothing in the codebase currently reads it back (real Slack
+# calls go through app.services.mcp.hub's SLACK_BOT_TOKEN/MCPServerConfig-
+# backed path), so encrypting here is a pure hardening change.
+_cipher = Fernet(vault.get_key())
 
 
 def get_db():
@@ -88,7 +96,7 @@ def configure_slack(req: SlackConfigCreate, db: Session = Depends(get_db)):
     """Configure Slack integration."""
     existing = db.query(SlackConfig).first()
     if existing:
-        existing.bot_token_encrypted = req.bot_token
+        existing.bot_token_encrypted = _cipher.encrypt(req.bot_token.encode()).decode()
         existing.workspace_name = req.workspace_name
         existing.default_channel = req.default_channel
         existing.notify_on_review = req.notify_on_review
@@ -101,7 +109,7 @@ def configure_slack(req: SlackConfigCreate, db: Session = Depends(get_db)):
         config = existing
     else:
         config = SlackConfig(
-            bot_token_encrypted=req.bot_token,
+            bot_token_encrypted=_cipher.encrypt(req.bot_token.encode()).decode(),
             workspace_name=req.workspace_name,
             default_channel=req.default_channel,
             notify_on_review=req.notify_on_review,
@@ -126,17 +134,33 @@ def configure_slack(req: SlackConfigCreate, db: Session = Depends(get_db)):
 
 @router.post("/notify")
 def send_notification(req: SlackNotification, db: Session = Depends(get_db)):
-    """Send a test notification (simulated — real Slack SDK call in production)."""
+    """Send a real Slack notification via the MCP slack adapter (SLACK_BOT_TOKEN
+    or the slack server's config.token) — no longer a simulated always-success stub."""
+    from app.services.mcp.hub import execute_tool
+
     config = db.query(SlackConfig).filter(SlackConfig.is_active == True).first()
     if not config:
         raise HTTPException(status_code=400, detail="Slack not configured.")
     channel = req.channel or config.default_channel
+
+    outcome = execute_tool(
+        db,
+        server_id="slack",
+        tool_name="send_message",
+        arguments={"channel": channel, "text": req.message},
+    )
+    result = outcome.get("result") or {}
+    if outcome.get("status") != "success" or result.get("status") in ("disabled", "not_configured"):
+        raise HTTPException(
+            status_code=502,
+            detail=result.get("message") or result.get("error") or "Slack send failed — check SLACK_BOT_TOKEN / MCP slack server config",
+        )
+
     return {
         "sent": True,
         "channel": channel,
         "message": req.message,
         "notification_type": req.notification_type,
-        "note": "Simulated — connect real Slack Bot Token for live notifications.",
     }
 
 

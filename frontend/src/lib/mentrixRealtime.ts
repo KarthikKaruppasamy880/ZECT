@@ -608,13 +608,30 @@ export async function startMentrixRealtime(
       void audio.play().catch(reject);
     });
 
+  const setMicEnabled = (enabled: boolean) => {
+    mediaStream?.getAudioTracks().forEach((t) => {
+      t.enabled = enabled;
+    });
+  };
+
   /**
    * Speak cloned TTS via HTMLAudio only (never decodeAudioData into the 24 kHz
    * Realtime AudioContext — that crashes Electron on Windows).
    * Chunk + prefetch so the first sentence starts playing sooner than one big MP3.
+   *
+   * Mic is muted for the duration: cloned audio plays through a plain
+   * <audio> element the Realtime session's server-side VAD has no idea
+   * exists, so without this, your speakers leaking into the mic gets
+   * transcribed as new user speech and the model replies to itself —
+   * observed as short, generic, back-to-back non-sequiturs ("Bye.",
+   * "Have fun. Have fun. Have fun."). Native (non-cloned) audio doesn't
+   * need this: OpenAI's own pipeline already knows that audio is its own
+   * output and won't treat it as a fresh turn. Trade-off: you can't barge
+   * in over a cloned-voice reply the way you can over native audio.
    */
   const speakWithClonedVoice = async (text: string) => {
     if (!text.trim() || stopped) return;
+    setMicEnabled(false);
     try {
       if (audioCtx?.state === "suspended") {
         await audioCtx.resume().catch(() => undefined);
@@ -660,6 +677,8 @@ export async function startMentrixRealtime(
           ? "Voice output blocked — click the Mentrix window, then speak again"
           : `Voice output: ${msg}`,
       );
+    } finally {
+      setMicEnabled(true);
     }
   };
 

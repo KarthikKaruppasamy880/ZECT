@@ -99,6 +99,18 @@ class TestCORSHeaders:
             # If present, it should not be "*" for arbitrary origins
             pass  # This depends on implementation details
 
+    def test_exposes_tts_engine_header(self, client):
+        """X-Mentrix-TTS-Engine (set by /api/mentrix/voice/speak) must be
+        explicitly exposed — browsers hide custom response headers from
+        fetch()'s res.headers.get() unless Access-Control-Expose-Headers
+        lists them, even though the server did send the header."""
+        response = client.get(
+            "/api/projects",
+            headers={"Origin": "http://localhost:5173"},
+        )
+
+        assert "x-mentrix-tts-engine" in response.headers.get("access-control-expose-headers", "").lower()
+
     def test_credentials_allowed_with_explicit_origin(self, client):
         """Test that credentials are allowed with explicit origins."""
         response = client.get(

@@ -283,8 +283,12 @@ export async function speakMentrixStreamedAwait(
   let usedBrowserFallback = false;
 
   type ChunkAudio = { url: string; engine: string };
+  let lastFetchError = "";
   const fetchChunk = (chunk: string): Promise<ChunkAudio | null> =>
-    mentrixSpeakClonedDetailed(chunk, voiceOpts).catch(() => null);
+    mentrixSpeakClonedDetailed(chunk, voiceOpts).catch((e) => {
+      lastFetchError = e instanceof Error ? e.message : String(e);
+      return null;
+    });
 
   let nextChunk: Promise<ChunkAudio | null> = fetchChunk(chunks[0]);
   for (let i = 0; i < chunks.length; i++) {
@@ -332,6 +336,13 @@ export async function speakMentrixStreamedAwait(
     }
 
     if (!played) {
+      // A voice you explicitly picked (a saved clone, or a stock voice for this
+      // presentation) failing should say so, not silently swap to a generic
+      // browser voice with no explanation — that's indistinguishable from the
+      // selector "just not working."
+      if (voiceOpts && lastFetchError) {
+        return { ok: false, error: `Selected voice failed: ${lastFetchError}` };
+      }
       // Per-chunk fallback: one bad chunk shouldn't derail the rest of the narration.
       if (typeof window === "undefined" || !window.speechSynthesis) {
         return { ok: false, error: "No audio output for this chunk — check TTS backend/Chatterbox/OpenAI" };

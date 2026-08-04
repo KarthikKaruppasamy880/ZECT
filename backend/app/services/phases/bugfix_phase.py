@@ -23,15 +23,13 @@ def run_root_cause_analysis(
 ) -> dict[str, Any]:
     from openai import APIError, OpenAI
 
-    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
-    from app.services.llm.anthropic_client import anthropic_available
     from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.services.llm.anthropic_client import resolve_generation_model
     from app.services.quality.truncation import complete_with_continuations
     from app.token_tracker import log_tokens
 
-    use_anthropic = anthropic_available()
+    use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 
     repro_text = (
         f"Reproduction attempted: {reproduction.get('attempted')}\n"

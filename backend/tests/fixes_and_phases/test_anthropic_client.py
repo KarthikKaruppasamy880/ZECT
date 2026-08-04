@@ -16,6 +16,7 @@ from app.services.llm.anthropic_client import (
     _split_system,
     anthropic_available,
     create_fn,
+    resolve_generation_model,
 )
 
 
@@ -257,6 +258,65 @@ class TestBuildRoutingUsesAnthropicWhenConfigured:
         assert captured["model"] == "gpt-4o-mini"
         assert captured["create_fn"] is None
         assert result["model"] == "gpt-4o-mini"
+
+
+class TestResolveGenerationModel:
+    """Build/HLD/Bugfix all called the same 3-line use_anthropic/model_name
+    pattern independently — centralized here, plus the new CODEGEN_MODEL
+    override (e.g. to force gpt-5.4) that none of them had before."""
+
+    def test_prefers_anthropic_when_configured(self, monkeypatch):
+        monkeypatch.delenv("CODEGEN_MODEL", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+        use_anthropic, model_name = resolve_generation_model()
+
+        assert use_anthropic is True
+        assert model_name == "claude-sonnet-5"
+
+    def test_falls_back_to_openai_default_without_anthropic_key(self, monkeypatch):
+        monkeypatch.delenv("CODEGEN_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        use_anthropic, model_name = resolve_generation_model()
+
+        assert use_anthropic is False
+        assert model_name == "gpt-4o-mini"
+
+    def test_custom_default_openai_model_respected(self, monkeypatch):
+        monkeypatch.delenv("CODEGEN_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        _, model_name = resolve_generation_model(default_openai_model="gpt-4o")
+
+        assert model_name == "gpt-4o"
+
+    def test_codegen_model_override_forces_openai_model_even_with_anthropic_key(self, monkeypatch):
+        monkeypatch.setenv("CODEGEN_MODEL", "gpt-5.4")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+        use_anthropic, model_name = resolve_generation_model()
+
+        assert use_anthropic is False
+        assert model_name == "gpt-5.4"
+
+    def test_codegen_model_override_of_a_claude_model_routes_to_anthropic(self, monkeypatch):
+        monkeypatch.setenv("CODEGEN_MODEL", "claude-3-haiku")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        use_anthropic, model_name = resolve_generation_model()
+
+        assert use_anthropic is True
+        assert model_name == "claude-3-haiku"
+
+    def test_blank_codegen_model_env_is_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("CODEGEN_MODEL", "   ")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        use_anthropic, model_name = resolve_generation_model()
+
+        assert use_anthropic is False
+        assert model_name == "gpt-4o-mini"
 
 
 class TestModelSelectionAnthropicStatus:

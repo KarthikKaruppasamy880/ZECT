@@ -40,9 +40,8 @@ def run_hld_generate(
     from openai import APIError, OpenAI
 
     from app.services.forge_loop.orchestrator import _run_scout
-    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
-    from app.services.llm.anthropic_client import anthropic_available
     from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.services.llm.anthropic_client import resolve_generation_model
     from app.services.phases.blueprint_phase import run_blueprint
     from app.services.quality.truncation import complete_with_continuations
     from app.token_tracker import log_tokens
@@ -51,9 +50,8 @@ def run_hld_generate(
     scout = _run_scout(db, goal, project_key, events)
     structural_prompt = run_blueprint(goal, project_key=project_key, scout=scout)["prompt"]
 
-    use_anthropic = anthropic_available()
+    use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 
     try:
         completed = complete_with_continuations(

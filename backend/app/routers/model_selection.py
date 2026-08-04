@@ -17,6 +17,11 @@ MODELS = [
     # OpenAI
     {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "cost_per_1k_input": 0.00015, "cost_per_1k_output": 0.0006, "free": False, "quality": "high", "speed": "fast"},
     {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "cost_per_1k_input": 0.005, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
+    # Pricing below is an estimate, not confirmed against OpenAI's published
+    # rate card — correct cost_per_1k_input/output once real GPT-5.4 pricing
+    # is known; it only affects the cost_usd shown in Token Controls/Analytics,
+    # not model selection or generation itself.
+    {"id": "gpt-5.4", "name": "GPT-5.4", "provider": "openai", "cost_per_1k_input": 0.005, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
     {"id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "openai", "cost_per_1k_input": 0.0005, "cost_per_1k_output": 0.0015, "free": False, "quality": "good", "speed": "fastest"},
     # Anthropic (direct)
     {"id": "claude-sonnet-5", "name": "Claude Sonnet 5", "provider": "anthropic", "cost_per_1k_input": 0.003, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},

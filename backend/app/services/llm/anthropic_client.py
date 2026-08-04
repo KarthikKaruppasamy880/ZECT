@@ -31,6 +31,25 @@ def anthropic_available() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
 
 
+def resolve_generation_model(*, default_openai_model: str = "gpt-4o-mini") -> tuple[bool, str]:
+    """Pick the model for Build/HLD/Bugfix generation — was copy-pasted as the
+    same 3 lines (use_anthropic = anthropic_available(); model_name = ...) at
+    5 separate call sites; centralized here so CODEGEN_MODEL only has to be
+    read in one place.
+
+    CODEGEN_MODEL overrides the default Claude-else-OpenAI preference
+    entirely (e.g. CODEGEN_MODEL=gpt-5.4) — provider is inferred from the
+    model name (claude* -> Anthropic, else OpenAI). Falls back to the
+    existing Claude Sonnet 5 (via ANTHROPIC_API_KEY) -> gpt-4o-mini
+    preference when unset, so this is a no-op for anyone not using it.
+    """
+    override = os.getenv("CODEGEN_MODEL", "").strip()
+    if override:
+        return override.startswith("claude"), override
+    use_anthropic = anthropic_available()
+    return use_anthropic, DEFAULT_MODEL if use_anthropic else default_openai_model
+
+
 def _get_client():
     from anthropic import Anthropic
 

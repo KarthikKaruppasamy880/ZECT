@@ -13,6 +13,10 @@ PRICING = {
     # Standard pricing; Anthropic's introductory rate ($2/$10) runs through
     # 2026-08-31 — using standard rate here since it's the steady-state cost.
     "claude-sonnet-5": {"input": 3.00, "output": 15.00},
+    # Estimate, not confirmed against OpenAI's published rate card — update
+    # once real GPT-5.4 pricing is known. Without an entry here, usage would
+    # silently be mis-costed at gpt-4o-mini's rate (see _estimate_cost below).
+    "gpt-5.4": {"input": 5.00, "output": 15.00},
 }
 
 

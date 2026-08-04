@@ -181,13 +181,11 @@ def generate_code(
     db: Session = Depends(get_db),
 ):
     """Generate code for a single plan step."""
-    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
-    from app.services.llm.anthropic_client import anthropic_available
     from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.services.llm.anthropic_client import resolve_generation_model
 
-    use_anthropic = anthropic_available()
+    use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else _get_client()
-    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 
     # Auto-inject repo context if repo_id provided — prefer semantic retrieval
     # over the repo (chunked + embedded, scoped to this plan step) once an
@@ -394,13 +392,11 @@ def generate_multi_file(
     if len(req.target_files) > MAX_MULTI_FILE_TARGETS:
         raise HTTPException(status_code=400, detail=f"target_files exceeds the {MAX_MULTI_FILE_TARGETS}-file limit per call")
 
-    from app.services.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_MODEL
-    from app.services.llm.anthropic_client import anthropic_available
     from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.services.llm.anthropic_client import resolve_generation_model
 
-    use_anthropic = anthropic_available()
+    use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else _get_client()
-    model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 
     project_context = req.project_context
     if req.repo_id and not project_context:

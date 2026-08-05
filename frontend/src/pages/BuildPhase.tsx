@@ -8,6 +8,7 @@ import DiffViewer from "@/components/DiffViewer";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import {
   Hammer,
   Play,
@@ -353,9 +354,7 @@ export default function BuildPhase() {
           </div>
 
           {/* Error */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>
-          )}
+          <PhaseErrorBanner error={error} density="plain" />
 
           {/* Generated Code Result */}
           {result && (

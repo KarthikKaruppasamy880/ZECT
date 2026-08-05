@@ -88,7 +88,7 @@ class AutoFixLoopRequest(BaseModel):
     repo: str
     pr_number: int
     max_iterations: int = 3
-    auto_comment: bool = True  # post fix suggestions as PR comments
+    auto_comment: bool = False  # Stage D: default off — require approve-post flow
 
 
 class WebhookConfigRequest(BaseModel):
@@ -96,7 +96,7 @@ class WebhookConfigRequest(BaseModel):
     repo: str
     enabled: bool = True
     auto_review: bool = True
-    auto_comment: bool = True
+    auto_comment: bool = False  # Stage D: do not auto-post without human approve
     webhook_secret: str = ""  # optional shared secret for signature verification
 
 
@@ -227,7 +227,7 @@ class PostReviewRequest(BaseModel):
     owner: str
     repo: str
     pr_number: int
-    auto_comment: bool = True  # If True, post review findings as inline comments
+    auto_comment: bool = False  # Stage D: default off — use /ultrareview approve-post + post-github
 
 
 @router.post("/pr/inline")
@@ -236,91 +236,26 @@ def review_pr_and_post_comments(
     current_user: CurrentUser = Depends(enforce_token_budget),
     db: Session = Depends(get_db),
 ):
-    """Review a PR and post findings as inline comments on GitHub.
+    """Review a PR; posting is opt-in via auto_comment (default False since Stage D).
 
-    ZECT reviews actual PRs and posts inline comments directly on GitHub,
-    not just reviewing pasted snippets.
+    Prefer POST /api/ultrareview/{session_id}/approve-post then /post-github for gated posts.
     """
-    # First, run the review
+    if req.auto_comment:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Direct auto_comment posting is disabled. "
+                "Run review with auto_comment=false, then "
+                "POST /api/ultrareview/{session_id}/approve-post and /post-github."
+            ),
+        )
+    # First, run the review (never posts)
     review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)
     try:
         review_result = review_pull_request(review_req, current_user=current_user, db=db)
     except HTTPException:
         raise
-
-    if not req.auto_comment:
-        return review_result
-
-    # Post findings as comments on the PR
-    posted_comments = []
-
-    # Post summary as a general comment
-    summary_body = f"## ZECT AI Code Review\n\n"
-    summary_body += f"**Quality Score: {review_result.quality_score}/100**\n\n"
-    summary_body += f"{review_result.summary}\n\n"
-    summary_body += f"**Issues Found:** {review_result.total_issues}\n\n"
-
-    if review_result.strengths:
-        summary_body += "### Strengths\n"
-        for s in review_result.strengths:
-            summary_body += f"- {s}\n"
-        summary_body += "\n"
-
-    if review_result.recommendations:
-        summary_body += "### Recommendations\n"
-        for r in review_result.recommendations:
-            summary_body += f"- {r}\n"
-
-    try:
-        if post_pr_review_comment:
-            comment = post_pr_review_comment(
-                owner=req.owner, repo=req.repo, pr_number=req.pr_number,
-                body=summary_body,
-            )
-            posted_comments.append(comment)
-    except Exception as e:
-        posted_comments.append({"error": str(e), "type": "summary"})
-
-    # Post inline comments for each finding that has a file/line
-    for finding in review_result.findings:
-        if finding.get("file") and finding.get("line"):
-            severity_icon = {"critical": "\U0001f6d1", "high": "\u26a0\ufe0f", "medium": "\U0001f4a1", "low": "\u2139\ufe0f"}.get(
-                finding.get("severity", "").lower(), "\U0001f4a1"
-            )
-            comment_body = f"{severity_icon} **{finding.get('severity', 'Info').upper()}: {finding.get('title', 'Issue')}**\n\n"
-            comment_body += f"{finding.get('description', '')}\n\n"
-            if finding.get("suggestion"):
-                comment_body += f"**Suggestion:** {finding['suggestion']}\n"
-            if finding.get("code_snippet"):
-                comment_body += f"\n```suggestion\n{finding['code_snippet']}\n```\n"
-
-            try:
-                if post_pr_review_comment:
-                    # Get the latest commit SHA for inline comments
-                    pr_data = github_service.get_pull(req.owner, req.repo, req.pr_number)
-                    # Use head SHA from the PR
-                    from app.github_service import get_github
-                    gh = get_github()
-                    repo_obj = gh.get_repo(f"{req.owner}/{req.repo}")
-                    pr_obj = repo_obj.get_pull(req.pr_number)
-                    head_sha = pr_obj.head.sha
-
-                    comment = post_pr_review_comment(
-                        owner=req.owner, repo=req.repo, pr_number=req.pr_number,
-                        body=comment_body,
-                        commit_sha=head_sha,
-                        path=finding["file"],
-                        line=finding["line"],
-                    )
-                    posted_comments.append(comment)
-            except Exception as e:
-                posted_comments.append({"error": str(e), "file": finding.get("file"), "type": "inline"})
-
-    return {
-        "review": review_result.model_dump(),
-        "posted_comments": posted_comments,
-        "total_comments_posted": len([c for c in posted_comments if "error" not in c]),
-    }
+    return review_result
 
 
 @router.post("/pr/comment")
@@ -444,56 +379,17 @@ def auto_fix_loop(
             }
             fix_suggestions.append(fix)
 
-        # Step 3: Post as inline comments if enabled
+        # Step 3: GitHub posting is gated (Stage D) — use ultrareview approve-post + post-github
         posted_count = 0
-        if req.auto_comment and post_pr_review_comment:
-            # Post summary
-            summary = f"## ZECT Auto-Fix Loop — Iteration {iteration}\n\n"
-            summary += f"**Quality Score:** {review_result.quality_score}/100\n"
-            summary += f"**Issues Found:** {review_result.total_issues}\n\n"
-            summary += "### Fix Suggestions\n\n"
-            for i, fix in enumerate(fix_suggestions, 1):
-                sev_icon = {"critical": "\U0001f6d1", "high": "\u26a0\ufe0f", "medium": "\U0001f4a1", "low": "\u2139\ufe0f"}.get(
-                    fix["severity"], "\U0001f4a1"
-                )
-                summary += f"{i}. {sev_icon} **{fix['title']}**"
-                if fix["file"]:
-                    summary += f" (`{fix['file']}"
-                    if fix["line"]:
-                        summary += f":{fix['line']}"
-                    summary += "`)"
-                summary += f"\n   - {fix['suggestion']}\n\n" if fix["suggestion"] else "\n"
-
-            try:
-                post_pr_review_comment(
-                    owner=req.owner, repo=req.repo, pr_number=req.pr_number,
-                    body=summary,
-                )
-                posted_count += 1
-            except Exception as e:
-                logger.warning("Failed to post auto-fix summary: %s", e)
-
-            # Post inline fixes for findings with file/line
-            for fix in fix_suggestions:
-                if fix["file"] and fix["line"] and fix["suggestion"]:
-                    body = f"**ZECT Auto-Fix:** {fix['suggestion']}"
-                    if fix["code_snippet"]:
-                        body += f"\n\n```suggestion\n{fix['code_snippet']}\n```"
-                    try:
-                        pr_data = github_service.get_pull(req.owner, req.repo, req.pr_number)
-                        from app.github_service import get_github
-                        gh = get_github()
-                        repo_obj = gh.get_repo(f"{req.owner}/{req.repo}")
-                        pr_obj = repo_obj.get_pull(req.pr_number)
-                        head_sha = pr_obj.head.sha
-                        post_pr_review_comment(
-                            owner=req.owner, repo=req.repo, pr_number=req.pr_number,
-                            body=body, commit_sha=head_sha,
-                            path=fix["file"], line=fix["line"],
-                        )
-                        posted_count += 1
-                    except Exception as e:
-                        logger.warning("Failed to post inline fix for %s:%s — %s", fix["file"], fix["line"], e)
+        if req.auto_comment:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "auto_comment posting disabled. Use "
+                    "POST /api/ultrareview/{session_id}/approve-post then /post-github "
+                    "or /start-fix-run."
+                ),
+            )
 
         total_fixes_posted += posted_count
 

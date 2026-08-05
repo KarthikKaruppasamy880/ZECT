@@ -1,6 +1,23 @@
 import { useState } from "react";
-import { reviewPR, reviewSnippet, reviewPRInline, postPRComment, getPRComments, reviewRepo, reviewAutoFixLoop, reviewEvaluateRules, configureWebhook, getWebhookConfig, mentrixSastStatus } from "@/lib/api";
+import {
+  reviewPR,
+  reviewSnippet,
+  reviewPRInline,
+  postPRComment,
+  getPRComments,
+  reviewRepo,
+  reviewAutoFixLoop,
+  reviewEvaluateRules,
+  configureWebhook,
+  getWebhookConfig,
+  mentrixSastStatus,
+  getUltraReview,
+  ultraReviewApprovePost,
+  ultraReviewPostGithub,
+  ultraReviewStartFixRun,
+} from "@/lib/api";
 import type { ReviewResponse, ReviewFinding } from "@/types";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   Shield,
   Bug,
@@ -30,6 +47,7 @@ import {
   FolderSearch,
   ToggleLeft,
   ToggleRight,
+  Wrench,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -164,6 +182,7 @@ function FindingCard({ finding, index }: { finding: ReviewFinding; index: number
 /* Main component                                                      */
 /* ------------------------------------------------------------------ */
 export default function CodeReview() {
+  const { activeProject, activeRepo, activeLocalPath, activeProjectKey } = useActiveProject();
   const [mode, setMode] = useState<"pr" | "snippet" | "repo" | "autofix" | "webhook">("pr");
   const [owner, setOwner] = useState("KarthikKaruppasamy880");
   const [repo, setRepo] = useState("ZECT");
@@ -185,20 +204,26 @@ export default function CodeReview() {
   const [commentLine, setCommentLine] = useState("");
   const [postingComment, setPostingComment] = useState(false);
   const [inlineSuccess, setInlineSuccess] = useState("");
+  // Phase 4 Stage D — approve before post / Mentrix fix-run
+  const [reviewSessionId, setReviewSessionId] = useState<number | null>(null);
+  const [sessionFindings, setSessionFindings] = useState<Array<{ id: number; title: string; severity: string; file_path?: string | null }>>([]);
+  const [selectedFindingIds, setSelectedFindingIds] = useState<Set<number>>(new Set());
+  const [gateBusy, setGateBusy] = useState(false);
+  const [gateMsg, setGateMsg] = useState("");
   // Full repo scan state
   const [repoBranch, setRepoBranch] = useState("");
   const [filePatterns, setFilePatterns] = useState("");
   const [repoScanResult, setRepoScanResult] = useState<any>(null);
   // Auto-fix loop state
   const [maxIterations, setMaxIterations] = useState(3);
-  const [autoComment, setAutoComment] = useState(true);
+  const [autoComment, setAutoComment] = useState(false);
   const [autoFixResult, setAutoFixResult] = useState<any>(null);
   const [useRulesEngine, setUseRulesEngine] = useState(false);
   const [rulesResult, setRulesResult] = useState<any>(null);
   // Webhook config state
   const [webhookEnabled, setWebhookEnabled] = useState(false);
   const [webhookAutoReview, setWebhookAutoReview] = useState(true);
-  const [webhookAutoComment, setWebhookAutoComment] = useState(true);
+  const [webhookAutoComment, setWebhookAutoComment] = useState(false);
   const [webhookSecret, setWebhookSecret] = useState("");
   const [webhookSaved, setWebhookSaved] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
@@ -319,7 +344,7 @@ export default function CodeReview() {
       const config = await getWebhookConfig(owner, repo);
       setWebhookEnabled(config.enabled || false);
       setWebhookAutoReview(config.auto_review !== false);
-      setWebhookAutoComment(config.auto_comment !== false);
+      setWebhookAutoComment(config.auto_comment === true);
       setWebhookSecret(config.webhook_secret || "");
     } catch { /* ignore */ }
   };
@@ -337,7 +362,7 @@ export default function CodeReview() {
       }, {})
     : {};
 
-  // Inline PR review functions
+  // Inline PR review — Stage D: review only (no auto-post); approve → post / fix-run
   const runInlineReview = async () => {
     if (!owner || !repo || !prNumber) {
       setError("Please fill in owner, repo, and PR number.");
@@ -346,17 +371,110 @@ export default function CodeReview() {
     setInlineReviewLoading(true);
     setError(null);
     setInlineSuccess("");
+    setGateMsg("");
+    setReviewSessionId(null);
+    setSessionFindings([]);
+    setSelectedFindingIds(new Set());
     try {
-      const result = await reviewPRInline(owner, repo, Number(prNumber), true);
-      setReview(result.review || result);
+      const result = await reviewPRInline(owner, repo, Number(prNumber), false);
+      const reviewPayload = result.review || result;
+      setReview(reviewPayload);
       setShowInlinePanel(true);
-      setInlineSuccess(`Posted ${result.posted_comments?.length || 0} inline comments to PR #${prNumber}`);
-      // Load existing comments
+      const sid = Number(reviewPayload.review_session_id || result.review_session_id || 0) || null;
+      if (sid) {
+        setReviewSessionId(sid);
+        const ur = await getUltraReview(sid);
+        const findings = (ur.findings || []).map((f: any) => ({
+          id: Number(f.id),
+          title: f.title || "Finding",
+          severity: f.severity || "info",
+          file_path: f.file_path || f.file || null,
+        })).filter((f: { id: number }) => Number.isFinite(f.id) && f.id > 0);
+        setSessionFindings(findings);
+        setSelectedFindingIds(new Set(findings.map((f: { id: number }) => f.id)));
+        setInlineSuccess(`Review ready (session #${sid}). Select findings, then Approve before posting or starting a fix run.`);
+      } else {
+        setInlineSuccess("Review complete. No review session id returned — approve/post gate unavailable for this run.");
+      }
       loadPRComments();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Inline review failed");
     } finally {
       setInlineReviewLoading(false);
+    }
+  };
+
+  const toggleFindingSelected = (id: number) => {
+    setSelectedFindingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleApproveSelected = async () => {
+    if (!reviewSessionId || selectedFindingIds.size === 0) {
+      setError("Select at least one finding to approve.");
+      return;
+    }
+    setGateBusy(true);
+    setError(null);
+    setGateMsg("");
+    try {
+      await ultraReviewApprovePost(reviewSessionId, [...selectedFindingIds], {
+        owner,
+        repo,
+        pr_number: Number(prNumber),
+      });
+      setGateMsg(`Approved ${selectedFindingIds.size} finding(s). You can now Post to GitHub or Start Fix Run.`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Approve failed");
+    } finally {
+      setGateBusy(false);
+    }
+  };
+
+  const handlePostApproved = async () => {
+    if (!reviewSessionId || !owner || !repo || !prNumber) return;
+    setGateBusy(true);
+    setError(null);
+    setGateMsg("");
+    try {
+      const res = await ultraReviewPostGithub(reviewSessionId, owner, repo, Number(prNumber));
+      setGateMsg(`Posted ${res.posted_count ?? 0} approved comment(s) to PR #${prNumber}.`);
+      loadPRComments();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Post to GitHub failed — approve findings first");
+    } finally {
+      setGateBusy(false);
+    }
+  };
+
+  const handleStartFixRun = async () => {
+    if (!reviewSessionId) return;
+    const workspace = (activeLocalPath || "").trim();
+    if (!workspace) {
+      setError("Select an active project repo with a local workspace path before starting a fix run.");
+      return;
+    }
+    setGateBusy(true);
+    setError(null);
+    setGateMsg("");
+    try {
+      const res = await ultraReviewStartFixRun(reviewSessionId, workspace, {
+        project_key: activeProjectKey || "",
+        project_id: activeProject?.id,
+        repo_id: activeRepo?.repo_id,
+        owner,
+        repo,
+        pr_number: Number(prNumber),
+      });
+      setGateMsg(`Fix run started (Mentrix run #${res.mentrix_run_id ?? res.run_id ?? "?"} · bugfix).`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Start fix run failed — approve findings first");
+    } finally {
+      setGateBusy(false);
     }
   };
 
@@ -806,9 +924,9 @@ export default function CodeReview() {
               className="flex items-center gap-2 bg-green-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {inlineReviewLoading ? (
-                <><Loader2 className="h-4 w-4 animate-spin" /> Posting Inline Review...</>
+                <><Loader2 className="h-4 w-4 animate-spin" /> Running PR Review...</>
               ) : (
-                <><FileCode className="h-4 w-4" /> Review &amp; Post to GitHub</>
+                <><FileCode className="h-4 w-4" /> Review PR (approve before post)</>
               )}
             </button>
           )}
@@ -816,9 +934,93 @@ export default function CodeReview() {
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           {inlineSuccess && <p className="text-sm text-green-600">{inlineSuccess}</p>}
+          {gateMsg && <p className="text-sm text-indigo-700">{gateMsg}</p>}
           {webhookSaved && <p className="text-sm text-green-600">Webhook configuration saved!</p>}
         </div>
       </div>
+
+      {/* Stage D — Approve → Post / Fix Run */}
+      {reviewSessionId && sessionFindings.length > 0 && mode === "pr" && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6 space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+              Approve findings (session #{reviewSessionId})
+            </h3>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <button
+                type="button"
+                className="text-indigo-600 hover:text-indigo-700"
+                onClick={() => setSelectedFindingIds(new Set(sessionFindings.map((f) => f.id)))}
+              >
+                Select all
+              </button>
+              <span>·</span>
+              <button
+                type="button"
+                className="text-indigo-600 hover:text-indigo-700"
+                onClick={() => setSelectedFindingIds(new Set())}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          <div className="max-h-56 overflow-y-auto space-y-2 border border-slate-100 rounded-lg p-2">
+            {sessionFindings.map((f) => (
+              <label key={f.id} className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1 rounded border-slate-300"
+                  checked={selectedFindingIds.has(f.id)}
+                  onChange={() => toggleFindingSelected(f.id)}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <SeverityBadge severity={f.severity} />
+                    <span className="text-sm text-slate-800">{f.title}</span>
+                  </div>
+                  {f.file_path && (
+                    <p className="text-xs text-slate-500 font-mono truncate mt-0.5">{f.file_path}</p>
+                  )}
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleApproveSelected}
+              disabled={gateBusy || selectedFindingIds.size === 0}
+              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {gateBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+              Approve selected ({selectedFindingIds.size})
+            </button>
+            <button
+              type="button"
+              onClick={handlePostApproved}
+              disabled={gateBusy}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-60"
+            >
+              <FileCode className="h-4 w-4" />
+              Post approved to GitHub
+            </button>
+            <button
+              type="button"
+              onClick={handleStartFixRun}
+              disabled={gateBusy}
+              className="flex items-center gap-2 bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-60"
+              title={activeLocalPath ? `Workspace: ${activeLocalPath}` : "Needs active local workspace"}
+            >
+              <Wrench className="h-4 w-4" />
+              Start Mentrix fix run
+            </button>
+          </div>
+          <p className="text-xs text-slate-500">
+            Posting and fix runs require an Approve step first. Fix run uses the active project&apos;s local workspace.
+          </p>
+        </div>
+      )}
 
       {/* Auto-Fix Results Panel */}
       {autoFixResult && !loading && (

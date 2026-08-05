@@ -27,12 +27,13 @@ from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, aut
 from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
 from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights
 from app.routers import repo_clone, repo_browser, build_intel
-from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, realtime, file_watcher, diff_viewer
+from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, file_watcher, diff_viewer
+from app.domains.voice import realtime
 from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
 from app.routers import lattice as lattice_router
 from app.routers import mentrix as mentrix_router
-from app.routers import voice_clone
+from app.domains.voice import voice_clone
 from app.routers import confluence_integration, datadog_integration, email_integration
 
 app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)

@@ -53,7 +53,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
         )
 
     def test_failed_reprovision_uses_short_timeout_and_502(self, tmp_path, monkeypatch):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
@@ -76,7 +76,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
         assert clone_calls[0] < 60.0  # short, not the 60s /clone default
 
     def test_repeat_call_within_cooldown_skips_network_entirely(self, tmp_path, monkeypatch):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
@@ -102,7 +102,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
         assert exc.value.status_code == 503
 
     def test_cooldown_expires_and_allows_retry(self, tmp_path, monkeypatch):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
@@ -121,7 +121,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
         assert "v2" not in vc._reprovision_blocked_until
 
     def test_successful_reprovision_returns_engine_id(self, tmp_path, monkeypatch):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
@@ -145,14 +145,14 @@ class TestSpeakRateLimit:
     use well before an hour of active conversation."""
 
     def test_default_limit_raised_for_per_sentence_chunking(self):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         assert vc.SPEAK_RATE_LIMIT >= 300
 
     def test_rate_limit_still_blocks_once_actually_exceeded(self):
         from collections import defaultdict
 
-        from app.routers.voice_clone import _rate_limit
+        from app.domains.voice.voice_clone import _rate_limit
 
         bucket: dict[int, list[float]] = defaultdict(list)
         for _ in range(3):
@@ -162,7 +162,7 @@ class TestSpeakRateLimit:
         assert exc.value.status_code == 429
 
     def test_rate_limit_is_per_user(self):
-        from app.routers.voice_clone import _rate_limit
+        from app.domains.voice.voice_clone import _rate_limit
         from collections import defaultdict
 
         bucket: dict[int, list[float]] = defaultdict(list)
@@ -279,7 +279,7 @@ class TestChatterboxClient:
 
 class TestVoiceCloneEndpoints:
     def test_clone_persists_sample_and_default(self, monkeypatch, tmp_path):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         db = _session()
@@ -293,7 +293,7 @@ class TestVoiceCloneEndpoints:
                 "name": name,
             },
         )
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
 
         upload = UploadFile(
             BytesIO(b"audio-data"),
@@ -324,13 +324,13 @@ class TestVoiceCloneEndpoints:
         assert row.sample_path and Path(row.sample_path).is_file()
 
     def test_clone_persists_when_engine_offline(self, monkeypatch, tmp_path):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(
             "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: False
         )
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
         db = _session()
         upload = UploadFile(
             BytesIO(b"audio-data"),
@@ -353,7 +353,7 @@ class TestVoiceCloneEndpoints:
         assert db.query(ClonedVoice).filter(ClonedVoice.user_id == 5).count() == 1
 
     def test_clone_rejects_missing_reference_text(self, monkeypatch, tmp_path):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(
@@ -381,10 +381,10 @@ class TestVoiceCloneEndpoints:
         assert exc.value.status_code == 400
 
     def test_list_default_and_delete(self, monkeypatch, tmp_path):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
         monkeypatch.setattr(
             "app.adapters.llm.chatterbox_client.delete_voice", lambda vid: None
         )
@@ -427,13 +427,13 @@ class TestVoiceCloneEndpoints:
         assert remaining[0].is_default is True
 
     def test_get_my_voice_returns_none_when_unset(self):
-        from app.routers.voice_clone import get_my_voice
+        from app.domains.voice.voice_clone import get_my_voice
 
         db = _session()
         assert get_my_voice(current_user=USER, db=db) is None
 
     def test_reset_my_voice_deletes_all(self, monkeypatch):
-        from app.routers.voice_clone import reset_my_voice
+        from app.domains.voice.voice_clone import reset_my_voice
 
         db = _session()
         db.add(
@@ -450,7 +450,7 @@ class TestVoiceCloneEndpoints:
         monkeypatch.setattr(
             "app.adapters.llm.chatterbox_client.delete_voice", lambda vid: None
         )
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
 
         result = reset_my_voice(current_user=USER, db=db)
 
@@ -458,7 +458,7 @@ class TestVoiceCloneEndpoints:
         assert db.query(ClonedVoice).filter(ClonedVoice.user_id == 5).first() is None
 
     def test_speak_requires_configured_voice(self):
-        from app.routers.voice_clone import SpeakRequest, speak
+        from app.domains.voice.voice_clone import SpeakRequest, speak
 
         db = _session()
         with pytest.raises(HTTPException) as exc:
@@ -466,7 +466,7 @@ class TestVoiceCloneEndpoints:
         assert exc.value.status_code == 404
 
     def test_speak_uses_default_external_id(self, monkeypatch):
-        from app.routers.voice_clone import SpeakRequest, speak
+        from app.domains.voice.voice_clone import SpeakRequest, speak
 
         db = _session()
         db.add(
@@ -484,7 +484,7 @@ class TestVoiceCloneEndpoints:
             "app.adapters.llm.chatterbox_client.synthesize_speech",
             lambda text, voice_id: b"wav-bytes",
         )
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
 
         result = speak(SpeakRequest(text="hello there"), current_user=USER, db=db)
 
@@ -492,7 +492,7 @@ class TestVoiceCloneEndpoints:
         assert result.media_type == "audio/mpeg"
 
     def test_speak_stock_voice_bypasses_chatterbox_entirely(self, monkeypatch):
-        from app.routers.voice_clone import SpeakRequest, speak
+        from app.domains.voice.voice_clone import SpeakRequest, speak
 
         db = _session()
         # No ClonedVoice row at all for this user — a stock voice request
@@ -503,7 +503,7 @@ class TestVoiceCloneEndpoints:
             "app.adapters.llm.openai_tts.synthesize_openai_speech",
             lambda text, voice=None, model=None: (captured.setdefault("voice", voice), b"mp3-bytes")[1],
         )
-        monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
 
         result = speak(SpeakRequest(text="hello", stock_voice="nova"), current_user=USER, db=db)
 
@@ -512,7 +512,7 @@ class TestVoiceCloneEndpoints:
         assert captured["voice"] == "nova"
 
     def test_speak_stock_voice_rejects_unknown_name(self):
-        from app.routers.voice_clone import SpeakRequest, speak
+        from app.domains.voice.voice_clone import SpeakRequest, speak
 
         db = _session()
         with pytest.raises(HTTPException) as exc:
@@ -520,7 +520,7 @@ class TestVoiceCloneEndpoints:
         assert exc.value.status_code == 400
 
     def test_speak_stock_voice_requires_openai_key(self, monkeypatch):
-        from app.routers.voice_clone import SpeakRequest, speak
+        from app.domains.voice.voice_clone import SpeakRequest, speak
 
         db = _session()
         monkeypatch.setattr("app.adapters.llm.openai_tts.openai_tts_available", lambda: False)
@@ -529,7 +529,7 @@ class TestVoiceCloneEndpoints:
         assert exc.value.status_code == 503
 
     def test_clone_rejects_bad_mime(self, monkeypatch, tmp_path):
-        from app.routers import voice_clone as vc
+        from app.domains.voice import voice_clone as vc
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(

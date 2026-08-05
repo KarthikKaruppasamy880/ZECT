@@ -2,75 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Bot, Check, GitPullRequest, Play, Sparkles } from "lucide-react";
 import {
-  mentrixAgents,
   mentrixApproveRun,
   mentrixConfirmPlan,
   mentrixCreatePr,
-  mentrixGetRun,
-  mentrixListRuns,
   mentrixRealtimeTool,
-  mentrixStartRun,
 } from "@/lib/api";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
+import { useMentrixRun } from "@/hooks/useMentrixRun";
+
 const MODES = ["upgrade", "bugfix", "assistant", "chat", "understand", "deliver", "review_only", "ops"];
-
-const WORKFLOW_STEPS = [
-  { id: "lattice", label: "Lattice" },
-  { id: "plan", label: "Plan" },
-  { id: "build_gates", label: "Build/Gates" },
-  { id: "ultra_review", label: "Ultra Review" },
-  { id: "approve", label: "Approve" },
-  { id: "pr", label: "PR" },
-] as const;
-
-type ChatMsg = {
-  role: "user" | "assistant" | "system";
-  text: string;
-  meta?: string;
-};
-
-function workflowStepIndex(run: any): number {
-  if (!run) return -1;
-  if (run.pr_url || run.status === "pr_created") return 5;
-  if (run.approved_at || run.status === "approved") return 4;
-  const gates = run.gates || run.result?.gates || {};
-  const events = run.events || [];
-  const phases = new Set(events.map((e: any) => e.phase).filter(Boolean));
-  const agents = new Set(events.map((e: any) => e.agent).filter(Boolean));
-  if (
-    (gates.review_ok != null && run.status !== "awaiting_plan_confirm") ||
-    phases.has("review") ||
-    agents.has("reviewer") ||
-    run.result?.ultra_review
-  ) {
-    return 3;
-  }
-  if (
-    run.status !== "awaiting_plan_confirm" &&
-    (gates.lint_ok != null ||
-      gates.sandbox_ready != null ||
-      phases.has("lint") ||
-      phases.has("sandbox") ||
-      phases.has("build") ||
-      agents.has("builder"))
-  ) {
-    return 2;
-  }
-  if (
-    run.status === "awaiting_plan_confirm" ||
-    phases.has("plan") ||
-    phases.has("root_cause") ||
-    phases.has("ask") ||
-    agents.has("planner")
-  ) {
-    return 1;
-  }
-  if (phases.has("lattice") || agents.has("scout") || agents.has("lattice") || phases.has("blueprint")) {
-    return 0;
-  }
-  if (run.status === "running") return 0;
-  return -1;
-}
 
 function speakStatus(text: string, enabled: boolean) {
   if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
@@ -90,6 +30,27 @@ export default function Mentrix() {
   // otherwise both speak at once ("multiple voices").
   const { voiceConnected } = useMentrixSession();
   const location = useLocation();
+  const {
+    agents,
+    runs,
+    active,
+    messages,
+    setMessages,
+    loading,
+    setLoading,
+    error,
+    setError,
+    refresh,
+    applyRun,
+    startRun,
+    openRun,
+    gates,
+    canApprove,
+    canCreatePr,
+    currentPhase,
+    stepIdx,
+    workflowSteps,
+  } = useMentrixRun();
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState("upgrade");
   const [projectKey, setProjectKey] = useState("");
@@ -97,36 +58,18 @@ export default function Mentrix() {
   const [issueKey, setIssueKey] = useState("");
   const [sourceLang, setSourceLang] = useState("");
   const [targetLang, setTargetLang] = useState("");
-  const [agents, setAgents] = useState<any>(null);
-  const [runs, setRuns] = useState<any[]>([]);
-  const [active, setActive] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const [ack, setAck] = useState(false);
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [ttsEnabled, setTtsEnabled] = useState(false);
   const [sttListening, setSttListening] = useState(false);
   const [wakeHint, setWakeHint] = useState("");
   const [jiraCommentNote, setJiraCommentNote] = useState("");
   const [planSummary, setPlanSummary] = useState("");
   const [realGithubPr, setRealGithubPr] = useState(false);
-  const pollRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenStatus = useRef<string>("");
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const refresh = async () => {
-    try {
-      const [a, r] = await Promise.all([mentrixAgents(), mentrixListRuns(15)]);
-      setAgents(a);
-      setRuns(Array.isArray(r) ? r : []);
-    } catch {
-      /* ignore */
-    }
-  };
-
   useEffect(() => {
-    refresh();
     try {
       const raw = localStorage.getItem("zect_mentrix_workspace");
       if (raw) {
@@ -144,9 +87,6 @@ export default function Mentrix() {
     } catch {
       /* ignore */
     }
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
   }, []);
 
   // Incident / Ask / Plan handoff into Delivery
@@ -296,92 +236,14 @@ export default function Mentrix() {
     }
   }, [active?.id, active?.status, active?.next_step, active?.pr_url, ttsEnabled, voiceConnected]);
 
-  const eventsToMessages = (run: any): ChatMsg[] => {
-    const msgs: ChatMsg[] = [
-      { role: "user", text: run.goal, meta: `mode=${run.mode}` },
-    ];
-    for (const ev of run.events || []) {
-      const phase = ev.phase ? ` · ${ev.phase}` : "";
-      const progress =
-        typeof ev.progress === "number" ? ` · ${Math.round(ev.progress * 100)}%` : "";
-      msgs.push({
-        role: "assistant",
-        text: ev.message || "",
-        meta: `${ev.agent || "mentrix"}${phase}${progress}${ev.next_step ? ` → ${ev.next_step}` : ""}`,
-      });
-    }
-    if (run.result?.ask?.answer) {
-      msgs.push({
-        role: "assistant",
-        text: String(run.result.ask.answer).slice(0, 1200),
-        meta: "ask",
-      });
-    }
-    if (run.result?.ultra_review?.summary) {
-      msgs.push({
-        role: "assistant",
-        text: `Mentrix Ultra Review: ${run.result.ultra_review.summary}`,
-        meta: `score=${run.result.ultra_review.score}`,
-      });
-    }
-    if (run.status) {
-      msgs.push({
-        role: "system",
-        text: `Status: ${run.status}${run.next_step ? ` · next: ${run.next_step}` : ""}`,
-      });
-    }
-    return msgs;
-  };
-
-  const startPolling = (runId: number) => {
-    if (pollRef.current) window.clearInterval(pollRef.current);
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const run = await mentrixGetRun(runId);
-        setActive(run);
-        setMessages(eventsToMessages(run));
-        if (run.status && run.status !== "running") {
-          if (pollRef.current) window.clearInterval(pollRef.current);
-          pollRef.current = null;
-          await refresh();
-        }
-      } catch {
-        /* ignore poll errors */
-      }
-    }, 2000);
-  };
-
   const start = async () => {
-    setError("");
-    setLoading(true);
-    setMessages([{ role: "user", text: goal, meta: `mode=${mode}` }]);
     try {
-      const run = await mentrixStartRun(goal, mode, projectKey, workspace, {
+      await startRun(goal, mode, projectKey, workspace, {
         source_lang: sourceLang,
         target_lang: targetLang,
       });
-      setActive(run);
-      setMessages(eventsToMessages(run));
-      if (run.status === "running") startPolling(run.id);
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Run failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const openRun = async (id: number) => {
-    setLoading(true);
-    try {
-      const run = await mentrixGetRun(id);
-      setActive(run);
-      setMessages(eventsToMessages(run));
-      if (run.status === "running") startPolling(id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Load failed");
-    } finally {
-      setLoading(false);
+    } catch {
+      /* error already set on hook */
     }
   };
 
@@ -400,9 +262,7 @@ export default function Mentrix() {
         summary: planSummary || undefined,
         steps: active?.result?.plan?.steps,
       });
-      setActive(run);
-      setMessages(eventsToMessages(run));
-      if (run.status === "running") startPolling(run.id);
+      applyRun(run);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Confirm plan failed");
@@ -417,8 +277,7 @@ export default function Mentrix() {
     setLoading(true);
     try {
       const run = await mentrixApproveRun(active.id, ack);
-      setActive(run);
-      setMessages(eventsToMessages(run));
+      applyRun(run, { pollIfRunning: false });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve failed");
@@ -449,8 +308,7 @@ export default function Mentrix() {
         repo_name: repoName || undefined,
         base_branch: owner === "zinnia" && repoName === "zoas" ? "develop" : "main",
       });
-      setActive(run);
-      setMessages(eventsToMessages(run));
+      applyRun(run, { pollIfRunning: false });
       await refresh();
       const pr =
         run?.pr_url ||
@@ -485,18 +343,6 @@ export default function Mentrix() {
     }
   };
 
-  const gates = active?.gates || active?.result?.gates || {};
-  const canApprove =
-    active &&
-    ["awaiting_approval", "needs_human", "completed"].includes(active.status) &&
-    !active.approved_at;
-  const canCreatePr = Boolean(active?.approved_at) && !active?.pr_url;
-  const currentPhase =
-    [...(active?.events || [])].reverse().find((e: any) => e.phase)?.phase ||
-    active?.current_agent ||
-    "—";
-  const stepIdx = workflowStepIndex(active);
-
   return (
     <div className="max-w-6xl mx-auto space-y-4 p-1" data-testid="mentrix-page">
       <div className="flex items-start gap-3">
@@ -522,7 +368,7 @@ export default function Mentrix() {
         data-testid="mentrix-step-rail"
       >
         <ol className="flex items-center gap-1 min-w-max">
-          {WORKFLOW_STEPS.map((step, i) => {
+          {workflowSteps.map((step, i) => {
             const done = stepIdx > i;
             const current = stepIdx === i;
             return (
@@ -842,7 +688,7 @@ export default function Mentrix() {
               {runs.map((r) => (
                 <li key={r.id}>
                   <button
-                    onClick={() => openRun(r.id)}
+                    onClick={() => void openRun(r.id).catch(() => {})}
                     className="w-full text-left rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
                   >
                     <div className="text-sm font-medium">

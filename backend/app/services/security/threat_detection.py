@@ -6,6 +6,8 @@ permission_broker.check_tool_permission() and core.auth.rbac.log_audit().
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -22,6 +24,26 @@ OFF_HOURS_START = int(os.getenv("SECURITY_OFF_HOURS_START_UTC", "0"))  # inclusi
 OFF_HOURS_END = int(os.getenv("SECURITY_OFF_HOURS_END_UTC", "5"))  # inclusive
 
 SENSITIVE_RESOURCE_TYPES = {"secret", "user", "permission", "jira_config", "mentrix_companion"}
+
+
+def fingerprint_finding(finding: dict[str, Any]) -> str:
+    """Stable fingerprint for dedupe (kind|user|severity|actions/resources)."""
+    payload = {
+        "kind": finding.get("kind"),
+        "user_id": finding.get("user_id"),
+        "severity": finding.get("severity"),
+        "actions": finding.get("actions") or finding.get("resource_types") or finding.get("ip_addresses"),
+        "rule_id": finding.get("rule_id"),
+        "host": finding.get("host"),
+    }
+    raw = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+
+
+def _with_fingerprint(finding: dict[str, Any]) -> dict[str, Any]:
+    out = dict(finding)
+    out["fingerprint"] = fingerprint_finding(out)
+    return out
 
 
 def _is_off_hours(dt: datetime) -> bool:
@@ -41,6 +63,7 @@ def run_anomaly_scan(db: Session, *, lookback_hours: int = 24) -> dict[str, Any]
     findings.extend(_scan_ip_churn(audit_rows))
     findings.extend(_scan_sensitive_bursts(audit_rows))
     findings.extend(_scan_off_hours_sensitive_access(audit_rows))
+    findings = [_with_fingerprint(f) for f in findings]
 
     return {
         "findings": findings,

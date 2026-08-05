@@ -1047,6 +1047,55 @@ class OutboundDraft(Base):
 
 
 # ---------------------------------------------------------------------------
+# Phase 9 — Security findings & incidents (ZECT-branded; adapters behind)
+# ---------------------------------------------------------------------------
+
+class SecurityFinding(Base):
+    """Normalized detection finding from any Detection Provider adapter."""
+    __tablename__ = "security_findings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fingerprint = Column(String, nullable=False, index=True)
+    source = Column(String, default="audit_trail")  # audit_trail | detection_provider
+    kind = Column(String, nullable=False, index=True)
+    severity = Column(String, default="medium")  # critical|high|medium|low|info
+    status = Column(String, default="open")  # open|drafted|ticketed|dismissed
+    title = Column(String, default="")
+    description = Column(Text, default="")
+    host = Column(String, default="")
+    user_ref = Column(String, default="")
+    rule_id = Column(String, default="")
+    raw_event_json = Column(Text, default="{}")  # immutable original payload
+    indicators_json = Column(JSON, default=dict)
+    correlation_id = Column(String, default="", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class SecurityIncident(Base):
+    """IR record linking findings → approval → Jira/Slack."""
+    __tablename__ = "security_incidents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    finding_id = Column(Integer, ForeignKey("security_findings.id"), nullable=False, index=True)
+    status = Column(String, default="draft")  # draft|pending_approval|created|notified|closed
+    summary = Column(String, default="")
+    severity = Column(String, default="medium")
+    confidence = Column(String, default="medium")
+    jira_key = Column(String, default="")
+    slack_ts = Column(String, default="")
+    approval_status = Column(String, default="pending")  # pending|approved|rejected
+    approved_by = Column(String, default="")
+    timeline_json = Column(JSON, default=list)
+    recommended_actions_json = Column(JSON, default=list)
+    correlation_id = Column(String, default="", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    finding = relationship("SecurityFinding", backref="incidents")
+
+
+# ---------------------------------------------------------------------------
 # Secrets Management — encrypted credential storage
 # ---------------------------------------------------------------------------
 

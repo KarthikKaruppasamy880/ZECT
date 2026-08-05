@@ -63,6 +63,7 @@ from app.domains.personal_agent import (
     file_organize,
 )
 from app.domains.voice import realtime, voice_clone
+from app.domains.security_incident import router as security_incident_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -131,6 +132,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(lattice_router.router)
     app.include_router(mentrix_router.router)
     app.include_router(voice_clone.router)
+    app.include_router(security_incident_router)
     app.include_router(confluence_integration.router)
     app.include_router(datadog_integration.router)
     app.include_router(email_integration.router)

@@ -9,8 +9,10 @@ frontend/dist/
 
 # Environment
 .env
+.env.local
 backend/.env
 frontend/.env
+frontend/.env.local
 
 # Database
 *.db
@@ -26,9 +28,19 @@ backend/.wheels/
 .idea/
 .DS_Store
 
-# Cursor MCP local secrets / wired credentials
+# Cursor MCP local secrets / wired credentials, local plan scratch files
 .cursor/mcp.env
 .cursor/mcp.json
+.cursor/plans/
+
+# Local-only tool output / recordings / diagnostics
+.playwright-mcp/
+artifacts/
+backend/get-pip.py
+backend/data/lattice/
+backend/data/voices/*
+!backend/data/voices/.gitkeep
+scripts/*.ps1
 
 # Misc
 *.pem

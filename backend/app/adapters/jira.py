@@ -58,14 +58,25 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
             r.raise_for_status()
             return r.json()
         if tool_name == "create_issue":
-            payload = {
-                "fields": {
+            fields: dict[str, Any] = {
+                "project": {"key": arguments["project"]},
+                "summary": arguments["summary"],
+                "issuetype": {"name": arguments.get("type", "Task")},
+            }
+            if arguments.get("description"):
+                # ADF for Cloud; plain string fallback handled by some Server/DC via later retry if needed
+                fields["description"] = _adf_doc(str(arguments["description"]))
+            payload = {"fields": fields}
+            r = client.post(f"{base}/rest/api/3/issue", json=payload)
+            if r.status_code >= 400 and arguments.get("description"):
+                # Fallback: omit description or use plain string field for older servers
+                fields.pop("description", None)
+                fields["description"] = str(arguments["description"])[:8000]
+                r = client.post(f"{base}/rest/api/3/issue", json={"fields": {
                     "project": {"key": arguments["project"]},
                     "summary": arguments["summary"],
                     "issuetype": {"name": arguments.get("type", "Task")},
-                }
-            }
-            r = client.post(f"{base}/rest/api/3/issue", json=payload)
+                }})
             r.raise_for_status()
             return r.json()
         if tool_name == "add_comment":

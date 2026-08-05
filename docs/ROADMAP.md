@@ -7,7 +7,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 | # | Phase | Completion | Evidence |
 |---|---|---|---|
 | 0 | Repo audit + doc set | **Done** (this pass) | CURRENT_ARCHITECTURE.md, TARGET_ARCHITECTURE.md, FEATURE_INVENTORY.md, THREAT_MODEL.md, this file. |
-| 1 | Core platform, shared AgentRun | ~35% | Real `MentrixRun` state machine + persisted events + SSE streaming exist. No `api/domains/adapters/infrastructure/workers` split; Ask/Plan/Build/Review are separate pages, not one workspace; no background-worker process (audit finding — everything runs in-request); no MockRuntime. |
+| 1 | Core platform, shared AgentRun | **Done (spine)** | `api/` + `domains/` + `adapters/` + `infrastructure/` + `workers/`; Mentrix shared run + cancel/retry/files/artifacts/terminal/gates; event `sequence_id` + SSE reconnect; MockCodingRuntime; audit on Mentrix state changes; Agent Workspace shell with Ask/Plan/Build/Review/Deploy modes. Residual: fat domain routers (not fully thin services), embedded Monaco diff still via App Runner, OpenHands = Phase 2. |
 | 2 | Coding-engine provider | ~5% | Build calls Anthropic/OpenAI directly in-process. No isolated per-run workspace, no sandboxing, no separate engine-server process. Furthest from target. |
 | 3 | Cursor-like workspace | ~20% | Build has file-attach + diff viewer + generated-files list. No Monaco, file tree, terminal, inline code actions, or symbol search. |
 | 4 | PR review platform | ~60% | Ultra Review consolidated (verified — no duplicate implementations remain), gated human-approve-then-create-PR is real. `ReviewFinding` schema fields (fingerprint, confidence, validation_status) not verified against spec. |
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-Per the execution rules, Phase 1 needs its own file-by-file plan before any code changes — that's the next thing to produce and get your sign-off on, once you tell me whether to fold in any of the exit-backlog items above (especially the two Critical security ones) as part of Phase 1, or handle them as an immediate, separate out-of-band patch first.
+**Phase 1 spine is complete.** Per Upgrade.md, stop and wait for approval before **Phase 2** (coding-runtime / OpenHands behind `CodingAgentRuntime`). Do not start Phase 9 (security incident) until unblocked.

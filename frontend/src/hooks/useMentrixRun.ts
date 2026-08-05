@@ -4,6 +4,7 @@ import {
   mentrixCancelRun,
   mentrixGetRun,
   mentrixListRuns,
+  mentrixRetryRun,
   mentrixStartRun,
 } from "@/lib/api";
 
@@ -238,6 +239,26 @@ export function useMentrixRun() {
     [applyRun, refresh, stopPolling],
   );
 
+  const retryRun = useCallback(
+    async (id: number) => {
+      setLoading(true);
+      setError("");
+      try {
+        stopPolling();
+        const run = await mentrixRetryRun(id);
+        applyRun(run);
+        await refresh();
+        return run;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Retry failed");
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyRun, refresh, stopPolling],
+  );
+
   useEffect(() => {
     void refresh();
     return () => stopPolling();
@@ -249,6 +270,8 @@ export function useMentrixRun() {
     ["awaiting_approval", "needs_human", "completed"].includes(active.status) &&
     !active.approved_at;
   const canCreatePr = Boolean(active?.approved_at) && !active?.pr_url;
+  const canRetry =
+    Boolean(active) && ["failed", "cancelled", "needs_human"].includes(active.status);
   const currentPhase =
     [...(active?.events || [])].reverse().find((e: any) => e.phase)?.phase ||
     active?.current_agent ||
@@ -273,9 +296,11 @@ export function useMentrixRun() {
     startRun,
     openRun,
     cancelRun,
+    retryRun,
     gates,
     canApprove,
     canCreatePr,
+    canRetry,
     currentPhase,
     stepIdx,
     workflowSteps: MENTRIX_WORKFLOW_STEPS,

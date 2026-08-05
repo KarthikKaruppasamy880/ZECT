@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Check, FileCode, GitPullRequest, MonitorPlay, Play, Sparkles, X } from "lucide-react";
+import { Bot, Check, FileCode, GitPullRequest, MonitorPlay, Play, RotateCcw, Sparkles, X } from "lucide-react";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import {
   mentrixApproveRun,
   mentrixConfirmPlan,
@@ -46,9 +47,11 @@ export default function Mentrix() {
     startRun,
     openRun,
     cancelRun,
+    retryRun,
     gates,
     canApprove,
     canCreatePr,
+    canRetry,
     currentPhase,
     stepIdx,
     workflowSteps,
@@ -700,7 +703,61 @@ export default function Mentrix() {
                       Cancel run
                     </button>
                   )}
+                  {canRetry && (
+                    <button
+                      type="button"
+                      data-testid="mentrix-retry"
+                      onClick={() => void retryRun(active.id).catch(() => {})}
+                      disabled={loading}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-800 text-xs disabled:opacity-40"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Retry run
+                    </button>
+                  )}
                 </div>
+                {Array.isArray(active.test_results) === false && active.test_results && (
+                  <div
+                    className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-1"
+                    data-testid="mentrix-test-results"
+                  >
+                    <div className="font-semibold text-slate-700">Test / gate results</div>
+                    {Object.entries(active.test_results as Record<string, unknown>).map(([k, v]) => (
+                      <div key={k}>
+                        {k}: {String(v ?? "—")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {Array.isArray(active.terminal) && active.terminal.length > 0 && (
+                  <div
+                    className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-[11px] font-mono text-slate-100"
+                    data-testid="mentrix-terminal"
+                  >
+                    <div className="font-semibold text-slate-300 mb-1">Terminal / run log</div>
+                    <pre className="max-h-36 overflow-auto whitespace-pre-wrap">
+                      {active.terminal.join("\n")}
+                    </pre>
+                  </div>
+                )}
+                {Array.isArray(active.artifacts) && active.artifacts.length > 0 && (
+                  <div
+                    className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-1"
+                    data-testid="mentrix-artifacts"
+                  >
+                    <div className="font-semibold text-slate-700">Artifacts</div>
+                    <ul className="max-h-28 overflow-auto space-y-1 font-mono text-[11px] text-slate-600">
+                      {active.artifacts.map((a: any, i: number) => (
+                        <li key={i}>
+                          {a.kind}
+                          {a.path ? `: ${a.path}` : ""}
+                          {a.name ? `: ${a.name}` : ""}
+                          {a.url ? `: ${a.url}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {Array.isArray(active.files_written) && active.files_written.length > 0 && (
                   <div
                     className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-2"
@@ -708,13 +765,16 @@ export default function Mentrix() {
                   >
                     <div className="font-semibold text-slate-700 flex items-center gap-2">
                       <FileCode className="h-3.5 w-3.5" />
-                      Files written ({active.files_written.length})
+                      Files changed ({active.files_written.length})
                     </div>
                     <ul className="max-h-28 overflow-auto space-y-1 font-mono text-[11px] text-slate-600">
                       {active.files_written.map((f: string) => (
                         <li key={f}>{f}</li>
                       ))}
                     </ul>
+                    <p className="text-[11px] text-slate-500">
+                      Open App Runner for live terminal/diff against the workspace.
+                    </p>
                     {workspace.trim() && (
                       <Link
                         to="/app-runner"
@@ -722,7 +782,7 @@ export default function Mentrix() {
                         data-testid="mentrix-open-app-runner"
                       >
                         <MonitorPlay className="h-3.5 w-3.5" />
-                        Open App Runner
+                        Open App Runner (terminal / diff)
                       </Link>
                     )}
                   </div>
@@ -756,22 +816,16 @@ export default function Mentrix() {
         </div>
       </div>
 
-      {error && (
-        <div
-          data-testid="mentrix-error"
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
-          {error}
-        </div>
-      )}
+      <PhaseErrorBanner error={error} testId="mentrix-error" density="compact" />
 
       {active?.events?.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-4" data-testid="mentrix-active-run">
-          <h2 className="font-semibold text-sm mb-2">Phase events</h2>
+          <h2 className="font-semibold text-sm mb-2">Execution timeline</h2>
           <ul className="space-y-2 max-h-48 overflow-auto" data-testid="mentrix-events">
             {(active.events || []).map((ev: any, i: number) => (
-              <li key={i} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <li key={ev.sequence_id ?? i} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
                 <span className="font-mono text-xs text-teal-800">
+                  {ev.sequence_id != null ? `#${ev.sequence_id} · ` : ""}
                   {ev.agent}
                   {ev.phase ? ` · ${ev.phase}` : ""}
                   {ev.event ? ` · ${ev.event}` : ""}

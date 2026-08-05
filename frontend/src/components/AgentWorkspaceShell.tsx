@@ -68,7 +68,8 @@ export default function AgentWorkspaceShell() {
             Agent Workspace
           </p>
           <p className="mt-1 text-[11px] leading-snug text-slate-500">
-            Mentrix Delivery is the primary run path. Tools stay available as steps.
+            Shared Agent Workspace — Ask, Plan, Build, Review, and Deploy are modes of this shell;
+            Mentrix Delivery is the primary run path.
           </p>
         </div>
         <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1">

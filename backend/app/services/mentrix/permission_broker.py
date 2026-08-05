@@ -172,7 +172,9 @@ def log_mentrix_tool(
     result: str = "ok",
     user_id: int | None = None,
 ) -> None:
-    redacted = {k: ("***" if "token" in k.lower() or "password" in k.lower() else v) for k, v in (args or {}).items()}
+    from app.security.redact import redact_mapping
+
+    redacted = redact_mapping(args or {})
     log_audit(
         db,
         action=f"mentrix_tool_{tool_name}",

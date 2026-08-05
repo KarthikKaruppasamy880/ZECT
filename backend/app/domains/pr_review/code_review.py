@@ -552,6 +552,11 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
     if not hmac.compare_digest(sig_header, expected):
         raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
+    from app.security.emergency_stop import is_emergency_stop_active
+
+    if is_emergency_stop_active(db):
+        return {"status": "blocked", "reason": "Global emergency stop is active"}
+
     # Check Rules Engine kill switch
     block_rules = db.query(Rule).filter(
         Rule.is_active == True,

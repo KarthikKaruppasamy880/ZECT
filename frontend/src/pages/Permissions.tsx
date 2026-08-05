@@ -46,7 +46,7 @@ export default function Permissions() {
   const [audits, setAudits] = useState<Audit[]>([]);
   const [pending, setPending] = useState<Audit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending" | "grants">("rules");
+  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending" | "grants" | "diagnostics">("rules");
   const [checkAction, setCheckAction] = useState("");
   const [checkResult, setCheckResult] = useState<any>(null);
   const [showAddRule, setShowAddRule] = useState(false);
@@ -64,6 +64,10 @@ export default function Permissions() {
     reason: "",
     expires_hours: 24,
   });
+  const [emergencyStop, setEmergencyStop] = useState(false);
+  const [estopBusy, setEstopBusy] = useState(false);
+  const [diagAction, setDiagAction] = useState("");
+  const [diagResult, setDiagResult] = useState<any>(null);
 
   const fetchRules = async () => {
     try {
@@ -103,9 +107,19 @@ export default function Permissions() {
     } catch (err) { showToast("error", "Network error loading grants"); }
   };
 
+  const fetchEmergencyStop = async () => {
+    try {
+      const res = await apiFetch(`/api/permissions/emergency-stop`);
+      if (res.ok) {
+        const body = await res.json();
+        setEmergencyStop(!!body.active);
+      }
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchRules(), fetchAudits(), fetchPending(), fetchGrants()]).finally(() => setLoading(false));
+    Promise.all([fetchRules(), fetchAudits(), fetchPending(), fetchGrants(), fetchEmergencyStop()]).finally(() => setLoading(false));
   }, []);
 
   const handleCheck = async () => {
@@ -201,6 +215,47 @@ export default function Permissions() {
     } catch (err) { showToast("error", "Failed to revoke grant"); }
   };
 
+  const toggleEmergencyStop = async () => {
+    const next = !emergencyStop;
+    if (next && !window.confirm("Engage global emergency stop? This cancels Mentrix runs and blocks new runner/webhook activity.")) {
+      return;
+    }
+    setEstopBusy(true);
+    try {
+      const res = await apiFetch(`/api/permissions/emergency-stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: next }),
+      });
+      if (!res.ok) {
+        showToast("error", `Emergency stop update failed (${res.status})`);
+        return;
+      }
+      const body = await res.json();
+      setEmergencyStop(!!body.active);
+      showToast(next ? "error" : "success", next ? "Emergency stop ENGAGED" : "Emergency stop cleared");
+    } catch {
+      showToast("error", "Failed to update emergency stop");
+    } finally {
+      setEstopBusy(false);
+    }
+  };
+
+  const handleDiagnostics = async () => {
+    if (!diagAction.trim()) return;
+    try {
+      const res = await apiFetch(`/api/permissions/diagnostics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: diagAction }),
+      });
+      if (res.ok) setDiagResult(await res.json());
+      else showToast("error", `Diagnostics failed (${res.status})`);
+    } catch {
+      showToast("error", "Network error running diagnostics");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -212,6 +267,7 @@ export default function Permissions() {
   const tabs = [
     { key: "rules" as const, label: "Permission Rules", icon: Shield },
     { key: "grants" as const, label: `Grants (${grants.filter((g) => g.active).length})`, icon: Clock },
+    { key: "diagnostics" as const, label: "Diagnostics", icon: Search },
     { key: "check" as const, label: "Check Action", icon: Search },
     { key: "pending" as const, label: `Pending (${pending.length})`, icon: Clock },
     { key: "audits" as const, label: "Audit Log", icon: ShieldCheck },
@@ -238,17 +294,34 @@ export default function Permissions() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Shield className="h-6 w-6 text-red-600" /> Permissions Protocol
           </h1>
           <p className="text-slate-500 text-sm">Allow / Require Approval / Never — security enforcement for agent actions</p>
         </div>
-        <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); fetchGrants(); }} className="p-2 rounded hover:bg-slate-100">
-          <RefreshCw className="h-4 w-4 text-slate-500" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleEmergencyStop}
+            disabled={estopBusy}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60 ${
+              emergencyStop ? "bg-red-600 text-white hover:bg-red-700" : "bg-slate-800 text-white hover:bg-slate-900"
+            }`}
+          >
+            {estopBusy ? "Updating…" : emergencyStop ? "Clear Emergency Stop" : "Engage Emergency Stop"}
+          </button>
+          <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); fetchGrants(); fetchEmergencyStop(); }} className="p-2 rounded hover:bg-slate-100">
+            <RefreshCw className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
       </div>
+
+      {emergencyStop && (
+        <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Global emergency stop is <strong>active</strong> — new Mentrix runs, App Runner commands, and GitHub auto-review webhooks are blocked.
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-slate-100 rounded-lg p-1">
@@ -395,6 +468,37 @@ export default function Permissions() {
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* Diagnostics Tab */}
+      {activeTab === "diagnostics" && (
+        <div>
+          <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Permission Diagnostics</h3>
+            <p className="text-xs text-slate-500 mb-3">Explains baseline rules, temporary grants, covering Upgrade capabilities, and emergency-stop effect — without posting a permission audit.</p>
+            <div className="flex gap-2">
+              <input value={diagAction} onChange={(e) => setDiagAction(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleDiagnostics()}
+                placeholder="Action (e.g. companion_create_pr, merge_pr)" className="flex-1 px-3 py-2 border rounded-lg text-sm" />
+              <button onClick={handleDiagnostics} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Diagnose</button>
+            </div>
+          </div>
+          {diagResult && (
+            <div className="bg-slate-50 rounded-xl border border-slate-200 p-5 space-y-2 text-sm">
+              <p><span className="text-slate-500">Effective:</span> <strong>{diagResult.effective_result}</strong> ({diagResult.effective_level})</p>
+              <p><span className="text-slate-500">Reason:</span> {diagResult.reason}</p>
+              <p><span className="text-slate-500">Emergency stop:</span> {diagResult.emergency_stop ? "yes" : "no"}</p>
+              {diagResult.covering_capabilities?.length > 0 && (
+                <p><span className="text-slate-500">Capabilities:</span> <span className="font-mono text-xs">{diagResult.covering_capabilities.join(", ")}</span></p>
+              )}
+              {diagResult.matching_rules?.map((r: any) => (
+                <p key={r.id} className="text-xs text-slate-600">Rule: {r.action_pattern} → {r.permission_level}</p>
+              ))}
+              {diagResult.grant_applied && (
+                <p className="text-xs text-indigo-700">Grant applied: {diagResult.grant_applied.capability} #{diagResult.grant_applied.id}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

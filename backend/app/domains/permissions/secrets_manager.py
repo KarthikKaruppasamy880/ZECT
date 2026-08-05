@@ -159,6 +159,67 @@ def create_secret(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/resolve")
+def resolve_secret_by_name(
+    name: str,
+    scope: Optional[str] = None,
+    project_id: Optional[int] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Resolve secret by name → reference only (no plaintext)."""
+    q = db.query(SecretEntry).filter(SecretEntry.name == name, SecretEntry.is_active == True)
+    if scope:
+        q = q.filter(SecretEntry.scope == scope)
+    if project_id is not None:
+        q = q.filter(SecretEntry.project_id == project_id)
+    entry = q.order_by(SecretEntry.id.desc()).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    _require_secret_access(entry, current_user, db)
+    return {
+        "ref": f"zect-secret://{entry.id}",
+        "id": entry.id,
+        "name": entry.name,
+        "secret_type": entry.secret_type,
+        "scope": entry.scope,
+        "project_id": entry.project_id,
+        "is_active": entry.is_active,
+        "expires_at": entry.expires_at.isoformat() if entry.expires_at else None,
+        "value": None,
+        "revealed": False,
+    }
+
+
+@router.get("/{secret_id}/resolve")
+def resolve_secret_reference(
+    secret_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Phase 5 Stage C — return a secret *reference* only (never plaintext).
+
+    Agents and tools should use this path (`secret:use_reference`) instead of
+    `?reveal=true`.
+    """
+    entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id, SecretEntry.is_active == True).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Secret not found")
+    _require_secret_access(entry, current_user, db)
+    return {
+        "ref": f"zect-secret://{entry.id}",
+        "id": entry.id,
+        "name": entry.name,
+        "secret_type": entry.secret_type,
+        "scope": entry.scope,
+        "project_id": entry.project_id,
+        "is_active": entry.is_active,
+        "expires_at": entry.expires_at.isoformat() if entry.expires_at else None,
+        "value": None,
+        "revealed": False,
+    }
+
+
 @router.get("/{secret_id}")
 def get_secret(
     secret_id: int,
@@ -166,7 +227,10 @@ def get_secret(
     current_user: CurrentUser = Depends(get_current_user),  # RBAC: authentication required
     db: Session = Depends(get_db),
 ):
-    """Get a secret. Revealing the plaintext value requires admin, ownership, or resource access."""
+    """Get a secret. Revealing the plaintext value requires admin, ownership, or resource access.
+
+    Prefer GET /{id}/resolve for agent/tool use — plaintext reveal is human-gated.
+    """
     try:
         entry = db.query(SecretEntry).filter(SecretEntry.id == secret_id).first()
         if not entry:

@@ -18,6 +18,7 @@ DEFAULT_SETTINGS = [
     {"key": "review-severity", "value": "Medium", "setting_type": "select", "label": "Minimum Review Severity", "description": "Only surface findings at or above this severity level.", "options": json.dumps(["Critical", "High", "Medium", "Low", "Info"])},
     {"key": "deploy-approval", "value": "Tech Lead + PM", "setting_type": "select", "label": "Deployment Approval Mode", "description": "Who must approve before a deployment can proceed.", "options": json.dumps(["Anyone", "Tech Lead", "Tech Lead + PM", "VP Engineering"])},
     {"key": "token-budget", "value": "80% of budget", "setting_type": "select", "label": "Monthly Token Budget Alert", "description": "Alert threshold for monthly AI token consumption.", "options": json.dumps(["50% of budget", "70% of budget", "80% of budget", "90% of budget", "No alert"])},
+    {"key": "emergency_stop", "value": "false", "setting_type": "toggle", "label": "Global Emergency Stop", "description": "Block new Mentrix runs, App Runner commands, and GitHub auto-review; cancel in-flight Mentrix runs."},
 ]
 
 

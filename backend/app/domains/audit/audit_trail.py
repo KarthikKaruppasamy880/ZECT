@@ -1,5 +1,6 @@
 """Audit Trail — Full CRUD audit logging for all operations."""
 
+import hashlib
 import json
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from app.infrastructure.database import SessionLocal
 from app.models import AuditLog
 from app.infrastructure.auth.deps import get_current_user, CurrentUser
 from app.infrastructure.auth.rbac import require_authentication
+from app.security.redact import redact_secrets
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 
@@ -36,6 +38,8 @@ class AuditLogResponse(BaseModel):
     ip_address: str | None
     user_agent: str | None
     created_at: str
+    prev_hash: str | None = None
+    entry_hash: str | None = None
 
 
 class AuditStats(BaseModel):
@@ -43,6 +47,11 @@ class AuditStats(BaseModel):
     actions: dict[str, int]
     resource_types: dict[str, int]
     recent_24h: int
+
+
+def _hash_entry(*, prev_hash: str, action: str, resource_type: str, resource_id, details: str, user_id) -> str:
+    payload = f"{prev_hash}|{action}|{resource_type}|{resource_id}|{details}|{user_id}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -60,14 +69,33 @@ def log_audit(
     ip_address: str | None = None,
     user_agent: str | None = None,
 ):
-    """Canonical audit writer (Phase 5 Stage A). Soft-fails so ops never break on audit errors."""
+    """Canonical audit writer — redacts secrets + appends optional integrity hash (Phase 5 C/D)."""
     try:
         if details is None:
             details_value = ""
         elif isinstance(details, str):
-            details_value = details
+            details_value = redact_secrets(details)
+            if not isinstance(details_value, str):
+                details_value = json.dumps(details_value, default=str)
         else:
-            details_value = json.dumps(details, default=str)
+            details_value = json.dumps(redact_secrets(details), default=str)
+
+        prev = (
+            db.query(AuditLog)
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+            .first()
+        )
+        prev_hash = (prev.entry_hash if prev and prev.entry_hash else "") or ("0" * 64)
+        entry_hash = _hash_entry(
+            prev_hash=prev_hash,
+            action=action,
+            resource_type=resource_type or "unknown",
+            resource_id=resource_id,
+            details=details_value,
+            user_id=user_id,
+        )
+
         entry = AuditLog(
             user_id=user_id,
             action=action,
@@ -77,6 +105,8 @@ def log_audit(
             details=details_value,
             ip_address=ip_address,
             user_agent=user_agent,
+            prev_hash=prev_hash,
+            entry_hash=entry_hash,
         )
         db.add(entry)
         db.commit()
@@ -124,6 +154,8 @@ def list_audit_logs(
             ip_address=e.ip_address,
             user_agent=e.user_agent,
             created_at=e.created_at.isoformat() if e.created_at else "",
+            prev_hash=getattr(e, "prev_hash", None),
+            entry_hash=getattr(e, "entry_hash", None),
         )
         for e in entries
     ]

@@ -6,24 +6,24 @@ Companion to `Upgrade.md` Phase 3. Staged PRs to `develop`; stop after each merg
 
 | Stage | Scope | Status |
 |---|---|---|
-| A | Unified `/workspace` shell: file tree + Monaco + git status/branch strip; path-scoped writes | **This PR** |
-| B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | Pending |
+| A | Unified `/workspace` shell: file tree + Monaco + git status/branch strip; path-scoped writes | **Done** (#89) |
+| B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | **This PR** |
 | C | Diff + hunk apply/revert + agent change markers | Pending |
 | D | Inline Ask / explain / generate tests / fix selection + context selector | Pending |
 | E | Symbols/refs jump + worktree display | Pending |
 
-## Stage A files
+## Stage B files
 
-- `frontend/src/pages/DeveloperWorkspace.tsx`
-- `frontend/src/components/MonacoCodeEditor.tsx`
-- `frontend/src/lib/workspacePaths.ts` — path containment for writes
-- Route `/workspace` + Sidebar entry
+- `frontend/src/components/WorkspaceTerminal.tsx` — App Runner execute/start/stop with `cwd` = workspace root
+- `frontend/src/components/WorkspaceMentrixTimeline.tsx` — run list + `sequence_id` events (2s poll while running)
+- `frontend/src/pages/DeveloperWorkspace.tsx` — bottom dual panel
 - `docs/PHASE_3_EXECUTION_PLAN.md`, `docs/ROADMAP.md`
 
-## Guardrail
+## Guardrails
 
-Editor saves only via `/api/files/write` and only when the target path is under the active Mentrix/ActiveProject workspace root (client-side check; server allowlist remains authoritative).
+- Editor saves only under the active workspace root (Stage A).
+- Terminal always uses that same root as `cwd` (server allowlist remains authoritative).
 
 ## Stop
 
-After Stage A merges, wait for approval before Stage B.
+After Stage B merges, wait for approval before Stage C.

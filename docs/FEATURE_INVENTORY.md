@@ -63,7 +63,7 @@
 | Output History `/output-history` | Not verified | |
 | Analytics `/analytics` | Not verified | |
 | Token Controls `/token-controls` | Working — token tracking/budgets (Fix #4) | |
-| Secrets Manager `/secrets` | Working — RBAC-gated, Fernet-encrypted | |
+| Secrets Manager `/secrets` | Working — RBAC-gated, Fernet; `/resolve` refs (no plaintext for agents) | |
 
 ### Labs (16 items — mostly experimental/incubating)
 | Route | Status | Note |
@@ -75,7 +75,7 @@
 | Dream Engine `/dream-engine` | Not verified | |
 | Data Layer `/data-layer` | Not verified | |
 | Data Flywheel `/data-flywheel` | Not verified | |
-| Permissions `/permissions` | Partial | Rules + auth-gated `/check` + **temporary grants** (Stage B). Missing: diagnostics UI, secret refs (Stage C). |
+| Permissions `/permissions` | Working | Rules, grants, diagnostics, emergency-stop (Phase 5 A–D). |
 | Transfer & Onboard `/transfer` | Not verified | |
 | Knowledge Base `/knowledge-base` | Not verified | Possible overlap with Lattice/Docs Center. |
 | Playbooks `/playbooks` | Not verified | |

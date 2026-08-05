@@ -194,6 +194,9 @@ async def execute_command(
     Runs an arbitrary shell command as the backend process user — admin-only
     and confined to the same workspace allowlist as Git Ops/File Explorer.
     """
+    from app.security.emergency_stop import require_not_emergency_stopped
+
+    require_not_emergency_stopped(db)
     cwd = _validate_cwd(req.cwd)
     log_audit(
         db=db,
@@ -240,6 +243,9 @@ async def start_process(
 ):
     """Start a long-running process (e.g. dev server) in background. Admin-only,
     confined to the same workspace allowlist as Git Ops/File Explorer."""
+    from app.security.emergency_stop import require_not_emergency_stopped
+
+    require_not_emergency_stopped(db)
     cwd = _validate_cwd(req.cwd)
     log_audit(
         db=db,
@@ -303,6 +309,22 @@ async def stop_process(process_id: str):
         "stopped": True,
         "exit_code": info.proc.returncode,
     }
+
+
+def stop_all_processes() -> int:
+    """Stop every tracked App Runner process (emergency stop). Returns count stopped."""
+    stopped = 0
+    for process_id, info in list(_processes.items()):
+        try:
+            if info.is_running:
+                _stop_process_tree(info.proc, info.pid)
+                stopped += 1
+            task = _bg_tasks.pop(process_id, None)
+            if task:
+                task.cancel()
+        except Exception:
+            continue
+    return stopped
 
 
 @router.get("/processes")

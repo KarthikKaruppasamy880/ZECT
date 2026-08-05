@@ -523,6 +523,133 @@ def revoke_grant(
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics + emergency stop (Phase 5 Stage C/D)
+# ---------------------------------------------------------------------------
+
+@router.post("/diagnostics")
+@require_authentication
+def permission_diagnostics(
+    data: PermissionCheck,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Explain effective permission for an action (rules + grants + emergency stop)."""
+    from app.domains.permissions.capability_grants import capabilities_covering_action
+    from app.security.emergency_stop import is_emergency_stop_active
+
+    if not data.user_id:
+        try:
+            db_user = get_user_from_current_user(current_user, db)
+            if db_user:
+                data.user_id = db_user.id
+        except Exception:
+            pass
+
+    rules = db.query(PermissionRule).filter(PermissionRule.is_active == True).all()  # noqa: E712
+    matching = []
+    for rule in rules:
+        if rule.project_id is not None and rule.project_id != data.project_id:
+            continue
+        try:
+            if re.fullmatch(rule.action_pattern, data.action):
+                matching.append(rule)
+        except re.error:
+            if rule.action_pattern == data.action:
+                matching.append(rule)
+
+    if not matching:
+        result, level = "granted", "allow"
+        reason = "No matching rule — default allow"
+    else:
+        levels = [r.permission_level for r in matching]
+        if "never" in levels:
+            result, level = "denied", "never"
+            reason = "Baseline rule denies (never)"
+        elif "require_approval" in levels:
+            result, level = "pending_approval", "require_approval"
+            reason = "Baseline rule requires approval"
+        else:
+            result, level = "granted", "allow"
+            reason = "Baseline rule allows"
+
+    grants = find_active_grants_for_action(
+        db,
+        data.action,
+        user_id=data.user_id,
+        project_id=data.project_id,
+        subject_type=data.subject_type,
+        subject_id=data.subject_id or (str(data.user_id) if data.user_id else None),
+        workspace=data.workspace,
+    )
+    result2, level2, grant = apply_grant_override(result, level, grants)
+    if grant:
+        reason = f"Temporary grant #{grant.id} ({grant.capability}) overrides to {level2}"
+
+    estop = is_emergency_stop_active(db)
+    return {
+        "action": data.action,
+        "covering_capabilities": sorted(capabilities_covering_action(data.action)),
+        "baseline_result": result,
+        "baseline_level": level,
+        "effective_result": "denied" if estop else result2,
+        "effective_level": "never" if estop else level2,
+        "reason": "Global emergency stop is active" if estop else reason,
+        "emergency_stop": estop,
+        "matching_rules": [_serialize_rule(r) for r in matching],
+        "active_grants": [serialize_grant(g) for g in grants],
+        "grant_applied": serialize_grant(grant) if grant else None,
+    }
+
+
+@router.get("/emergency-stop")
+@require_authentication
+def get_emergency_stop(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.security.emergency_stop import is_emergency_stop_active, ensure_emergency_stop_setting
+
+    ensure_emergency_stop_setting(db)
+    return {"active": is_emergency_stop_active(db)}
+
+
+class EmergencyStopBody(BaseModel):
+    active: bool
+
+
+@router.post("/emergency-stop")
+@require_role("admin")
+def set_emergency_stop_endpoint(
+    data: EmergencyStopBody,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.security.emergency_stop import clear_emergency_stop, engage_emergency_stop
+
+    if data.active:
+        result = engage_emergency_stop(db)
+    else:
+        result = clear_emergency_stop(db)
+
+    uid = getattr(current_user, "user_id", None) or 0
+    try:
+        u = get_user_from_current_user(current_user, db)
+        if u:
+            uid = u.id
+    except Exception:
+        pass
+    log_audit(
+        db=db,
+        user_id=uid or 0,
+        action="emergency_stop_engage" if data.active else "emergency_stop_clear",
+        resource_type="setting",
+        resource_id=None,
+        details=result,
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Serializers
 # ---------------------------------------------------------------------------
 

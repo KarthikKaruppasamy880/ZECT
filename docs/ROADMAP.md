@@ -11,7 +11,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 2 | Coding-engine provider | **Done (A–D)** | Worktree isolation + optional Docker sandbox (falls back when Docker unavailable); remote HTTP adapter; Mentrix opt-in engine slice; health/version/isolation reporting. See `PHASE_2_EXECUTION_PLAN.md`. |
 | 3 | Cursor-like workspace | **Done (A–E)** | `/workspace` tree+Monaco+git+terminal+Mentrix timeline+diff/hunks+inline Ask+symbols/worktrees. See `PHASE_3_EXECUTION_PLAN.md`. |
 | 4 | PR review platform | **Done (A–D)** | Schema + validate/dedupe/rank; deterministic secrets/TODO/rules; approve-before-post + Mentrix bugfix hook. See `PHASE_4_EXECUTION_PLAN.md`. |
-| 5 | Permissions/secrets/audit | **In progress (Stage B)** | A done (#98). Stage B: temporary `CapabilityGrant` + Upgrade capability aliases wired into `/check` and Mentrix broker. Remaining: secret refs + diagnostics, emergency-stop. See `PHASE_5_EXECUTION_PLAN.md`. |
+| 5 | Permissions/secrets/audit | **Done (A–D)** | Audit unify; grants; secret refs + redaction + diagnostics; global emergency-stop + audit hash chain. See `PHASE_5_EXECUTION_PLAN.md`. |
 | 6 | Realtime voice | **~75% — most complete phase** | Persistent session, per-sentence streaming speech, true cross-sentence prefetch, barge-in cancellation, 8 named latency checkpoints, short-timeout no-silent-retry — all shipped this session. Built on the OpenAI Realtime API directly (already brand-clean); no LiveKit dependency needed unless a future provider swap is wanted. |
 | 7 | Browser/desktop access | ~15% — and inverted priority order | "Computer Mode" is OS-level simulated input (SendKeys/window activation) — the tier the target architecture says should be *last resort*, currently the *only* method. No DOM/accessibility-tree automation. File-organization workflow (hash+rollback) not built. |
 | 8 | Email/Slack/Calendar/Jira | ~40% | Real Jira/Slack/Confluence/Datadog MCP adapters work today. Admin-configured credentials, not per-user OAuth; no draft-before-send gate; no Calendar adapter. |
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 5 Stage B** is the current deliverable (temporary capability grants). Phase 9 remains ON HOLD.
+**Phase 5 is complete (A–D).** Next decision: Phase 6 (realtime voice) when requested. Phase 9 remains ON HOLD.

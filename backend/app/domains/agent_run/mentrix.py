@@ -204,6 +204,9 @@ def start_run(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
+    from app.security.emergency_stop import require_not_emergency_stopped
+
+    require_not_emergency_stopped(db)
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail="goal is required")
     if req.mode not in MODE_PIPELINE:

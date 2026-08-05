@@ -252,6 +252,9 @@ class AuditLog(Base):
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Phase 5 Stage D — optional integrity chain (nullable for backfill)
+    prev_hash = Column(String, nullable=True)
+    entry_hash = Column(String, nullable=True)
 
 
 # ---------------------------------------------------------------------------

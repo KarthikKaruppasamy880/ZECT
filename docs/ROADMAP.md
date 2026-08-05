@@ -8,7 +8,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 |---|---|---|---|
 | 0 | Repo audit + doc set | **Done** (this pass) | CURRENT_ARCHITECTURE.md, TARGET_ARCHITECTURE.md, FEATURE_INVENTORY.md, THREAT_MODEL.md, this file. |
 | 1 | Core platform, shared AgentRun | **Done (spine)** | `api/` + `domains/` + `adapters/` + `infrastructure/` + `workers/`; Mentrix shared run + cancel/retry/files/artifacts/terminal/gates; event `sequence_id` + SSE reconnect; MockCodingRuntime; audit on Mentrix state changes; Agent Workspace shell with Ask/Plan/Build/Review/Deploy modes. Residual: fat domain routers (not fully thin services), embedded Monaco diff still via App Runner, OpenHands = Phase 2. |
-| 2 | Coding-engine provider | **In progress (Stage B)** | Stage A worktrees/health done. Stage B: remote HTTP adapter + ZECT event translation + `/api/coding-engine/runs*`. Mentrix wire-up = Stage C; Docker = Stage D. See `PHASE_2_EXECUTION_PLAN.md`. |
+| 2 | Coding-engine provider | **In progress (Stage C)** | Stages A–B done. Stage C: Mentrix worker runs opt-in remote engine slice (worktree + events) before ForgeLoop; Build stamps provider. Docker = Stage D. See `PHASE_2_EXECUTION_PLAN.md`. |
 | 3 | Cursor-like workspace | ~20% | Build has file-attach + diff viewer + generated-files list. No Monaco, file tree, terminal, inline code actions, or symbol search. |
 | 4 | PR review platform | ~60% | Ultra Review consolidated (verified — no duplicate implementations remain), gated human-approve-then-create-PR is real. `ReviewFinding` schema fields (fingerprint, confidence, validation_status) not verified against spec. |
 | 5 | Permissions/secrets/audit | ~55% | RBAC + Fernet secrets + pervasive audit log + permission broker exist. Missing granular capability grants w/ expiry, permission-diagnostics page, emergency stop. **Inherits THREAT_MODEL.md findings 1-6 as backlog**, especially the two Critical items (app_runner.py, sandbox.py). |
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 2 Stage B** lands the remote adapter + event translation. After merge, approve **Stage C** (Mentrix/Build vertical slice) before continuing. Phase 9 remains ON HOLD.
+**Phase 2 Stage C** lands Mentrix/Build opt-in coding-engine wire-up. After merge, approve **Stage D** (Docker isolation + harden) before continuing. Phase 9 remains ON HOLD.

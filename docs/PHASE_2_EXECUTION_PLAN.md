@@ -15,31 +15,25 @@ names are implementation detail.
 | Stage | PR scope | Status |
 |---|---|---|
 | A | Workspace provisioner (git worktree), factory `ZECT_CODING_ENGINE`, `/api/coding-engine/health`, notices | **Done** |
-| B | Remote HTTP adapter + event translation (mocked in CI); `/api/coding-engine/runs*` | **This PR** |
-| C | Mentrix/Build vertical slice wire-up (opt-in remote) | Pending |
+| B | Remote HTTP adapter + event translation (mocked in CI); `/api/coding-engine/runs*` | **Done** |
+| C | Mentrix/Build vertical slice wire-up (opt-in remote) | **This PR** |
 | D | Docker isolation + harden | Pending |
 
-## Stage B files
+## Stage C files
 
-- `backend/app/adapters/coding_engine_events.py` — remote → `RuntimeEvent` map
-- `backend/app/adapters/coding_engine_remote.py` — start/stream/cancel/approve + retries
-- `backend/app/adapters/coding_runtime.py` — process singleton for run continuity
-- `backend/app/domains/workspace/coding_engine.py` — thin run APIs
-- `backend/tests/test_coding_engine_stage_b.py`
+- `backend/app/services/coding_engine/mentrix_bridge.py` — provision + engine poll → Mentrix events
+- `backend/app/workers/mentrix_worker.py` — call bridge before ForgeLoop; dispose after
+- `backend/app/domains/agent_run/mentrix.py` — expose `engine_provider` / `workspace_id` / `engine_run_id`
+- `backend/app/domains/agent_run/build_phase.py` — stamp `coding_engine` on Build responses
+- `backend/tests/test_coding_engine_stage_c.py`
 
-## Env
+## Behavior
 
-```
-ZECT_CODING_ENGINE=mock          # mock | remote
-ZECT_CODING_ENGINE_URL=          # remote Agent Server base URL (server-side only)
-ZECT_CODING_ENGINE_API_KEY=      # session key; never sent to browser
-ZECT_CODING_ENGINE_TIMEOUT=30
-ZECT_CODING_ENGINE_RETRIES=2
-ZECT_ENGINE_WORKSPACE_ROOT=      # allowlisted root for per-run worktrees
-```
+- `ZECT_CODING_ENGINE=mock` (default): stamp `engine_provider=mock`; ForgeLoop unchanged
+- `ZECT_CODING_ENGINE=remote` + workspace: worktree → remote start → poll events into MentrixRun → ForgeLoop on worktree → dispose with patch artifacts
 
 ## Verification
 
 - Full `pytest` green
-- Branding: no third-party product name under `frontend/` or public route paths
-- Stop for Stage C approval after merge
+- Branding gate on public surfaces
+- Stop for Stage D approval after merge

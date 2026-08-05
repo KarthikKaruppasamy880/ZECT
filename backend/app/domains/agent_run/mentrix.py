@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.adapters.coding_runtime import selected_coding_engine
 from app.domains.audit.audit_trail import log_audit
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.database import SessionLocal, get_db
@@ -161,6 +162,15 @@ def _run_to_dict(run: MentrixRun) -> dict:
             "sast_ok": gates.get("sast_ok"),
         },
         "event_cursor": events[-1]["sequence_id"] if events else 0,
+        "engine_provider": (result.get("context") or {}).get("engine_provider")
+        if isinstance(result.get("context"), dict)
+        else None,
+        "workspace_id": (result.get("context") or {}).get("workspace_id")
+        if isinstance(result.get("context"), dict)
+        else None,
+        "engine_run_id": (result.get("context") or {}).get("engine_run_id")
+        if isinstance(result.get("context"), dict)
+        else None,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
     }
@@ -174,6 +184,7 @@ def list_agents(_user: CurrentUser = Depends(get_current_user)):
         "pipelines": MODE_PIPELINE,
         "wake_phrases": ["Mentrix", "Hey Mentrix", "Mentrix engage"],
         "engine": "forge_loop",
+        "coding_engine": selected_coding_engine(),
         "langgraph": False,
     }
 

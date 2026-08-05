@@ -6,19 +6,18 @@ Companion to `Upgrade.md` Phase 4. Staged PRs to `develop`. **Phase 9 remains ON
 
 | Stage | Scope | Status |
 |---|---|---|
-| A | Canonical `ReviewFinding` schema (Upgrade.md fields) + fingerprint + normalize LLM/DB/rules; ultrareview GET returns spec shape | **Done** (re-landed on develop via Stage B PR — #94 had merged only into the Stage E branch) |
-| B | Diff-line validation + dedupe by fingerprint + rank by severity/confidence | **This PR** |
-| C | Deterministic checks → findings (`source=deterministic`): lint/secrets/rules | Pending |
+| A | Canonical `ReviewFinding` schema + fingerprint + normalize | **Done** (#95) |
+| B | Diff-line validation + dedupe by fingerprint + rank | **Done** (#95) |
+| C | Deterministic checks → findings (`source=deterministic`): secrets/TODO + rules | **This PR** |
 | D | Approval gate before GitHub post + coding-engine fix-run hook for accepted findings | Pending |
 
-## Stage B files
+## Stage C files
 
-- `backend/app/domains/pr_review/finding_pipeline.py` — validate / dedupe / rank / `finalize_pr_findings`
-- `backend/app/review_service.py` — PR reviews run `finalize_pr_findings` before persist
-- `backend/tests/fixes_and_phases/test_finding_pipeline.py`
-- Also includes Stage A cherry-pick onto `develop` (`finding_schema.py`, ultrareview wiring)
+- `backend/app/domains/pr_review/deterministic_checks.py` — secrets/TODO/rules collectors
+- `backend/app/review_service.py` — merge deterministic findings in PR + snippet review
+- `backend/app/services/phases/review_phase_svc.py` — shared credential regex
+- `backend/tests/fixes_and_phases/test_deterministic_checks.py`
 
-## Guardrails
+## Deferred
 
-- Do not auto-post speculative findings to GitHub.
-- Invalidated findings (file/line not in diff) are kept but ranked last — not silently dropped.
+- Structured lint (eslint/ruff) issue parsing — `run_lint` returns stderr only today.

@@ -259,8 +259,11 @@ Provide your review as valid JSON following the specified structure."""
                     )
                     merged_findings.append(finding)
 
+        from app.domains.pr_review.deterministic_checks import collect_deterministic_findings
         from app.domains.pr_review.finding_pipeline import finalize_pr_findings
 
+        det = collect_deterministic_findings(files=files, db=db)
+        merged_findings = det + merged_findings
         merged_findings = finalize_pr_findings(
             merged_findings,
             files,
@@ -364,11 +367,16 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
         review = json.loads(content)
         review.setdefault("summary", "Snippet review completed.")
         review.setdefault("quality_score", 50)
-        review.setdefault("total_issues", len(review.get("findings", [])))
         review.setdefault("categories", {})
         review.setdefault("findings", [])
         review.setdefault("strengths", [])
         review.setdefault("recommendations", [])
+        from app.domains.pr_review.deterministic_checks import collect_deterministic_findings
+        from app.domains.pr_review.finding_pipeline import finalize_pr_findings
+
+        det = collect_deterministic_findings(code=code, language=language, db=db, file_path="snippet")
+        review["findings"] = finalize_pr_findings(det + list(review.get("findings") or []), files=[])
+        review["total_issues"] = len(review["findings"])
         review["tokens_used"] = tokens
         review["model"] = "gpt-4o-mini"
         store_cached(db, cache_key, review, model="gpt-4o-mini", tokens_used=tokens)

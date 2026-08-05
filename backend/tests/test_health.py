@@ -12,7 +12,7 @@ def test_root_routes_exist(client):
     for path in [
         "/api/projects",
         "/api/analytics/overview",
-        "/api/skills",
+        "/api/skills-engine/skills",
         "/api/token-controls/usage",
     ]:
         resp = client.get(path)

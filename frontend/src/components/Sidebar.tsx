@@ -104,7 +104,6 @@ const enterpriseItems: NavItem[] = [
 ];
 
 const labsItems: NavItem[] = [
-  { href: "/skills", label: "Skill Library", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/memory", label: "Memory System", icon: Brain },
   { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },

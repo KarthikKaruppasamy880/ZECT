@@ -20,7 +20,7 @@ except Exception as e:
 from app.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
-from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
+from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management
 from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
 from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
 from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
@@ -140,7 +140,6 @@ app.include_router(code_review.code_review_alias)
 app.include_router(build_phase.router)
 app.include_router(review_phase.router)
 app.include_router(deploy_phase.router)
-app.include_router(skills.router)
 app.include_router(token_controls.router)
 app.include_router(model_selection.router)
 app.include_router(orchestration.router)

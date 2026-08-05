@@ -27,6 +27,14 @@ CHATTERBOX_AUDIO_PATH_TEMPLATE = os.getenv(
 # call (POST /generate blocks until the whole clip is done, no streaming),
 # so the engine's own speed is the dominant factor in perceived TTS latency.
 DEFAULT_CHATTERBOX_ENGINE = os.getenv("CHATTERBOX_ENGINE", "qwen")
+# Per-chunk synthesis is short text (~220 chars) — 30s let a hung/slow engine
+# stall every sentence of a live conversation. Configurable since a real
+# heavy model on modest hardware may legitimately need longer.
+SPEAK_TIMEOUT = float(os.getenv("CHATTERBOX_SPEAK_TIMEOUT", "15.0"))
+# Lazy re-provisioning (voice cloning) at speak time is heavier than plain
+# synthesis and only ever a fallback path — keep it short so a broken/missing
+# engine-side profile fails fast to OpenAI instead of stalling every sentence.
+REPROVISION_TIMEOUT = float(os.getenv("CHATTERBOX_REPROVISION_TIMEOUT", "6.0"))
 
 
 def chatterbox_available() -> bool:
@@ -51,12 +59,21 @@ def clone_voice(
     *,
     reference_text: str,
     language: str = "en",
+    timeout: float = 60.0,
 ) -> dict[str, Any]:
-    """Create a voice profile on the local engine, then attach the sample."""
+    """Create a voice profile on the local engine, then attach the sample.
+
+    timeout defaults to 60s for the deliberate /clone flow (one-time action,
+    user is watching a progress spinner). Speak-time lazy re-provisioning
+    (_ensure_engine_profile) passes a much shorter timeout — voice cloning is
+    a heavier operation than plain synthesis, and letting it run for a full
+    60s on every /speak call when a profile is missing turns one bad clone
+    into a many-second stall on every single sentence of a live conversation.
+    """
     if not reference_text.strip():
         raise ValueError("reference_text is required — it must match what the audio sample says")
 
-    with httpx.Client(timeout=60.0) as client:
+    with httpx.Client(timeout=timeout) as client:
         profile_resp = client.post(
             f"{CHATTERBOX_BASE_URL}/profiles",
             json={"name": name[:100], "language": language, "voice_type": "cloned"},
@@ -91,7 +108,7 @@ def _resolve_audio_url(audio_path: str) -> str:
 
 def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine: str | None = None) -> bytes:
     """Synthesize text in the given cloned voice profile. Returns raw audio bytes."""
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=SPEAK_TIMEOUT) as client:
         gen_resp = client.post(
             f"{CHATTERBOX_BASE_URL}/generate",
             json={

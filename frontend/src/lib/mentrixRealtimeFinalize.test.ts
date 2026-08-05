@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   chunkSpeakText,
+  createPerfTracker,
   nextSpeakableSentence,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
@@ -93,5 +94,45 @@ describe("mentrixRealtimeFinalize", () => {
     }
     expect(sentences).toEqual(["First one.", "Second one!", "Third one?"]);
     expect(full.slice(spokenUpTo)).toBe("Trailing partial");
+  });
+
+  describe("createPerfTracker", () => {
+    it("records elapsed time since the last reset for each checkpoint", () => {
+      let clock = 1000;
+      const tracker = createPerfTracker(() => clock);
+      tracker.reset();
+      clock = 1295;
+      expect(tracker.mark("llm_request_started")).toEqual({ name: "llm_request_started", elapsedMs: 295 });
+      clock = 1500;
+      expect(tracker.mark("llm_first_token")).toEqual({ name: "llm_first_token", elapsedMs: 500 });
+    });
+
+    it("only records the first occurrence of a given checkpoint per cycle", () => {
+      let clock = 0;
+      const tracker = createPerfTracker(() => clock);
+      tracker.reset();
+      clock = 100;
+      expect(tracker.mark("llm_first_token")).not.toBeNull();
+      clock = 900;
+      // A second content delta shouldn't re-log or overwrite the first timing.
+      expect(tracker.mark("llm_first_token")).toBeNull();
+    });
+
+    it("starts a fresh cycle on reset — same checkpoint name marks again", () => {
+      let clock = 0;
+      const tracker = createPerfTracker(() => clock);
+      tracker.reset();
+      clock = 50;
+      tracker.mark("user_speech_stopped");
+      clock = 1000;
+      tracker.reset();
+      clock = 1080;
+      expect(tracker.mark("user_speech_stopped")).toEqual({ name: "user_speech_stopped", elapsedMs: 80 });
+    });
+
+    it("reports 0ms before the first reset instead of a huge/garbage elapsed value", () => {
+      const tracker = createPerfTracker(() => 5000);
+      expect(tracker.mark("user_speech_stopped")).toEqual({ name: "user_speech_stopped", elapsedMs: 0 });
+    });
   });
 });

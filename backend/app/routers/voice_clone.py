@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -21,6 +22,7 @@ from app.database import get_db
 from app.models import ClonedVoice
 
 router = APIRouter(prefix="/api/mentrix/voice", tags=["mentrix-voice"])
+logger = logging.getLogger("mentrix.voice_clone")
 
 MAX_SAMPLE_BYTES = 10_000_000
 MAX_NAME_LEN = 100
@@ -144,9 +146,22 @@ def _row_out(row: ClonedVoice) -> "ClonedVoiceOut":
     )
 
 
+# Re-provisioning (voice cloning) is heavier than plain synthesis and only a
+# fallback path (external_voice_id missing/stale) — if it just failed, don't
+# repeat the same slow attempt on every subsequent sentence of a live
+# conversation. Per-process, keyed by ZECT voice_id: value is the monotonic
+# time() after which a retry is allowed again.
+_REPROVISION_COOLDOWN_S = 60.0
+_reprovision_blocked_until: dict[str, float] = {}
+
+
 def _ensure_engine_profile(row: ClonedVoice) -> str:
     """Return engine profile id, re-provisioning from stored sample if needed."""
-    from app.services.llm.chatterbox_client import chatterbox_available, clone_voice
+    from app.services.llm.chatterbox_client import (
+        REPROVISION_TIMEOUT,
+        chatterbox_available,
+        clone_voice,
+    )
 
     if row.external_voice_id:
         return row.external_voice_id
@@ -160,15 +175,35 @@ def _ensure_engine_profile(row: ClonedVoice) -> str:
             status_code=503,
             detail="Chatterbox engine offline — start the local synthesis service to speak.",
         )
+    blocked_until = _reprovision_blocked_until.get(row.voice_id, 0.0)
+    if time() < blocked_until:
+        raise HTTPException(
+            status_code=503,
+            detail="Chatterbox re-provisioning failed recently — retrying shortly, using fallback voice for now.",
+        )
     audio_bytes = Path(row.sample_path).read_bytes()
     filename = Path(row.sample_path).name
-    result = clone_voice(
-        row.name or "Mentrix Voice",
-        audio_bytes,
-        filename,
-        "application/octet-stream",
-        reference_text=(row.reference_text or "").strip() or "Hello, this is my voice sample.",
-    )
+    try:
+        result = clone_voice(
+            row.name or "Mentrix Voice",
+            audio_bytes,
+            filename,
+            "application/octet-stream",
+            reference_text=(row.reference_text or "").strip() or "Hello, this is my voice sample.",
+            timeout=REPROVISION_TIMEOUT,
+        )
+    except Exception as exc:
+        _reprovision_blocked_until[row.voice_id] = time() + _REPROVISION_COOLDOWN_S
+        # Chatterbox is local/no-API-key — safe to log the message, still
+        # truncated in case the engine ever echoes request content back.
+        logger.warning(
+            "Chatterbox re-provision failed for voice_id=%s: %s — falling back for %ss",
+            row.voice_id,
+            str(exc)[:300],
+            _REPROVISION_COOLDOWN_S,
+        )
+        raise HTTPException(status_code=502, detail="Chatterbox re-provisioning failed") from exc
+    _reprovision_blocked_until.pop(row.voice_id, None)
     return result["voice_id"]
 
 

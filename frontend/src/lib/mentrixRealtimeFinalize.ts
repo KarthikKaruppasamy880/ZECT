@@ -73,6 +73,32 @@ export function chunkSpeakText(text: string, maxChars = 220): string[] {
  * sentence the instant it streams in, instead of the whole reply waiting
  * for the LLM to finish generating before any TTS call fires at all.
  */
+/**
+ * Named-checkpoint latency tracker for one user turn (user_speech_stopped
+ * through playback_finished). reset() marks t0 (called at
+ * input_audio_buffer.speech_stopped — the point "response time" is actually
+ * measured from). mark() records the FIRST occurrence of a given name since
+ * the last reset — later repeats (e.g. llm_first_token semantics only apply
+ * once, but a handler may fire per-delta) return null instead of re-logging.
+ */
+export type PerfMark = { name: string; elapsedMs: number };
+
+export function createPerfTracker(now: () => number = () => performance.now()) {
+  let t0 = 0;
+  const seen = new Set<string>();
+  return {
+    reset(): void {
+      t0 = now();
+      seen.clear();
+    },
+    mark(name: string): PerfMark | null {
+      if (seen.has(name)) return null;
+      seen.add(name);
+      return { name, elapsedMs: t0 ? Math.round(now() - t0) : 0 };
+    },
+  };
+}
+
 export function nextSpeakableSentence(unspoken: string): { sentence: string; consumedLength: number } | null {
   const match = unspoken.match(/^[\s\S]*?[.!?](?:\s|$)/);
   if (!match) return null;

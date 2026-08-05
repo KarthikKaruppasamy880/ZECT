@@ -33,6 +33,7 @@ import DreamEngine from "@/pages/DreamEngine";
 import DataLayer from "@/pages/DataLayer";
 import DataFlywheel from "@/pages/DataFlywheel";
 import Permissions from "@/pages/Permissions";
+import SecurityIncidents from "@/pages/SecurityIncidents";
 import TransferOnboarding from "@/pages/TransferOnboarding";
 import SkillsEngine from "@/pages/SkillsEngine";
 import KnowledgeBase from "@/pages/KnowledgeBase";
@@ -167,6 +168,7 @@ export default function App() {
           <Route path="/data-layer" element={<DataLayer />} />
           <Route path="/data-flywheel" element={<DataFlywheel />} />
           <Route path="/permissions" element={<Permissions />} />
+          <Route path="/security-incidents" element={<SecurityIncidents />} />
           <Route path="/transfer" element={<TransferOnboarding />} />
           <Route path="/skills-engine" element={<SkillsEngine />} />
           <Route path="/knowledge-base" element={<KnowledgeBase />} />

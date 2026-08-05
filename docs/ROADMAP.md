@@ -15,7 +15,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 6 | Realtime voice | **In progress (Stage A)** | Engine ~75% complete. Stage A: voice telemetry HUD (mode + latency marks). See `PHASES_6_11_STAGE_A.md`. |
 | 7 | Browser/desktop access | **In progress (Stage A)** | Browser fill verify + artifacts; file-organize dry-run/approve/hash/rollback. Computer Mode remains last-resort. |
 | 8 | Email/Slack/Calendar/Jira | **In progress (Stage A)** | Slack/email draft-before-send via `OutboundDraft`. Calendar/OAuth deferred. |
-| 9 | Security monitoring/incident response | **ON HOLD** | Do not implement. |
+| 9 | Security monitoring/incident response | **Done (A–D spine)** | Detection Provider + audit adapter; findings/incidents; draft→approve→Jira/Slack; signed ingest webhook; containment stubs disabled. See `PHASE_9_EXECUTION_PLAN.md`. |
 | 10 | Memory/skills/automation | **In progress (Stage A)** | Schedule trigger executes Mentrix runs with permission + idempotency. |
 | 11 | Packaging/licensing/release | **In progress (Stage A)** | `THIRD_PARTY_NOTICES.md` expanded; `docs/RELEASE.md`; `scripts/support_bundle.py`. |
 
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phases 6–8 / 10–11 Stage A** is the current deliverable (see `PHASES_6_11_STAGE_A.md`). Phase 9 remains ON HOLD.
+**Phase 9 Stage A–D spine** is the current deliverable (security incidents). Automatic containment remains disabled.

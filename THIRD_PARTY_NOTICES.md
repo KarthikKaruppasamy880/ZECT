@@ -65,7 +65,15 @@ Mentrix Realtime voice may use cloud realtime speech APIs or local TTS
 clone engines configured via environment and Secrets Manager. Adapter
 boundaries keep provider names out of ZECT routes and UI labels.
 
-## Electron desktop shell (Phase 11)
+## Detection / endpoint / forensics adapters (Phase 9)
+
+ZECT Security Incidents use a ZECT-owned **Detection Provider** interface.
+Optional external SIEM/EDR/forensic collectors may be wired behind that
+interface; product UI, routes, and models never brand those vendors.
+Attribution for any installed connector libraries belongs here when added.
+
+Current built-in provider: audit-trail anomaly scan (ZECT-native).
+
 
 The optional desktop shell uses Electron (MIT) for windowing. App identity
 is `com.zinnia.zect`. See `docs/RELEASE.md` for packaging gates.

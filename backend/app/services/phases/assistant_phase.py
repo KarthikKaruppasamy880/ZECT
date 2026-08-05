@@ -260,14 +260,32 @@ def execute_heavy_tool(
 
 
 def _scan_for_anomalies(args: dict[str, Any]) -> dict[str, Any]:
+    from app.adapters.detection_audit import AuditTrailDetectionProvider
+    from app.domains.security_incident.router import persist_normalized_findings
     from app.infrastructure.database import SessionLocal
-    from app.services.security.threat_detection import run_anomaly_scan
 
     lookback_hours = int(args.get("lookback_hours") or 24)
     db = SessionLocal()
     try:
-        result = run_anomaly_scan(db, lookback_hours=lookback_hours)
-        return {"ok": True, **result}
+        provider = AuditTrailDetectionProvider()
+        result = provider.collect(db, lookback_hours=lookback_hours)
+        rows = persist_normalized_findings(db, result.get("findings") or [])
+        return {
+            "ok": True,
+            "provider": provider.name,
+            "findings": [
+                {
+                    "id": r.id,
+                    "fingerprint": r.fingerprint,
+                    "kind": r.kind,
+                    "severity": r.severity,
+                    "title": r.title,
+                    "description": r.description,
+                }
+                for r in rows
+            ],
+            "scanned": result.get("scanned") or {},
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
     finally:
@@ -275,28 +293,68 @@ def _scan_for_anomalies(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _file_security_ticket(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:
-    from app.infrastructure.database import SessionLocal
-    from app.services.mcp.hub import execute_tool
+    """Create IR draft from finding (prefer finding_id) then optionally require approve API.
 
-    project_key = args.get("project_key") or os.getenv("SECURITY_JIRA_PROJECT_KEY", "SEC")
-    summary = args.get("summary", "")[:250]
-    description = args.get("description", "")
+    Direct Jira create still supported for backward compatibility when summary is provided
+    without finding_id — but description is redacted and summary is prefixed.
+    """
+    from datetime import datetime, timezone
+
+    from app.infrastructure.database import SessionLocal
+    from app.models import SecurityFinding, SecurityIncident
+    from app.security.redact import redact_secrets
+
+    finding_id = args.get("finding_id")
     db = SessionLocal()
     try:
+        if finding_id:
+            finding = db.query(SecurityFinding).filter(SecurityFinding.id == int(finding_id)).first()
+            if not finding:
+                return {"ok": False, "error": "finding_not_found"}
+            incident = SecurityIncident(
+                finding_id=finding.id,
+                status="draft",
+                summary=(args.get("summary") or finding.title or finding.kind)[:250],
+                severity=finding.severity,
+                confidence="medium",
+                approval_status="pending",
+                timeline_json=[{"at": datetime.now(timezone.utc).isoformat(), "event": "draft_via_mentrix"}],
+                recommended_actions_json=["Approve via Security Incidents to create Jira"],
+                correlation_id=finding.correlation_id or "",
+            )
+            finding.status = "drafted"
+            db.add(incident)
+            db.commit()
+            db.refresh(incident)
+            return {
+                "ok": True,
+                "draft_incident_id": incident.id,
+                "finding_id": finding.id,
+                "status": "pending_approval",
+                "spoken_summary": f"Security incident draft #{incident.id} ready for approval before Jira creation.",
+            }
+
+        from app.services.mcp.hub import execute_tool
+
+        project_key = args.get("project_key") or os.getenv("SECURITY_JIRA_PROJECT_KEY", "SEC")
+        summary = f"[ZECT Security] {(args.get('summary') or 'Security finding')}"[:250]
+        description = redact_secrets(args.get("description", ""))
         outcome = execute_tool(
             db,
             server_id="jira",
             tool_name="create_issue",
-            arguments={"project": project_key, "summary": summary, "type": "Bug"},
+            arguments={"project": project_key, "summary": summary, "type": "Bug", "description": description},
             user_email=created_by,
         )
         if outcome.get("status") != "success":
             return {"ok": False, "error": outcome.get("result", {}).get("message") or "Jira not configured or unreachable"}
         result = outcome.get("result") or {}
         key = result.get("key")
-        return {"ok": bool(key), "ticket_key": key, "description": description}
+        return {"ok": bool(key), "ticket_key": key, "description": description[:500]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+    finally:
+        db.close()
     finally:
         db.close()
 

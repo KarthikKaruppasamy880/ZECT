@@ -16,19 +16,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-_SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+from app.domains.pr_review.deterministic_checks import HARDCODED_CREDENTIAL_RE as _HARDCODED_CREDENTIAL_RE
 
-# Assignment-style pattern, not a bare substring — mirrors transfer.py's
-# SECRET_PATTERNS. A bare "api_key" substring match previously false-
-# positived on the offline build stub's OWN comment ("Generated without
-# OPENAI_API_KEY — replace in live runs"), which contains "api_key" as a
-# substring of "OPENAI_API_KEY" — meaning every upgrade/deliver run with no
-# LLM key configured got a critical, non-waiveable "credential handling"
-# finding purely from the placeholder explaining that no key was configured.
-_HARDCODED_CREDENTIAL_RE = re.compile(
-    r"(?:api[_-]?key|secret|password|credential|token)\s*[:=]\s*['\"]\S",
-    re.IGNORECASE,
-)
+_SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 
 
 def run_ultra_review(

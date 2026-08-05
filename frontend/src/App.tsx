@@ -1,6 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Layout from "@/components/Layout";
+import AgentWorkspaceShell from "@/components/AgentWorkspaceShell";
 import ToastContainer from "@/components/Toast";
 import Dashboard from "@/pages/Dashboard";
 import Projects from "@/pages/Projects";
@@ -138,13 +139,17 @@ export default function App() {
           <Route path="/repo-analysis" element={<RepoAnalysis />} />
           <Route path="/blueprint" element={<BlueprintGenerator />} />
           <Route path="/doc-generator" element={<DocGenerator />} />
-          <Route path="/ask" element={<AskMode />} />
-          <Route path="/plan" element={<PlanMode />} />
+          <Route element={<AgentWorkspaceShell />}>
+            <Route path="/ask" element={<AskMode />} />
+            <Route path="/plan" element={<PlanMode />} />
+            <Route path="/build" element={<Suspense fallback={<PageLoader />}><LazyBuildPhase /></Suspense>} />
+            <Route path="/review" element={<Suspense fallback={<PageLoader />}><LazyReviewPhase /></Suspense>} />
+            <Route path="/deploy" element={<Suspense fallback={<PageLoader />}><LazyDeployPhase /></Suspense>} />
+            <Route path="/mentrix" element={<Mentrix />} />
+            <Route path="/agent-mode" element={<AgentMode />} />
+          </Route>
           <Route path="/docs" element={<Docs />} />
           <Route path="/code-review" element={<Suspense fallback={<PageLoader />}><LazyCodeReview /></Suspense>} />
-          <Route path="/build" element={<Suspense fallback={<PageLoader />}><LazyBuildPhase /></Suspense>} />
-          <Route path="/review" element={<Suspense fallback={<PageLoader />}><LazyReviewPhase /></Suspense>} />
-          <Route path="/deploy" element={<Suspense fallback={<PageLoader />}><LazyDeployPhase /></Suspense>} />
           <Route path="/token-controls" element={<TokenControls />} />
           <Route path="/audit-trail" element={<AuditTrail />} />
           <Route path="/rules" element={<RulesEngine />} />
@@ -171,10 +176,8 @@ export default function App() {
           <Route path="/session-insights" element={<SessionInsights />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/repo-workspace" element={<RepoWorkspace />} />
-          <Route path="/agent-mode" element={<AgentMode />} />
           <Route path="/lattice" element={<LatticeGraph />} />
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
-          <Route path="/mentrix" element={<Mentrix />} />
           <Route path="/sandbox" element={<SandboxGate />} />
         </Route>
       </Routes>

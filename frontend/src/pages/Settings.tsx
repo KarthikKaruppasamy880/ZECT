@@ -16,10 +16,17 @@ import {
   KeyRound,
   ArrowRight,
 } from "lucide-react";
+import {
+  agentModeEnvLocked as isAgentModeEnvLocked,
+  isAgentModeEnabled,
+  setAgentModeEnabled,
+} from "@/lib/featureFlags";
 
 export default function Settings() {
   const [settings, setSettings] = useState<Setting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agentModeEnabled, setAgentModeEnabledState] = useState(() => isAgentModeEnabled());
+  const agentModeLocked = isAgentModeEnvLocked();
 
   // API Key Modal
   const [showApiModal, setShowApiModal] = useState(false);
@@ -248,6 +255,55 @@ export default function Settings() {
             Manage Secrets <ArrowRight size={12} />
           </Link>
         </div>
+      </div>
+
+      {/* Advanced — power-user surfaces */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="settings-advanced">
+        <div className="flex items-center gap-2 mb-5">
+          <SettingsIcon className="h-5 w-5 text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-700">Advanced</h2>
+        </div>
+        <div className="flex items-center justify-between py-2">
+          <div>
+            <p className="text-sm font-medium text-slate-900">Agent Mode (legacy orchestrator)</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Mentrix Delivery is the primary Agent Workspace path. Enable Agent Mode only if you need the
+              older multi-stage /api/agent runner. You can turn this off anytime.
+              {agentModeLocked && (
+                <span className="block mt-1 text-amber-700">
+                  Locked by VITE_ENABLE_AGENT_MODE in the environment.
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="settings-agent-mode-toggle"
+            disabled={agentModeLocked}
+            onClick={() => {
+              const next = !agentModeEnabled;
+              setAgentModeEnabled(next);
+              setAgentModeEnabledState(next);
+            }}
+            className="shrink-0 ml-4 disabled:opacity-40"
+            aria-label="Toggle Agent Mode"
+          >
+            {agentModeEnabled ? (
+              <ToggleRight className="h-7 w-7 text-indigo-600" />
+            ) : (
+              <ToggleLeft className="h-7 w-7 text-slate-300" />
+            )}
+          </button>
+        </div>
+        {agentModeEnabled && (
+          <p className="text-xs text-slate-500 mt-2">
+            Open{" "}
+            <Link to="/agent-mode" className="text-teal-700 underline font-medium">
+              Agent Mode
+            </Link>{" "}
+            from Deliver or the Agent Workspace rail.
+          </p>
+        )}
       </div>
 
       {/* Feature Toggles */}

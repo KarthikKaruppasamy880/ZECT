@@ -224,6 +224,7 @@ export interface TokenDashboard {
 
 // Code Review
 export interface ReviewFinding {
+  id?: number;
   severity: string;
   category: string;
   title: string;
@@ -246,6 +247,8 @@ export interface ReviewResponse {
   model: string;
   pr_number?: number;
   repo?: string;
+  /** ReviewSession id — required for approve → post / fix-run (Phase 4 Stage D) */
+  review_session_id?: number | null;
 }
 
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";

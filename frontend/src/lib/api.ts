@@ -1120,12 +1120,54 @@ export const autofixApply = (filePath: string, originalContent: string, fixCode:
     }),
   });
 
-// Inline PR Review
-export const reviewPRInline = (owner: string, repo: string, prNumber: number, autoComment = true) =>
+// Inline PR Review — default autoComment=false (Stage D gate)
+export const reviewPRInline = (owner: string, repo: string, prNumber: number, autoComment = false) =>
   request<any>("/api/review/pr/inline", {
     method: "POST",
     body: JSON.stringify({ owner, repo, pr_number: prNumber, auto_comment: autoComment }),
   });
+
+export const ultraReviewApprovePost = (
+  sessionId: number,
+  findingIds: number[],
+  opts?: { owner?: string; repo?: string; pr_number?: number },
+) =>
+  request<any>(`/api/ultrareview/${sessionId}/approve-post`, {
+    method: "POST",
+    body: JSON.stringify({
+      finding_ids: findingIds,
+      ...(opts?.owner ? { owner: opts.owner } : {}),
+      ...(opts?.repo ? { repo: opts.repo } : {}),
+      ...(opts?.pr_number != null ? { pr_number: opts.pr_number } : {}),
+    }),
+  });
+
+export const ultraReviewPostGithub = (sessionId: number, owner: string, repo: string, prNumber: number) =>
+  request<any>(`/api/ultrareview/${sessionId}/post-github`, {
+    method: "POST",
+    body: JSON.stringify({ owner, repo, pr_number: prNumber }),
+  });
+
+export const ultraReviewStartFixRun = (
+  sessionId: number,
+  workspace: string,
+  opts?: { project_key?: string; project_id?: number; repo_id?: number; owner?: string; repo?: string; pr_number?: number },
+) =>
+  request<any>(`/api/ultrareview/${sessionId}/start-fix-run`, {
+    method: "POST",
+    body: JSON.stringify({
+      workspace,
+      project_key: opts?.project_key || "",
+      ...(opts?.project_id != null ? { project_id: opts.project_id } : {}),
+      ...(opts?.repo_id != null ? { repo_id: opts.repo_id } : {}),
+      ...(opts?.owner ? { owner: opts.owner } : {}),
+      ...(opts?.repo ? { repo: opts.repo } : {}),
+      ...(opts?.pr_number != null ? { pr_number: opts.pr_number } : {}),
+    }),
+  });
+
+export const getUltraReview = (sessionId: number) =>
+  request<any>(`/api/ultrareview/${sessionId}`);
 export const postPRComment = (owner: string, repo: string, prNumber: number, body: string, commitSha?: string, path?: string, line?: number) =>
   request<any>("/api/review/pr/comment", {
     method: "POST",

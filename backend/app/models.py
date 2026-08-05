@@ -1273,7 +1273,7 @@ class ReviewWebhookConfig(Base):
     repo = Column(String, nullable=False)
     enabled = Column(Boolean, default=False)
     auto_review = Column(Boolean, default=True)
-    auto_comment = Column(Boolean, default=True)
+    auto_comment = Column(Boolean, default=False)  # Stage D: off by default
     webhook_secret = Column(String, default="")
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -50,6 +50,7 @@ import {
   AlertTriangle,
   StickyNote,
 } from "lucide-react";
+import { isAgentModeEnabled } from "@/lib/featureFlags";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
@@ -75,8 +76,7 @@ const understandItems: NavItem[] = [
   { href: "/docs", label: "Docs Center", icon: FileText },
 ];
 
-const deliverItems: NavItem[] = [
-  { href: "/agent-mode", label: "Agent Mode", icon: Bot },
+const deliverItemsBase: NavItem[] = [
   { href: "/ask", label: "Ask", icon: MessageSquare },
   { href: "/plan", label: "Plan", icon: ClipboardList },
   { href: "/build", label: "Build", icon: Hammer },
@@ -84,6 +84,8 @@ const deliverItems: NavItem[] = [
   { href: "/deploy", label: "Deploy", icon: Rocket },
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
 ];
+
+const agentModeItem: NavItem = { href: "/agent-mode", label: "Agent Mode (Advanced)", icon: Bot };
 
 const qualityItems: NavItem[] = [
   { href: "/code-review", label: "Mentrix Ultra Review", icon: ShieldCheck },
@@ -125,7 +127,7 @@ const sections: { title: string; items: NavItem[] }[] = [
   { title: "Workflow", items: workflowItems },
   { title: "Workspace", items: workspaceItems },
   { title: "Understand", items: understandItems },
-  { title: "Deliver", items: deliverItems },
+  { title: "Deliver", items: deliverItemsBase },
   { title: "Quality", items: qualityItems },
   { title: "Enterprise", items: enterpriseItems },
   { title: "Labs", items: labsItems },
@@ -147,10 +149,30 @@ export default function Sidebar({
   onMobileClose,
 }: SidebarProps) {
   const location = useLocation();
+  const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
 
   useEffect(() => {
     onMobileClose();
   }, [location.pathname]);
+
+  useEffect(() => {
+    const sync = () => setAgentModeOn(isAgentModeEnabled());
+    window.addEventListener("zect-feature-flags", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("zect-feature-flags", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  const navSections = sections.map((section) =>
+    section.title === "Deliver"
+      ? {
+          ...section,
+          items: agentModeOn ? [...deliverItemsBase, agentModeItem] : deliverItemsBase,
+        }
+      : section,
+  );
 
   const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
     <div key={title}>
@@ -237,7 +259,7 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 py-4">
-        {sections.map((section, idx) => renderSection(section.title, section.items, idx === 0))}
+        {navSections.map((section, idx) => renderSection(section.title, section.items, idx === 0))}
       </nav>
 
       <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>

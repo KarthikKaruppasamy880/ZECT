@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { isAgentModeEnabled } from "@/lib/featureFlags";
 
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -207,6 +208,37 @@ export default function AgentMode() {
 
   const filesWritten = activeRun?.files_written || [];
   const runWorkspace = activeRun?.workspace || workspace;
+
+  if (!isAgentModeEnabled()) {
+    return (
+      <div className="space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-6" data-testid="agent-mode-gated">
+        <div className="flex items-center gap-3">
+          <Bot className="h-7 w-7 text-amber-700" />
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">Agent Mode is off</h1>
+            <p className="text-sm text-slate-600 mt-1">
+              Mentrix Delivery is the primary Agent Workspace experience. Enable the legacy Agent Mode
+              orchestrator under Settings → Advanced when you need it.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            to="/settings"
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Open Settings
+          </Link>
+          <Link
+            to="/mentrix"
+            className="rounded-lg border border-teal-300 bg-white px-4 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50"
+          >
+            Go to Mentrix Delivery
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6" data-testid="agent-mode-page">

@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.models import PermissionAudit, PermissionRule
 from app.domains.audit.audit_trail import log_audit
+from app.domains.permissions.capability_grants import (
+    apply_grant_override,
+    find_active_grants_for_action,
+)
 
 # Companion tool → permission action mapping
 TOOL_ACTIONS: dict[str, str] = {
@@ -118,6 +122,16 @@ def check_tool_permission(
         else:
             result, level = "granted", "allow"
 
+    grants = find_active_grants_for_action(
+        db,
+        action,
+        user_id=user_id,
+        project_id=project_id,
+        subject_type="user" if user_id else "agent",
+        subject_id=str(user_id) if user_id else "mentrix",
+    )
+    result, level, grant = apply_grant_override(result, level, grants)
+
     needs_confirm = tool_name in ALWAYS_CONFIRM_TOOLS or result == "pending_approval"
     if needs_confirm and user_confirmed and result == "pending_approval":
         result = "granted"
@@ -133,6 +147,7 @@ def check_tool_permission(
         permission_level=level,
         result=result,
         rule_id=matching[0].id if matching else None,
+        reason=f"grant:{grant.id}" if grant else "",
     )
     db.add(audit)
     db.commit()
@@ -145,6 +160,7 @@ def check_tool_permission(
         "permission_level": level,
         "needs_confirm": needs_confirm and not user_confirmed and result != "denied",
         "audit_id": audit.id,
+        "grant_id": grant.id if grant else None,
     }
 
 

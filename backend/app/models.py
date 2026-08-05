@@ -730,6 +730,27 @@ class PermissionAudit(Base):
     project = relationship("Project", backref="permission_audits")
 
 
+class CapabilityGrant(Base):
+    """Temporary capability grant (Phase 5 Stage B) — expires; overrides rules while active."""
+    __tablename__ = "capability_grants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Upgrade.md capability (e.g. pull_request:create) or raw action pattern
+    capability = Column(String, nullable=False, index=True)
+    subject_type = Column(String, nullable=False, default="user")  # user | agent | tool | workspace
+    subject_id = Column(String, nullable=False, default="")  # user id / agent key / workspace path
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    permission_level = Column(String, nullable=False, default="allow")  # allow | require_approval | never
+    reason = Column(Text, default="")
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="capability_grants")
+    granter = relationship("User", foreign_keys=[granted_by])
+
+
 # ---------------------------------------------------------------------------
 # Transfer & Onboarding
 # ---------------------------------------------------------------------------

@@ -75,7 +75,7 @@
 | Dream Engine `/dream-engine` | Not verified | |
 | Data Layer `/data-layer` | Not verified | |
 | Data Flywheel `/data-flywheel` | Not verified | |
-| Permissions `/permissions` | Partial | Rules + `/check` + approvals auth-gated (Stage A). Missing: grants/expiry UI, diagnostics (Stage B/C). |
+| Permissions `/permissions` | Partial | Rules + auth-gated `/check` + **temporary grants** (Stage B). Missing: diagnostics UI, secret refs (Stage C). |
 | Transfer & Onboard `/transfer` | Not verified | |
 | Knowledge Base `/knowledge-base` | Not verified | Possible overlap with Lattice/Docs Center. |
 | Playbooks `/playbooks` | Not verified | |

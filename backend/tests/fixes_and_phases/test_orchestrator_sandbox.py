@@ -52,7 +52,7 @@ class TestRunSandboxCheck:
         (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
         fake_result = Mock(success=True, total_attempts=1, final_output="2 passed")
 
-        with patch("app.routers.autofix.run_and_fix", return_value=fake_result) as mock_run:
+        with patch("app.domains.workspace.autofix.run_and_fix", return_value=fake_result) as mock_run:
             result = _run_sandbox_check(str(tmp_path), 80, 0, [], "upgrade")
 
         assert result["real_execution"] is True
@@ -65,7 +65,7 @@ class TestRunSandboxCheck:
         (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
         fake_result = Mock(success=False, total_attempts=3, final_output="AssertionError: boom")
 
-        with patch("app.routers.autofix.run_and_fix", return_value=fake_result):
+        with patch("app.domains.workspace.autofix.run_and_fix", return_value=fake_result):
             result = _run_sandbox_check(str(tmp_path), 95, 0, [], "upgrade")
 
         assert result["ready"] is False
@@ -76,7 +76,7 @@ class TestRunSandboxCheck:
         (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
         fake_result = Mock(success=True, total_attempts=1, final_output="all good")
 
-        with patch("app.routers.autofix.run_and_fix", return_value=fake_result):
+        with patch("app.domains.workspace.autofix.run_and_fix", return_value=fake_result):
             result = _run_sandbox_check(str(tmp_path), 80, 2, [], "upgrade")
 
         assert result["ready"] is False

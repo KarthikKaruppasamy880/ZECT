@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401 — register ContextStoreEntry
 from app.infrastructure.auth.deps import CurrentUser
 from app.infrastructure.database import Base
-from app.routers.context_management import (
+from app.domains.agent_run.context_management import (
     LoadContextRequest,
     SaveContextRequest,
     clear_context,

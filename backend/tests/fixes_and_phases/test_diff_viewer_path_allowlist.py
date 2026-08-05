@@ -13,7 +13,7 @@ import os
 import pytest
 from fastapi import HTTPException
 
-from app.routers.diff_viewer import FileDiffRequest, file_diff
+from app.domains.workspace.diff_viewer import FileDiffRequest, file_diff
 
 
 class TestFileDiffPathAllowlist:

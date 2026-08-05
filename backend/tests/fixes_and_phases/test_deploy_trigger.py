@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.routers.deploy_phase import DeployTriggerRequest, trigger_workflow
+from app.domains.agent_run.deploy_phase import DeployTriggerRequest, trigger_workflow
 
 CURRENT_USER = Mock(user_id=7, email="dev@zinnia.com")
 

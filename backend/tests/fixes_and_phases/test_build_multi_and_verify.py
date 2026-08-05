@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Repo
-from app.routers.build_phase import (
+from app.domains.agent_run.build_phase import (
     MAX_MULTI_FILE_TARGETS,
     ApplyFileEntry,
     ApplyMultiRequest,
@@ -99,7 +99,7 @@ class TestGenerateMultiFile:
             "app.services.build_intel.retriever.search",
             lambda db, repo_id, query, top_k=4, user_id=None: [],
         )
-        monkeypatch.setattr("app.routers.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
+        monkeypatch.setattr("app.domains.agent_run.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
         monkeypatch.setattr(
             "app.services.quality.truncation.complete_with_continuations",
             lambda client, messages, **kw: {
@@ -130,11 +130,11 @@ class TestApplyMultiFile:
         repo = Mock(spec=Repo, id=1, clone_status="cloned", local_path=str(tmp_path))
         db = Mock(spec=Session)
         db.query().filter().first.return_value = repo
-        monkeypatch.setattr("app.routers.build_phase.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.agent_run.build_phase.log_audit", lambda **kw: None)
 
         commit_calls = []
         monkeypatch.setattr(
-            "app.routers.git_ops.git_commit",
+            "app.domains.repository.git_ops.git_commit",
             lambda req: (commit_calls.append(req), {"status": "committed", "message": "ok"})[1],
         )
 
@@ -195,7 +195,7 @@ class TestVerifyAndFix:
         repo = Mock(spec=Repo, clone_status="cloned", local_path=str(tmp_path))
         db = Mock(spec=Session)
         db.query().filter().first.return_value = repo
-        monkeypatch.setattr("app.routers.build_phase.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.agent_run.build_phase.log_audit", lambda **kw: None)
 
         captured = {}
 
@@ -203,10 +203,10 @@ class TestVerifyAndFix:
             captured["command"] = req.command
             captured["cwd"] = req.cwd
             captured["max_retries"] = req.max_retries
-            from app.routers.autofix import AutoFixResponse
+            from app.domains.workspace.autofix import AutoFixResponse
             return AutoFixResponse(success=True, total_attempts=1, steps=[], final_output="ok", tokens_used=0)
 
-        monkeypatch.setattr("app.routers.autofix.run_and_fix", fake_run_and_fix)
+        monkeypatch.setattr("app.domains.workspace.autofix.run_and_fix", fake_run_and_fix)
 
         req = VerifyAndFixRequest(repo_id=1, test_command="pytest -x", max_retries=2)
         result = verify_and_fix(req, current_user=Mock(user_id=1), db=db)

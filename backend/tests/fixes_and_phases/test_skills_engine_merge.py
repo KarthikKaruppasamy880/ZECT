@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401
 from app.infrastructure.database import Base
 from app.models import SkillDefinition
-from app.routers.skills_engine import (
+from app.domains.personal_agent.skills_engine import (
     DetectSkillRequest,
     SkillCreate,
     SkillUpdate,
@@ -91,7 +91,7 @@ class TestDetectPatterns:
         fake_resp = Mock(choices=[fake_choice], usage=fake_usage)
         fake_client = Mock()
         fake_client.chat.completions.create.return_value = fake_resp
-        monkeypatch.setattr("app.routers.skills_engine._get_openai_client", lambda: fake_client)
+        monkeypatch.setattr("app.domains.personal_agent.skills_engine._get_openai_client", lambda: fake_client)
         monkeypatch.setattr("app.token_tracker.log_tokens", lambda **kw: None)
 
         result = detect_patterns(DetectSkillRequest(code="def foo(): pass"))

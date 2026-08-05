@@ -11,14 +11,14 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
-from app.routers.sandbox import SandboxDockerRequest, _run_docker_sandbox, _run_local_sandbox, pr_readiness
+from app.domains.workspace.sandbox import SandboxDockerRequest, _run_docker_sandbox, _run_local_sandbox, pr_readiness
 
 
 class TestDockerSandboxNotShellInjectable:
     def test_builds_argv_list_not_a_shell_string(self):
         fake_result = Mock(returncode=0, stdout="ok", stderr="")
-        with patch("app.routers.sandbox.shutil.which", return_value="/usr/bin/docker"), \
-             patch("app.routers.sandbox.subprocess.run", return_value=fake_result) as mock_run:
+        with patch("app.domains.workspace.sandbox.shutil.which", return_value="/usr/bin/docker"), \
+             patch("app.domains.workspace.sandbox.subprocess.run", return_value=fake_result) as mock_run:
             _run_docker_sandbox(SandboxDockerRequest(image="python:3.11-slim", command="python main.py"))
 
         args, kwargs = mock_run.call_args
@@ -32,8 +32,8 @@ class TestDockerSandboxNotShellInjectable:
         text is just one inert argv element — it can only ever run inside
         the container's own /bin/sh, not the host's."""
         fake_result = Mock(returncode=0, stdout="", stderr="")
-        with patch("app.routers.sandbox.shutil.which", return_value="/usr/bin/docker"), \
-             patch("app.routers.sandbox.subprocess.run", return_value=fake_result) as mock_run:
+        with patch("app.domains.workspace.sandbox.shutil.which", return_value="/usr/bin/docker"), \
+             patch("app.domains.workspace.sandbox.subprocess.run", return_value=fake_result) as mock_run:
             _run_docker_sandbox(
                 SandboxDockerRequest(image="python:3.11-slim", command="echo hi; rm -rf /tmp/whatever")
             )
@@ -45,7 +45,7 @@ class TestDockerSandboxNotShellInjectable:
         assert "echo hi; rm -rf /tmp/whatever" in args[0]
 
     def test_falls_back_cleanly_when_docker_missing(self):
-        with patch("app.routers.sandbox.shutil.which", return_value=None):
+        with patch("app.domains.workspace.sandbox.shutil.which", return_value=None):
             result = _run_docker_sandbox(SandboxDockerRequest())
 
         assert result["success"] is False
@@ -60,20 +60,20 @@ class TestLocalSandboxSurfacesUnsandboxedMode:
 
 class TestPrReadinessSurfacesIsolationMode:
     def test_reports_docker_isolated_false_for_local_fallback(self):
-        from app.routers.sandbox import PRReadinessRequest
+        from app.domains.workspace.sandbox import PRReadinessRequest
 
-        with patch("app.routers.sandbox.shutil.which", return_value=None):
+        with patch("app.domains.workspace.sandbox.shutil.which", return_value=None):
             out = pr_readiness(PRReadinessRequest(code="print(1)", language="python", prefer_docker=True))
 
         assert out["docker_isolated"] is False
         assert out["sandbox"]["mode"] == "local_unsandboxed"
 
     def test_reports_docker_isolated_true_when_docker_actually_used(self):
-        from app.routers.sandbox import PRReadinessRequest
+        from app.domains.workspace.sandbox import PRReadinessRequest
 
-        with patch("app.routers.sandbox.shutil.which", return_value="/usr/bin/docker"), \
+        with patch("app.domains.workspace.sandbox.shutil.which", return_value="/usr/bin/docker"), \
              patch(
-                 "app.routers.sandbox._run_docker_sandbox",
+                 "app.domains.workspace.sandbox._run_docker_sandbox",
                  return_value={"success": True, "mode": "docker"},
              ):
             out = pr_readiness(PRReadinessRequest(code="print(1)", language="python", prefer_docker=True))

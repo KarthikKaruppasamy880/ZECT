@@ -91,7 +91,7 @@ def run_build_generate(
             "offline": True,
         }
 
-    from app.routers.build_phase import BuildRequest
+    from app.domains.agent_run.build_phase import BuildRequest
 
     req = BuildRequest(
         plan_step=plan_step,
@@ -145,7 +145,7 @@ def _generate_core(
                 for h in hits
             )
         else:
-            from app.routers.llm import _build_repo_context
+            from app.domains.agent_run.llm import _build_repo_context
 
             context = _build_repo_context(db, req.repo_id, max_chars=4000)
 

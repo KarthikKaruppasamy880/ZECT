@@ -306,7 +306,7 @@ def _trigger_deploy(args: dict[str, Any], *, created_by: str = "") -> dict[str, 
     calls — this tool call cannot bypass that require_approval wall."""
     from app.infrastructure.auth.deps import CurrentUser
     from app.infrastructure.database import SessionLocal
-    from app.routers.deploy_phase import DeployTriggerRequest, trigger_workflow
+    from app.domains.agent_run.deploy_phase import DeployTriggerRequest, trigger_workflow
 
     req = DeployTriggerRequest(
         owner=args.get("owner", ""),

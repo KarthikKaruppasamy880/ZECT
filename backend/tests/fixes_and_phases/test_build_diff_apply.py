@@ -38,7 +38,7 @@ class TestGenerateCoreComputesDiff:
             "app.services.build_intel.retriever.search",
             lambda db, repo_id, query, top_k=6, user_id=None: [],
         )
-        monkeypatch.setattr("app.routers.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
+        monkeypatch.setattr("app.domains.agent_run.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
         monkeypatch.setattr("app.services.context_store.load", lambda db, user_id, page, keys=None: {})
         monkeypatch.setattr(
             "app.services.quality.truncation.complete_with_continuations",
@@ -75,7 +75,7 @@ class TestGenerateCoreComputesDiff:
             "app.services.build_intel.retriever.search",
             lambda db, repo_id, query, top_k=6, user_id=None: [],
         )
-        monkeypatch.setattr("app.routers.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
+        monkeypatch.setattr("app.domains.agent_run.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
         monkeypatch.setattr("app.services.context_store.load", lambda db, user_id, page, keys=None: {})
         monkeypatch.setattr(
             "app.services.quality.truncation.complete_with_continuations",
@@ -112,7 +112,7 @@ class TestGenerateCoreComputesDiff:
             "app.services.build_intel.retriever.search",
             lambda db, repo_id, query, top_k=6, user_id=None: [],
         )
-        monkeypatch.setattr("app.routers.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
+        monkeypatch.setattr("app.domains.agent_run.llm._build_repo_context", lambda db, repo_id, max_chars=4000: "")
         monkeypatch.setattr("app.services.context_store.load", lambda db, user_id, page, keys=None: {})
         monkeypatch.setattr(
             "app.services.quality.truncation.complete_with_continuations",
@@ -140,7 +140,7 @@ class TestApplyEndpoint:
     """apply_generated_code — the review-then-write path."""
 
     def test_writes_file_and_logs_audit(self, tmp_path, monkeypatch):
-        from app.routers.build_phase import ApplyRequest, apply_generated_code
+        from app.domains.agent_run.build_phase import ApplyRequest, apply_generated_code
 
         repo = Mock(spec=Repo, id=1, clone_status="cloned", local_path=str(tmp_path))
         db = Mock(spec=Session)
@@ -148,7 +148,7 @@ class TestApplyEndpoint:
 
         audit_calls = []
         monkeypatch.setattr(
-            "app.routers.build_phase.log_audit",
+            "app.domains.agent_run.build_phase.log_audit",
             lambda **kw: audit_calls.append(kw),
         )
 
@@ -163,7 +163,7 @@ class TestApplyEndpoint:
         assert audit_calls[0]["user_id"] == 42
 
     def test_rejects_path_traversal(self, tmp_path):
-        from app.routers.build_phase import ApplyRequest, apply_generated_code
+        from app.domains.agent_run.build_phase import ApplyRequest, apply_generated_code
         from fastapi import HTTPException
 
         repo = Mock(spec=Repo, id=1, clone_status="cloned", local_path=str(tmp_path))
@@ -179,7 +179,7 @@ class TestApplyEndpoint:
         assert "escapes" in exc_info.value.detail
 
     def test_rejects_uncloned_repo(self, tmp_path):
-        from app.routers.build_phase import ApplyRequest, apply_generated_code
+        from app.domains.agent_run.build_phase import ApplyRequest, apply_generated_code
         from fastapi import HTTPException
 
         repo = Mock(spec=Repo, id=1, clone_status="not_cloned", local_path=None)
@@ -194,12 +194,12 @@ class TestApplyEndpoint:
         assert exc_info.value.status_code == 400
 
     def test_allows_legitimate_nested_path(self, tmp_path, monkeypatch):
-        from app.routers.build_phase import ApplyRequest, apply_generated_code
+        from app.domains.agent_run.build_phase import ApplyRequest, apply_generated_code
 
         repo = Mock(spec=Repo, id=1, clone_status="cloned", local_path=str(tmp_path))
         db = Mock(spec=Session)
         db.query().filter().first.return_value = repo
-        monkeypatch.setattr("app.routers.build_phase.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.agent_run.build_phase.log_audit", lambda **kw: None)
         current_user = Mock(user_id=1)
 
         req = ApplyRequest(repo_id=1, file_path="a/b/c/deep.py", code="x = 1\n")

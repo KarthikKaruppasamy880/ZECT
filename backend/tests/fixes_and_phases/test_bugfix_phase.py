@@ -106,8 +106,8 @@ class TestBugfixOrchestratorStages:
         # run_and_fix, the later "sandbox"/regression-test stage — mock
         # run_and_fix separately so the two don't collide on the same
         # always-failing result.
-        with patch("app.routers.autofix._run_command", return_value=fake_run_result) as mock_run, \
-             patch("app.routers.autofix.run_and_fix", return_value=Mock(success=True, total_attempts=1, final_output="ok")), \
+        with patch("app.domains.workspace.autofix._run_command", return_value=fake_run_result) as mock_run, \
+             patch("app.domains.workspace.autofix.run_and_fix", return_value=Mock(success=True, total_attempts=1, final_output="ok")), \
              patch("app.services.forge_loop.orchestrator.run_ask", side_effect=self._fake_ask), \
              patch("app.services.forge_loop.orchestrator.run_ultra_review", side_effect=self._fake_ultra_review), \
              patch(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.routers.agent_mode import AgentRunRequest, _resolve_mode
+from app.domains.agent_run.agent_mode import AgentRunRequest, _resolve_mode
 
 
 class TestResolveMode:
@@ -29,7 +29,7 @@ class TestResolveMode:
 
 class TestAppRunnerWindowsPopen:
     def test_popen_kwargs_no_setsid_on_windows(self, monkeypatch):
-        import app.routers.app_runner as ar
+        import app.domains.workspace.app_runner as ar
 
         monkeypatch.setattr(ar, "_IS_WINDOWS", True)
         kwargs = ar._popen_kwargs()
@@ -37,7 +37,7 @@ class TestAppRunnerWindowsPopen:
         assert "creationflags" in kwargs
 
     def test_popen_kwargs_setsid_on_unix(self, monkeypatch):
-        import app.routers.app_runner as ar
+        import app.domains.workspace.app_runner as ar
         import os
 
         monkeypatch.setattr(ar, "_IS_WINDOWS", False)

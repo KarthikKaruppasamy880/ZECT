@@ -18,7 +18,7 @@ from app.infrastructure.auth.deps import CurrentUser
 from app.infrastructure.auth.rbac import PermissionDenied, RequiresAuthentication
 from app.infrastructure.database import Base
 from app.models import User
-from app.routers.app_runner import ExecuteRequest, StartRequest, _validate_cwd, execute_command
+from app.domains.workspace.app_runner import ExecuteRequest, StartRequest, _validate_cwd, execute_command
 
 
 def _session():
@@ -102,7 +102,7 @@ class TestValidateCwdAllowlist:
 class TestStartRequiresAdmin:
     @pytest.mark.asyncio
     async def test_developer_role_denied(self, tmp_path, monkeypatch):
-        from app.routers.app_runner import start_process
+        from app.domains.workspace.app_runner import start_process
 
         monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
         db = _session()

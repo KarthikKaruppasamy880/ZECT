@@ -42,11 +42,11 @@ class TestContextPack:
         )
 
     def test_engage_rejects_missing_pack(self, monkeypatch):
-        from app.routers.mentrix import StartRunRequest, start_run
+        from app.domains.agent_run.mentrix import StartRunRequest, start_run
 
         monkeypatch.setattr(orch, "validate_context_pack", lambda **kw: ["project_key required"])
         # re-import path uses validate from mentrix router
-        import app.routers.mentrix as mr
+        import app.domains.agent_run.mentrix as mr
 
         monkeypatch.setattr(mr, "validate_context_pack", lambda **kw: ["project_key required"])
         with pytest.raises(HTTPException) as exc:

@@ -203,7 +203,7 @@ def generate_code(
                     for h in hits
                 )
             else:
-                from app.routers.llm import _build_repo_context
+                from app.domains.agent_run.llm import _build_repo_context
                 req.project_context = _build_repo_context(db, req.repo_id, max_chars=4000)
 
     system_prompt = (
@@ -358,7 +358,7 @@ def apply_generated_code(
     committed = False
     commit_warning = None
     if req.commit_message:
-        from app.routers.git_ops import GitCommitRequest, git_commit
+        from app.domains.repository.git_ops import GitCommitRequest, git_commit
 
         try:
             result = git_commit(GitCommitRequest(
@@ -415,7 +415,7 @@ def generate_multi_file(
         if parts:
             project_context = "\n\n".join(parts)
         else:
-            from app.routers.llm import _build_repo_context
+            from app.domains.agent_run.llm import _build_repo_context
             project_context = _build_repo_context(db, req.repo_id, max_chars=4000)
 
     system_prompt = (
@@ -531,7 +531,7 @@ def apply_multi_file(
     committed = False
     commit_warning = None
     if req.commit_message:
-        from app.routers.git_ops import GitCommitRequest, git_commit
+        from app.domains.repository.git_ops import GitCommitRequest, git_commit
 
         try:
             result = git_commit(GitCommitRequest(
@@ -557,7 +557,7 @@ def verify_and_fix(
     (run → AI-analyze failure → apply fix → retry) against the actual cloned
     repo directory — this is the "iterate and verify" step, not a new loop.
     """
-    from app.routers.autofix import AutoFixRequest, run_and_fix
+    from app.domains.workspace.autofix import AutoFixRequest, run_and_fix
 
     repo = db.query(Repo).filter(Repo.id == req.repo_id).first()
     if not repo or repo.clone_status != "cloned" or not repo.local_path:

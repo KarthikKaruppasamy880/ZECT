@@ -191,7 +191,7 @@ class TestBuildRoutingUsesAnthropicWhenConfigured:
             lambda db, repo_id, query, top_k=6, user_id=None: [],
         )
         monkeypatch.setattr(
-            "app.routers.llm._build_repo_context",
+            "app.domains.agent_run.llm._build_repo_context",
             lambda db, repo_id, max_chars=4000: "",
         )
         monkeypatch.setattr("app.services.context_store.load", lambda db, user_id, page, keys=None: {})
@@ -324,7 +324,7 @@ class TestModelSelectionAnthropicStatus:
     whenever an OpenAI key existed, even with zero Anthropic key — a real bug."""
 
     def test_anthropic_not_falsely_reported_configured(self, monkeypatch):
-        from app.routers.model_selection import get_model_status
+        from app.domains.agent_run.model_selection import get_model_status
 
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-only")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -335,7 +335,7 @@ class TestModelSelectionAnthropicStatus:
         assert "anthropic" not in status["available_providers"]
 
     def test_anthropic_configured_when_key_present(self, monkeypatch):
-        from app.routers.model_selection import get_model_status
+        from app.domains.agent_run.model_selection import get_model_status
 
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")

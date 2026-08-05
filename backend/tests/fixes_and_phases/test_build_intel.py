@@ -255,7 +255,7 @@ class TestBuildPhaseUsesRetrieval:
             lambda db, repo_id, query, top_k=6, user_id=None: [],  # no index yet
         )
         monkeypatch.setattr(
-            "app.routers.llm._build_repo_context",
+            "app.domains.agent_run.llm._build_repo_context",
             lambda db, repo_id, max_chars=4000: "STATIC SNAPSHOT CONTEXT",
         )
 

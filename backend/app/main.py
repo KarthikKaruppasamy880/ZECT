@@ -19,25 +19,63 @@ except Exception as e:
 
 from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
-from app.routers import projects, settings, analytics, repo_analysis, llm
-from app.domains.permissions import auth
+from app.routers import settings
+from app.domains.project import projects, analytics, export_share, token_controls, generated_outputs
+from app.domains.permissions import auth, permissions, secrets_manager
 from app.domains.pr_review import github, code_review
-from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management
-from app.routers import ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
+from app.domains.agent_run import (
+    llm,
+    build_phase,
+    review_phase,
+    deploy_phase,
+    model_selection,
+    orchestration,
+    context_management,
+    ultrareview,
+    agent_mode,
+)
+from app.domains.agent_run import mentrix as mentrix_router
 from app.domains.audit import audit_trail
-from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
-from app.routers import memory, dream_engine, data_layer, data_flywheel, transfer, skills_engine
-from app.domains.permissions import permissions, secrets_manager
-from app.routers import conversations, knowledge_base, playbooks, scheduler, code_index, session_insights
-from app.routers import repo_clone, repo_browser, build_intel
-from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, file_watcher, diff_viewer
-from app.domains.voice import realtime
+from app.domains.integration import (
+    jira_integration,
+    slack_integration,
+    confluence_integration,
+    datadog_integration,
+    email_integration,
+    mcp,
+    ci_monitor,
+    ci_remediation,
+)
+from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer
+from app.domains.repository import (
+    repo_analysis,
+    file_explorer,
+    git_ops,
+    code_index,
+    knowledge_base,
+    repo_clone,
+    repo_browser,
+    build_intel,
+    file_watcher,
+)
+from app.domains.repository import lattice as lattice_router
+from app.domains.personal_agent import (
+    memory,
+    dream_engine,
+    data_layer,
+    data_flywheel,
+    transfer,
+    skills_engine,
+    conversations,
+    playbooks,
+    scheduler,
+    session_insights,
+    persistent_sessions,
+    user_sessions,
+)
+from app.domains.voice import realtime, voice_clone
 from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
-from app.routers import lattice as lattice_router
-from app.routers import mentrix as mentrix_router
-from app.domains.voice import voice_clone
-from app.routers import confluence_integration, datadog_integration, email_integration
 
 app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401
 from app.infrastructure.database import Base
 from app.models import SlackConfig
-from app.routers.slack_integration import SlackNotification, send_notification
+from app.domains.integration.slack_integration import SlackNotification, send_notification
 from fastapi import HTTPException
 import pytest
 

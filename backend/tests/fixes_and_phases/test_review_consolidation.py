@@ -111,7 +111,7 @@ class TestReviewPhaseDelegatesNotDuplicates:
     OpenAI call — this is the core of the consolidation."""
 
     def test_analyze_delegates_and_adapts_response(self, monkeypatch):
-        from app.routers.review_phase import ReviewRequest, analyze_code
+        from app.domains.agent_run.review_phase import ReviewRequest, analyze_code
 
         monkeypatch.setattr(
             "app.review_service.review_code_snippet",
@@ -127,7 +127,7 @@ class TestReviewPhaseDelegatesNotDuplicates:
         assert "Hardcoded secret" in result.findings[0].message
 
     def test_severity_threshold_filters_findings(self, monkeypatch):
-        from app.routers.review_phase import ReviewRequest, analyze_code
+        from app.domains.agent_run.review_phase import ReviewRequest, analyze_code
 
         two_findings = {**SAMPLE_RESULT, "findings": [
             {**SAMPLE_RESULT["findings"][0], "severity": "high"},
@@ -146,7 +146,7 @@ class TestReviewPhaseDelegatesNotDuplicates:
         assert result.findings[0].severity == "high"
 
     def test_context_is_prepended_to_code_not_dropped(self, monkeypatch):
-        from app.routers.review_phase import ReviewRequest, analyze_code
+        from app.domains.agent_run.review_phase import ReviewRequest, analyze_code
 
         captured = {}
 
@@ -165,7 +165,7 @@ class TestReviewPhaseDelegatesNotDuplicates:
 
 class TestUltrareviewDelegatesAndReusesHistory:
     def test_snippet_endpoint_delegates_and_fetches_persisted_session(self, monkeypatch):
-        from app.routers.ultrareview import SnippetReviewRequest, review_snippet
+        from app.domains.agent_run.ultrareview import SnippetReviewRequest, review_snippet
 
         monkeypatch.setattr(
             "app.review_service.review_code_snippet",
@@ -188,7 +188,7 @@ class TestUltrareviewDelegatesAndReusesHistory:
         assert result.overall_score == 72.0
 
     def test_raises_if_persistence_failed(self, monkeypatch):
-        from app.routers.ultrareview import SnippetReviewRequest, review_snippet
+        from app.domains.agent_run.ultrareview import SnippetReviewRequest, review_snippet
         from fastapi import HTTPException
 
         monkeypatch.setattr(

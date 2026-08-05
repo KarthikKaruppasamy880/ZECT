@@ -25,8 +25,8 @@ from app.adapters.coding_runtime import (
 from app.models import MentrixRun
 from app.services.coding_engine.workspace import (
     WorkspaceError,
-    dispose_worktree,
-    provision_worktree,
+    dispose_isolated_workspace,
+    provision_isolated_workspace,
 )
 
 
@@ -42,6 +42,8 @@ class CodingEngineSlice:
     branch: str | None = None
     artifact_dir: str | None = None
     repo_path: str | None = None
+    isolation: str | None = None
+    container_id: str | None = None
     events_appended: int = 0
     files: list[str] = field(default_factory=list)
     error: str | None = None
@@ -56,6 +58,8 @@ class CodingEngineSlice:
             "engine_workspace_path": self.engine_workspace_path,
             "engine_branch": self.branch,
             "engine_artifact_dir": self.artifact_dir,
+            "engine_isolation": self.isolation,
+            "engine_container_id": self.container_id,
             "engine_error": self.error,
         }
 
@@ -146,7 +150,7 @@ def prepare_coding_engine_slice(
         return out
 
     try:
-        provisioned = provision_worktree(repo_path=ws, run_id=f"mentrix-{run.id}")
+        provisioned = provision_isolated_workspace(repo_path=ws, run_id=f"mentrix-{run.id}")
     except (WorkspaceError, ValueError) as exc:
         out.error = f"provision_failed:{exc}"
         _merge_context(run, out.context_patch())
@@ -170,6 +174,8 @@ def prepare_coding_engine_slice(
     out.branch = provisioned.branch
     out.artifact_dir = provisioned.artifact_dir
     out.repo_path = provisioned.repo_path
+    out.isolation = provisioned.isolation
+    out.container_id = provisioned.container_id
 
     try:
         rt = get_coding_runtime()
@@ -235,14 +241,15 @@ def prepare_coding_engine_slice(
 
 
 def cleanup_coding_engine_slice(slice_result: CodingEngineSlice) -> dict[str, Any] | None:
-    """Preserve patch artifacts and remove the worktree after Mentrix finishes."""
+    """Preserve patch artifacts and remove the worktree/sandbox after Mentrix finishes."""
     if not slice_result.active or not slice_result.workspace_id:
         return None
     try:
-        return dispose_worktree(
+        return dispose_isolated_workspace(
             workspace_id=slice_result.workspace_id,
             repo_path=slice_result.repo_path,
             workspace_path=slice_result.engine_workspace_path,
+            container_id=slice_result.container_id,
             preserve_artifacts=True,
         )
     except Exception:

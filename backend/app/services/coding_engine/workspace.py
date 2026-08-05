@@ -1,7 +1,8 @@
-"""Per-run isolated coding-engine workspaces (git worktrees).
+"""Per-run isolated coding-engine workspaces (git worktrees + optional Docker).
 
-Stage A isolation: one worktree per run under ZECT_ENGINE_WORKSPACE_ROOT
-(or a temp dir under allowlisted roots). Docker isolation is Stage D.
+Default isolation is git worktree (works without Docker). When
+ZECT_CODING_ENGINE_ISOLATION=docker|auto and Docker is available, a restricted
+bind-mount sandbox container is started alongside the worktree (Stage D).
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.infrastructure.allowed_paths import path_under_allowed_roots
+from app.services.coding_engine.isolation import resolve_isolation
 
 
 class WorkspaceError(ValueError):
@@ -28,6 +30,10 @@ class ProvisionedWorkspace:
     branch: str
     repo_path: str
     artifact_dir: str
+    isolation: str = "worktree"
+    container_id: str | None = None
+    sandbox_image: str | None = None
+    isolation_note: str | None = None
 
 
 def _engine_root() -> Path:
@@ -103,7 +109,53 @@ def provision_worktree(*, repo_path: str, run_id: str | None = None) -> Provisio
         branch=branch,
         repo_path=str(repo.resolve()),
         artifact_dir=str(artifact_dir.resolve()),
+        isolation="worktree",
     )
+
+
+def provision_isolated_workspace(*, repo_path: str, run_id: str | None = None) -> ProvisionedWorkspace:
+    """Provision a worktree, then optionally wrap it in a Docker sandbox.
+
+    If Docker was requested but unavailable, falls back to worktree unless
+    ZECT_CODING_ENGINE_ISOLATION_STRICT=1 (then raises WorkspaceError).
+    """
+    plan = resolve_isolation()
+    if plan["isolation"] == "unavailable":
+        raise WorkspaceError(
+            "ZECT_CODING_ENGINE_ISOLATION=docker requires a working Docker daemon "
+            "(set ZECT_CODING_ENGINE_ISOLATION=worktree or install Docker/Rancher)."
+        )
+
+    ws = provision_worktree(repo_path=repo_path, run_id=run_id)
+    ws.isolation_note = plan.get("detail")
+
+    if plan["isolation"] != "docker":
+        ws.isolation = "worktree"
+        return ws
+
+    try:
+        from app.services.coding_engine.docker_sandbox import start_workspace_sandbox
+
+        box = start_workspace_sandbox(host_workspace=ws.path, run_id=ws.workspace_id)
+        ws.isolation = "docker"
+        ws.container_id = box.container_id
+        ws.sandbox_image = box.image
+        ws.isolation_note = "docker_ok"
+    except Exception as exc:  # noqa: BLE001
+        if plan.get("isolation_requested") == "docker" and (
+            (os.getenv("ZECT_CODING_ENGINE_ISOLATION_STRICT") or "").strip().lower()
+            in ("1", "true", "yes", "on")
+        ):
+            dispose_worktree(
+                workspace_id=ws.workspace_id,
+                repo_path=ws.repo_path,
+                workspace_path=ws.path,
+                preserve_artifacts=False,
+            )
+            raise WorkspaceError(f"docker_sandbox_failed:{exc}") from exc
+        ws.isolation = "worktree"
+        ws.isolation_note = f"docker_start_failed_fallback_worktree:{exc}"
+    return ws
 
 
 def _capture_patch(workspace_path: Path, artifact_dir: Path) -> str | None:
@@ -189,3 +241,29 @@ def dispose_worktree(
         "artifact_patch": patch_file,
         "artifact_dir": str(artifact_dir) if artifact_dir.exists() else None,
     }
+
+
+def dispose_isolated_workspace(
+    *,
+    workspace_id: str,
+    repo_path: str | None = None,
+    workspace_path: str | None = None,
+    container_id: str | None = None,
+    preserve_artifacts: bool = True,
+) -> dict:
+    """Stop optional Docker sandbox, then dispose worktree + preserve patch."""
+    if container_id:
+        try:
+            from app.services.coding_engine.docker_sandbox import stop_workspace_sandbox
+
+            stop_workspace_sandbox(container_id)
+        except Exception:
+            pass
+    result = dispose_worktree(
+        workspace_id=workspace_id,
+        repo_path=repo_path,
+        workspace_path=workspace_path,
+        preserve_artifacts=preserve_artifacts,
+    )
+    result["container_stopped"] = bool(container_id)
+    return result

@@ -6,7 +6,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -52,6 +52,7 @@ class TestContextPack:
         with pytest.raises(HTTPException) as exc:
             start_run(
                 StartRunRequest(goal="fix bug", mode="bugfix"),
+                background_tasks=BackgroundTasks(),
                 db=_session(),
                 user=Mock(email="a@b.c", user_id=1),
             )

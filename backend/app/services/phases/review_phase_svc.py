@@ -18,6 +18,18 @@ from typing import Any
 
 _SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
 
+# Assignment-style pattern, not a bare substring — mirrors transfer.py's
+# SECRET_PATTERNS. A bare "api_key" substring match previously false-
+# positived on the offline build stub's OWN comment ("Generated without
+# OPENAI_API_KEY — replace in live runs"), which contains "api_key" as a
+# substring of "OPENAI_API_KEY" — meaning every upgrade/deliver run with no
+# LLM key configured got a critical, non-waiveable "credential handling"
+# finding purely from the placeholder explaining that no key was configured.
+_HARDCODED_CREDENTIAL_RE = re.compile(
+    r"(?:api[_-]?key|secret|password|credential|token)\s*[:=]\s*['\"]\S",
+    re.IGNORECASE,
+)
+
 
 def run_ultra_review(
     code: str,
@@ -42,9 +54,11 @@ def run_ultra_review(
     except ValueError:
         # No LLM configured — offline heuristic, same signals the old
         # standalone implementation used, kept for zero-config environments.
+        # Only scans the generated code, not the goal text — a goal like
+        # "add password reset flow" describes a legitimate feature, not a
+        # hardcoded credential, and shouldn't trip this on its own.
         findings: list[dict[str, Any]] = []
-        blob = (code + "\n" + goal).lower()
-        if "password" in blob or "secret" in blob or "api_key" in blob:
+        if _HARDCODED_CREDENTIAL_RE.search(code):
             findings.append({
                 "severity": "critical",
                 "category": "security",

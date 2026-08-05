@@ -2,7 +2,24 @@
 
 import os
 import tempfile
+import time
 from pathlib import Path
+
+
+def _await_run_completion(client, auth_headers, run_id: int, *, attempts: int = 20, delay: float = 0.25) -> dict:
+    """POST /api/mentrix/runs now returns as soon as the run row is created —
+    the actual pipeline executes as a background task (Phase 1: don't block
+    the request for a long-running orchestration) — so the initial response
+    reflects status="running" with no events yet. Poll GET /runs/{id} the
+    same way a real client (see Mentrix.tsx's startPolling) would."""
+    data: dict = {}
+    for _ in range(attempts):
+        resp = client.get(f"/api/mentrix/runs/{run_id}", headers=auth_headers)
+        data = resp.json()
+        if data.get("status") != "running":
+            return data
+        time.sleep(delay)
+    return data
 
 
 def test_unauthenticated_api_rejected(client):
@@ -67,7 +84,7 @@ def test_mentrix_upgrade_pipeline_phases(client, auth_headers, monkeypatch):
             },
         )
         assert resp.status_code == 200, resp.text
-        data = resp.json()
+        data = _await_run_completion(client, auth_headers, resp.json()["id"])
         assert data["mode"] == "upgrade"
         assert data["status"] in ("awaiting_approval", "needs_human", "completed")
         events = data.get("events") or []
@@ -134,13 +151,18 @@ def test_mentrix_run_chat(client, auth_headers):
 
 def test_mentrix_deliver_approve_create_pr(client, auth_headers, monkeypatch):
     monkeypatch.setenv("MENTRIX_PR_DRY_RUN", "true")
+    # validate_context_pack requires a project_key for upgrade/bugfix/deliver
+    # regardless of workspace, then checks it's actually Lattice-indexed —
+    # LATTICE_ENABLED=false skips that check so this test doesn't need a
+    # real index, same contract the app itself documents for that env var.
+    monkeypatch.setenv("LATTICE_ENABLED", "false")
     start = client.post(
         "/api/mentrix/runs",
         headers=auth_headers,
-        json={"goal": "Add a small helper function", "mode": "deliver"},
+        json={"goal": "Add a small helper function", "mode": "deliver", "project_key": "deliver-fixture"},
     )
     assert start.status_code == 200, start.text
-    run = start.json()
+    run = _await_run_completion(client, auth_headers, start.json()["id"])
     run_id = run["id"]
     assert run["status"] in ("awaiting_approval", "needs_human", "completed")
 
@@ -172,14 +194,19 @@ def test_mentrix_deliver_approve_create_pr(client, auth_headers, monkeypatch):
     assert body["pr_url"]
 
 
-def test_mentrix_recovery_events_on_deliver(client, auth_headers):
+def test_mentrix_recovery_events_on_deliver(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("LATTICE_ENABLED", "false")
     resp = client.post(
         "/api/mentrix/runs",
         headers=auth_headers,
-        json={"goal": "never store password in source", "mode": "deliver"},
+        json={
+            "goal": "never store password in source",
+            "mode": "deliver",
+            "project_key": "recovery-fixture",
+        },
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = _await_run_completion(client, auth_headers, resp.json()["id"])
     events = data.get("events") or []
     # Critical credential finding should drive needs_human or recovery
     assert data["status"] in ("needs_human", "awaiting_approval")

@@ -86,6 +86,57 @@ class TestRunUltraReviewDelegates:
         assert result["critical_findings"] == 1
         assert result["passed"] is False
 
+    def test_offline_build_stub_comment_does_not_false_positive(self, monkeypatch):
+        """The offline build stub's own placeholder comment ("Generated
+        without OPENAI_API_KEY — replace in live runs") contains "api_key"
+        as a substring of "OPENAI_API_KEY" — a bare substring check
+        previously flagged this as a critical, non-waiveable "credential
+        handling" finding on every single upgrade/deliver run with no LLM
+        key configured, purely from the stub explaining that no key was
+        configured. Must not fire without an actual assignment pattern."""
+
+        def raise_no_key(code, language, user_id=None, db=None):
+            raise ValueError("OpenAI API key not configured.")
+
+        monkeypatch.setattr("app.review_service.review_code_snippet", raise_no_key)
+
+        stub_code = (
+            "# Mentrix offline build stub\n"
+            "# Plan step: Add a small helper function\n"
+            "def mentrix_upgrade_placeholder():\n"
+            '    """Generated without OPENAI_API_KEY — replace in live runs."""\n'
+            "    return True\n"
+        )
+        result = run_ultra_review(stub_code, goal="Add a small helper function")
+
+        assert result["critical_findings"] == 0
+        assert result["passed"] is True
+
+    def test_goal_mentioning_password_feature_does_not_false_positive(self, monkeypatch):
+        """A goal like "add password reset flow" describes a legitimate
+        feature request, not code that hardcodes a password — only the
+        generated code should be scanned, not the goal/intent text."""
+
+        def raise_no_key(code, language, user_id=None, db=None):
+            raise ValueError("OpenAI API key not configured.")
+
+        monkeypatch.setattr("app.review_service.review_code_snippet", raise_no_key)
+
+        result = run_ultra_review("def reset(): pass", goal="add a password reset flow with secret tokens")
+
+        assert result["critical_findings"] == 0
+
+    def test_real_hardcoded_secret_in_code_still_flagged(self, monkeypatch):
+        def raise_no_key(code, language, user_id=None, db=None):
+            raise ValueError("OpenAI API key not configured.")
+
+        monkeypatch.setattr("app.review_service.review_code_snippet", raise_no_key)
+
+        result = run_ultra_review("password = 'hunter2'", goal="add auth")
+
+        assert result["critical_findings"] == 1
+        assert result["passed"] is False
+
     def test_context_is_prepended_not_dropped(self, monkeypatch):
         captured = {}
 

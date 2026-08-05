@@ -40,8 +40,8 @@ def run_hld_generate(
     from openai import APIError, OpenAI
 
     from app.services.forge_loop.orchestrator import _run_scout
-    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
-    from app.services.llm.anthropic_client import resolve_generation_model
+    from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.adapters.llm.anthropic_client import resolve_generation_model
     from app.services.phases.blueprint_phase import run_blueprint
     from app.services.quality.truncation import complete_with_continuations
     from app.token_tracker import log_tokens

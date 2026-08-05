@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from app.services.llm.anthropic_client import (
+from app.adapters.llm.anthropic_client import (
     DEFAULT_MODEL,
     _split_system,
     anthropic_available,
@@ -83,7 +83,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response()
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             resp = create_fn(messages=[{"role": "user", "content": "write hello world"}])
 
         assert resp.choices[0].message.content == "print('hi')"
@@ -98,7 +98,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response(stop_reason="max_tokens")
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             resp = create_fn(messages=[{"role": "user", "content": "x"}])
 
         assert resp.choices[0].finish_reason == "length"
@@ -108,7 +108,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response(stop_reason="end_turn")
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             resp = create_fn(messages=[{"role": "user", "content": "x"}])
 
         assert resp.choices[0].finish_reason == "stop"
@@ -118,7 +118,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response()
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             create_fn(messages=[
                 {"role": "system", "content": "You are a build agent."},
                 {"role": "user", "content": "generate code"},
@@ -138,7 +138,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response()
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             create_fn(messages=[
                 {"role": "system", "content": "You are ZECT Build Agent."},
                 {"role": "user", "content": "generate code"},
@@ -152,7 +152,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = self._mock_anthropic_response()
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             create_fn(messages=[{"role": "user", "content": "generate code"}])
 
         assert mock_client.messages.create.call_args.kwargs["system"] is None
@@ -167,7 +167,7 @@ class TestCreateFnShape:
         mock_client = Mock()
         mock_client.messages.create.return_value = resp
 
-        with patch("app.services.llm.anthropic_client._get_client", return_value=mock_client):
+        with patch("app.adapters.llm.anthropic_client._get_client", return_value=mock_client):
             result = create_fn(messages=[{"role": "user", "content": "x"}])
 
         assert result.choices[0].message.content == "hello world"

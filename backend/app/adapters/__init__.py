@@ -1,1 +1,1 @@
-"""MCP adapters for Mentrix integrations."""
+"""Provider adapters (MCP integrations + LLM clients)."""

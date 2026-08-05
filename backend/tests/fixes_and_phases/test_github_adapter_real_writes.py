@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from app.services.mcp.adapters import github as github_adapter
+from app.adapters import github as github_adapter
 
 CFG = {"token": "gh-test-token"}
 

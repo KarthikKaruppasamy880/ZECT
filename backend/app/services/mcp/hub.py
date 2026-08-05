@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import MCPServerConfig, MCPToolAudit, Rule
-from app.services.mcp.adapters import (
+from app.adapters import (
     confluence,
     datadog,
     email_adapter,

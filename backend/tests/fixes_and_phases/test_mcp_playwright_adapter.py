@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from app.services.mcp.adapters import playwright_adapter as pw
+from app.adapters import playwright_adapter as pw
 
 
 def test_playwright_disabled():

@@ -183,7 +183,7 @@ def review_pr_diff(
     total_tokens = 0
     scores: list[int] = []
 
-    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
 
     try:
         for idx, chunk in enumerate(chunks):
@@ -305,7 +305,7 @@ def review_code_snippet(
         code: The code to review
         language: Programming language hint
     """
-    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
 
     cache_key = cache_key_for("review_snippet", language, code)
     cached = get_cached(db, cache_key)
@@ -644,7 +644,7 @@ def review_repo_files(
     if len(files_text) > 60_000:
         files_text = files_text[:60_000] + "\n\n... [remaining files truncated for context limit]"
 
-    from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
 
     cache_key = cache_key_for("review_repo", owner, repo, scan_branch, files_text)
     cached = get_cached(db, cache_key)

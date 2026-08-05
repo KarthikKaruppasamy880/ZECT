@@ -157,7 +157,7 @@ _reprovision_blocked_until: dict[str, float] = {}
 
 def _ensure_engine_profile(row: ClonedVoice) -> str:
     """Return engine profile id, re-provisioning from stored sample if needed."""
-    from app.services.llm.chatterbox_client import (
+    from app.adapters.llm.chatterbox_client import (
         REPROVISION_TIMEOUT,
         chatterbox_available,
         clone_voice,
@@ -236,7 +236,7 @@ async def clone_my_voice(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.chatterbox_client import chatterbox_available, clone_voice
+    from app.adapters.llm.chatterbox_client import chatterbox_available, clone_voice
 
     _rate_limit(_clone_hits, current_user.user_id, CLONE_RATE_LIMIT)
 
@@ -363,7 +363,7 @@ def delete_voice_by_id(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.chatterbox_client import delete_voice
+    from app.adapters.llm.chatterbox_client import delete_voice
 
     row = (
         db.query(ClonedVoice)
@@ -403,7 +403,7 @@ def delete_voice_by_id(
 @router.delete("/my-voice")
 def reset_my_voice(current_user: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)):
     """Delete all clones for the user (legacy reset)."""
-    from app.services.llm.chatterbox_client import delete_voice
+    from app.adapters.llm.chatterbox_client import delete_voice
 
     rows = db.query(ClonedVoice).filter(ClonedVoice.user_id == current_user.user_id).all()
     if not rows:
@@ -430,8 +430,8 @@ def speak(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.services.llm.chatterbox_client import chatterbox_available, synthesize_speech
-    from app.services.llm.openai_tts import openai_tts_available, synthesize_openai_speech
+    from app.adapters.llm.chatterbox_client import chatterbox_available, synthesize_speech
+    from app.adapters.llm.openai_tts import openai_tts_available, synthesize_openai_speech
 
     _rate_limit(_speak_hits, current_user.user_id, SPEAK_RATE_LIMIT)
 

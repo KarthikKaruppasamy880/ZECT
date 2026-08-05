@@ -268,6 +268,42 @@ def git_restore(req: GitRestoreRequest):
     return {"status": "restored", "files": safe}
 
 
+@router.get("/worktrees")
+def git_worktrees(repo_path: str):
+    """List git worktrees for a repo (porcelain)."""
+    path = _validate_repo(repo_path)
+    result = _run_git(path, ["worktree", "list", "--porcelain"])
+    if result["exit_code"] != 0:
+        raise HTTPException(status_code=500, detail=f"git worktree list failed: {result['stderr']}")
+    trees: list[dict] = []
+    current: dict = {}
+    for line in (result["stdout"] or "").splitlines():
+        if not line.strip():
+            if current.get("path"):
+                trees.append(current)
+            current = {}
+            continue
+        if line.startswith("worktree "):
+            current["path"] = line[len("worktree ") :].strip()
+        elif line.startswith("HEAD "):
+            current["head"] = line[len("HEAD ") :].strip()
+        elif line.startswith("branch "):
+            ref = line[len("branch ") :].strip()
+            current["branch"] = ref.replace("refs/heads/", "") if ref.startswith("refs/heads/") else ref
+        elif line == "bare":
+            current["bare"] = True
+        elif line == "detached":
+            current["detached"] = True
+    if current.get("path"):
+        trees.append(current)
+    # Mark which worktree matches the requested repo path
+    norm = path.replace("\\", "/").rstrip("/").lower()
+    for t in trees:
+        tp = (t.get("path") or "").replace("\\", "/").rstrip("/").lower()
+        t["is_current"] = tp == norm
+    return {"worktrees": trees, "count": len(trees)}
+
+
 @router.get("/diff")
 def git_diff(repo_path: str, staged: bool = False):
     """Get the current diff."""

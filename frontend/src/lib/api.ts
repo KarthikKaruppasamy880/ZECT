@@ -1050,6 +1050,8 @@ export const gitRestore = (repoPath: string, files: string[]) =>
     method: "POST",
     body: JSON.stringify({ repo_path: repoPath, files }),
   });
+export const gitWorktrees = (repoPath: string) =>
+  request<any>(`/api/git/worktrees?repo_path=${encodeURIComponent(repoPath)}`);
 
 /** Compare two strings via /api/diff/compare (unified + side_by_side + stats). */
 export const diffCompare = (
@@ -1261,6 +1263,20 @@ export const indexRepo = (repoPath: string, repoId?: number, fileExtensions?: st
   });
 export const getCodeIndexStats = (repoId?: number) =>
   request<any>(`/api/code-index/stats${repoId ? `?repo_id=${repoId}` : ""}`);
+export const getFileSymbols = (filePath: string, repoId?: number) => {
+  const params = new URLSearchParams();
+  if (repoId) params.set("repo_id", String(repoId));
+  const q = params.toString();
+  const encoded = filePath
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+  // Preserve leading slash for absolute POSIX paths
+  const prefix = filePath.replace(/\\/g, "/").startsWith("/") ? "/" : "";
+  return request<any[]>(`/api/code-index/file/${prefix}${encoded}${q ? `?${q}` : ""}`);
+};
 
 // Session Insights
 export const getSessionInsightsOverview = (days = 30) =>

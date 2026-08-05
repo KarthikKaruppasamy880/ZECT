@@ -9,21 +9,16 @@ Companion to `Upgrade.md` Phase 3. Staged PRs to `develop`; stop after each merg
 | A | Unified `/workspace` shell: file tree + Monaco + git status/branch strip; path-scoped writes | **Done** (#89) |
 | B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | **Done** (#90) |
 | C | Diff + hunk apply/revert + agent change markers | **Done** (#91) |
-| D | Inline Ask / explain / generate tests / fix selection + context selector | **This PR** |
-| E | Symbols/refs jump + worktree display | Pending |
+| D | Inline Ask / explain / generate tests / fix selection + context selector | **Done** (#92) |
+| E | Symbols/refs jump + worktree display | **This PR** |
 
-## Stage D files
+## Stage E files
 
-- `frontend/src/components/MonacoCodeEditor.tsx` — selection change callbacks
-- `frontend/src/components/WorkspaceInlinePanel.tsx` — context chips + Ask/Explain/Tests/Fix + apply
-- `frontend/src/pages/DeveloperWorkspace.tsx` — Ask panel toggle wiring
-- Reuses `askQuestion`, `buildGenerate`, `reviewAnalyze` / `reviewFixPrompt` (no new backend)
+- `GET /api/git/worktrees` + `gitWorktrees` client
+- `getFileSymbols` client + `WorkspaceSymbolsPanel` (search + file outline → jump)
+- Monaco `revealLine` for go-to-line
+- Worktree badge on git strip when multiple worktrees exist
 
-## Guardrails
+## Phase 3 complete when Stage E merges
 
-- Inline actions only operate on the open workspace file buffer; Apply & Save still path-scoped.
-- Context chips: Selection / File / Repo (`repo_id` when Active Project set).
-
-## Stop
-
-After Stage D merges, wait for approval before Stage E.
+Next: Phase 4 (PR review platform). Phase 9 remains ON HOLD.

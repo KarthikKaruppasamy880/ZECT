@@ -1,5 +1,6 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import type { editor as MonacoEditor } from "monaco-editor";
 
 export type EditorSelection = {
   text: string;
@@ -14,23 +15,43 @@ type MonacoCodeEditorProps = {
   value: string;
   language: string;
   readOnly?: boolean;
+  /** 1-based line to reveal after mount / when changed. */
+  revealLine?: number | null;
   onChange?: (value: string) => void;
   onSelectionChange?: (selection: EditorSelection | null) => void;
 };
 
-/** Thin Monaco wrapper for the developer workspace (selection callbacks for Stage D). */
+/** Thin Monaco wrapper for the developer workspace (selection + go-to-line). */
 export default function MonacoCodeEditor({
   path,
   value,
   language,
   readOnly = false,
+  revealLine = null,
   onChange,
   onSelectionChange,
 }: MonacoCodeEditorProps) {
   const onSelRef = useRef(onSelectionChange);
   onSelRef.current = onSelectionChange;
+  const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
+  const revealRef = useRef(revealLine);
+  revealRef.current = revealLine;
+
+  const goTo = (ed: MonacoEditor.IStandaloneCodeEditor, line: number) => {
+    if (!line || line < 1) return;
+    ed.revealLineInCenter(line);
+    ed.setPosition({ lineNumber: line, column: 1 });
+    ed.focus();
+  };
+
+  useEffect(() => {
+    if (revealLine && editorRef.current) {
+      goTo(editorRef.current, revealLine);
+    }
+  }, [revealLine, path, value]);
 
   const handleMount: OnMount = (editor) => {
+    editorRef.current = editor;
     const emit = () => {
       const cb = onSelRef.current;
       if (!cb) return;
@@ -59,6 +80,7 @@ export default function MonacoCodeEditor({
     };
     emit();
     editor.onDidChangeCursorSelection(() => emit());
+    if (revealRef.current) goTo(editor, revealRef.current);
   };
 
   return (

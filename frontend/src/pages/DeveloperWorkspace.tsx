@@ -11,12 +11,14 @@ import {
   Save,
   AlertCircle,
   Sparkles,
+  Code2,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import WorkspaceDiffPanel from "@/components/WorkspaceDiffPanel";
 import WorkspaceInlinePanel, { replaceSelectionInContent } from "@/components/WorkspaceInlinePanel";
 import WorkspaceMentrixTimeline from "@/components/WorkspaceMentrixTimeline";
+import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/WorkspaceSymbolsPanel";
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
@@ -26,6 +28,7 @@ import {
   gitBranches,
   gitRestore,
   gitStatus,
+  gitWorktrees,
   mentrixListRuns,
 } from "@/lib/api";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
@@ -59,8 +62,7 @@ function collectGitPaths(st: Record<string, unknown> | null | undefined): string
 }
 
 /**
- * Phase 3 — unified developer workspace (Stages A–D):
- * tree + Monaco + git + terminal + Mentrix timeline + diff/hunks + inline Ask actions.
+ * Phase 3 — unified developer workspace (Stages A–E).
  */
 export default function DeveloperWorkspace() {
   const { activeLocalPath, activeRepo, activeRepoId } = useActiveProject();
@@ -83,25 +85,32 @@ export default function DeveloperWorkspace() {
   const [agentFiles, setAgentFiles] = useState<string[]>([]);
   const [showDiff, setShowDiff] = useState(false);
   const [showInline, setShowInline] = useState(false);
+  const [showSymbols, setShowSymbols] = useState(false);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
+  const [revealLine, setRevealLine] = useState<number | null>(null);
+  const [worktrees, setWorktrees] = useState<{ path?: string; branch?: string; is_current?: boolean }[]>([]);
 
   const dirty = content !== baseline && Boolean(selectedPath);
   const sideOpen = showDiff || showInline;
+  const currentWorktree = worktrees.find((w) => w.is_current) || worktrees[0];
+  const isLinkedWorktree = worktrees.length > 1;
 
   const refreshGit = useCallback(async (root: string) => {
     if (!root) return;
     try {
-      const [st, br] = await Promise.all([gitStatus(root), gitBranches(root)]);
+      const [st, br, wt] = await Promise.all([gitStatus(root), gitBranches(root), gitWorktrees(root).catch(() => null)]);
       setBranch(br?.current || st?.branch || "");
       const count = countGitChanges(st);
       setDirtyCount(count);
       setGitSummary(st?.clean || count === 0 ? "clean" : `${count} change${count === 1 ? "" : "s"}`);
       setGitChanged(collectGitPaths(st));
+      setWorktrees(Array.isArray(wt?.worktrees) ? wt.worktrees : []);
     } catch {
       setBranch("");
       setGitSummary("git unavailable");
       setDirtyCount(0);
       setGitChanged([]);
+      setWorktrees([]);
     }
   }, []);
 
@@ -140,7 +149,7 @@ export default function DeveloperWorkspace() {
     void loadTree();
   }, [loadTree]);
 
-  const openFile = async (path: string) => {
+  const openFile = async (path: string, line?: number) => {
     if (!rootPath || !isPathInsideRoot(path, rootPath)) {
       setError("File is outside the active workspace root");
       return;
@@ -154,11 +163,16 @@ export default function DeveloperWorkspace() {
       setContent(text);
       setBaseline(text);
       setSelection(null);
+      setRevealLine(line && line > 0 ? line : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read file");
     } finally {
       setLoadingFile(false);
     }
+  };
+
+  const jumpToSymbol = (target: SymbolJumpTarget) => {
+    void openFile(target.filePath, target.line);
   };
 
   const saveFile = async () => {
@@ -278,7 +292,7 @@ export default function DeveloperWorkspace() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
           <p className="text-xs text-slate-500">
-            Tree + Monaco + git + terminal + Mentrix + diff/hunks + inline Ask/Explain/Tests/Fix. Writes stay inside the workspace.
+            Full Phase 3 shell — symbols/worktrees, Ask, Diff, terminal, Mentrix. Writes stay inside the workspace.
           </p>
         </div>
         <button
@@ -305,6 +319,19 @@ export default function DeveloperWorkspace() {
           {gitSummary || "—"}
           {dirtyCount > 0 ? ` (${dirtyCount})` : ""}
         </span>
+        {isLinkedWorktree && (
+          <>
+            <span className="text-slate-400">|</span>
+            <span
+              className="text-violet-700"
+              data-testid="workspace-worktree-badge"
+              title={worktrees.map((w) => `${w.branch || "detached"} → ${w.path}`).join("\n")}
+            >
+              worktrees {worktrees.length}
+              {currentWorktree?.branch ? ` · ${currentWorktree.branch}` : ""}
+            </span>
+          </>
+        )}
         {agentFiles.length > 0 && (
           <>
             <span className="text-slate-400">|</span>
@@ -342,30 +369,54 @@ export default function DeveloperWorkspace() {
       ) : (
         <div className="flex flex-1 min-h-0 flex-col gap-3">
           <div className="flex flex-1 min-h-0 gap-3">
-            <aside
-              className="w-64 shrink-0 overflow-auto rounded-lg border border-slate-200 bg-white"
-              data-testid="workspace-file-tree"
-            >
-              <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
-                Files
-              </div>
-              {loadingTree ? (
-                <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+            <aside className="w-64 shrink-0 flex flex-col gap-2 min-h-0">
+              <div
+                className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white"
+                data-testid="workspace-file-tree"
+              >
+                <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
+                  Files
                 </div>
-              ) : tree.length === 0 ? (
-                <p className="p-3 text-xs text-slate-500">Empty or inaccessible tree.</p>
-              ) : (
-                <div className="py-1">{renderTree(tree)}</div>
-              )}
+                {loadingTree ? (
+                  <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+                  </div>
+                ) : tree.length === 0 ? (
+                  <p className="p-3 text-xs text-slate-500">Empty or inaccessible tree.</p>
+                ) : (
+                  <div className="py-1">{renderTree(tree)}</div>
+                )}
+              </div>
+              {showSymbols ? (
+                <div className="h-56 shrink-0">
+                  <WorkspaceSymbolsPanel
+                    workspaceRoot={rootPath}
+                    openFilePath={selectedPath}
+                    repoId={activeRepoId}
+                    onJump={jumpToSymbol}
+                  />
+                </div>
+              ) : null}
             </aside>
 
             <section className="flex-1 min-w-0 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="truncate font-mono text-xs text-slate-600" data-testid="workspace-open-path">
                   {selectedPath || "Select a file"}
+                  {revealLine ? `:${revealLine}` : ""}
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowSymbols((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs ${
+                      showSymbols ? "border-teal-300 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-700"
+                    }`}
+                    data-testid="workspace-toggle-symbols"
+                  >
+                    <Code2 className="h-3.5 w-3.5" />
+                    Symbols
+                  </button>
                   <button
                     type="button"
                     disabled={!selectedPath}
@@ -413,6 +464,7 @@ export default function DeveloperWorkspace() {
                       path={selectedPath}
                       value={content}
                       language={languageFromPath(selectedPath)}
+                      revealLine={revealLine}
                       onChange={setContent}
                       onSelectionChange={setSelection}
                     />

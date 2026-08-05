@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Check, GitPullRequest, Play, Sparkles } from "lucide-react";
+import { Bot, Check, FileCode, GitPullRequest, MonitorPlay, Play, Sparkles, X } from "lucide-react";
 import {
   mentrixApproveRun,
   mentrixConfirmPlan,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
 import { useMentrixRun } from "@/hooks/useMentrixRun";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
 const MODES = ["upgrade", "bugfix", "assistant", "chat", "understand", "deliver", "review_only", "ops"];
 
@@ -29,6 +30,7 @@ export default function Mentrix() {
   // whenever it's connected — this page's browser speechSynthesis must yield to it,
   // otherwise both speak at once ("multiple voices").
   const { voiceConnected } = useMentrixSession();
+  const { activeRepoId, activeLocalPath, activeProjectKey } = useActiveProject();
   const location = useLocation();
   const {
     agents,
@@ -43,6 +45,7 @@ export default function Mentrix() {
     applyRun,
     startRun,
     openRun,
+    cancelRun,
     gates,
     canApprove,
     canCreatePr,
@@ -87,6 +90,12 @@ export default function Mentrix() {
       /* ignore */
     }
   }, []);
+
+  // Prefer header Active Project when local fields are empty
+  useEffect(() => {
+    if (!projectKey && activeProjectKey) setProjectKey(activeProjectKey);
+    if (!workspace && activeLocalPath) setWorkspace(activeLocalPath);
+  }, [activeProjectKey, activeLocalPath, projectKey, workspace]);
 
   // Incident / Ask / Plan handoff into Delivery
   useEffect(() => {
@@ -240,6 +249,7 @@ export default function Mentrix() {
       await startRun(goal, mode, projectKey, workspace, {
         source_lang: sourceLang,
         target_lang: targetLang,
+        repo_id: activeRepoId ?? undefined,
       });
     } catch {
       /* error already set on hook */
@@ -676,7 +686,47 @@ export default function Mentrix() {
                     <GitPullRequest className="h-3.5 w-3.5" />
                     {realGithubPr ? "Create PR (live)" : "Create PR (dry-run)"}
                   </button>
+                  {["running", "awaiting_plan_confirm", "awaiting_approval", "needs_human", "failed"].includes(
+                    active.status,
+                  ) && (
+                    <button
+                      type="button"
+                      data-testid="mentrix-cancel"
+                      onClick={() => void cancelRun(active.id).catch(() => {})}
+                      disabled={loading}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-red-700 text-xs disabled:opacity-40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cancel run
+                    </button>
+                  )}
                 </div>
+                {Array.isArray(active.files_written) && active.files_written.length > 0 && (
+                  <div
+                    className="rounded-lg border border-slate-200 bg-white p-3 text-xs space-y-2"
+                    data-testid="mentrix-files-written"
+                  >
+                    <div className="font-semibold text-slate-700 flex items-center gap-2">
+                      <FileCode className="h-3.5 w-3.5" />
+                      Files written ({active.files_written.length})
+                    </div>
+                    <ul className="max-h-28 overflow-auto space-y-1 font-mono text-[11px] text-slate-600">
+                      {active.files_written.map((f: string) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                    </ul>
+                    {workspace.trim() && (
+                      <Link
+                        to="/app-runner"
+                        className="inline-flex items-center gap-1.5 text-teal-700 underline font-medium"
+                        data-testid="mentrix-open-app-runner"
+                      >
+                        <MonitorPlay className="h-3.5 w-3.5" />
+                        Open App Runner
+                      </Link>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

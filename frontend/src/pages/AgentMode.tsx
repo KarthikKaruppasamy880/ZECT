@@ -15,49 +15,14 @@ import {
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { isAgentModeEnabled } from "@/lib/featureFlags";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-function authHeaders(): HeadersInit {
-  const token = localStorage.getItem("zect_token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
-interface AgentStep {
-  id: number;
-  stage: string;
-  step_index: number;
-  output: string;
-  tokens_used: number;
-  duration_ms: number;
-  status: string;
-  model: string;
-  created_at: string | null;
-}
-
-interface AgentRun {
-  id: number;
-  run_id: string;
-  task: string;
-  stages: string[];
-  model: string;
-  status: string;
-  current_stage_index?: number;
-  auto_advance?: boolean;
-  total_tokens?: number;
-  steps: AgentStep[];
-  created_at?: string | null;
-  completed_at?: string | null;
-  mode?: string;
-  engine?: string;
-  warning?: string;
-  workspace?: string;
-  files_written?: string[];
-  result?: Record<string, unknown>;
-}
+import {
+  agentCancelRun,
+  agentGetRun,
+  agentListRuns,
+  agentResumeRun,
+  agentStartRun,
+  type AgentModeRun,
+} from "@/lib/api";
 
 const STAGE_COLORS: Record<string, string> = {
   ask: "bg-blue-500/20 text-blue-400 border-blue-500/30",
@@ -80,8 +45,8 @@ const STATUS_ICONS: Record<string, JSX.Element> = {
 
 export default function AgentMode() {
   const { activeRepoId, activeLocalPath, activeProjectKey } = useActiveProject();
-  const [runs, setRuns] = useState<AgentRun[]>([]);
-  const [activeRun, setActiveRun] = useState<AgentRun | null>(null);
+  const [runs, setRuns] = useState<AgentModeRun[]>([]);
+  const [activeRun, setActiveRun] = useState<AgentModeRun | null>(null);
   const [task, setTask] = useState("");
   const [model, setModel] = useState("gpt-4o-mini");
   const [autoAdvance, setAutoAdvance] = useState(true);
@@ -113,8 +78,7 @@ export default function AgentMode() {
 
   const fetchRuns = async () => {
     try {
-      const res = await fetch(`${API}/api/agent/runs`, { headers: authHeaders() });
-      if (res.ok) setRuns(await res.json());
+      setRuns(await agentListRuns());
     } catch {
       /* ignore */
     }
@@ -125,25 +89,16 @@ export default function AgentMode() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/agent/run`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({
-          task: task.trim(),
-          stages: selectedStages,
-          model,
-          repo_context: repoContext,
-          auto_advance: autoAdvance,
-          workspace: workspace.trim(),
-          project_key: projectKey.trim(),
-          repo_id: activeRepoId ?? undefined,
-        }),
+      const body = await agentStartRun({
+        task: task.trim(),
+        stages: selectedStages,
+        model,
+        repo_context: repoContext,
+        auto_advance: autoAdvance,
+        workspace: workspace.trim(),
+        project_key: projectKey.trim(),
+        repo_id: activeRepoId ?? undefined,
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body.detail || `Agent run failed (${res.status})`);
-        return;
-      }
       setActiveRun(body);
       if (body.warning) setError(body.warning);
       setTask("");
@@ -159,17 +114,7 @@ export default function AgentMode() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/agent/run/${runId}/resume`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ model }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body.detail || `Resume failed (${res.status})`);
-        return;
-      }
-      setActiveRun(body);
+      setActiveRun(await agentResumeRun(runId, model));
       void fetchRuns();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Resume failed");
@@ -180,10 +125,7 @@ export default function AgentMode() {
 
   const cancelRun = async (runId: string) => {
     try {
-      await fetch(`${API}/api/agent/run/${runId}`, {
-        method: "DELETE",
-        headers: authHeaders(),
-      });
+      await agentCancelRun(runId);
       setActiveRun(null);
       void fetchRuns();
     } catch {
@@ -193,8 +135,7 @@ export default function AgentMode() {
 
   const viewRun = async (runId: string) => {
     try {
-      const res = await fetch(`${API}/api/agent/run/${runId}`, { headers: authHeaders() });
-      if (res.ok) setActiveRun(await res.json());
+      setActiveRun(await agentGetRun(runId));
     } catch {
       /* ignore */
     }

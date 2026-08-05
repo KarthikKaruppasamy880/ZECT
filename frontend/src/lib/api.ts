@@ -783,6 +783,69 @@ export const mentrixRefreshSast = (
 export const mentrixFineTuneExport = () =>
   request<any>("/api/mentrix/fine-tune/export");
 
+// Legacy Agent Mode (/api/agent) — power-user path; prefer Mentrix Delivery
+export interface AgentModeStep {
+  id: number;
+  stage: string;
+  step_index: number;
+  output: string;
+  tokens_used: number;
+  duration_ms: number;
+  status: string;
+  model: string;
+  created_at: string | null;
+}
+
+export interface AgentModeRun {
+  id: number;
+  run_id: string;
+  task: string;
+  stages: string[];
+  model: string;
+  status: string;
+  current_stage_index?: number;
+  auto_advance?: boolean;
+  total_tokens?: number;
+  steps: AgentModeStep[];
+  created_at?: string | null;
+  completed_at?: string | null;
+  mode?: string;
+  engine?: string;
+  warning?: string;
+  workspace?: string;
+  files_written?: string[];
+  result?: Record<string, unknown>;
+}
+
+export const agentListRuns = () => request<AgentModeRun[]>("/api/agent/runs");
+
+export const agentGetRun = (runId: string) =>
+  request<AgentModeRun>(`/api/agent/run/${encodeURIComponent(runId)}`);
+
+export const agentStartRun = (data: {
+  task: string;
+  stages: string[];
+  model: string;
+  repo_context?: string;
+  auto_advance?: boolean;
+  workspace?: string;
+  project_key?: string;
+  repo_id?: number;
+}) =>
+  request<AgentModeRun>("/api/agent/run", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+
+export const agentResumeRun = (runId: string, model?: string) =>
+  request<AgentModeRun>(`/api/agent/run/${encodeURIComponent(runId)}/resume`, {
+    method: "POST",
+    body: JSON.stringify({ model }),
+  });
+
+export const agentCancelRun = (runId: string) =>
+  request<void>(`/api/agent/run/${encodeURIComponent(runId)}`, { method: "DELETE" });
+
 // Sandbox PR readiness
 export const sandboxPrReadiness = (data: {
   code?: string;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { deployChecklist, deployRunbook, deployTriggerWorkflow, approvePermissionAudit } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import { Rocket, Play, Loader2, CheckSquare, FileText, AlertCircle, Zap, ShieldAlert } from "lucide-react";
 
 export default function DeployPhase() {
@@ -172,9 +173,7 @@ export default function DeployPhase() {
         </button>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>
-      )}
+      <PhaseErrorBanner error={error} density="plain" />
 
       {/* Trigger Deployment — real GitHub Actions dispatch, not advice text */}
       <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-4">

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { generatePlan, saveContext, loadContext, clearContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
@@ -7,29 +7,17 @@ import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
+import AttachedContextPanel, { type AttachedFile } from "@/components/AttachedContextPanel";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import {
   ClipboardList,
   Loader2,
-  AlertCircle,
   Copy,
   Check,
   Zap,
-  Plus,
-  X,
-  FileText,
-  FolderGit2,
-  FileCode,
-  Upload,
   ArrowRight,
   Hammer,
 } from "lucide-react";
-
-interface AttachedFile {
-  id: string;
-  name: string;
-  type: "file" | "repo" | "snippet";
-  content: string;
-}
 
 export default function PlanMode() {
   const navigate = useNavigate();
@@ -56,11 +44,6 @@ export default function PlanMode() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [showAddPanel, setShowAddPanel] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
-  const [newFileContent, setNewFileContent] = useState("");
-  const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void (async () => {
@@ -96,38 +79,6 @@ export default function PlanMode() {
       }
     })();
   }, [location.state, blueprintPrompt, loadSavedBlueprint, projectKey]);
-
-  const handleAddFile = () => {
-    if (!newFileName.trim() || !newFileContent.trim()) return;
-    setAttachedFiles((prev) => [
-      ...prev,
-      { id: Date.now().toString(), name: newFileName.trim(), type: newFileType, content: newFileContent.trim() },
-    ]);
-    setNewFileName("");
-    setNewFileContent("");
-    setShowAddPanel(false);
-  };
-
-  const handleBrowseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const content = ev.target?.result as string;
-        setAttachedFiles((prev) => [
-          ...prev,
-          { id: `${Date.now()}-${file.name}`, name: file.name, type: "file", content },
-        ]);
-      };
-      reader.readAsText(file);
-    });
-    e.target.value = "";
-  };
-
-  const handleRemoveFile = (id: string) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
-  };
 
   const handleGenerate = async () => {
     if (!description.trim()) {
@@ -229,93 +180,11 @@ export default function PlanMode() {
         </div>
 
         {/* Context Files Bar */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowAddPanel(!showAddPanel)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition"
-          >
-            <Plus size={12} />
-            Add files, repos, snippets
-          </button>
-          {attachedFiles.map((file) => (
-            <div key={file.id} className="flex items-center gap-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs">
-              {file.type === "file" && <FileText className="h-3 w-3 text-blue-500" />}
-              {file.type === "repo" && <FolderGit2 className="h-3 w-3 text-green-500" />}
-              {file.type === "snippet" && <FileCode className="h-3 w-3 text-purple-500" />}
-              <span className="text-slate-700 max-w-[100px] truncate">{file.name}</span>
-              <button onClick={() => handleRemoveFile(file.id)} className="text-slate-400 hover:text-red-500">
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Add File Panel */}
-        {showAddPanel && (
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-            {/* Browse files from system */}
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                onChange={handleBrowseFiles}
-                className="hidden"
-                accept="*/*"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg font-medium hover:bg-indigo-700 transition"
-              >
-                <Upload className="h-3.5 w-3.5" />
-                Browse Files from System
-              </button>
-              <span className="text-[11px] text-slate-500">Select files from your local machine</span>
-            </div>
-
-            {/* Manual entry */}
-            <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Or add manually:</p>
-            <div className="flex gap-2">
-              {(["file", "repo", "snippet"] as const).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setNewFileType(type)}
-                  className={`px-3 py-1.5 text-xs rounded-lg font-medium transition flex items-center gap-1 ${
-                    newFileType === type
-                      ? "bg-indigo-100 text-indigo-700 border border-indigo-300"
-                      : "bg-white text-slate-600 border border-slate-200 hover:border-indigo-300"
-                  }`}
-                >
-                  {type === "file" && <FileText className="h-3 w-3" />}
-                  {type === "repo" && <FolderGit2 className="h-3 w-3" />}
-                  {type === "snippet" && <FileCode className="h-3 w-3" />}
-                  {type.charAt(0).toUpperCase() + type.slice(1)}
-                </button>
-              ))}
-            </div>
-            <input
-              type="text"
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              placeholder={newFileType === "file" ? "File path (e.g., src/utils/auth.ts)" : newFileType === "repo" ? "Repo URL or owner/repo" : "Snippet name"}
-              className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500"
-            />
-            <textarea
-              value={newFileContent}
-              onChange={(e) => setNewFileContent(e.target.value)}
-              placeholder="Paste file content, code snippet, or repo description here..."
-              className="w-full h-24 p-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 resize-none"
-            />
-            <div className="flex gap-2">
-              <button onClick={handleAddFile} disabled={!newFileName.trim() || !newFileContent.trim()} className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg font-medium hover:bg-indigo-700 disabled:bg-slate-300 transition">
-                Add Context
-              </button>
-              <button onClick={() => setShowAddPanel(false)} className="px-3 py-1.5 bg-slate-200 text-slate-600 text-xs rounded-lg font-medium hover:bg-slate-300 transition">
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
+        <AttachedContextPanel
+          files={attachedFiles}
+          onChange={setAttachedFiles}
+          accent="indigo"
+        />
 
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}
@@ -403,12 +272,7 @@ export default function PlanMode() {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
-          <AlertCircle size={18} className="text-red-500" />
-          <span className="text-sm text-red-700">{error}</span>
-        </div>
-      )}
+      <PhaseErrorBanner error={error} density="roomy" />
 
       {/* Result */}
       {plan && (

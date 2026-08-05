@@ -2,6 +2,7 @@ import { useState } from "react";
 import { reviewAnalyze, reviewFixPrompt } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import ModelSelector from "@/components/ModelSelector";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import { Shield, Play, Loader2, AlertTriangle, CheckCircle, XCircle, Wand2 } from "lucide-react";
 
 export default function ReviewPhase() {
@@ -141,9 +142,7 @@ export default function ReviewPhase() {
         </div>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>
-      )}
+      <PhaseErrorBanner error={error} density="plain" />
 
       {/* Results */}
       {result && (

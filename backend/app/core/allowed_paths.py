@@ -3,13 +3,29 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
+# POSIX-only — kept for existing Linux/macOS deployments that rely on them.
 _DEFAULT_ROOTS = ["/home", "/tmp", "/var", "/opt"]
 
 
+def _cross_platform_defaults() -> list[str]:
+    """The POSIX defaults above never match a resolved Windows path, so a
+    fresh Windows install with no ZECT_WORKSPACE_ROOT set had File Explorer/
+    Git Ops/Diff Viewer silently unable to reach anything. Path.home() and
+    the system temp dir resolve correctly on every platform and are the same
+    kind of "your own stuff, not the whole filesystem" boundary the POSIX
+    list was already going for.
+    """
+    try:
+        return [str(Path.home()), str(Path(tempfile.gettempdir()))]
+    except Exception:
+        return []
+
+
 def allowed_roots() -> list[str]:
-    roots = list(_DEFAULT_ROOTS)
+    roots = list(_DEFAULT_ROOTS) + _cross_platform_defaults()
     workspace = os.getenv("ZECT_WORKSPACE_ROOT", "").strip()
     if workspace:
         roots.append(str(Path(workspace).resolve()))

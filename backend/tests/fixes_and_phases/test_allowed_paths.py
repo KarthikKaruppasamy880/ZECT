@@ -29,3 +29,19 @@ def test_path_under_workspace_root(monkeypatch, tmp_path):
 def test_path_outside_roots_raises():
     with pytest.raises(ValueError, match="Access denied"):
         path_under_allowed_roots(os.path.abspath("C:\\Windows\\System32"))
+
+
+def test_home_and_tempdir_allowed_without_any_env_var(monkeypatch):
+    """The POSIX-only defaults (/home, /tmp, /var, /opt) never match a
+    resolved Windows path — a fresh install with no ZECT_WORKSPACE_ROOT set
+    had File Explorer/Git Ops/Diff Viewer silently unable to reach anything
+    at all on Windows. Path.home() and the system temp dir work on every
+    platform without needing that env var."""
+    monkeypatch.delenv("ZECT_WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("MENTRIX_WORKSPACE", raising=False)
+    import tempfile
+    from pathlib import Path
+
+    roots = allowed_roots()
+    assert str(Path.home()) in roots
+    assert str(Path(tempfile.gettempdir())) in roots

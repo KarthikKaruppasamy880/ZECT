@@ -39,9 +39,6 @@ def chatterbox_available() -> bool:
         return False
 
 
-# Back-compat alias used by older tests/imports
-voicebox_available = chatterbox_available
-
 
 def clone_voice(
     name: str,

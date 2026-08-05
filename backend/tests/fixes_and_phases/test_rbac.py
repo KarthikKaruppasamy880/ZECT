@@ -339,3 +339,69 @@ class TestRequiresAuthenticationException:
         """Test that RequiresAuthentication has custom message."""
         exc = RequiresAuthentication("Login required")
         assert "Login required" in exc.detail
+
+
+class TestDecoratorsSupportPlainSyncHandlers:
+    """Both decorators unconditionally did `return await func(*args, **kwargs)`
+    — every real route handler either decorator is applied to in this
+    codebase (audit_trail's list/stats, permissions' create/update/delete
+    rule + approve_action, secrets_manager's delete_secret) is a plain
+    `def`, not `async def`, so every one of those 7 endpoints raised
+    TypeError: '<return type>' object can't be awaited on every call,
+    regardless of the actual permission outcome — a correctness bug, not a
+    permission bug. Verifies both decorators now handle a sync handler
+    (returning its result directly) exactly like they handle an async one."""
+
+    @pytest.mark.asyncio
+    async def test_require_role_calls_a_sync_handler_without_raising(self):
+        @require_role("admin")
+        def sync_endpoint(current_user, db):
+            return {"result": "sync-ok"}
+
+        admin_user = CurrentUser(user_id=1, username="admin", email="admin@example.com", auth_mode="local", token="t")
+        db_mock = Mock(spec=Session)
+        db_mock.query().filter().first.return_value = Mock(role="admin")
+
+        result = await sync_endpoint(current_user=admin_user, db=db_mock)
+        assert result == {"result": "sync-ok"}
+
+    @pytest.mark.asyncio
+    async def test_require_role_still_calls_an_async_handler_correctly(self):
+        @require_role("admin")
+        async def async_endpoint(current_user, db):
+            return {"result": "async-ok"}
+
+        admin_user = CurrentUser(user_id=1, username="admin", email="admin@example.com", auth_mode="local", token="t")
+        db_mock = Mock(spec=Session)
+        db_mock.query().filter().first.return_value = Mock(role="admin")
+
+        result = await async_endpoint(current_user=admin_user, db=db_mock)
+        assert result == {"result": "async-ok"}
+
+    @pytest.mark.asyncio
+    async def test_require_authentication_calls_a_sync_handler_without_raising(self):
+        @require_authentication
+        def sync_endpoint(current_user):
+            return [1, 2, 3]
+
+        user = CurrentUser(user_id=1, username="dev", email="dev@example.com", auth_mode="local", token="t")
+
+        result = await sync_endpoint(current_user=user)
+        assert result == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_require_role_denial_still_raised_before_calling_a_sync_handler(self):
+        calls = []
+
+        @require_role("admin")
+        def sync_endpoint(current_user, db):
+            calls.append(1)
+            return {"should": "not run"}
+
+        dev_user = CurrentUser(user_id=2, username="dev", email="dev@example.com", auth_mode="local", token="t")
+        db_mock = Mock(spec=Session)
+        db_mock.query().filter().first.return_value = Mock(role="developer")
+
+        with pytest.raises(PermissionDenied):
+            await sync_endpoint(current_user=dev_user, db=db_mock)
+        assert calls == []

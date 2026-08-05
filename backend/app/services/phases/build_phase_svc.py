@@ -12,6 +12,18 @@ def _openai_ready() -> bool:
     return bool(os.getenv("OPENAI_API_KEY", "").strip())
 
 
+def _generation_ready() -> bool:
+    """Gate for the offline stub below. _generate_core (used whenever this
+    gate passes) already branches between Anthropic and OpenAI via
+    resolve_generation_model() — but this gate only ever checked
+    OPENAI_API_KEY, so an Anthropic-only deployment (no OpenAI key at all)
+    hit the offline placeholder on every build step instead of calling
+    Claude, despite the app's own documented Anthropic-preferred behavior."""
+    from app.services.llm.anthropic_client import anthropic_available
+
+    return _openai_ready() or anthropic_available()
+
+
 def _infer_lang(path: str) -> str:
     ext = Path(path).suffix.lower()
     return {
@@ -43,7 +55,7 @@ def run_build_generate(
     """Generate code for one plan step. Offline stub writes a marker file when workspace set."""
     expected_files = expected_files or ([file_path] if file_path else [])
 
-    if not _openai_ready():
+    if not _generation_ready():
         target = (expected_files[0] if expected_files else None) or file_path or "generated/upgrade_stub.py"
         code = (
             f"# Mentrix offline build stub\n"

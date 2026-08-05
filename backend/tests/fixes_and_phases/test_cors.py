@@ -1,8 +1,25 @@
 """Unit tests for CORS security headers."""
 
+import asyncio
+
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
-from app.main import app
+
+from app.main import _ALLOWED_ORIGINS, app, global_exception_handler
+
+
+def _fake_request(origin: str | None) -> Request:
+    headers = [(b"origin", origin.encode())] if origin else []
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/whatever",
+        "headers": headers,
+        "query_string": b"",
+        "client": ("test", 0),
+    }
+    return Request(scope)
 
 
 class TestCORSHeaders:
@@ -151,6 +168,33 @@ class TestSecurityHeadersOnErrors:
 
         # Should still have security headers (if auth passes)
         # The exact status depends on auth implementation
+
+
+class TestGlobalExceptionHandlerCORS:
+    """The 500 handler used to unconditionally echo back whatever Origin
+    header the request carried, with credentials allowed — bypassing the
+    CORSMiddleware allowlist above for this one response class. Verifies it
+    now applies the same allowlist as every other response."""
+
+    def test_allowed_origin_is_reflected_with_credentials(self):
+        allowed = _ALLOWED_ORIGINS[0]
+        resp = asyncio.run(global_exception_handler(_fake_request(allowed), RuntimeError("boom")))
+
+        assert resp.headers.get("access-control-allow-origin") == allowed
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+
+    def test_disallowed_origin_is_not_reflected(self):
+        resp = asyncio.run(
+            global_exception_handler(_fake_request("https://attacker.example"), RuntimeError("boom"))
+        )
+
+        assert "access-control-allow-origin" not in resp.headers
+        assert "access-control-allow-credentials" not in resp.headers
+
+    def test_missing_origin_is_not_reflected(self):
+        resp = asyncio.run(global_exception_handler(_fake_request(None), RuntimeError("boom")))
+
+        assert "access-control-allow-origin" not in resp.headers
 
 
 class TestCORSOptionsRequest:

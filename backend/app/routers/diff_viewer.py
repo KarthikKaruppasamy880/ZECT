@@ -13,6 +13,8 @@ import subprocess
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.allowed_paths import path_under_allowed_roots
+
 router = APIRouter(prefix="/api/diff", tags=["diff-viewer"])
 
 
@@ -172,7 +174,10 @@ def git_diff(req: GitDiffRequest):
 @router.post("/file")
 def file_diff(req: FileDiffRequest):
     """Get diff of a specific file between two commits in a local repo."""
-    repo_path = req.repo_path
+    try:
+        repo_path = str(path_under_allowed_roots(req.repo_path))
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     if not os.path.isdir(repo_path):
         raise HTTPException(status_code=404, detail="Repository path not found")
 

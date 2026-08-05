@@ -20,7 +20,7 @@ from app.infrastructure.database import Base
 from app.infrastructure.auth.deps import CurrentUser
 from app.infrastructure.auth.rbac import PermissionDenied
 from app.models import SecretEntry, User
-from app.routers.secrets_manager import (
+from app.domains.permissions.secrets_manager import (
     SecretCreate,
     SecretRotate,
     SecretUpdate,

@@ -19,14 +19,16 @@ except Exception as e:
 
 from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
-from app.routers import projects, settings, analytics, repo_analysis, auth, llm
+from app.routers import projects, settings, analytics, repo_analysis, llm
+from app.domains.permissions import auth
 from app.domains.pr_review import github, code_review
 from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management
 from app.routers import ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
 from app.domains.audit import audit_trail
 from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
-from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
-from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights
+from app.routers import memory, dream_engine, data_layer, data_flywheel, transfer, skills_engine
+from app.domains.permissions import permissions, secrets_manager
+from app.routers import conversations, knowledge_base, playbooks, scheduler, code_index, session_insights
 from app.routers import repo_clone, repo_browser, build_intel
 from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, file_watcher, diff_viewer
 from app.domains.voice import realtime

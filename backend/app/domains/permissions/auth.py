@@ -24,7 +24,7 @@ from app.models import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 # Dev-local defaults when .env credentials are unset (local/hybrid only).

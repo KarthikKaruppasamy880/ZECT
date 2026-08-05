@@ -264,7 +264,7 @@ def trigger_workflow(
     retry this call with that audit_id."""
     from app.models import PermissionAudit
     from app.domains.audit.audit_trail import log_audit
-    from app.routers.permissions import PermissionCheck, check_permission
+    from app.domains.permissions.permissions import PermissionCheck, check_permission
 
     action = f"deploy_{req.environment}"
 

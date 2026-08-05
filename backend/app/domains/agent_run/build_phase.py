@@ -86,6 +86,8 @@ class BuildResponse(BaseModel):
     file_existed: bool = False
     diff: dict | None = None  # unified + side_by_side + stats, only when file_existed
     rule_violations: list[dict] = []  # free deterministic pre-check, before any human review
+    # Phase 2 Stage C: provider stamp only (full engine slice runs via Mentrix Delivery)
+    coding_engine: dict | None = None
 
 
 class MultiFileBuildRequest(BaseModel):
@@ -303,6 +305,8 @@ def generate_code(
 
         rule_violations = check_rule_violations(db, code, language)
 
+        from app.adapters.coding_runtime import selected_coding_engine
+
         return BuildResponse(
             generated_code=code,
             file_path=file_path,
@@ -313,6 +317,10 @@ def generate_code(
             file_existed=file_existed,
             diff=diff,
             rule_violations=rule_violations,
+            coding_engine={
+                "engine_provider": selected_coding_engine(),
+                "note": "full_engine_slice_via_mentrix_delivery",
+            },
         )
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")

@@ -259,6 +259,14 @@ Provide your review as valid JSON following the specified structure."""
                     )
                     merged_findings.append(finding)
 
+        from app.domains.pr_review.finding_pipeline import finalize_pr_findings
+
+        merged_findings = finalize_pr_findings(
+            merged_findings,
+            files,
+            repository=f"{owner}/{repo}",
+        )
+
         review = {
             "summary": " ".join(s for s in summaries if s) or "Review completed.",
             "quality_score": int(sum(scores) / len(scores)) if scores else 50,
@@ -271,6 +279,7 @@ Provide your review as valid JSON following the specified structure."""
             "model": "gpt-4o-mini",
             "pr_number": pr_number,
             "repo": f"{owner}/{repo}",
+            "repository": f"{owner}/{repo}",
             "chunks_reviewed": len(chunks),
         }
         review["review_session_id"] = _persist_review_session(
@@ -485,20 +494,37 @@ def _persist_review_session(
         db.flush()
 
         for f in result.get("findings", []):
-            db.add(ReviewFinding(
-                review_session_id=session.id,
-                category=f.get("category", "code_quality"),
-                severity=f.get("severity", "info"),
-                title=f.get("title", ""),
-                description=f.get("description", ""),
-                file_path=f.get("file"),
-                line_start=f.get("line"),
-                code_snippet=f.get("code_snippet"),
-                suggestion=f.get("suggestion"),
-                fixed_code=f.get("fixed_code"),
-                cwe_id=f.get("cwe_id"),
-                owasp_category=f.get("owasp_category"),
-            ))
+            from app.domains.pr_review.finding_schema import normalize_from_llm
+
+            repo_label = None
+            if result.get("owner") and result.get("repo"):
+                repo_label = f"{result.get('owner')}/{result.get('repo')}"
+            elif result.get("repository"):
+                repo_label = result.get("repository")
+            spec = normalize_from_llm(
+                f,
+                repository=repo_label,
+                commit_sha=result.get("commit_sha") or result.get("head_sha"),
+            )
+            # Stage A: persist legacy columns; fingerprint/confidence computed at read time
+            # via normalize_from_db until a dedicated migration lands.
+            db.add(
+                ReviewFinding(
+                    review_session_id=session.id,
+                    category=spec.category,
+                    severity=spec.severity,
+                    title=spec.title,
+                    description=spec.explanation,
+                    file_path=spec.file,
+                    line_start=spec.start_line,
+                    line_end=spec.end_line,
+                    code_snippet=spec.code_snippet or spec.evidence,
+                    suggestion=spec.suggested_fix,
+                    fixed_code=spec.fixed_code,
+                    cwe_id=spec.cwe_id,
+                    owasp_category=spec.owasp_category,
+                )
+            )
         db.commit()
         return session.id
     except Exception as e:

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.infrastructure.auth.deps import CurrentUser
 from app.infrastructure.budget import enforce_token_budget
 from app.infrastructure.database import get_db
-from app.models import ReviewSession, ReviewFinding
+from app.domains.pr_review.finding_schema import ReviewFindingSpec, normalize_from_db
 
 router = APIRouter(prefix="/api/ultrareview", tags=["ultrareview"])
 
@@ -39,19 +39,8 @@ class PRReviewRequest(BaseModel):
     model: str = "gpt-4o-mini"
 
 
-class FindingOut(BaseModel):
-    category: str
-    severity: str
-    title: str
-    description: str
-    file_path: str | None = None
-    line_start: int | None = None
-    line_end: int | None = None
-    code_snippet: str | None = None
-    suggestion: str | None = None
-    fixed_code: str | None = None
-    cwe_id: str | None = None
-    owasp_category: str | None = None
+# FindingOut = canonical Upgrade.md shape (Phase 4 Stage A)
+FindingOut = ReviewFindingSpec
 
 
 class ReviewResult(BaseModel):
@@ -103,23 +92,7 @@ def _build_review_result(session: ReviewSession, findings: list[ReviewFinding]) 
         medium_count=session.medium_count,
         low_count=session.low_count,
         info_count=session.info_count,
-        findings=[
-            FindingOut(
-                category=f.category,
-                severity=f.severity,
-                title=f.title,
-                description=f.description or "",
-                file_path=f.file_path,
-                line_start=f.line_start,
-                line_end=f.line_end,
-                code_snippet=f.code_snippet,
-                suggestion=f.suggestion,
-                fixed_code=f.fixed_code,
-                cwe_id=f.cwe_id,
-                owasp_category=f.owasp_category,
-            )
-            for f in findings
-        ],
+        findings=[normalize_from_db(f) for f in findings],
         tokens_used=session.tokens_used,
         cost_usd=session.cost_usd,
         duration_seconds=session.duration_seconds,

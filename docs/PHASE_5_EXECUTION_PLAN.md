@@ -8,8 +8,8 @@ Reuse existing engines: `PermissionRule` + broker, Fernet vault, `AuditLog` / `l
 
 | Stage | Scope | Status |
 |---|---|---|
-| A | Unify `log_audit`; auth-gate open permission endpoints; sync threat docs to fixed findings 3–6 | **This PR** |
-| B | Temporary capability grants (`expires_at`) + map Upgrade capability names onto existing rules/broker | Pending |
+| A | Unify `log_audit`; auth-gate open permission endpoints; sync threat docs to fixed findings 3–6 | **Done** (#98) |
+| B | Temporary capability grants (`expires_at`) + map Upgrade capability names onto existing rules/broker | **This PR** |
 | C | Secret references (no plaintext reveal path for agents) + systemic log redaction + permission diagnostics UI | Pending |
 | D | Global emergency-stop (halt agents/runners/webhooks) + optional audit integrity chain | Pending |
 
@@ -21,15 +21,16 @@ Reuse existing engines: `PermissionRule` + broker, Fernet vault, `AuditLog` / `l
 - Audit Trail API + UI
 - Path allowlist; App Runner / sandbox / webhook / CORS / auth `.env` hardening (code already fixed)
 
-## Stage A files
+## Stage B files
 
-- `backend/app/domains/audit/audit_trail.py` — canonical soft-fail `log_audit`
-- `backend/app/infrastructure/auth/rbac.py` — delegate to canonical `log_audit`
-- `backend/app/domains/permissions/permissions.py` — auth on list/check/audits GETs
-- Docs: `PHASE_5_EXECUTION_PLAN.md`, `THREAT_MODEL.md`, `ROADMAP.md`, `FEATURE_INVENTORY.md`
-- Tests: `test_permissions_auth.py`, existing `test_rbac.py`
+- `backend/app/models.py` — `CapabilityGrant` table
+- `backend/app/domains/permissions/capability_grants.py` — Upgrade aliases + grant evaluation
+- `backend/app/domains/permissions/permissions.py` — `/grants`, `/capabilities`; `/check` applies grants
+- `backend/app/services/mentrix/permission_broker.py` — grant override before confirm
+- `frontend/src/pages/Permissions.tsx` — Grants tab
+- `backend/tests/fixes_and_phases/test_capability_grants.py`
 
-## Risks (Stage A)
+## Risks (Stage B)
 
-- Dual `log_audit` signatures — wrapper preserves rbac call shape
-- Auth on `/check` may break unauthenticated clients — UI already uses `apiFetch` with token; broker is in-process
+- Empty `subject_id` on a user grant matches any authenticated user of that check — intentional for broad temp allows; prefer explicit ids in production
+- Temporary `allow` can open actions whose baseline rule is `never` (admin-issued only)

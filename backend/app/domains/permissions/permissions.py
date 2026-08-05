@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database import get_db
-from app.models import PermissionRule, PermissionAudit
+from app.models import PermissionRule, PermissionAudit, CapabilityGrant
 from app.infrastructure.auth.deps import get_current_user, CurrentUser
 from app.infrastructure.auth.rbac import (
     require_role,
@@ -17,6 +17,12 @@ from app.infrastructure.auth.rbac import (
     log_audit,
     get_user_from_current_user,
     PermissionDenied,
+)
+from app.domains.permissions.capability_grants import (
+    CAPABILITY_TO_ACTIONS,
+    apply_grant_override,
+    find_active_grants_for_action,
+    serialize_grant,
 )
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
@@ -97,6 +103,19 @@ class PermissionCheck(BaseModel):
     action: str
     project_id: Optional[int] = None
     user_id: Optional[int] = None
+    subject_type: Optional[str] = None  # user | agent | tool | workspace
+    subject_id: Optional[str] = None
+    workspace: Optional[str] = None
+
+
+class CapabilityGrantCreate(BaseModel):
+    capability: str
+    subject_type: str = "user"
+    subject_id: str = ""
+    project_id: Optional[int] = None
+    permission_level: str = "allow"
+    reason: str = ""
+    expires_at: datetime  # required — temporary grants only
 
 
 class ApprovalAction(BaseModel):
@@ -280,6 +299,17 @@ def check_permission(
             result = "granted"
             level = "allow"
 
+    grants = find_active_grants_for_action(
+        db,
+        data.action,
+        user_id=data.user_id,
+        project_id=data.project_id,
+        subject_type=data.subject_type,
+        subject_id=data.subject_id or (str(data.user_id) if data.user_id else None),
+        workspace=data.workspace,
+    )
+    result, level, grant = apply_grant_override(result, level, grants)
+
     # Log the check
     audit = PermissionAudit(
         user_id=data.user_id,
@@ -288,6 +318,7 @@ def check_permission(
         permission_level=level,
         result=result,
         rule_id=matching[0].id if matching else None,
+        reason=f"grant:{grant.id}" if grant else "",
     )
     db.add(audit)
     db.commit()
@@ -298,6 +329,8 @@ def check_permission(
         "result": result,
         "permission_level": level,
         "matching_rules": [_serialize_rule(r) for r in matching],
+        "active_grants": [serialize_grant(g) for g in grants],
+        "grant_applied": serialize_grant(grant) if grant else None,
         "audit_id": audit.id,
     }
 
@@ -373,6 +406,120 @@ def list_pending_approvals(
         PermissionAudit.result == "pending_approval",
     ).order_by(PermissionAudit.created_at.desc()).all()
     return [_serialize_audit(a) for a in audits]
+
+
+# ---------------------------------------------------------------------------
+# Temporary capability grants (Phase 5 Stage B)
+# ---------------------------------------------------------------------------
+
+@router.get("/capabilities")
+@require_authentication
+def list_capability_aliases(current_user: CurrentUser = Depends(get_current_user)):
+    """Upgrade.md capability → existing action-pattern map."""
+    return {"capabilities": CAPABILITY_TO_ACTIONS}
+
+
+@router.get("/grants")
+@require_authentication
+def list_grants(
+    project_id: Optional[int] = None,
+    active_only: bool = True,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    q = db.query(CapabilityGrant)
+    if project_id is not None:
+        q = q.filter(CapabilityGrant.project_id == project_id)
+    rows = q.order_by(CapabilityGrant.created_at.desc()).limit(200).all()
+    out = [serialize_grant(g) for g in rows]
+    if active_only:
+        out = [g for g in out if g.get("active")]
+    return out
+
+
+@router.post("/grants")
+@require_role("admin", "lead")
+def create_grant(
+    data: CapabilityGrantCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if data.permission_level not in ("allow", "require_approval", "never"):
+        raise HTTPException(400, "permission_level must be: allow, require_approval, or never")
+    if data.subject_type not in ("user", "agent", "tool", "workspace"):
+        raise HTTPException(400, "subject_type must be: user, agent, tool, or workspace")
+    exp = data.expires_at
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    if exp <= datetime.now(timezone.utc):
+        raise HTTPException(400, "expires_at must be in the future")
+
+    granter_id = None
+    try:
+        u = get_user_from_current_user(current_user, db)
+        if u:
+            granter_id = u.id
+    except Exception:
+        granter_id = getattr(current_user, "user_id", None)
+
+    subject_id = (data.subject_id or "").strip()
+    if data.subject_type == "user" and not subject_id and granter_id:
+        subject_id = str(granter_id)
+
+    grant = CapabilityGrant(
+        capability=data.capability.strip(),
+        subject_type=data.subject_type,
+        subject_id=subject_id,
+        project_id=data.project_id,
+        permission_level=data.permission_level,
+        reason=data.reason or "",
+        granted_by=granter_id,
+        expires_at=exp,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(grant)
+    log_audit(
+        db=db,
+        user_id=granter_id or 0,
+        action="create_capability_grant",
+        resource_id=grant.id,
+        resource_type="capability_grant",
+        details={"capability": grant.capability, "expires_at": exp.isoformat(), "subject_type": grant.subject_type},
+    )
+    return serialize_grant(grant)
+
+
+@router.post("/grants/{grant_id}/revoke")
+@require_role("admin", "lead")
+def revoke_grant(
+    grant_id: int,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    grant = db.query(CapabilityGrant).filter(CapabilityGrant.id == grant_id).first()
+    if not grant:
+        raise HTTPException(404, "Grant not found")
+    if grant.revoked_at is None:
+        grant.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(grant)
+    granter_id = getattr(current_user, "user_id", None) or 0
+    try:
+        u = get_user_from_current_user(current_user, db)
+        if u:
+            granter_id = u.id
+    except Exception:
+        pass
+    log_audit(
+        db=db,
+        user_id=granter_id or 0,
+        action="revoke_capability_grant",
+        resource_id=grant_id,
+        resource_type="capability_grant",
+        details={"capability": grant.capability},
+    )
+    return serialize_grant(grant)
 
 
 # ---------------------------------------------------------------------------

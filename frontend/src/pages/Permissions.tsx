@@ -46,13 +46,24 @@ export default function Permissions() {
   const [audits, setAudits] = useState<Audit[]>([]);
   const [pending, setPending] = useState<Audit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending">("rules");
+  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending" | "grants">("rules");
   const [checkAction, setCheckAction] = useState("");
   const [checkResult, setCheckResult] = useState<any>(null);
   const [showAddRule, setShowAddRule] = useState(false);
   const [newRule, setNewRule] = useState({ action_pattern: "", permission_level: "require_approval", category: "general", description: "" });
   const [rulesPage, setRulesPage] = useState(1);
   const rulesPerPage = 10;
+  const [grants, setGrants] = useState<any[]>([]);
+  const [capabilities, setCapabilities] = useState<Record<string, string[]>>({});
+  const [showAddGrant, setShowAddGrant] = useState(false);
+  const [newGrant, setNewGrant] = useState({
+    capability: "pull_request:create",
+    subject_type: "user",
+    subject_id: "",
+    permission_level: "allow",
+    reason: "",
+    expires_hours: 24,
+  });
 
   const fetchRules = async () => {
     try {
@@ -78,9 +89,23 @@ export default function Permissions() {
     } catch (err) { showToast("error", "Network error loading pending"); }
   };
 
+  const fetchGrants = async () => {
+    try {
+      const [gRes, cRes] = await Promise.all([
+        apiFetch(`/api/permissions/grants?active_only=false`),
+        apiFetch(`/api/permissions/capabilities`),
+      ]);
+      if (gRes.ok) setGrants(await gRes.json());
+      if (cRes.ok) {
+        const body = await cRes.json();
+        setCapabilities(body.capabilities || {});
+      }
+    } catch (err) { showToast("error", "Network error loading grants"); }
+  };
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchRules(), fetchAudits(), fetchPending()]).finally(() => setLoading(false));
+    Promise.all([fetchRules(), fetchAudits(), fetchPending(), fetchGrants()]).finally(() => setLoading(false));
   }, []);
 
   const handleCheck = async () => {
@@ -137,6 +162,45 @@ export default function Permissions() {
     } catch (err) { showToast("error", "Failed to delete rule"); }
   };
 
+  const handleAddGrant = async () => {
+    if (!newGrant.capability.trim()) return;
+    const expires = new Date(Date.now() + Number(newGrant.expires_hours || 24) * 3600_000).toISOString();
+    try {
+      const res = await apiFetch(`/api/permissions/grants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          capability: newGrant.capability,
+          subject_type: newGrant.subject_type,
+          subject_id: newGrant.subject_id,
+          permission_level: newGrant.permission_level,
+          reason: newGrant.reason,
+          expires_at: expires,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast("error", err.detail || `Failed to create grant (${res.status})`);
+        return;
+      }
+      setShowAddGrant(false);
+      showToast("success", "Temporary grant created");
+      fetchGrants();
+    } catch (err) { showToast("error", "Failed to create grant"); }
+  };
+
+  const handleRevokeGrant = async (grantId: number) => {
+    try {
+      const res = await apiFetch(`/api/permissions/grants/${grantId}/revoke`, { method: "POST" });
+      if (!res.ok) {
+        showToast("error", `Revoke failed (${res.status})`);
+        return;
+      }
+      showToast("info", "Grant revoked");
+      fetchGrants();
+    } catch (err) { showToast("error", "Failed to revoke grant"); }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -147,6 +211,7 @@ export default function Permissions() {
 
   const tabs = [
     { key: "rules" as const, label: "Permission Rules", icon: Shield },
+    { key: "grants" as const, label: `Grants (${grants.filter((g) => g.active).length})`, icon: Clock },
     { key: "check" as const, label: "Check Action", icon: Search },
     { key: "pending" as const, label: `Pending (${pending.length})`, icon: Clock },
     { key: "audits" as const, label: "Audit Log", icon: ShieldCheck },
@@ -180,7 +245,7 @@ export default function Permissions() {
           </h1>
           <p className="text-slate-500 text-sm">Allow / Require Approval / Never — security enforcement for agent actions</p>
         </div>
-        <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); }} className="p-2 rounded hover:bg-slate-100">
+        <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); fetchGrants(); }} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />
         </button>
       </div>
@@ -261,6 +326,78 @@ export default function Permissions() {
         </div>
       )}
 
+      {/* Temporary Grants Tab */}
+      {activeTab === "grants" && (
+        <div>
+          <div className="flex justify-between items-center mb-3 gap-3 flex-wrap">
+            <p className="text-sm text-slate-500">Temporary capability grants expire automatically and can override baseline rules while active.</p>
+            <button onClick={() => setShowAddGrant(!showAddGrant)} className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">
+              <Plus className="h-3.5 w-3.5" /> Add Grant
+            </button>
+          </div>
+          {showAddGrant && (
+            <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-5 mb-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <select
+                  value={newGrant.capability}
+                  onChange={(e) => setNewGrant({ ...newGrant, capability: e.target.value })}
+                  className="px-3 py-2 border rounded-lg text-sm"
+                >
+                  {Object.keys(capabilities).length === 0 ? (
+                    <option value={newGrant.capability}>{newGrant.capability}</option>
+                  ) : (
+                    Object.keys(capabilities).map((cap) => (
+                      <option key={cap} value={cap}>{cap}</option>
+                    ))
+                  )}
+                </select>
+                <select value={newGrant.subject_type} onChange={(e) => setNewGrant({ ...newGrant, subject_type: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="user">User</option>
+                  <option value="agent">Agent</option>
+                  <option value="tool">Tool</option>
+                  <option value="workspace">Workspace</option>
+                </select>
+                <input value={newGrant.subject_id} onChange={(e) => setNewGrant({ ...newGrant, subject_id: e.target.value })} placeholder="Subject id (user id / agent key / workspace path)" className="px-3 py-2 border rounded-lg text-sm" />
+                <select value={newGrant.permission_level} onChange={(e) => setNewGrant({ ...newGrant, permission_level: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="allow">Allow</option>
+                  <option value="require_approval">Require Approval</option>
+                  <option value="never">Never</option>
+                </select>
+                <input type="number" min={1} value={newGrant.expires_hours} onChange={(e) => setNewGrant({ ...newGrant, expires_hours: Number(e.target.value) })} placeholder="Expires in hours" className="px-3 py-2 border rounded-lg text-sm" />
+                <input value={newGrant.reason} onChange={(e) => setNewGrant({ ...newGrant, reason: e.target.value })} placeholder="Reason" className="px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <button onClick={handleAddGrant} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Save Grant</button>
+            </div>
+          )}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
+            {grants.length === 0 ? (
+              <p className="text-slate-400 text-sm py-8 text-center">No capability grants yet.</p>
+            ) : (
+              grants.map((g) => (
+                <div key={g.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-mono text-slate-800 truncate">{g.capability}</p>
+                    <p className="text-xs text-slate-500">
+                      {g.subject_type}:{g.subject_id || "*"} · expires {g.expires_at ? new Date(g.expires_at).toLocaleString() : "—"}
+                      {g.reason ? ` · ${g.reason}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {levelBadge(g.permission_level)}
+                    <span className={`text-xs px-2 py-0.5 rounded ${g.active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
+                      {g.active ? "active" : g.revoked_at ? "revoked" : "expired"}
+                    </span>
+                    {g.active && (
+                      <button onClick={() => handleRevokeGrant(g.id)} className="text-xs text-red-600 hover:text-red-700">Revoke</button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Check Tab */}
       {activeTab === "check" && (
         <div>
@@ -289,6 +426,11 @@ export default function Permissions() {
                     <p key={r.id} className="text-xs text-slate-600">- {r.action_pattern} → {r.permission_level} ({r.description})</p>
                   ))}
                 </div>
+              )}
+              {checkResult.grant_applied && (
+                <p className="text-xs text-slate-600 mt-2">
+                  Temporary grant applied: <span className="font-mono">{checkResult.grant_applied.capability}</span> (#{checkResult.grant_applied.id})
+                </p>
               )}
             </div>
           )}

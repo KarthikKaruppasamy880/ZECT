@@ -153,13 +153,15 @@ export default function Mentrix() {
   useEffect(() => {
     const st = (location.state || {}) as {
       goal?: string;
+      /** @deprecated Plan previously sent this; accept as goal alias */
+      agentContext?: string;
       issue_key?: string;
       projectKey?: string;
       workspace?: string;
     };
     const params = new URLSearchParams(location.search);
-    if (st.goal) setGoal(st.goal);
-    else if (params.get("goal")) setGoal(params.get("goal") || "");
+    const goalText = st.goal || st.agentContext || params.get("goal") || "";
+    if (goalText) setGoal(goalText);
     if (st.issue_key) setIssueKey(st.issue_key);
     else if (params.get("issue_key")) setIssueKey(params.get("issue_key") || "");
     if (st.projectKey) setProjectKey(st.projectKey);

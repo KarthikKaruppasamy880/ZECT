@@ -19,7 +19,8 @@ except Exception as e:
 
 from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
-from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
+from app.routers import projects, settings, analytics, repo_analysis, auth, llm
+from app.domains.pr_review import github, code_review
 from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management
 from app.routers import ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
 from app.domains.audit import audit_trail

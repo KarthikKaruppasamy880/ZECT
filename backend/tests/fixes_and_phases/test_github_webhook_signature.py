@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401
 from app.infrastructure.database import Base
 from app.models import ReviewWebhookConfig
-from app.routers.code_review import github_webhook
+from app.domains.pr_review.code_review import github_webhook
 
 
 class _FakeRequest:
@@ -101,7 +101,7 @@ class TestWebhookRequiresSecret:
         req = _FakeRequest(body, headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": sig})
 
         monkeypatch.setattr(
-            "app.routers.code_review.review_pull_request",
+            "app.domains.pr_review.code_review.review_pull_request",
             lambda req, current_user, db: {"status": "completed", "score": 90, "findings": []},
         )
 

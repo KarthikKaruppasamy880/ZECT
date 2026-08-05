@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush, loadContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
@@ -9,21 +9,17 @@ import ModelSelector from "@/components/ModelSelector";
 import PromptHygieneTips from "@/components/PromptHygieneTips";
 import ConversationHistory from "@/components/ConversationHistory";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
+import AttachedContextPanel, { type AttachedFile } from "@/components/AttachedContextPanel";
 import {
   Hammer,
   Play,
   Loader2,
   FileCode,
   Layers,
-  Plus,
-  X,
-  FolderGit2,
-  FileText,
   Paperclip,
   Download,
   Copy,
   Check,
-  Upload,
   GitPullRequest,
   RefreshCw,
   AlertTriangle,
@@ -31,13 +27,6 @@ import {
   Wrench,
   ArrowUpRight,
 } from "lucide-react";
-
-interface AttachedFile {
-  id: string;
-  name: string;
-  type: "file" | "repo" | "snippet";
-  content: string;
-}
 
 export default function BuildPhase() {
   const location = useLocation();
@@ -53,13 +42,8 @@ export default function BuildPhase() {
   const [applying, setApplying] = useState(false);
   const [applied, setApplied] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-  const [showAddPanel, setShowAddPanel] = useState(false);
-  const [newFileName, setNewFileName] = useState("");
-  const [newFileContent, setNewFileContent] = useState("");
-  const [newFileType, setNewFileType] = useState<"file" | "repo" | "snippet">("file");
   const [copied, setCopied] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<any[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Plan → Build handoff: "Open in Build" navigates here with the plan text in
   // location.state, but a page refresh (or arriving fresh via the sidebar)
@@ -152,41 +136,6 @@ export default function BuildPhase() {
     } finally {
       setApplying(false);
     }
-  };
-
-  const handleAddFile = () => {
-    if (!newFileName.trim() || !newFileContent.trim()) return;
-    const file: AttachedFile = {
-      id: Date.now().toString(),
-      name: newFileName.trim(),
-      type: newFileType,
-      content: newFileContent.trim(),
-    };
-    setAttachedFiles((prev) => [...prev, file]);
-    setNewFileName("");
-    setNewFileContent("");
-    setShowAddPanel(false);
-  };
-
-  const handleBrowseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const content = ev.target?.result as string;
-        setAttachedFiles((prev) => [
-          ...prev,
-          { id: `${Date.now()}-${file.name}`, name: file.name, type: "file", content },
-        ]);
-      };
-      reader.readAsText(file);
-    });
-    e.target.value = "";
-  };
-
-  const handleRemoveFile = (id: string) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   const handleCopyAll = async () => {
@@ -435,133 +384,21 @@ export default function BuildPhase() {
         {/* Right Panel — Files & Context */}
         <div className="space-y-4">
           {/* Attached Files Panel */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <Paperclip className="h-4 w-4" />
-                Context Files ({attachedFiles.length})
-              </h3>
-              <button
-                onClick={() => setShowAddPanel(!showAddPanel)}
-                className="p-1.5 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition"
-                title="Add files, repos, snippets"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Add File Form */}
-            {showAddPanel && (
-              <div className="p-4 border-b border-slate-100 bg-slate-50 space-y-3">
-                {/* Browse files from system */}
-                <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={handleBrowseFiles}
-                    className="hidden"
-                    accept="*/*"
-                  />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-xs rounded-lg font-medium hover:bg-amber-700 transition"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    Browse Files
-                  </button>
-                  <span className="text-[11px] text-slate-500">Select from your system</span>
-                </div>
-
-                <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">Or add manually:</p>
-                <div className="flex gap-2">
-                  {(["file", "repo", "snippet"] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setNewFileType(type)}
-                      className={`px-3 py-1.5 text-xs rounded-lg font-medium transition flex items-center gap-1 ${
-                        newFileType === type
-                          ? "bg-amber-100 text-amber-700 border border-amber-300"
-                          : "bg-white text-slate-600 border border-slate-200 hover:border-amber-300"
-                      }`}
-                    >
-                      {type === "file" && <FileText className="h-3 w-3" />}
-                      {type === "repo" && <FolderGit2 className="h-3 w-3" />}
-                      {type === "snippet" && <FileCode className="h-3 w-3" />}
-                      {type.charAt(0).toUpperCase() + type.slice(1)}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  type="text"
-                  value={newFileName}
-                  onChange={(e) => setNewFileName(e.target.value)}
-                  placeholder={
-                    newFileType === "file"
-                      ? "File path (e.g., src/utils/auth.ts)"
-                      : newFileType === "repo"
-                        ? "Repo URL or owner/repo"
-                        : "Snippet name"
-                  }
-                  className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-amber-500"
-                />
-                <textarea
-                  value={newFileContent}
-                  onChange={(e) => setNewFileContent(e.target.value)}
-                  placeholder="Paste file content, code snippet, or repo description here..."
-                  className="w-full h-28 p-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-amber-500 resize-none"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddFile}
-                    disabled={!newFileName.trim() || !newFileContent.trim()}
-                    className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg font-medium hover:bg-amber-700 disabled:bg-slate-300 transition"
-                  >
-                    Add Context
-                  </button>
-                  <button
-                    onClick={() => setShowAddPanel(false)}
-                    className="px-3 py-1.5 bg-slate-200 text-slate-600 text-xs rounded-lg font-medium hover:bg-slate-300 transition"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              <Paperclip className="h-4 w-4" />
+              Context Files ({attachedFiles.length})
+            </h3>
+            <AttachedContextPanel
+              files={attachedFiles}
+              onChange={setAttachedFiles}
+              accent="amber"
+            />
+            {attachedFiles.length === 0 && (
+              <p className="text-[10px] text-slate-400">
+                Add files, repos, or code snippets for generation context
+              </p>
             )}
-
-            {/* File List */}
-            <div className="p-3 space-y-2 max-h-64 overflow-y-auto">
-              {attachedFiles.length === 0 ? (
-                <div className="text-center py-6 text-slate-400">
-                  <Paperclip className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs">No files attached</p>
-                  <p className="text-[10px] mt-1">Add files, repos, or code snippets for context</p>
-                </div>
-              ) : (
-                attachedFiles.map((file) => (
-                  <div
-                    key={file.id}
-                    className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100 group"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {file.type === "file" && <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      {file.type === "repo" && <FolderGit2 className="h-3.5 w-3.5 text-green-500 shrink-0" />}
-                      {file.type === "snippet" && <FileCode className="h-3.5 w-3.5 text-purple-500 shrink-0" />}
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-slate-700 truncate">{file.name}</p>
-                        <p className="text-[10px] text-slate-400">{file.content.length} chars</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRemoveFile(file.id)}
-                      className="p-1 text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
           </div>
 
           {/* Generated Files List */}

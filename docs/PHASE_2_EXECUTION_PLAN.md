@@ -16,24 +16,28 @@ names are implementation detail.
 |---|---|---|
 | A | Workspace provisioner (git worktree), factory `ZECT_CODING_ENGINE`, `/api/coding-engine/health`, notices | **Done** |
 | B | Remote HTTP adapter + event translation (mocked in CI); `/api/coding-engine/runs*` | **Done** |
-| C | Mentrix/Build vertical slice wire-up (opt-in remote) | **This PR** |
-| D | Docker isolation + harden | Pending |
+| C | Mentrix/Build vertical slice wire-up (opt-in remote) | **Done** |
+| D | Isolation harden (Docker optional; worktree default/fallback) | **This PR** |
 
-## Stage C files
+## Stage D files
 
-- `backend/app/services/coding_engine/mentrix_bridge.py` — provision + engine poll → Mentrix events
-- `backend/app/workers/mentrix_worker.py` — call bridge before ForgeLoop; dispose after
-- `backend/app/domains/agent_run/mentrix.py` — expose `engine_provider` / `workspace_id` / `engine_run_id`
-- `backend/app/domains/agent_run/build_phase.py` — stamp `coding_engine` on Build responses
-- `backend/tests/test_coding_engine_stage_c.py`
+- `backend/app/services/coding_engine/isolation.py` — mode resolve + restricted env
+- `backend/app/services/coding_engine/docker_sandbox.py` — optional container wrap
+- `backend/app/services/coding_engine/workspace.py` — `provision_isolated_workspace` / dispose
+- Mentrix bridge uses isolated provision; health reports isolation fields
+- `backend/tests/test_coding_engine_stage_d.py`
 
-## Behavior
+## Isolation env
 
-- `ZECT_CODING_ENGINE=mock` (default): stamp `engine_provider=mock`; ForgeLoop unchanged
-- `ZECT_CODING_ENGINE=remote` + workspace: worktree → remote start → poll events into MentrixRun → ForgeLoop on worktree → dispose with patch artifacts
+```
+ZECT_CODING_ENGINE_ISOLATION=worktree   # worktree | docker | auto  (default worktree)
+ZECT_CODING_ENGINE_ISOLATION_STRICT=0   # 1 = fail if docker requested but unavailable
+ZECT_CODING_ENGINE_SANDBOX_IMAGE=python:3.12-slim
+```
 
-## Verification
+Hosts without Docker (including many Windows setups) keep **worktree** isolation.
+Docker is used only when the daemon is actually available.
 
-- Full `pytest` green
-- Branding gate on public surfaces
-- Stop for Stage D approval after merge
+## Phase 2 complete when Stage D merges
+
+Stop for approval before Upgrade.md Phase 3.

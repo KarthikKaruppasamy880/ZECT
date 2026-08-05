@@ -78,6 +78,18 @@ describe("speakMentrixStreamedAwait", () => {
     }
   });
 
+  it("surfaces the real error when an explicitly chosen voice fails, instead of silently falling back to browser speech", async () => {
+    const s1 = "A".repeat(150) + ".";
+    const s2 = "B".repeat(150) + ".";
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("stock_voice must be one of (...)"),
+    );
+
+    const result = await speakMentrixStreamedAwait(`${s1} ${s2}`, true, { stockVoice: "bogus" });
+
+    expect(result).toEqual({ ok: false, error: "Selected voice failed: stock_voice must be one of (...)" });
+  });
+
   it("splits long text into chunks and plays each via the reported engine in order", async () => {
     const s1 = "A".repeat(150) + ".";
     const s2 = "B".repeat(150) + ".";

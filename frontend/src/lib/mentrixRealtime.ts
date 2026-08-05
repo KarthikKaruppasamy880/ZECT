@@ -317,6 +317,17 @@ export async function startMentrixRealtime(
   const playQueue: Int16Array[] = [];
   let playing = false;
   const handledCallIds = new Set<string>();
+  // The Realtime API allows only one response in flight per conversation at a
+  // time. A single turn can include several function calls (e.g. slack_digest
+  // for two channels + delivery_status) whose completions race each other —
+  // each used to fire its own response.create, and the losers errored with
+  // "Conversation already has an active response in progress" and got dropped.
+  // responseInFlight is set the instant we send response.create (not on the
+  // server's response.created ack, which arrives too late to prevent the
+  // race) so at most one is ever outstanding; a second caller just flags
+  // pendingResponseCreate and the queued create fires once response.done lands.
+  let responseInFlight = false;
+  let pendingResponseCreate = false;
   let resolveReady: (ok: boolean) => void = () => undefined;
   const ready = new Promise<boolean>((resolve) => {
     resolveReady = resolve;
@@ -356,6 +367,16 @@ export async function startMentrixRealtime(
     }
   };
 
+  const requestResponse = () => {
+    if (stopped || ws.readyState !== WebSocket.OPEN) return;
+    if (responseInFlight) {
+      pendingResponseCreate = true;
+      return;
+    }
+    responseInFlight = true;
+    ws.send(JSON.stringify({ type: "response.create" }));
+  };
+
   const runFunctionCall = async (name: string, callId: string, rawArgs: unknown) => {
     if (!name || !callId || handledCallIds.has(callId)) return;
     handledCallIds.add(callId);
@@ -381,7 +402,7 @@ export async function startMentrixRealtime(
           },
         }),
       );
-      ws.send(JSON.stringify({ type: "response.create" }));
+      requestResponse();
     }
   };
 
@@ -397,7 +418,7 @@ export async function startMentrixRealtime(
         },
       }),
     );
-    ws.send(JSON.stringify({ type: "response.create" }));
+    requestResponse();
     handlers.onOrb?.("speaking");
   };
 
@@ -495,7 +516,12 @@ export async function startMentrixRealtime(
       source = attached.source;
       captureDispose = attached.dispose;
       const audioInputConfig = {
-        transcription: { model: "whisper-1" },
+        // Without a language hint, Whisper auto-detects per utterance and its
+        // well-documented failure mode on noisy/quiet/ambiguous audio is to
+        // hallucinate fluent-looking text in a random wrong language rather
+        // than return low-confidence output — pin it so stray mic noise
+        // never turns into a bogus foreign-language "turn."
+        transcription: { model: "whisper-1", language: "en" },
         turn_detection: {
           type: "server_vad",
           create_response: true,
@@ -838,6 +864,7 @@ export async function startMentrixRealtime(
       markPerf("user_speech_stopped");
     }
     if (t === "response.created") {
+      responseInFlight = true;
       handlers.onOrb?.("thinking");
       if (clonedVoiceActive) {
         clonedTextAcc = "";
@@ -904,6 +931,7 @@ export async function startMentrixRealtime(
       await runFunctionCall(msg.name || msg.tool_name, msg.call_id, msg.arguments || "{}");
     }
     if (t === "response.done") {
+      responseInFlight = false;
       const responseId = String(msg.response?.id || msg.response_id || "");
       const outputs = msg.response?.output || [];
       for (const item of outputs) {
@@ -939,6 +967,10 @@ export async function startMentrixRealtime(
         }
         clonedTextAcc = "";
         lastUserTranscript = "";
+      }
+      if (pendingResponseCreate && !responseInFlight) {
+        pendingResponseCreate = false;
+        requestResponse();
       }
     }
     if (t === "error") {

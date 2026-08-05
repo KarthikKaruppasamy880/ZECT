@@ -365,7 +365,10 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
             for model in REALTIME_MODEL_FALLBACKS:
                 audio_cfg: dict[str, Any] = {
                     "input": {
-                        "transcription": {"model": "whisper-1"},
+                        # Pin the STT language — without it Whisper auto-detects
+                        # per utterance and hallucinates wrong-language text on
+                        # noisy/ambiguous audio instead of low-confidence output.
+                        "transcription": {"model": "whisper-1", "language": "en"},
                         "turn_detection": {
                             "type": "server_vad",
                             "create_response": True,

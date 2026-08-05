@@ -361,6 +361,45 @@ def test_realtime_mint_returns_voice_for_session_update(monkeypatch):
     assert out.get("voice") == "shimmer"
 
 
+def test_realtime_mint_pins_transcription_language(monkeypatch):
+    """Without a language hint, Whisper auto-detects per utterance and can
+    hallucinate wrong-language text on noisy/ambiguous audio — pin it so mint
+    always requests English transcription."""
+    from app.services.mentrix import realtime
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {
+                "value": "ek_test_secret",
+                "expires_at": 9999999999,
+                "session": {"type": "realtime", "model": "gpt-realtime"},
+            }
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            transcription = json["session"]["audio"]["input"]["transcription"]
+            assert transcription == {"model": "whisper-1", "language": "en"}
+            return _Resp()
+
+    monkeypatch.setenv("MENTRIX_REALTIME", "1")
+    monkeypatch.setenv("MENTRIX_REALTIME_MODEL", "gpt-realtime")
+    monkeypatch.setattr(realtime, "_ensure_openai_env", lambda: "sk-test")
+    monkeypatch.setattr(realtime.httpx, "Client", _Client)
+    out = realtime.mint_realtime_session()
+    assert out.get("realtime_enabled") is True
+
+
 def test_open_sandbox_intent():
     db = _db()
     ensure_companion_rules(db)

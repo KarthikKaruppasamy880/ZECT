@@ -37,10 +37,10 @@ test.describe("Mentrix smoke", () => {
     await expect(page.getByRole("heading", { name: /Snippet Review/i })).toBeVisible();
   });
 
-  test("Workflow sidebar links to Mentrix Delivery", async ({ page }) => {
+  test("Workflow sidebar links to Agent Workspace", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("link", { name: /Mentrix Delivery/i })).toBeVisible();
-    await page.getByRole("link", { name: /Mentrix Delivery/i }).click();
+    await expect(page.getByRole("link", { name: /Agent Workspace/i })).toBeVisible();
+    await page.getByRole("link", { name: /Agent Workspace/i }).click();
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
   });
 

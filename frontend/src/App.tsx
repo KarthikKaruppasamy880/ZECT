@@ -43,6 +43,7 @@ import CodeIndex from "@/pages/CodeIndex";
 import SessionInsights from "@/pages/SessionInsights";
 import Conversations from "@/pages/Conversations";
 import RepoWorkspace from "@/pages/RepoWorkspace";
+import DeveloperWorkspace from "@/pages/DeveloperWorkspace";
 import AgentMode from "@/pages/AgentMode";
 import LatticeGraph from "@/pages/LatticeGraph";
 import Mentrix from "@/pages/Mentrix";
@@ -176,6 +177,7 @@ export default function App() {
           <Route path="/session-insights" element={<SessionInsights />} />
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/repo-workspace" element={<RepoWorkspace />} />
+          <Route path="/workspace" element={<DeveloperWorkspace />} />
           <Route path="/lattice" element={<LatticeGraph />} />
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
           <Route path="/sandbox" element={<SandboxGate />} />

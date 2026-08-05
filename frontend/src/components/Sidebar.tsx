@@ -38,6 +38,7 @@ import {
   TrendingUp,
   MessageCircle,
   HardDrive,
+  PanelLeft,
   Bot,
   Network,
   FlaskConical,
@@ -59,6 +60,7 @@ const workspaceItems: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
+  { href: "/workspace", label: "Developer Workspace", icon: PanelLeft },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

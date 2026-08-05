@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import MonacoCodeEditor from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
+import WorkspaceMentrixTimeline from "@/components/WorkspaceMentrixTimeline";
+import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { fileRead, fileTree, fileWrite, gitBranches, gitStatus } from "@/lib/api";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
@@ -35,9 +37,9 @@ function countGitChanges(st: Record<string, unknown> | null | undefined): number
 }
 
 /**
- * Phase 3 Stage A — unified developer workspace shell:
- * file tree + Monaco + git status/branch strip.
- * Writes are blocked unless the file path is under the active workspace root.
+ * Phase 3 — unified developer workspace:
+ * file tree + Monaco + git strip (Stage A); terminal + Mentrix timeline (Stage B).
+ * Writes and terminal cwd stay under the active workspace root.
  */
 export default function DeveloperWorkspace() {
   const { activeLocalPath, activeRepo } = useActiveProject();
@@ -192,7 +194,7 @@ export default function DeveloperWorkspace() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
           <p className="text-xs text-slate-500">
-            Phase 3 shell — tree + Monaco + git strip. Saves stay inside the active workspace.
+            Tree + Monaco + git strip + workspace terminal + Mentrix timeline. Saves and shell cwd stay inside the active workspace.
           </p>
         </div>
         <button
@@ -238,60 +240,67 @@ export default function DeveloperWorkspace() {
           Select an Active Project with a local clone, or set Mentrix workspace, then refresh.
         </div>
       ) : (
-        <div className="flex flex-1 min-h-0 gap-3">
-          <aside
-            className="w-64 shrink-0 overflow-auto rounded-lg border border-slate-200 bg-white"
-            data-testid="workspace-file-tree"
-          >
-            <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
-              Files
-            </div>
-            {loadingTree ? (
-              <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
+        <div className="flex flex-1 min-h-0 flex-col gap-3">
+          <div className="flex flex-1 min-h-0 gap-3">
+            <aside
+              className="w-64 shrink-0 overflow-auto rounded-lg border border-slate-200 bg-white"
+              data-testid="workspace-file-tree"
+            >
+              <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
+                Files
               </div>
-            ) : tree.length === 0 ? (
-              <p className="p-3 text-xs text-slate-500">Empty or inaccessible tree.</p>
-            ) : (
-              <div className="py-1">{renderTree(tree)}</div>
-            )}
-          </aside>
-
-          <section className="flex-1 min-w-0 flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <div className="truncate font-mono text-xs text-slate-600" data-testid="workspace-open-path">
-                {selectedPath || "Select a file"}
-              </div>
-              <button
-                type="button"
-                disabled={!dirty || saving || !selectedPath}
-                onClick={() => void saveFile()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40"
-                data-testid="workspace-save"
-              >
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                Save
-              </button>
-            </div>
-            <div className="flex-1 min-h-0">
-              {loadingFile ? (
-                <div className="h-full flex items-center justify-center text-sm text-slate-500 gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Opening…
+              {loadingTree ? (
+                <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
                 </div>
-              ) : selectedPath ? (
-                <MonacoCodeEditor
-                  path={selectedPath}
-                  value={content}
-                  language={languageFromPath(selectedPath)}
-                  onChange={setContent}
-                />
+              ) : tree.length === 0 ? (
+                <p className="p-3 text-xs text-slate-500">Empty or inaccessible tree.</p>
               ) : (
-                <div className="h-full rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
-                  Open a file from the tree to edit in Monaco.
-                </div>
+                <div className="py-1">{renderTree(tree)}</div>
               )}
-            </div>
-          </section>
+            </aside>
+
+            <section className="flex-1 min-w-0 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="truncate font-mono text-xs text-slate-600" data-testid="workspace-open-path">
+                  {selectedPath || "Select a file"}
+                </div>
+                <button
+                  type="button"
+                  disabled={!dirty || saving || !selectedPath}
+                  onClick={() => void saveFile()}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40"
+                  data-testid="workspace-save"
+                >
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  Save
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                {loadingFile ? (
+                  <div className="h-full flex items-center justify-center text-sm text-slate-500 gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Opening…
+                  </div>
+                ) : selectedPath ? (
+                  <MonacoCodeEditor
+                    path={selectedPath}
+                    value={content}
+                    language={languageFromPath(selectedPath)}
+                    onChange={setContent}
+                  />
+                ) : (
+                  <div className="h-full rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+                    Open a file from the tree to edit in Monaco.
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-52 shrink-0" data-testid="workspace-stage-b-panels">
+            <WorkspaceTerminal workspaceRoot={rootPath} />
+            <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
+          </div>
         </div>
       )}
     </div>

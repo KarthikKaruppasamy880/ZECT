@@ -10,10 +10,12 @@ import {
   RefreshCw,
   Save,
   AlertCircle,
+  Sparkles,
 } from "lucide-react";
-import MonacoCodeEditor from "@/components/MonacoCodeEditor";
+import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import WorkspaceDiffPanel from "@/components/WorkspaceDiffPanel";
+import WorkspaceInlinePanel, { replaceSelectionInContent } from "@/components/WorkspaceInlinePanel";
 import WorkspaceMentrixTimeline from "@/components/WorkspaceMentrixTimeline";
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
@@ -57,11 +59,11 @@ function collectGitPaths(st: Record<string, unknown> | null | undefined): string
 }
 
 /**
- * Phase 3 — unified developer workspace (Stages A–C):
- * tree + Monaco + git strip + terminal + Mentrix timeline + diff/hunks + agent markers.
+ * Phase 3 — unified developer workspace (Stages A–D):
+ * tree + Monaco + git + terminal + Mentrix timeline + diff/hunks + inline Ask actions.
  */
 export default function DeveloperWorkspace() {
-  const { activeLocalPath, activeRepo } = useActiveProject();
+  const { activeLocalPath, activeRepo, activeRepoId } = useActiveProject();
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
@@ -80,8 +82,11 @@ export default function DeveloperWorkspace() {
   const [gitChanged, setGitChanged] = useState<string[]>([]);
   const [agentFiles, setAgentFiles] = useState<string[]>([]);
   const [showDiff, setShowDiff] = useState(false);
+  const [showInline, setShowInline] = useState(false);
+  const [selection, setSelection] = useState<EditorSelection | null>(null);
 
   const dirty = content !== baseline && Boolean(selectedPath);
+  const sideOpen = showDiff || showInline;
 
   const refreshGit = useCallback(async (root: string) => {
     if (!root) return;
@@ -148,6 +153,7 @@ export default function DeveloperWorkspace() {
       setSelectedPath(path);
       setContent(text);
       setBaseline(text);
+      setSelection(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read file");
     } finally {
@@ -191,11 +197,20 @@ export default function DeveloperWorkspace() {
       const text = typeof file?.content === "string" ? file.content : "";
       setContent(text);
       setBaseline(text);
+      setSelection(null);
       await refreshGit(rootPath);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Revert failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const applyInlineCode = (code: string, mode: "replace-selection" | "replace-file") => {
+    if (mode === "replace-selection" && selection) {
+      setContent(replaceSelectionInContent(content, selection, code));
+    } else {
+      setContent(code);
     }
   };
 
@@ -263,7 +278,7 @@ export default function DeveloperWorkspace() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
           <p className="text-xs text-slate-500">
-            Tree + Monaco + git + terminal + Mentrix timeline + diff/hunks. Saves, restore, and shell cwd stay inside the workspace.
+            Tree + Monaco + git + terminal + Mentrix + diff/hunks + inline Ask/Explain/Tests/Fix. Writes stay inside the workspace.
           </p>
         </div>
         <button
@@ -354,6 +369,18 @@ export default function DeveloperWorkspace() {
                   <button
                     type="button"
                     disabled={!selectedPath}
+                    onClick={() => setShowInline((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${
+                      showInline ? "border-teal-300 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-700"
+                    }`}
+                    data-testid="workspace-toggle-inline"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Ask
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPath}
                     onClick={() => setShowDiff((v) => !v)}
                     className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${
                       showDiff ? "border-teal-300 bg-teal-50 text-teal-900" : "border-slate-200 bg-white text-slate-700"
@@ -375,7 +402,7 @@ export default function DeveloperWorkspace() {
                   </button>
                 </div>
               </div>
-              <div className={`flex-1 min-h-0 ${showDiff ? "grid grid-cols-1 xl:grid-cols-2 gap-2" : ""}`}>
+              <div className={`flex-1 min-h-0 ${sideOpen ? "grid grid-cols-1 xl:grid-cols-2 gap-2" : ""}`}>
                 <div className="min-h-[200px] h-full">
                   {loadingFile ? (
                     <div className="h-full flex items-center justify-center text-sm text-slate-500 gap-2">
@@ -387,6 +414,7 @@ export default function DeveloperWorkspace() {
                       value={content}
                       language={languageFromPath(selectedPath)}
                       onChange={setContent}
+                      onSelectionChange={setSelection}
                     />
                   ) : (
                     <div className="h-full rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
@@ -394,16 +422,29 @@ export default function DeveloperWorkspace() {
                     </div>
                   )}
                 </div>
-                {showDiff && selectedPath ? (
-                  <WorkspaceDiffPanel
-                    baseline={baseline}
-                    content={content}
-                    fileLabel={normalizePath(selectedPath).split("/").pop()}
-                    onContentChange={setContent}
-                    onApplySave={saveFile}
-                    onRevertFile={revertFile}
-                    saving={saving}
-                  />
+                {sideOpen && selectedPath ? (
+                  <div className="min-h-[200px] h-full flex flex-col gap-2 overflow-auto">
+                    {showInline ? (
+                      <WorkspaceInlinePanel
+                        filePath={selectedPath}
+                        content={content}
+                        selection={selection}
+                        repoId={activeRepoId}
+                        onApplyCode={applyInlineCode}
+                      />
+                    ) : null}
+                    {showDiff ? (
+                      <WorkspaceDiffPanel
+                        baseline={baseline}
+                        content={content}
+                        fileLabel={normalizePath(selectedPath).split("/").pop()}
+                        onContentChange={setContent}
+                        onApplySave={saveFile}
+                        onRevertFile={revertFile}
+                        saving={saving}
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </section>

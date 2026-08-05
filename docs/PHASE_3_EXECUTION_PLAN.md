@@ -8,25 +8,22 @@ Companion to `Upgrade.md` Phase 3. Staged PRs to `develop`; stop after each merg
 |---|---|---|
 | A | Unified `/workspace` shell: file tree + Monaco + git status/branch strip; path-scoped writes | **Done** (#89) |
 | B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | **Done** (#90) |
-| C | Diff + hunk apply/revert + agent change markers | **This PR** |
-| D | Inline Ask / explain / generate tests / fix selection + context selector | Pending |
+| C | Diff + hunk apply/revert + agent change markers | **Done** (#91) |
+| D | Inline Ask / explain / generate tests / fix selection + context selector | **This PR** |
 | E | Symbols/refs jump + worktree display | Pending |
 
-## Stage C files
+## Stage D files
 
-- `frontend/src/lib/diffHunks.ts` (+ tests) — parse/apply/revert unified hunks client-side
-- `frontend/src/components/WorkspaceDiffPanel.tsx` — DiffViewer + hunk checkboxes + Apply/Revert
-- `frontend/src/pages/DeveloperWorkspace.tsx` — Diff toggle, tree markers (agent/git)
-- `frontend/src/lib/api.ts` — `diffCompare`, `gitRestore`
-- `backend/app/domains/repository/git_ops.py` — `POST /api/git/restore`
-- `docs/PHASE_3_EXECUTION_PLAN.md`, `docs/ROADMAP.md`
+- `frontend/src/components/MonacoCodeEditor.tsx` — selection change callbacks
+- `frontend/src/components/WorkspaceInlinePanel.tsx` — context chips + Ask/Explain/Tests/Fix + apply
+- `frontend/src/pages/DeveloperWorkspace.tsx` — Ask panel toggle wiring
+- Reuses `askQuestion`, `buildGenerate`, `reviewAnalyze` / `reviewFixPrompt` (no new backend)
 
 ## Guardrails
 
-- Editor saves / restore targets only under the active workspace root.
-- Terminal cwd remains the workspace root (Stage B).
-- Hunk apply/revert mutates the editor buffer only until Apply & Save / `fileWrite`.
+- Inline actions only operate on the open workspace file buffer; Apply & Save still path-scoped.
+- Context chips: Selection / File / Repo (`repo_id` when Active Project set).
 
 ## Stop
 
-After Stage C merges, wait for approval before Stage D.
+After Stage D merges, wait for approval before Stage E.

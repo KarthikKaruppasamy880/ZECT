@@ -9,7 +9,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 0 | Repo audit + doc set | **Done** (this pass) | CURRENT_ARCHITECTURE.md, TARGET_ARCHITECTURE.md, FEATURE_INVENTORY.md, THREAT_MODEL.md, this file. |
 | 1 | Core platform, shared AgentRun | **Done (spine)** | `api/` + `domains/` + `adapters/` + `infrastructure/` + `workers/`; Mentrix shared run + cancel/retry/files/artifacts/terminal/gates; event `sequence_id` + SSE reconnect; MockCodingRuntime; audit on Mentrix state changes; Agent Workspace shell with Ask/Plan/Build/Review/Deploy modes. Residual: fat domain routers (not fully thin services), embedded Monaco diff still via App Runner, OpenHands = Phase 2. |
 | 2 | Coding-engine provider | **Done (A–D)** | Worktree isolation + optional Docker sandbox (falls back when Docker unavailable); remote HTTP adapter; Mentrix opt-in engine slice; health/version/isolation reporting. See `PHASE_2_EXECUTION_PLAN.md`. |
-| 3 | Cursor-like workspace | **In progress (Stage B)** | Stage A: `/workspace` tree+Monaco+git. Stage B: workspace-scoped App Runner terminal + Mentrix agent timeline. See `PHASE_3_EXECUTION_PLAN.md`. Remaining: diff/hunks, inline Ask, symbols/refs, worktree UI. |
+| 3 | Cursor-like workspace | **In progress (Stage C)** | A–B done. Stage C: DiffViewer + hunk apply/revert, agent/git tree markers, `POST /api/git/restore`. See `PHASE_3_EXECUTION_PLAN.md`. Remaining: inline Ask/actions, symbols/refs, worktree UI. |
 | 4 | PR review platform | ~60% | Ultra Review consolidated (verified — no duplicate implementations remain), gated human-approve-then-create-PR is real. `ReviewFinding` schema fields (fingerprint, confidence, validation_status) not verified against spec. |
 | 5 | Permissions/secrets/audit | ~55% | RBAC + Fernet secrets + pervasive audit log + permission broker exist. Missing granular capability grants w/ expiry, permission-diagnostics page, emergency stop. **Inherits THREAT_MODEL.md findings 1-6 as backlog**, especially the two Critical items (app_runner.py, sandbox.py). |
 | 6 | Realtime voice | **~75% — most complete phase** | Persistent session, per-sentence streaming speech, true cross-sentence prefetch, barge-in cancellation, 8 named latency checkpoints, short-timeout no-silent-retry — all shipped this session. Built on the OpenAI Realtime API directly (already brand-clean); no LiveKit dependency needed unless a future provider swap is wanted. |
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 3 Stage B** is the current deliverable (workspace terminal + Mentrix timeline). Stop after each Stage merge and wait for approval before Stage C. Phase 9 remains ON HOLD.
+**Phase 3 Stage C** is the current deliverable (diff/hunks + agent markers). Stop after each Stage merge and wait for approval before Stage D. Phase 9 remains ON HOLD.

@@ -7,23 +7,26 @@ Companion to `Upgrade.md` Phase 3. Staged PRs to `develop`; stop after each merg
 | Stage | Scope | Status |
 |---|---|---|
 | A | Unified `/workspace` shell: file tree + Monaco + git status/branch strip; path-scoped writes | **Done** (#89) |
-| B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | **This PR** |
-| C | Diff + hunk apply/revert + agent change markers | Pending |
+| B | Embed workspace-scoped terminal (App Runner) + Mentrix timeline panel | **Done** (#90) |
+| C | Diff + hunk apply/revert + agent change markers | **This PR** |
 | D | Inline Ask / explain / generate tests / fix selection + context selector | Pending |
 | E | Symbols/refs jump + worktree display | Pending |
 
-## Stage B files
+## Stage C files
 
-- `frontend/src/components/WorkspaceTerminal.tsx` — App Runner execute/start/stop with `cwd` = workspace root
-- `frontend/src/components/WorkspaceMentrixTimeline.tsx` — run list + `sequence_id` events (2s poll while running)
-- `frontend/src/pages/DeveloperWorkspace.tsx` — bottom dual panel
+- `frontend/src/lib/diffHunks.ts` (+ tests) — parse/apply/revert unified hunks client-side
+- `frontend/src/components/WorkspaceDiffPanel.tsx` — DiffViewer + hunk checkboxes + Apply/Revert
+- `frontend/src/pages/DeveloperWorkspace.tsx` — Diff toggle, tree markers (agent/git)
+- `frontend/src/lib/api.ts` — `diffCompare`, `gitRestore`
+- `backend/app/domains/repository/git_ops.py` — `POST /api/git/restore`
 - `docs/PHASE_3_EXECUTION_PLAN.md`, `docs/ROADMAP.md`
 
 ## Guardrails
 
-- Editor saves only under the active workspace root (Stage A).
-- Terminal always uses that same root as `cwd` (server allowlist remains authoritative).
+- Editor saves / restore targets only under the active workspace root.
+- Terminal cwd remains the workspace root (Stage B).
+- Hunk apply/revert mutates the editor buffer only until Apply & Save / `fileWrite`.
 
 ## Stop
 
-After Stage B merges, wait for approval before Stage C.
+After Stage C merges, wait for approval before Stage D.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPathInsideRoot, languageFromPath, normalizePath } from "@/lib/workspacePaths";
+import { isPathInsideRoot, languageFromPath, normalizePath, pathMatchesMarker } from "@/lib/workspacePaths";
 
 describe("workspacePaths", () => {
   it("normalizes slashes", () => {
@@ -16,5 +16,11 @@ describe("workspacePaths", () => {
   it("maps languages", () => {
     expect(languageFromPath("a.tsx")).toBe("typescript");
     expect(languageFromPath("b.py")).toBe("python");
+  });
+
+  it("matches agent/git markers", () => {
+    expect(pathMatchesMarker("/ws/src/a.ts", "/ws", ["src/a.ts"])).toBe(true);
+    expect(pathMatchesMarker("/ws/src/a.ts", "/ws", ["/ws/src/a.ts"])).toBe(true);
+    expect(pathMatchesMarker("/ws/src/a.ts", "/ws", ["other.ts"])).toBe(false);
   });
 });

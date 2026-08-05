@@ -83,6 +83,13 @@ class GitCheckoutRequest(BaseModel):
     branch: str
 
 
+class GitRestoreRequest(BaseModel):
+    """Discard working-tree (and optionally staged) changes for listed paths."""
+
+    repo_path: str
+    files: list[str]
+
+
 class GitDiffResponse(BaseModel):
     diff: str
     files_changed: int
@@ -237,6 +244,28 @@ def git_checkout(req: GitCheckoutRequest):
     if result["exit_code"] != 0:
         raise HTTPException(status_code=500, detail=f"git checkout failed: {result['stderr']}")
     return {"status": "checked_out", "branch": req.branch}
+
+
+@router.post("/restore")
+def git_restore(req: GitRestoreRequest):
+    """Restore paths from HEAD into the working tree (and index). Path-scoped via repo validation."""
+    if not req.files:
+        raise HTTPException(status_code=400, detail="files required")
+    path = _validate_repo(req.repo_path)
+    # Reject absolute / traversal segments — restore args must be relative paths inside the repo
+    safe: list[str] = []
+    for f in req.files:
+        cleaned = (f or "").replace("\\", "/").strip()
+        if not cleaned or cleaned.startswith("/") or ".." in cleaned.split("/"):
+            raise HTTPException(status_code=400, detail=f"Invalid path: {f}")
+        safe.append(cleaned)
+    result = _run_git(path, ["restore", "--source=HEAD", "--staged", "--worktree", "--"] + safe)
+    if result["exit_code"] != 0:
+        # Older git may lack `restore` — fall back to checkout --
+        result = _run_git(path, ["checkout", "HEAD", "--"] + safe)
+        if result["exit_code"] != 0:
+            raise HTTPException(status_code=500, detail=f"git restore failed: {result['stderr']}")
+    return {"status": "restored", "files": safe}
 
 
 @router.get("/diff")

@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch, MagicMock
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.core.auth.rbac import (
+from app.infrastructure.auth.rbac import (
     require_role,
     require_authentication,
     log_audit,
@@ -14,7 +14,7 @@ from app.core.auth.rbac import (
     PermissionDenied,
     RequiresAuthentication,
 )
-from app.core.auth.deps import CurrentUser
+from app.infrastructure.auth.deps import CurrentUser
 from app.models import User, SecretEntry, AuditLog, Project
 
 

@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import JiraConfig, SlackConfig
 from app.routers.jira_integration import JiraConfigCreate, configure_jira
 from app.routers.slack_integration import SlackConfigCreate, configure_slack

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import FlywheelTrace, FlywheelContextCard, FlywheelEvalCase
 
 router = APIRouter(prefix="/api/flywheel", tags=["data-flywheel"])

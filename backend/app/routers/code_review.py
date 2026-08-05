@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app import github_service
 from app.review_service import review_pr_diff, review_code_snippet, review_repo_files
-from app.database import SessionLocal, get_db
+from app.infrastructure.database import SessionLocal, get_db
 from app.models import ReviewWebhookConfig, Rule
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.budget import enforce_token_budget
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.budget import enforce_token_budget
 
 # Import for inline PR review
 try:

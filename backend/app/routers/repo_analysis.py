@@ -7,7 +7,7 @@ from GitHub, then synthesizes a single copy-paste prompt for AI tools.
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import Setting, TokenLog
 from app import github_service
 from app.token_tracker import log_tokens as _persist_tokens, get_usage_summary

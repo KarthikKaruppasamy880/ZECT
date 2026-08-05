@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import MentrixRun
 from app.services.forge_loop import orchestrator
 from app.services.phases import assistant_phase
@@ -61,7 +61,7 @@ class TestToCcTool:
 class TestKickoffBackgroundRun:
     def test_creates_queued_run_and_returns_immediately(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
 
         started = []
         monkeypatch.setattr(
@@ -85,7 +85,7 @@ class TestKickoffBackgroundRun:
 
     def test_worker_marks_run_failed_on_exception(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
 
         captured_worker = {}
         monkeypatch.setattr(
@@ -158,7 +158,7 @@ class TestExecuteHeavyTool:
 
     def test_scan_for_anomalies_runs_inline_against_real_scan(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
             "app.services.security.threat_detection.run_anomaly_scan",
             lambda db, lookback_hours=24: {"findings": [{"kind": "ip_churn"}], "scanned": {"audit_logs": 3}},
@@ -172,7 +172,7 @@ class TestExecuteHeavyTool:
 
     def test_scan_for_anomalies_handles_exception(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
             "app.services.security.threat_detection.run_anomaly_scan",
             Mock(side_effect=RuntimeError("db exploded")),
@@ -185,7 +185,7 @@ class TestExecuteHeavyTool:
 
     def test_file_security_ticket_creates_real_issue(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
             "app.services.mcp.hub.execute_tool",
             lambda db, server_id, tool_name, arguments, user_email="": {
@@ -203,7 +203,7 @@ class TestExecuteHeavyTool:
 
     def test_file_security_ticket_reports_when_jira_not_configured(self, monkeypatch):
         db = _session()
-        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
             "app.services.mcp.hub.execute_tool",
             lambda db, server_id, tool_name, arguments, user_email="": {

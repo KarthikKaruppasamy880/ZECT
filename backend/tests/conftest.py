@@ -13,7 +13,7 @@ os.environ["ZECT_AUTH_ENFORCE"] = "true"
 os.environ.setdefault("OPENAI_API_KEY", "")
 
 from app.main import app  # noqa: E402
-from app.database import init_db  # noqa: E402
+from app.infrastructure.database import init_db  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)

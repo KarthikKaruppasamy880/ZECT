@@ -11,15 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user, get_optional_user
-from app.core.auth.oidc import oidc_configured, oidc_login_url, validate_bearer_jwt
-from app.core.auth.session_store import (
+from app.infrastructure.auth.deps import CurrentUser, get_current_user, get_optional_user
+from app.infrastructure.auth.oidc import oidc_configured, oidc_login_url, validate_bearer_jwt
+from app.infrastructure.auth.session_store import (
     create_token,
     get_token_row,
     revoke_token,
     upsert_local_user,
 )
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])

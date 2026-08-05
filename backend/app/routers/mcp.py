@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.database import get_db
 
 router = APIRouter(prefix="/api/mcp", tags=["MCP"])
 

@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import JiraConfig
 from app.routers import jira_integration
 from app.routers.jira_integration import JiraTicketCreate, create_ticket

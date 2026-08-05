@@ -14,9 +14,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.core.auth.deps import CurrentUser
-from app.core.auth.rbac import PermissionDenied, RequiresAuthentication
-from app.database import Base
+from app.infrastructure.auth.deps import CurrentUser
+from app.infrastructure.auth.rbac import PermissionDenied, RequiresAuthentication
+from app.infrastructure.database import Base
 from app.models import User
 from app.routers.app_runner import ExecuteRequest, StartRequest, _validate_cwd, execute_command
 

@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.services.mentrix.companion import iter_companion_events, run_companion_turn, _exec_tool
 from app.services.mentrix.notes import add_note, list_notes
 from app.services.mentrix.org_policy import ensure_companion_rules, export_org_policy, import_org_policy
@@ -151,7 +151,7 @@ def test_desktop_app_navigates_to_mentrix_home():
 
 
 def test_build_agent_context_empty_without_data():
-    from app.database import SessionLocal
+    from app.infrastructure.database import SessionLocal
     from app.services.mentrix.companion import build_agent_context
 
     db = SessionLocal()

@@ -1193,7 +1193,7 @@ def _exec_tool(
         # same approve/create-pr route functions the UI calls, directly.
         from fastapi import HTTPException
 
-        from app.core.auth.deps import CurrentUser
+        from app.infrastructure.auth.deps import CurrentUser
         from app.routers.mentrix import ApproveRequest, CreatePRRequest, approve_run, create_pr_for_run
 
         run_id = args.get("run_id")

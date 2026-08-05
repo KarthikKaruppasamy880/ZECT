@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import SkillDefinition
 from app.routers.skills_engine import (
     DetectSkillRequest,

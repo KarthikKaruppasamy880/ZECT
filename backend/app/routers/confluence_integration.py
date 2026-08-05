@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.database import get_db
 from app.services.mcp.hub import upsert_server_config
 
 router = APIRouter(prefix="/api/confluence", tags=["confluence"])

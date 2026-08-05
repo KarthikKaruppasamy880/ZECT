@@ -86,7 +86,7 @@ class TestIterCompanionEventsStreamingPath:
         from sqlalchemy.orm import sessionmaker
 
         import app.models  # noqa: F401
-        from app.database import Base
+        from app.infrastructure.database import Base
 
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(bind=engine)
@@ -110,7 +110,7 @@ class TestIterCompanionEventsStreamingPath:
         from sqlalchemy.orm import sessionmaker
 
         import app.models  # noqa: F401
-        from app.database import Base
+        from app.infrastructure.database import Base
 
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(bind=engine)

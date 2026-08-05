@@ -27,7 +27,7 @@ from datetime import datetime
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import SecretEntry
 from cryptography.fernet import Fernet
 from app.security.vault import vault

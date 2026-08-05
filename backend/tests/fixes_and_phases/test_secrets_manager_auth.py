@@ -16,9 +16,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
-from app.core.auth.deps import CurrentUser
-from app.core.auth.rbac import PermissionDenied
+from app.infrastructure.database import Base
+from app.infrastructure.auth.deps import CurrentUser
+from app.infrastructure.auth.rbac import PermissionDenied
 from app.models import SecretEntry, User
 from app.routers.secrets_manager import (
     SecretCreate,

@@ -31,10 +31,12 @@ backend/app/
   - Skill Library vs. Skills Engine — **already resolved**, merged in
     `refactor/merge-skill-library-into-skills-engine`.
   - Memory System (`memory.py`) vs. Mentrix Notes (`services/mentrix/notes.py`)
-    — not yet checked. 30 min task: read both, decide keep-one-or-both, before
-    Stage 4.
+    — **resolved: keep both** (agent 4-layer DB memory vs Companion JSON
+    scratchpad/auto-log; different storage, APIs, and consumers).
   - Knowledge Base (`knowledge_base.py`) vs. Lattice Graph (`lattice.py`) vs.
-    Docs Center — not yet checked. Same treatment, before Stage 2.
+    Docs Center — **resolved: keep all three** (manual CRUD tips vs
+    code/docs graph+RAG vs static in-app operator help; Docs Center has no
+    backend domain).
 - Confirm test baseline: `cd backend && python -m pytest -q` should show the
   same pass count as today (516 passed / 1 pre-existing unrelated failure —
   `test_mentrix_upgrade_pipeline_phases`, missing Lattice-index test fixture,

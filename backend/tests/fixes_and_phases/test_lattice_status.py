@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.main import app
 
 

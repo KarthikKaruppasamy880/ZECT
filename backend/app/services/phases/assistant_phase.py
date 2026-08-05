@@ -172,7 +172,7 @@ def _kickoff_background_run(
     repo_id: int | None = None,
     created_by: str = "",
 ) -> dict[str, Any]:
-    from app.database import SessionLocal
+    from app.infrastructure.database import SessionLocal
     from app.models import MentrixRun
 
     setup_db = SessionLocal()
@@ -260,7 +260,7 @@ def execute_heavy_tool(
 
 
 def _scan_for_anomalies(args: dict[str, Any]) -> dict[str, Any]:
-    from app.database import SessionLocal
+    from app.infrastructure.database import SessionLocal
     from app.services.security.threat_detection import run_anomaly_scan
 
     lookback_hours = int(args.get("lookback_hours") or 24)
@@ -275,7 +275,7 @@ def _scan_for_anomalies(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _file_security_ticket(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:
-    from app.database import SessionLocal
+    from app.infrastructure.database import SessionLocal
     from app.services.mcp.hub import execute_tool
 
     project_key = args.get("project_key") or os.getenv("SECURITY_JIRA_PROJECT_KEY", "SEC")
@@ -304,8 +304,8 @@ def _file_security_ticket(args: dict[str, Any], *, created_by: str = "") -> dict
 def _trigger_deploy(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:
     """Delegates to the exact same approval-gated endpoint Deploy's own UI
     calls — this tool call cannot bypass that require_approval wall."""
-    from app.core.auth.deps import CurrentUser
-    from app.database import SessionLocal
+    from app.infrastructure.auth.deps import CurrentUser
+    from app.infrastructure.database import SessionLocal
     from app.routers.deploy_phase import DeployTriggerRequest, trigger_workflow
 
     req = DeployTriggerRequest(

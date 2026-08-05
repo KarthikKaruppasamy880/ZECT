@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.services.forge_loop import orchestrator
 from app.services.phases.bugfix_phase import run_root_cause_analysis
 

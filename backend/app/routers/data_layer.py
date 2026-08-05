@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import AgentEvent, DailyReport
 
 router = APIRouter(prefix="/api/data-layer", tags=["data-layer"])

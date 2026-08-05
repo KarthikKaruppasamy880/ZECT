@@ -13,8 +13,8 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.database import SessionLocal, get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.database import SessionLocal, get_db
 from app.models import FineTuneSample, MentrixRun
 from app.services.forge_loop.orchestrator import (
     AGENT_ROLES,
@@ -1108,8 +1108,8 @@ async def companion_realtime_ws(websocket: WebSocket, token: str = Query("")):
     For browser convenience, prefer ephemeral client_secret from /realtime/session and
     connect to OpenAI directly; this relay is available when proxying is preferred.
     """
-    from app.core.auth.session_store import get_token_row
-    from app.database import SessionLocal
+    from app.infrastructure.auth.session_store import get_token_row
+    from app.infrastructure.database import SessionLocal
     from app.services.mentrix.realtime import mint_realtime_session, realtime_enabled
 
     if not token:

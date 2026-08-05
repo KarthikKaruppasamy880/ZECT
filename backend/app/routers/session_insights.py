@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import UserSession, TokenLog, GeneratedOutput, ReviewSession
 
 router = APIRouter(prefix="/api/session-insights", tags=["session-insights"])

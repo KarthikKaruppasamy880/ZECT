@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import SkillDefinition, SkillExecutionLog
 
 router = APIRouter(prefix="/api/skills-engine", tags=["skills-engine"])

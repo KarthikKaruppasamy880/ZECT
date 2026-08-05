@@ -8,10 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import PermissionRule, PermissionAudit
-from app.core.auth.deps import get_current_user, CurrentUser
-from app.core.auth.rbac import (
+from app.infrastructure.auth.deps import get_current_user, CurrentUser
+from app.infrastructure.auth.rbac import (
     require_role,
     log_audit,
     get_user_from_current_user,

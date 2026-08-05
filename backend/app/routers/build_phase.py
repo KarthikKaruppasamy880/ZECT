@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.auth.rbac import log_audit
-from app.core.budget import enforce_token_budget
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.rbac import log_audit
+from app.infrastructure.budget import enforce_token_budget
+from app.infrastructure.database import get_db
 from app.models import Repo
 from app.token_tracker import log_tokens
 

@@ -12,9 +12,9 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.budget import enforce_token_budget
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.budget import enforce_token_budget
+from app.infrastructure.database import get_db
 from app.models import CodeEmbedding
 from app.services.build_intel.indexer import index_repo_semantic
 from app.services.build_intel.retriever import search as semantic_search

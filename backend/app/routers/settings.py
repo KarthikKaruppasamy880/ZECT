@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import Setting
 from app.schemas import SettingOut, SettingUpdate
 

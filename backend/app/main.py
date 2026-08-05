@@ -17,7 +17,7 @@ try:
 except Exception as e:
     raise RuntimeError(f"❌ Failed to initialize encryption vault: {e}")
 
-from app.database import init_db, SessionLocal
+from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management

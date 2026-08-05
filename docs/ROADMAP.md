@@ -8,7 +8,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 |---|---|---|---|
 | 0 | Repo audit + doc set | **Done** (this pass) | CURRENT_ARCHITECTURE.md, TARGET_ARCHITECTURE.md, FEATURE_INVENTORY.md, THREAT_MODEL.md, this file. |
 | 1 | Core platform, shared AgentRun | **Done (spine)** | `api/` + `domains/` + `adapters/` + `infrastructure/` + `workers/`; Mentrix shared run + cancel/retry/files/artifacts/terminal/gates; event `sequence_id` + SSE reconnect; MockCodingRuntime; audit on Mentrix state changes; Agent Workspace shell with Ask/Plan/Build/Review/Deploy modes. Residual: fat domain routers (not fully thin services), embedded Monaco diff still via App Runner, OpenHands = Phase 2. |
-| 2 | Coding-engine provider | ~5% | Build calls Anthropic/OpenAI directly in-process. No isolated per-run workspace, no sandboxing, no separate engine-server process. Furthest from target. |
+| 2 | Coding-engine provider | **In progress (Stage A)** | Workspace provisioner + `ZECT_CODING_ENGINE` factory + `/api/coding-engine/health` + Mock default. Remote adapter / Mentrix wire-up / Docker = Stages B–D. See `PHASE_2_EXECUTION_PLAN.md`. |
 | 3 | Cursor-like workspace | ~20% | Build has file-attach + diff viewer + generated-files list. No Monaco, file tree, terminal, inline code actions, or symbol search. |
 | 4 | PR review platform | ~60% | Ultra Review consolidated (verified — no duplicate implementations remain), gated human-approve-then-create-PR is real. `ReviewFinding` schema fields (fingerprint, confidence, validation_status) not verified against spec. |
 | 5 | Permissions/secrets/audit | ~55% | RBAC + Fernet secrets + pervasive audit log + permission broker exist. Missing granular capability grants w/ expiry, permission-diagnostics page, emergency stop. **Inherits THREAT_MODEL.md findings 1-6 as backlog**, especially the two Critical items (app_runner.py, sandbox.py). |
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 1 spine is complete.** Per Upgrade.md, stop and wait for approval before **Phase 2** (coding-runtime / OpenHands behind `CodingAgentRuntime`). Do not start Phase 9 (security incident) until unblocked.
+**Phase 2 Stage A** lands workspace isolation + engine factory/health. After merge, approve **Stage B** (remote adapter + event translation) before continuing. Phase 9 remains ON HOLD.

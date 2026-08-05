@@ -34,7 +34,7 @@ from app.domains.integration import (
     ci_monitor,
     ci_remediation,
 )
-from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer
+from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer, coding_engine
 from app.domains.repository import (
     repo_analysis,
     file_explorer,
@@ -124,6 +124,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(realtime.router)
     app.include_router(file_watcher.router)
     app.include_router(diff_viewer.router)
+    app.include_router(coding_engine.router)
 
     app.include_router(lattice_router.router)
     app.include_router(mentrix_router.router)

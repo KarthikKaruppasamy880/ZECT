@@ -32,6 +32,9 @@ def allowed_roots() -> list[str]:
     mentrix_ws = os.getenv("MENTRIX_WORKSPACE", "").strip()
     if mentrix_ws:
         roots.append(str(Path(mentrix_ws).resolve()))
+    engine_ws = os.getenv("ZECT_ENGINE_WORKSPACE_ROOT", "").strip()
+    if engine_ws:
+        roots.append(str(Path(engine_ws).resolve()))
     # De-dupe while preserving order
     seen: set[str] = set()
     out: list[str] = []

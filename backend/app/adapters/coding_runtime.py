@@ -1,11 +1,12 @@
-"""Coding-agent runtime adapter interface + MockRuntime (Phase 1).
+"""Coding-agent runtime adapter interface + MockRuntime + factory (Phase 2 Stage A).
 
-OpenHands wiring is Phase 2. Tests and local runs use MockCodingRuntime so
-orchestration does not require an external coding engine.
+Public provider names: mock | remote. Third-party product names must not appear
+in routes, UI, or public API payloads.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 from uuid import uuid4
@@ -41,6 +42,8 @@ class CodingAgentRuntime(Protocol):
 
 class MockCodingRuntime:
     """Deterministic in-memory runtime for unit tests and offline demos."""
+
+    provider_name = "mock"
 
     def __init__(self) -> None:
         self._runs: dict[str, dict[str, Any]] = {}
@@ -122,6 +125,14 @@ class MockCodingRuntime:
         self._require(run_id)
         self._runs.pop(run_id, None)
 
+    def health(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider_name,
+            "ready": True,
+            "version": "mock-1",
+            "detail": "mock_ok",
+        }
+
     def _require(self, run_id: str) -> dict[str, Any]:
         run = self._runs.get(run_id)
         if not run:
@@ -129,6 +140,46 @@ class MockCodingRuntime:
         return run
 
 
+def selected_coding_engine() -> str:
+    return (os.getenv("ZECT_CODING_ENGINE") or "mock").strip().lower() or "mock"
+
+
 def get_coding_runtime() -> CodingAgentRuntime:
-    """Factory — Phase 2 will switch on CODING_RUNTIME=openhands."""
-    return MockCodingRuntime()
+    """Factory — default mock; remote requires URL + API key (server-side)."""
+    mode = selected_coding_engine()
+    if mode == "mock":
+        return MockCodingRuntime()
+    if mode == "remote":
+        from app.adapters.coding_engine_remote import CodingEngineConfigError, RemoteCodingEngine
+
+        try:
+            return RemoteCodingEngine.from_env()
+        except CodingEngineConfigError:
+            raise
+    raise ValueError(f"Unknown ZECT_CODING_ENGINE={mode!r}; use mock|remote")
+
+
+def coding_engine_health() -> dict[str, Any]:
+    """Public health payload — provider is mock|remote only."""
+    mode = selected_coding_engine()
+    if mode == "mock":
+        return MockCodingRuntime().health()
+    if mode == "remote":
+        from app.adapters.coding_engine_remote import CodingEngineConfigError, RemoteCodingEngine
+
+        try:
+            engine = RemoteCodingEngine.from_env()
+        except CodingEngineConfigError as exc:
+            return {
+                "provider": "remote",
+                "ready": False,
+                "version": None,
+                "detail": str(exc),
+            }
+        return engine.health()
+    return {
+        "provider": mode,
+        "ready": False,
+        "version": None,
+        "detail": f"unknown_provider:{mode}",
+    }

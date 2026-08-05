@@ -1,32 +1,38 @@
-# Third-Party Notices
+# Third-party notices
 
-ZECT / Mentrix includes or depends on open-source components. This is a summary notice; see each package’s license for full terms.
+ZECT uses replaceable third-party components behind ZECT-owned adapter
+interfaces. Product UI, routes, and public APIs do not brand these
+components. Attribution required by applicable licenses is preserved here.
 
-## Backend (Python)
+## Remote coding Agent Server (optional Phase 2 provider)
 
-- FastAPI, Starlette, Uvicorn — MIT  
-- SQLAlchemy — MIT  
-- Pydantic — MIT  
-- httpx / requests — Apache-2.0 / Apache-2.0  
-- PyGithub — LGPL-3.0  
-- OpenAI Python SDK — Apache-2.0  
-- python-dotenv — BSD-3-Clause  
-- PyJWT (OIDC path) — MIT  
+When `ZECT_CODING_ENGINE=remote`, ZECT's backend may call an independently
+running Agent Server over HTTP/WebSocket (credentials never reach the
+browser). Compatible upstream packaging is typically distributed under the
+MIT License (OpenHands Software Agent SDK / Agent Server).
 
-## Frontend
+Pin a released version in deployment docs; do not install from an unpinned
+`main` branch in production.
 
-- React, React DOM — MIT  
-- React Router — MIT  
-- Vite — MIT  
-- Lucide React — ISC  
-- Tailwind CSS — MIT  
+Copyright (c) OpenHands contributors and/or respective authors.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-## Desktop
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-- Electron — MIT  
-- electron-builder — MIT  
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
-## Notes
-
-- No third-party product names are used as Mentrix branding in the shipped UI.  
-- Optional Azure AD / Entra SSO uses Microsoft identity endpoints; configure via env only.
+Source references (implementation detail, not product branding):
+- https://github.com/OpenHands/software-agent-sdk
+- https://github.com/OpenHands/OpenHands

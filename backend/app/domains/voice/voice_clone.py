@@ -36,7 +36,7 @@ MAX_SPEAK_TEXT_LEN = 4000
 SPEAK_RATE_LIMIT = int(os.getenv("MENTRIX_SPEAK_RATE_LIMIT", "300"))  # per user per hour
 CLONE_RATE_LIMIT = 5
 
-_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
 VOICES_DIR = _BACKEND_ROOT / "data" / "voices"
 
 ALLOWED_AUDIO_MIME = frozenset({

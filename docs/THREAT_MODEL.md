@@ -4,19 +4,15 @@ Ranked by severity. Phase 0 does not fix these — this is the input to Phase 5 
 
 ## Critical
 
-### 1. `app_runner.py` — unauthenticated-scope arbitrary shell execution, no path restriction
-`backend/app/routers/app_runner.py:174` (`/api/runner/execute`) and `:213` (`/api/runner/start`) run caller-supplied shell strings via `subprocess.run(req.command, shell=True, ...)` / `subprocess.Popen(req.command, shell=True, ...)`.
-- No command allowlist or escaping.
-- No RBAC decorator on either endpoint (confirmed via grep — no `require_role`/permission dependency in the file).
-- `cwd` is only checked for existence (`os.path.isdir`), **not** run through the `path_under_allowed_roots` allowlist that `file_explorer.py`/`git_ops.py` use.
-- **Impact:** any authenticated bearer-token holder gets full RCE as the backend process user, anywhere on the filesystem the process can reach.
-- This is a single-user personal tool today, which lowers real-world exploitability, but it's worth a conscious decision: keep as-is because you trust your own auth boundary, or add the same RBAC + path-allowlist pattern already used elsewhere in the codebase.
+### 1. ~~`app_runner.py` — unauthenticated-scope arbitrary shell execution, no path restriction~~ — FIXED
+`backend/app/routers/app_runner.py:174` (`/api/runner/execute`) and `:213` (`/api/runner/start`) ran caller-supplied shell strings via `subprocess.run(req.command, shell=True, ...)` / `subprocess.Popen(req.command, shell=True, ...)` with no RBAC decorator and no path allowlist on `cwd` (only checked for existence).
+- **Fixed** on `fix/app-runner-sandbox-rbac-and-injection`: `/execute`, `/start`, `/configure` are now `@require_role("admin")`, and `cwd`/`repo_path` route through the same `path_under_allowed_roots` allowlist Git Ops/File Explorer use, plus audit logging on every call. 13 new tests cover the gate and the allowlist.
 
-### 2. `sandbox.py` — silent host fallback + command injection even with Docker
+### 2. ~~`sandbox.py` — silent host fallback + command injection even with Docker~~ — FIXED
 `backend/app/routers/sandbox.py` docstring claims Docker-isolated execution, but:
-- `_run_local_sandbox` (line 75) runs directly on the host with `shell=True` whenever Docker isn't installed or `prefer_docker=False` (lines 115-123, 236-238) — **silent**, not surfaced as a degraded-mode warning to the caller.
-- `_run_docker_sandbox` (lines 137-147) builds the `docker run` command via raw string concatenation of `req.image`/`req.command` into a `shell=True` string — unescaped, so shell metacharacters in those fields break out of the intended container isolation.
-- **Impact:** the "safe sandbox" can silently not be a sandbox at all, and even when it is, its own invocation is injectable.
+- `_run_local_sandbox` ran directly on the host with `shell=True` whenever Docker isn't installed, with no signal in its result that no container isolation was used.
+- `_run_docker_sandbox` built the `docker run` command via raw string concatenation of `req.image`/`req.command` into a `shell=True` string — unescaped, so shell metacharacters in those fields broke out to the **host** shell before docker even started.
+- **Fixed** on `fix/app-runner-sandbox-rbac-and-injection`: Docker invocation is now an argv list with `shell=False` (the command text is still shell-interpreted, but only inside the container's own `/bin/sh`, confined by the same resource/network/user limits). Both paths now flag `"mode": "docker"` / `"mode": "local_unsandboxed"`, surfaced to callers via `pr_readiness`'s new `docker_isolated` field.
 
 ## High
 
@@ -52,4 +48,8 @@ Ranked by severity. Phase 0 does not fix these — this is the input to Phase 5 
 
 ## Recommended immediate action vs. Phase 5 backlog
 
-Findings 1 and 2 (Critical) are the only ones I'd flag as worth a decision *now*, independent of the phase roadmap, since they're live RCE-class gaps on a running service — not because Phase 0 mandates a fix, but because severity warrants a conscious choice rather than sitting in a backlog unexamined. Everything else fits naturally into Phase 5's permissions/secrets/audit work.
+Findings 1 and 2 (Critical) were fixed immediately rather than deferred — see above. Findings 3-6 fit naturally into Phase 5's permissions/secrets/audit work.
+
+## Correction to the original audit pass
+
+The original run of the backend test suite for this audit used a different Python install (`AppData\Local\Programs\Python\Python312`, via a broken project `.venv`) than the one used for all other work in this session (`AppData\Roaming\Python\Python314`). Re-verified in the actual working environment: `pytest-asyncio` **is** installed and `test_rbac.py`'s async tests pass cleanly — that part of the original finding was an artifact of the wrong Python install, not a real gap. The `auth.py` `.env`-reload bug (finding 4) **is** reproducible in the real working environment — `test_auth_contract.py::test_login_success_and_verify` fails there too — that finding stands as accurate.

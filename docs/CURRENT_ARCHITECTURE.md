@@ -42,9 +42,7 @@ This is organized **by feature**, not by the `api/domains/adapters/infrastructur
 
 ## Verified test status (full suite, no deselects)
 
-- Backend: `443 passed, 7 failed, 26 errors` (Python 3.12, system install — the project's own `.venv` is broken, missing pip-installed packages). All 33 failures/errors trace to **two environment issues, not product defects**:
-  1. `pytest-asyncio` not installed (an optional test extra) — breaks 6-7 async RBAC tests.
-  2. `auth.py`'s `_auth_creds()` reloads `.env` with `override=True` on every call, stomping the test suite's injected test credentials with real `.env` credentials mid-run — cascades into 26 fixture-setup errors in `test_enterprise_routers.py`/`test_mentrix_platform.py`.
+- Backend, re-verified against the actual working Python install (`AppData\Roaming\Python\Python314` — the project's own `.venv` is separately broken/unused): `449 passed, 1 failed` after the app_runner/sandbox security fixes (see THREAT_MODEL.md findings 1-2). The one remaining failure, `test_auth_contract.py::test_login_success_and_verify`, is a real code-level bug: `auth.py`'s `_auth_creds()` reloads `.env` with `override=True` on every call, stomping the test suite's injected test credentials with real `.env` credentials mid-run — cascades into fixture-setup errors in `test_enterprise_routers.py`/`test_mentrix_platform.py` too. (An earlier pass of this audit, run against a different/broken Python 3.12 install, also reported `pytest-asyncio` as missing — that was an artifact of the wrong install, not a real gap; it's present and the async RBAC tests pass in the actual working environment.)
 - Frontend: `36 passed (36)`, clean.
 
 See THREAT_MODEL.md for the `auth.py` reload behavior's production implications.

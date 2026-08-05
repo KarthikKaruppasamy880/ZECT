@@ -725,6 +725,8 @@ export const mentrixListRuns = (limit = 20) =>
   request<any[]>(`/api/mentrix/runs?limit=${limit}`);
 export const mentrixCancelRun = (runId: number) =>
   request<any>(`/api/mentrix/runs/${runId}`, { method: "DELETE" });
+export const mentrixRetryRun = (runId: number) =>
+  request<any>(`/api/mentrix/runs/${runId}/retry`, { method: "POST" });
 export const mentrixApproveRun = (runId: number, acknowledge_issues = false) =>
   request<any>(`/api/mentrix/runs/${runId}/approve`, {
     method: "POST",

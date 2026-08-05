@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime, timezone
 
+import time
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Any
@@ -13,6 +15,7 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.domains.audit.audit_trail import log_audit
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.database import SessionLocal, get_db
 from app.models import FineTuneSample, MentrixRun
@@ -27,6 +30,11 @@ from app.services.forge_loop.orchestrator import (
 from app.workers.mentrix_worker import run_mentrix_in_background
 
 router = APIRouter(prefix="/api/mentrix", tags=["mentrix"])
+
+# Mentrix Delivery state set (Phase 1). Upgrade.md also lists queued/provisioning/validating —
+# those map onto Mentrix phases inside events; top-level status stays product-facing.
+MENTRIX_TERMINAL = frozenset({"completed", "failed", "cancelled", "pr_created", "approved"})
+RETRYABLE_STATUSES = frozenset({"failed", "cancelled", "needs_human"})
 
 
 class StartRunRequest(BaseModel):
@@ -78,26 +86,81 @@ class ConfirmPlanRequest(BaseModel):
     steps: list[dict[str, Any]] | None = None
 
 
+def _normalize_events(raw: Any) -> list[dict[str, Any]]:
+    """Ensure every event has a stable 1-based sequence_id for SSE reconnect."""
+    events = raw if isinstance(raw, list) else []
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(events):
+        if not isinstance(item, dict):
+            continue
+        ev = dict(item)
+        if "sequence_id" not in ev:
+            ev["sequence_id"] = i + 1
+        out.append(ev)
+    return out
+
+
+def _append_event(run: MentrixRun, event: dict[str, Any]) -> list[dict[str, Any]]:
+    events = _normalize_events(json.loads(run.events_json or "[]"))
+    next_seq = (events[-1]["sequence_id"] if events else 0) + 1
+    payload = dict(event)
+    payload.setdefault("sequence_id", next_seq)
+    payload.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    events.append(payload)
+    run.events_json = json.dumps(events)
+    return events
+
+
+def _artifacts_from_run(run: MentrixRun, result: dict[str, Any], files_written: list) -> list[dict[str, Any]]:
+    arts: list[dict[str, Any]] = []
+    for path in files_written:
+        arts.append({"kind": "file", "path": path})
+    if run.pr_url:
+        arts.append({"kind": "pr", "url": run.pr_url})
+    for key in ("plan", "ask", "ultra_review", "api_eval", "builder"):
+        if result.get(key):
+            arts.append({"kind": "result", "name": key})
+    return arts
+
+
 def _run_to_dict(run: MentrixRun) -> dict:
     result = json.loads(run.result_json or "{}")
     builder = result.get("builder") or {}
     files_written = builder.get("files_written") or result.get("files_written") or []
     if not isinstance(files_written, list):
         files_written = []
+    events = _normalize_events(json.loads(run.events_json or "[]"))
+    gates = json.loads(run.gates_json or "{}")
+    terminal_lines = [
+        f"[{e.get('phase') or e.get('agent') or 'mentrix'}] {e.get('message') or e.get('event') or ''}"
+        for e in events
+        if e.get("message") or e.get("event")
+    ]
     return {
         "id": run.id,
         "status": run.status,
         "mode": run.mode,
         "goal": run.goal,
         "current_agent": run.current_agent,
-        "events": json.loads(run.events_json or "[]"),
+        "events": events,
         "result": result,
-        "gates": json.loads(run.gates_json or "{}"),
+        "gates": gates,
         "next_step": run.next_step or "",
         "approved_at": run.approved_at.isoformat() if run.approved_at else None,
         "approved_by": run.approved_by or "",
         "pr_url": run.pr_url or "",
         "files_written": files_written,
+        "artifacts": _artifacts_from_run(run, result, files_written),
+        "terminal": terminal_lines[-80:],
+        "test_results": {
+            "lint_ok": gates.get("lint_ok"),
+            "sandbox_ready": gates.get("sandbox_ready"),
+            "api_eval_ok": gates.get("api_eval_ok"),
+            "review_ok": gates.get("review_ok"),
+            "incomplete_ok": gates.get("incomplete_ok"),
+            "sast_ok": gates.get("sast_ok"),
+        },
+        "event_cursor": events[-1]["sequence_id"] if events else 0,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
     }
@@ -150,12 +213,33 @@ def start_run(
         current_agent="orchestrator",
         events_json="[]",
         gates_json="{}",
+        result_json=json.dumps(
+            {
+                "context": {
+                    "project_key": req.project_key or "",
+                    "workspace": req.workspace or "",
+                    "source_lang": req.source_lang or "",
+                    "target_lang": req.target_lang or "",
+                    "repo_id": req.repo_id,
+                }
+            }
+        ),
         next_step="",
         created_by=user.email,
     )
     db.add(run)
     db.commit()
     db.refresh(run)
+
+    log_audit(
+        db,
+        action="mentrix_run_start",
+        resource_type="mentrix_run",
+        resource_id=run.id,
+        resource_name=(req.goal or "")[:120],
+        details=json.dumps({"mode": req.mode, "project_key": req.project_key or ""}),
+        user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+    )
 
     background_tasks.add_task(
         run_mentrix_in_background,
@@ -288,19 +372,164 @@ def cancel_run(
     if run.status != "cancelled":
         run.status = "cancelled"
         run.next_step = f"Cancelled by {user.email or user.username or 'user'}"
-        events = json.loads(run.events_json or "[]")
-        events.append(
+        _append_event(
+            run,
             {
                 "agent": "orchestrator",
                 "phase": "cancel",
                 "event": "cancelled",
                 "message": run.next_step,
-            }
+            },
         )
-        run.events_json = json.dumps(events)
         db.commit()
         db.refresh(run)
+        log_audit(
+            db,
+            action="mentrix_run_cancel",
+            resource_type="mentrix_run",
+            resource_id=run.id,
+            resource_name=(run.goal or "")[:120],
+            details=json.dumps({"status": run.status}),
+            user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+        )
     return _run_to_dict(run)
+
+
+@router.post("/runs/{run_id}/retry")
+def retry_run(
+    run_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Retry a failed/cancelled/needs_human run by starting a fresh Mentrix run (same goal/mode)."""
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status not in RETRYABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry a run in status={run.status}",
+        )
+    result = json.loads(run.result_json or "{}")
+    ctx = result.get("context") or {}
+    goal = (run.goal or "").strip()
+    mode = run.mode or "deliver"
+    project_key = ctx.get("project_key") or ""
+    workspace = ctx.get("workspace") or ""
+    source_lang = ctx.get("source_lang") or ""
+    target_lang = ctx.get("target_lang") or ""
+    repo_id = ctx.get("repo_id")
+    project_id = run.project_id
+
+    new_run = MentrixRun(
+        project_id=project_id,
+        mode=mode,
+        goal=goal,
+        status="running",
+        current_agent="orchestrator",
+        events_json=json.dumps(
+            [
+                {
+                    "sequence_id": 1,
+                    "agent": "orchestrator",
+                    "phase": "retry",
+                    "event": "retry",
+                    "message": f"Retry of run #{run_id}",
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }
+            ]
+        ),
+        gates_json="{}",
+        next_step="",
+        created_by=user.email,
+    )
+    db.add(new_run)
+    db.commit()
+    db.refresh(new_run)
+    log_audit(
+        db,
+        action="mentrix_run_retry",
+        resource_type="mentrix_run",
+        resource_id=new_run.id,
+        resource_name=goal[:120],
+        details=json.dumps({"retried_from": run_id, "mode": mode}),
+        user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+    )
+    background_tasks.add_task(
+        run_mentrix_in_background,
+        new_run.id,
+        goal=goal,
+        mode=mode,
+        project_key=project_key,
+        project_id=project_id,
+        created_by=user.email,
+        workspace=workspace,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        repo_id=repo_id if isinstance(repo_id, int) else None,
+    )
+    return _run_to_dict(new_run)
+
+
+@router.get("/runs/{run_id}/events/stream")
+def stream_run_events(
+    run_id: int,
+    after: int = Query(0, ge=0, description="Resume after this sequence_id"),
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """SSE of Mentrix run events with sequence_id; reconnect with ?after=<last_seq>."""
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    def gen():
+        cursor = after
+        idle_rounds = 0
+        # Bound the stream so tests and proxies don't hang forever.
+        while idle_rounds < 40:
+            session = SessionLocal()
+            try:
+                row = session.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+                if not row:
+                    yield f"event: error\ndata: {json.dumps({'error': 'not_found'})}\n\n"
+                    return
+                events = _normalize_events(json.loads(row.events_json or "[]"))
+                new_events = [e for e in events if int(e.get("sequence_id") or 0) > cursor]
+                for ev in new_events:
+                    cursor = int(ev["sequence_id"])
+                    yield f"id: {cursor}\nevent: mentrix_event\ndata: {json.dumps(ev)}\n\n"
+                    idle_rounds = 0
+                payload = {
+                    "run_id": run_id,
+                    "status": row.status,
+                    "event_cursor": cursor,
+                }
+                yield f"event: status\ndata: {json.dumps(payload)}\n\n"
+                if row.status != "running" and not new_events:
+                    idle_rounds += 1
+                    if row.status in MENTRIX_TERMINAL or row.status in (
+                        "awaiting_plan_confirm",
+                        "awaiting_approval",
+                        "needs_human",
+                    ):
+                        # Pause states: emit once more then close so clients reconnect on action.
+                        if idle_rounds >= 2:
+                            yield f"event: done\ndata: {json.dumps(payload)}\n\n"
+                            return
+                else:
+                    idle_rounds += 1
+            finally:
+                session.close()
+            time.sleep(0.25)
+        yield f"event: done\ndata: {json.dumps({'run_id': run_id, 'event_cursor': cursor, 'reason': 'timeout'})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/runs")
@@ -373,18 +602,18 @@ def approve_run(
     run.status = "approved"
     run.next_step = "create_pr"
     run.gates_json = json.dumps(gates)
-    events = json.loads(run.events_json or "[]")
-    events.append({
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "agent": "orchestrator",
-        "message": f"Human approved by {run.approved_by}",
-        "event": "approve",
-        "next_step": "create_pr",
-    })
+    _append_event(
+        run,
+        {
+            "agent": "orchestrator",
+            "message": f"Human approved by {run.approved_by}",
+            "event": "approve",
+            "next_step": "create_pr",
+        },
+    )
     if req.acknowledge_issues:
         reason = (req.acknowledge_reason or "").strip() or "human override of non-security gates"
         waiver_event = {
-            "ts": datetime.now(timezone.utc).isoformat(),
             "agent": "orchestrator",
             "message": f"Acknowledge waiver by {run.approved_by}: {reason}",
             "event": "acknowledge_waiver",
@@ -392,17 +621,25 @@ def approve_run(
             "reason": reason,
             "actor": run.approved_by,
         }
-        events.append(waiver_event)
+        events = _append_event(run, waiver_event)
         result["acknowledge_waiver"] = {
             "waived_gates": waived,
             "reason": reason,
             "actor": run.approved_by,
-            "ts": waiver_event["ts"],
+            "ts": events[-1].get("ts"),
         }
         run.result_json = json.dumps(result)
-    run.events_json = json.dumps(events)
     db.commit()
     db.refresh(run)
+    log_audit(
+        db,
+        action="mentrix_run_approve",
+        resource_type="mentrix_run",
+        resource_id=run.id,
+        resource_name=(run.goal or "")[:120],
+        details=json.dumps({"acknowledge_issues": bool(req.acknowledge_issues), "waived": waived}),
+        user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+    )
     return _run_to_dict(run)
 
 
@@ -498,16 +735,16 @@ def create_pr_for_run(
     run.pr_url = pr_url
     run.status = "pr_created"
     run.next_step = "done"
-    events = json.loads(run.events_json or "[]")
-    events.append({
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "agent": "integrator",
-        "message": f"PR created: {pr_url}",
-        "event": "create_pr",
-        "pr_url": pr_url,
-        "by": user.email,
-    })
-    run.events_json = json.dumps(events)
+    _append_event(
+        run,
+        {
+            "agent": "integrator",
+            "message": f"PR created: {pr_url}",
+            "event": "create_pr",
+            "pr_url": pr_url,
+            "by": user.email,
+        },
+    )
     result = json.loads(run.result_json or "{}")
     result["pr"] = pr_meta if not dry else {"dry_run": True, "html_url": pr_url}
 
@@ -533,23 +770,25 @@ def create_pr_for_run(
                 "repo": repo_name,
             }
             result["sast"] = gates["sast_detail"]
-            events.append({
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "agent": "integrator",
-                "message": f"SAST check: ok={gates['sast_ok']} ({sast.get('note') or ''})",
-                "event": "sast_check",
-            })
-            run.events_json = json.dumps(events)
+            _append_event(
+                run,
+                {
+                    "agent": "integrator",
+                    "message": f"SAST check: ok={gates['sast_ok']} ({sast.get('note') or ''})",
+                    "event": "sast_check",
+                },
+            )
             if gates["sast_required"] and not gates["sast_ok"]:
                 run.status = "awaiting_sast"
                 run.next_step = "await_sast"
-                events.append({
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "agent": "integrator",
-                    "message": "Awaiting Semgrep/GitHub SAST success — use POST /refresh-sast",
-                    "event": "awaiting_sast",
-                })
-                run.events_json = json.dumps(events)
+                _append_event(
+                    run,
+                    {
+                        "agent": "integrator",
+                        "message": "Awaiting Semgrep/GitHub SAST success — use POST /refresh-sast",
+                        "event": "awaiting_sast",
+                    },
+                )
         except Exception as exc:
             gates["sast_checked"] = True
             gates["sast_ok"] = False if gates.get("sast_required") else True
@@ -562,6 +801,15 @@ def create_pr_for_run(
     run.result_json = json.dumps(result)
     db.commit()
     db.refresh(run)
+    log_audit(
+        db,
+        action="mentrix_run_create_pr",
+        resource_type="mentrix_run",
+        resource_id=run.id,
+        resource_name=(run.goal or "")[:120],
+        details=json.dumps({"pr_url": pr_url, "dry_run": bool(dry)}),
+        user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+    )
     return _run_to_dict(run)
 
 

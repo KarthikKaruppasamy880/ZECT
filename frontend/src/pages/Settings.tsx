@@ -267,8 +267,10 @@ export default function Settings() {
           <div>
             <p className="text-sm font-medium text-slate-900">Agent Mode (legacy orchestrator)</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Mentrix Delivery is the primary Agent Workspace path. Enable Agent Mode only if you need the
-              older multi-stage /api/agent runner. You can turn this off anytime.
+              Deprecated power-user facade over Mentrix Delivery. Prefer Agent Workspace for plan
+              confirm, gates, approve, and PR. Enable only if you still need the older multi-stage
+              /api/agent runner. Scheduled for removal after Mentrix cancel/files/App Runner parity
+              lands.
               {agentModeLocked && (
                 <span className="block mt-1 text-amber-700">
                   Locked by VITE_ENABLE_AGENT_MODE in the environment.

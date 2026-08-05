@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   mentrixAgents,
+  mentrixCancelRun,
   mentrixGetRun,
   mentrixListRuns,
   mentrixStartRun,
@@ -217,6 +218,26 @@ export function useMentrixRun() {
     [applyRun],
   );
 
+  const cancelRun = useCallback(
+    async (id: number) => {
+      setLoading(true);
+      setError("");
+      try {
+        stopPolling();
+        const run = await mentrixCancelRun(id);
+        applyRun(run, { pollIfRunning: false });
+        await refresh();
+        return run;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Cancel failed");
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [applyRun, refresh, stopPolling],
+  );
+
   useEffect(() => {
     void refresh();
     return () => stopPolling();
@@ -251,6 +272,7 @@ export function useMentrixRun() {
     stopPolling,
     startRun,
     openRun,
+    cancelRun,
     gates,
     canApprove,
     canCreatePr,

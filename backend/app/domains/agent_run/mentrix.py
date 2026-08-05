@@ -79,6 +79,11 @@ class ConfirmPlanRequest(BaseModel):
 
 
 def _run_to_dict(run: MentrixRun) -> dict:
+    result = json.loads(run.result_json or "{}")
+    builder = result.get("builder") or {}
+    files_written = builder.get("files_written") or result.get("files_written") or []
+    if not isinstance(files_written, list):
+        files_written = []
     return {
         "id": run.id,
         "status": run.status,
@@ -86,12 +91,13 @@ def _run_to_dict(run: MentrixRun) -> dict:
         "goal": run.goal,
         "current_agent": run.current_agent,
         "events": json.loads(run.events_json or "[]"),
-        "result": json.loads(run.result_json or "{}"),
+        "result": result,
         "gates": json.loads(run.gates_json or "{}"),
         "next_step": run.next_step or "",
         "approved_at": run.approved_at.isoformat() if run.approved_at else None,
         "approved_by": run.approved_by or "",
         "pr_url": run.pr_url or "",
+        "files_written": files_written,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
     }
@@ -261,6 +267,39 @@ def get_run(run_id: int, db: Session = Depends(get_db), _user: CurrentUser = Dep
     run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    return _run_to_dict(run)
+
+
+@router.delete("/runs/{run_id}")
+def cancel_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Cancel an in-flight Mentrix run (parity with Agent Mode DELETE /api/agent/run/{id})."""
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status in ("approved", "pr_created", "completed"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot cancel a run in status={run.status}",
+        )
+    if run.status != "cancelled":
+        run.status = "cancelled"
+        run.next_step = f"Cancelled by {user.email or user.username or 'user'}"
+        events = json.loads(run.events_json or "[]")
+        events.append(
+            {
+                "agent": "orchestrator",
+                "phase": "cancel",
+                "event": "cancelled",
+                "message": run.next_step,
+            }
+        )
+        run.events_json = json.dumps(events)
+        db.commit()
+        db.refresh(run)
     return _run_to_dict(run)
 
 

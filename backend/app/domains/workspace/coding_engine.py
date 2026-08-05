@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.adapters.coding_runtime import coding_engine_health, get_coding_runtime, selected_coding_engine
-from app.adapters.coding_engine_remote import CodingEngineConfigError
+from app.adapters.coding_engine_remote import CodingEngineConfigError, CodingEngineRequestError
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.services.coding_engine.workspace import WorkspaceError, dispose_worktree, provision_worktree
 
@@ -26,6 +26,11 @@ class DisposeRequest(BaseModel):
     repo_path: str | None = None
     workspace_path: str | None = None
     preserve_artifacts: bool = True
+
+
+class StartEngineRunRequest(BaseModel):
+    goal: str = Field(..., min_length=1)
+    workspace: str = ""
 
 
 @router.get("/health")
@@ -82,3 +87,76 @@ def runtime_info(_user: CurrentUser = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     provider = getattr(rt, "provider_name", selected_coding_engine())
     return {"provider": provider, "ready": True}
+
+
+@router.post("/runs")
+def start_engine_run(req: StartEngineRunRequest, _user: CurrentUser = Depends(get_current_user)):
+    """Start a coding-engine run (mock or remote). Returns ZECT-shaped events only."""
+    try:
+        rt = get_coding_runtime()
+        run_id = rt.start_run(req.goal.strip(), workspace=req.workspace or "")
+        return rt.get_run(run_id)
+    except CodingEngineConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CodingEngineRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/runs/{run_id}")
+def get_engine_run(run_id: str, _user: CurrentUser = Depends(get_current_user)):
+    try:
+        rt = get_coding_runtime()
+        return rt.get_run(run_id)
+    except CodingEngineConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+    except CodingEngineRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/runs/{run_id}/events")
+def list_engine_events(
+    run_id: str,
+    after: int = 0,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Reconnect-friendly event list (sequence_id > after)."""
+    try:
+        rt = get_coding_runtime()
+        events = rt.stream_events(run_id, after=after)
+        return {
+            "run_id": run_id,
+            "events": [
+                {
+                    "sequence_id": e.sequence_id,
+                    "event": e.event,
+                    "message": e.message,
+                    "phase": e.phase,
+                    "data": e.data,
+                }
+                for e in events
+            ],
+        }
+    except CodingEngineConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+    except CodingEngineRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.delete("/runs/{run_id}")
+def cancel_engine_run(run_id: str, _user: CurrentUser = Depends(get_current_user)):
+    try:
+        rt = get_coding_runtime()
+        rt.cancel_run(run_id)
+        return rt.get_run(run_id)
+    except CodingEngineConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Run not found") from None
+    except CodingEngineRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

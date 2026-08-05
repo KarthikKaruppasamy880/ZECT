@@ -12,5 +12,6 @@ from app.domains.personal_agent import conversations
 from app.domains.personal_agent import session_insights
 from app.domains.personal_agent import persistent_sessions
 from app.domains.personal_agent import user_sessions
+from app.domains.personal_agent import file_organize
 
-__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions']
+__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions', 'file_organize']

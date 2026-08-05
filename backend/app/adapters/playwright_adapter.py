@@ -46,7 +46,7 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
         }
 
     if tool_name == "status":
-        return {"status": "ready", "engine": "chromium"}
+        return {"status": "ready", "engine": "browser_automation"}
 
     try:
         context, page = _get_page()
@@ -79,8 +79,45 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
                 value = arguments.get("value", "")
                 if not selector:
                     return {"status": "error", "message": "selector required"}
-                page.fill(selector, str(value), timeout=15_000)
-                return {"status": "ok", "filled": selector, "url": page.url}
+                max_attempts = int(arguments.get("retries") or 2)
+                last_err = None
+                for attempt in range(max(1, max_attempts)):
+                    try:
+                        page.fill(selector, str(value), timeout=15_000)
+                        actual = page.input_value(selector)
+                        if str(actual) != str(value):
+                            raise RuntimeError(
+                                f"fill verify failed: expected {value!r} got {actual!r}"
+                            )
+                        return {
+                            "status": "ok",
+                            "filled": selector,
+                            "verified": True,
+                            "url": page.url,
+                            "engine": "browser_automation",
+                            "attempt": attempt + 1,
+                        }
+                    except Exception as exc:  # noqa: BLE001
+                        last_err = exc
+                        try:
+                            shot = page.screenshot(type="png")
+                            # Return short base64 prefix only — full artifacts stay optional
+                            import base64
+
+                            artifact = base64.b64encode(shot[:4096]).decode("ascii")
+                        except Exception:
+                            artifact = ""
+                        if attempt + 1 >= max_attempts:
+                            return {
+                                "status": "error",
+                                "message": str(last_err),
+                                "tool": tool_name,
+                                "verified": False,
+                                "screenshot_b64_prefix": artifact,
+                                "dom_excerpt": (page.content() or "")[:2000],
+                                "engine": "browser_automation",
+                            }
+                return {"status": "error", "message": str(last_err), "tool": tool_name}
             return {"status": "unknown_tool", "tool": tool_name}
         finally:
             context.close()

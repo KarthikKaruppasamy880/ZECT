@@ -12,12 +12,12 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 3 | Cursor-like workspace | **Done (A–E)** | `/workspace` tree+Monaco+git+terminal+Mentrix timeline+diff/hunks+inline Ask+symbols/worktrees. See `PHASE_3_EXECUTION_PLAN.md`. |
 | 4 | PR review platform | **Done (A–D)** | Schema + validate/dedupe/rank; deterministic secrets/TODO/rules; approve-before-post + Mentrix bugfix hook. See `PHASE_4_EXECUTION_PLAN.md`. |
 | 5 | Permissions/secrets/audit | **Done (A–D)** | Audit unify; grants; secret refs + redaction + diagnostics; global emergency-stop + audit hash chain. See `PHASE_5_EXECUTION_PLAN.md`. |
-| 6 | Realtime voice | **~75% — most complete phase** | Persistent session, per-sentence streaming speech, true cross-sentence prefetch, barge-in cancellation, 8 named latency checkpoints, short-timeout no-silent-retry — all shipped this session. Built on the OpenAI Realtime API directly (already brand-clean); no LiveKit dependency needed unless a future provider swap is wanted. |
-| 7 | Browser/desktop access | ~15% — and inverted priority order | "Computer Mode" is OS-level simulated input (SendKeys/window activation) — the tier the target architecture says should be *last resort*, currently the *only* method. No DOM/accessibility-tree automation. File-organization workflow (hash+rollback) not built. |
-| 8 | Email/Slack/Calendar/Jira | ~40% | Real Jira/Slack/Confluence/Datadog MCP adapters work today. Admin-configured credentials, not per-user OAuth; no draft-before-send gate; no Calendar adapter. |
-| 9 | Security monitoring/incident response | **ON HOLD** | Existing custom audit-log anomaly detector → Jira ticket flow is a real, separate, ZECT-native capability — kept as-is, not extended toward Wazuh/osquery/Velociraptor until unblocked. |
-| 10 | Memory/skills/automation | ~35% | Mentrix Notes + a Skills concept exist. Scheduled/condition-based automation with retry/idempotency not verified as built to spec. Sidebar has both "Skill Library" and "Skills Engine," and both "Memory System" and "Mentrix Notes" — check for real duplication before building more here (see FEATURE_INVENTORY.md). |
-| 11 | Packaging/licensing/release | ~0% | No dependency/license audit, signed builds, or update mechanism found. |
+| 6 | Realtime voice | **In progress (Stage A)** | Engine ~75% complete. Stage A: voice telemetry HUD (mode + latency marks). See `PHASES_6_11_STAGE_A.md`. |
+| 7 | Browser/desktop access | **In progress (Stage A)** | Browser fill verify + artifacts; file-organize dry-run/approve/hash/rollback. Computer Mode remains last-resort. |
+| 8 | Email/Slack/Calendar/Jira | **In progress (Stage A)** | Slack/email draft-before-send via `OutboundDraft`. Calendar/OAuth deferred. |
+| 9 | Security monitoring/incident response | **ON HOLD** | Do not implement. |
+| 10 | Memory/skills/automation | **In progress (Stage A)** | Schedule trigger executes Mentrix runs with permission + idempotency. |
+| 11 | Packaging/licensing/release | **In progress (Stage A)** | `THIRD_PARTY_NOTICES.md` expanded; `docs/RELEASE.md`; `scripts/support_bundle.py`. |
 
 ## Phase 0 exit backlog (small, concrete items surfaced by this audit — not yet actioned)
 
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 5 is complete (A–D).** Next decision: Phase 6 (realtime voice) when requested. Phase 9 remains ON HOLD.
+**Phases 6–8 / 10–11 Stage A** is the current deliverable (see `PHASES_6_11_STAGE_A.md`). Phase 9 remains ON HOLD.

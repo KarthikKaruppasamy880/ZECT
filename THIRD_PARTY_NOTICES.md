@@ -47,3 +47,25 @@ Monaco Editor is licensed under the MIT License.
 Copyright (c) Microsoft Corporation.
 
 https://github.com/microsoft/monaco-editor
+
+## Browser automation engine (Phase 7)
+
+ZECT Mentrix may drive a local Chromium instance through an internal
+browser-automation adapter for DOM fill/click/snapshot. The product UI
+exposes this as Mentrix Browser Automation — not under a third-party brand.
+
+When Playwright (Apache-2.0) is installed as the implementation library,
+its copyright and license terms apply to that dependency only.
+
+https://github.com/microsoft/playwright
+
+## Voice / realtime media (Phase 6)
+
+Mentrix Realtime voice may use cloud realtime speech APIs or local TTS
+clone engines configured via environment and Secrets Manager. Adapter
+boundaries keep provider names out of ZECT routes and UI labels.
+
+## Electron desktop shell (Phase 11)
+
+The optional desktop shell uses Electron (MIT) for windowing. App identity
+is `com.zinnia.zect`. See `docs/RELEASE.md` for packaging gates.

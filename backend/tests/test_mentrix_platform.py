@@ -65,6 +65,9 @@ def test_auth_dev_defaults_when_unset(monkeypatch):
 
 def test_mentrix_upgrade_pipeline_phases(client, auth_headers, monkeypatch):
     monkeypatch.setenv("MENTRIX_LINT_STRICT", "false")
+    # Same contract as deliver/approve tests: LATTICE_ENABLED=false skips the
+    # "must be Lattice-indexed" preflight so unit tests don't need a real ingest.
+    monkeypatch.setenv("LATTICE_ENABLED", "false")
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / "app.py").write_text(
@@ -84,12 +87,19 @@ def test_mentrix_upgrade_pipeline_phases(client, auth_headers, monkeypatch):
             },
         )
         assert resp.status_code == 200, resp.text
-        data = _await_run_completion(client, auth_headers, resp.json()["id"])
+        run_id = resp.json()["id"]
+        data = _await_run_completion(client, auth_headers, run_id)
         assert data["mode"] == "upgrade"
-        assert data["status"] in ("awaiting_approval", "needs_human", "completed")
+        # Upgrade pauses for human plan confirm before Build/gates.
+        assert data["status"] in (
+            "awaiting_plan_confirm",
+            "awaiting_approval",
+            "needs_human",
+            "completed",
+        )
         events = data.get("events") or []
         phases = {e.get("phase") for e in events if e.get("phase")}
-        # Real Ask/Plan/Build/Ultra Review path markers
+        # Real Ask/Plan path markers (pre-confirm)
         assert "lattice" in phases or any(e.get("agent") == "scout" for e in events)
         assert any(
             e.get("phase") in ("blueprint", "ask", "plan", "build", "ultra_review", "api_eval")
@@ -98,6 +108,17 @@ def test_mentrix_upgrade_pipeline_phases(client, auth_headers, monkeypatch):
         )
         result = data.get("result") or {}
         assert "ask" in result or "plan" in result or "builder" in result
+
+        if data["status"] == "awaiting_plan_confirm":
+            confirm = client.post(
+                f"/api/mentrix/runs/{run_id}/confirm-plan",
+                headers=auth_headers,
+                json={},
+            )
+            assert confirm.status_code == 200, confirm.text
+            data = _await_run_completion(client, auth_headers, run_id, attempts=40)
+            assert data["status"] in ("awaiting_approval", "needs_human", "completed")
+
         gates = data.get("gates") or {}
         assert "incomplete_ok" in gates
         assert "api_eval_ok" in gates

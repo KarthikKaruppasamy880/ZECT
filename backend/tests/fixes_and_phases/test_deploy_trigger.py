@@ -26,7 +26,7 @@ class TestTriggerWorkflow:
             "app.github_service.trigger_workflow_dispatch",
             lambda owner, repo, workflow_file, ref, inputs: {"dispatched": True, "message": "Dispatched deploy.yml on main"},
         )
-        monkeypatch.setattr("app.routers.audit_trail.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.audit.audit_trail.log_audit", lambda **kw: None)
 
         req = DeployTriggerRequest(owner="acme", repo="widgets", workflow_file="deploy.yml", ref="main", environment="staging")
         result = trigger_workflow(req, current_user=CURRENT_USER, db=Mock(spec=Session))
@@ -76,7 +76,7 @@ class TestTriggerWorkflow:
             "app.github_service.trigger_workflow_dispatch",
             lambda owner, repo, workflow_file, ref, inputs: {"dispatched": True, "message": "Dispatched deploy.yml on main"},
         )
-        monkeypatch.setattr("app.routers.audit_trail.log_audit", lambda **kw: None)
+        monkeypatch.setattr("app.domains.audit.audit_trail.log_audit", lambda **kw: None)
 
         req = DeployTriggerRequest(
             owner="acme", repo="widgets", workflow_file="deploy.yml", environment="production", audit_id=42

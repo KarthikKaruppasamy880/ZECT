@@ -68,6 +68,114 @@ class TestElevenLabsClient:
         assert audio == b"fake-mp3-bytes"
 
 
+class TestEnsureEngineProfileReprovisionCooldown:
+    """external_voice_id missing (e.g. cloned while Chatterbox was offline)
+    made _ensure_engine_profile re-clone the voice from stored sample on
+    EVERY /speak call — a heavier op than plain synthesis, with a 60s
+    timeout. If Chatterbox rejected/hung, that stalled every single sentence
+    of a live conversation for many seconds before falling back to OpenAI.
+    Now: a short timeout on the retry itself, plus a cooldown so a failure
+    doesn't repeat the same slow attempt on the very next sentence."""
+
+    def _row(self, tmp_path, voice_id="v1"):
+        sample = tmp_path / "sample.wav"
+        sample.write_bytes(b"fake-audio")
+        return ClonedVoice(
+            user_id=5,
+            voice_id=voice_id,
+            external_voice_id=None,
+            name="Me",
+            provider="chatterbox",
+            sample_path=str(sample),
+            reference_text="hello",
+        )
+
+    def test_failed_reprovision_uses_short_timeout_and_502(self, tmp_path, monkeypatch):
+        from app.routers import voice_clone as vc
+
+        vc._reprovision_blocked_until.clear()
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        clone_calls = []
+
+        def boom(*a, timeout=None, **kw):
+            clone_calls.append(timeout)
+            raise RuntimeError("Chatterbox profile creation failed (500): engine error")
+
+        monkeypatch.setattr("app.services.llm.chatterbox_client.clone_voice", boom)
+
+        row = self._row(tmp_path)
+        with pytest.raises(HTTPException) as exc:
+            vc._ensure_engine_profile(row)
+
+        assert exc.value.status_code == 502
+        assert clone_calls == [chatterbox_client.REPROVISION_TIMEOUT]
+        assert clone_calls[0] < 60.0  # short, not the 60s /clone default
+
+    def test_repeat_call_within_cooldown_skips_network_entirely(self, tmp_path, monkeypatch):
+        from app.routers import voice_clone as vc
+
+        vc._reprovision_blocked_until.clear()
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        clone_calls = []
+
+        def boom(*a, **kw):
+            clone_calls.append(1)
+            raise RuntimeError("engine error")
+
+        monkeypatch.setattr("app.services.llm.chatterbox_client.clone_voice", boom)
+        row = self._row(tmp_path)
+
+        with pytest.raises(HTTPException):
+            vc._ensure_engine_profile(row)
+        assert len(clone_calls) == 1
+
+        # Next sentence, moments later — must NOT repeat the slow attempt.
+        with pytest.raises(HTTPException) as exc:
+            vc._ensure_engine_profile(row)
+        assert len(clone_calls) == 1
+        assert exc.value.status_code == 503
+
+    def test_cooldown_expires_and_allows_retry(self, tmp_path, monkeypatch):
+        from app.routers import voice_clone as vc
+
+        vc._reprovision_blocked_until.clear()
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.clone_voice",
+            lambda *a, **kw: {"voice_id": "engine-2"},
+        )
+        row = self._row(tmp_path, voice_id="v2")
+        vc._reprovision_blocked_until["v2"] = 0.0  # already expired
+
+        result = vc._ensure_engine_profile(row)
+
+        assert result == "engine-2"
+        assert "v2" not in vc._reprovision_blocked_until
+
+    def test_successful_reprovision_returns_engine_id(self, tmp_path, monkeypatch):
+        from app.routers import voice_clone as vc
+
+        vc._reprovision_blocked_until.clear()
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        monkeypatch.setattr(
+            "app.services.llm.chatterbox_client.clone_voice",
+            lambda *a, **kw: {"voice_id": "engine-3"},
+        )
+        row = self._row(tmp_path, voice_id="v3")
+
+        result = vc._ensure_engine_profile(row)
+
+        assert result == "engine-3"
+
+
 class TestSpeakRateLimit:
     """30/hour was sized for one /speak call per full reply. Sentence-level
     TTS streaming and Present Deck's chunking both call /speak several times

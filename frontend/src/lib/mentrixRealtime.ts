@@ -7,6 +7,7 @@ import { isOpenAiQuotaError } from "@/mentrix/desktopBridge";
 import { audioConstraintsForDevice } from "@/lib/micDevices";
 import {
   chunkSpeakText,
+  createPerfTracker,
   nextSpeakableSentence,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
@@ -404,6 +405,16 @@ export async function startMentrixRealtime(
     if (stopped) return;
     stopped = true;
     stopClonedSpeakEl();
+    sentenceQueue.length = 0;
+    lookahead = null;
+    for (const c of inFlightAborts) {
+      try {
+        c.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    inFlightAborts.clear();
     try {
       captureDispose?.();
     } catch {
@@ -564,37 +575,91 @@ export async function startMentrixRealtime(
    * complete sentences start synthesizing as they stream in, instead of the
    * whole reply waiting for response.done before any Chatterbox call fires. */
   let clonedSpokenUpTo = 0;
-  /** performance.now() at response.created — used to log how much of the
-   * latency to first speech is LLM generation vs. Chatterbox synthesis. */
-  let responseStartedAt = 0;
   /** Last thing the user said — paired with the assistant's reply for auto-logging to Notes. */
   let lastUserTranscript = "";
 
+  // --- Latency instrumentation ------------------------------------------
+  // Named checkpoints from end-of-user-speech to first audio, so a slow
+  // reply is diagnosed from real numbers instead of guessed. perf.reset()
+  // fires at user_speech_stopped (the actual point "response time" is
+  // measured from); perf.mark() dedupes so only the FIRST occurrence per
+  // turn logs (repeat deltas/sentences within one reply would otherwise
+  // spam the log with the same checkpoint name).
+  const perf = createPerfTracker();
+  const markPerf = (name: string) => {
+    const m = perf.mark(name);
+    if (m) handlers.onLog?.(`perf: ${m.name} at +${m.elapsedMs}ms`);
+  };
+
+  // --- Barge-in cancellation ---------------------------------------------
+  // turnGeneration increments on every new user turn (speech_started) —
+  // anything still fetching/queued/playing from a stale generation is
+  // dropped instead of talking over the user. inFlightAborts lets a real
+  // in-progress /speak HTTP request be cancelled immediately, not just
+  // ignored once it resolves.
+  let turnGeneration = 0;
+  const inFlightAborts = new Set<AbortController>();
+  const cancelCurrentTurn = (reason: string) => {
+    turnGeneration += 1;
+    sentenceQueue.length = 0;
+    lookahead = null;
+    for (const c of inFlightAborts) {
+      try {
+        c.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    inFlightAborts.clear();
+    if (clonedSpeakEl) {
+      stopClonedSpeakEl();
+      handlers.onLog?.(`Interrupted (${reason}) — stopped speech`);
+    }
+  };
+
   type ClonedSpeakBuffer = { buf: ArrayBuffer; engine: string };
 
-  const fetchClonedSpeakBuffer = async (text: string): Promise<ClonedSpeakBuffer | null> => {
-    const res = await apiFetch("/api/mentrix/voice/speak", {
-      method: "POST",
-      body: JSON.stringify({ text: text.slice(0, 4000) }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      const detail =
-        typeof err.detail === "string" ? err.detail : `Speak failed (${res.status})`;
-      handlers.onLog?.(`cloned TTS failed: ${detail}`);
-      handlers.onError?.(`Voice output: ${detail}`);
+  const fetchClonedSpeakBuffer = async (text: string, gen: number): Promise<ClonedSpeakBuffer | null> => {
+    if (gen !== turnGeneration || stopped) return null;
+    markPerf("tts_request_started");
+    const controller = new AbortController();
+    inFlightAborts.add(controller);
+    try {
+      const res = await apiFetch("/api/mentrix/voice/speak", {
+        method: "POST",
+        body: JSON.stringify({ text: text.slice(0, 4000) }),
+        signal: controller.signal,
+      });
+      if (gen !== turnGeneration) return null;
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        const detail =
+          typeof err.detail === "string" ? err.detail : `Speak failed (${res.status})`;
+        handlers.onLog?.(`cloned TTS failed: ${detail}`);
+        handlers.onError?.(`Voice output: ${detail}`);
+        return null;
+      }
+      // /speak falls back server-side (Chatterbox -> OpenAI) and still returns
+      // 200 — this header is the only way to tell your real clone apart from a
+      // silent fallback to a generic voice.
+      const engine = res.headers.get("X-Mentrix-TTS-Engine") || "unknown";
+      const arrayBuf = await res.arrayBuffer();
+      if (gen !== turnGeneration) return null;
+      markPerf("tts_first_audio_chunk");
+      if (!arrayBuf.byteLength) {
+        handlers.onError?.("Voice output: empty audio from /voice/speak");
+        return null;
+      }
+      return { buf: arrayBuf, engine };
+    } catch (e) {
+      if (controller.signal.aborted) return null; // cancelled by barge-in, not a real error
+      const msg = e instanceof Error ? e.message : "speak request failed";
+      handlers.onLog?.(`cloned TTS failed: ${msg}`);
+      handlers.onError?.(`Voice output: ${msg}`);
       return null;
+    } finally {
+      inFlightAborts.delete(controller);
     }
-    // /speak falls back server-side (Chatterbox -> OpenAI) and still returns
-    // 200 — this header is the only way to tell your real clone apart from a
-    // silent fallback to a generic voice.
-    const engine = res.headers.get("X-Mentrix-TTS-Engine") || "unknown";
-    const arrayBuf = await res.arrayBuffer();
-    if (!arrayBuf.byteLength) {
-      handlers.onError?.("Voice output: empty audio from /voice/speak");
-      return null;
-    }
-    return { buf: arrayBuf, engine };
   };
 
   const playClonedMpeg = (arrayBuf: ArrayBuffer): Promise<void> =>
@@ -605,7 +670,9 @@ export async function startMentrixRealtime(
       const audio = new Audio(url);
       clonedSpeakEl = audio;
       clonedSpeakUrl = url;
+      audio.onplaying = () => markPerf("playback_started");
       audio.onended = () => {
+        markPerf("playback_finished");
         stopClonedSpeakEl();
         resolve();
       };
@@ -625,7 +692,15 @@ export async function startMentrixRealtime(
   /**
    * Speak cloned TTS via HTMLAudio only (never decodeAudioData into the 24 kHz
    * Realtime AudioContext — that crashes Electron on Windows).
-   * Chunk + prefetch so the first sentence starts playing sooner than one big MP3.
+   *
+   * A single persistent queue + lookahead prefetch spans the WHOLE reply
+   * (not just one call's worth of chunks): as soon as a queue item starts
+   * being awaited, the NEXT queued item's fetch is kicked off immediately
+   * too, so its Chatterbox synthesis overlaps with the current item's
+   * playback instead of only starting once playback finishes. enqueueSpeak
+   * (called per-sentence as text streams in, and once more for the trailing
+   * remainder at response.done) just pushes chunkSpeakText(text)'s pieces
+   * onto this queue and (re)starts the runner if it's idle.
    *
    * Mic is muted only while audio is actually PLAYING, not while a chunk is
    * being fetched/synthesized: cloned audio plays through a plain <audio>
@@ -633,94 +708,100 @@ export async function startMentrixRealtime(
    * without muting, your speakers leaking into the mic gets transcribed as
    * new user speech and the model replies to itself (short, generic,
    * back-to-back non-sequiturs — "Bye.", "Have fun. Have fun. Have fun.").
-   * Muting for the *whole* reply (the first version of this fix) instead
-   * left the mic deaf during network/synthesis wait time too, when nothing
-   * was even playing yet — that's dead time with zero feedback risk, but it
-   * silently ate the start of anything you said during a slow reply,
-   * feeling like a new response-time regression. Scoping the mute to just
-   * each chunk's playback keeps that window as small as it can be. Native
-   * (non-cloned) audio doesn't need this at all — OpenAI's own pipeline
-   * already knows that audio is its own output.
+   * Native (non-cloned) audio doesn't need this at all — OpenAI's own
+   * pipeline already knows that audio is its own output.
    */
+  type QueueItem = { text: string; gen: number };
+  const sentenceQueue: QueueItem[] = [];
+  let lookahead: { key: QueueItem; promise: Promise<ClonedSpeakBuffer | null> } | null = null;
+  let queueRunning = false;
   let pendingSpeakCount = 0;
-  const speakWithClonedVoice = async (text: string) => {
-    if (!text.trim() || stopped) return;
+  const turnEnginesUsed = new Set<string>();
+
+  const startLookahead = () => {
+    if (lookahead || !sentenceQueue.length || stopped) return;
+    const item = sentenceQueue[0];
+    lookahead = { key: item, promise: fetchClonedSpeakBuffer(item.text, item.gen) };
+  };
+
+  const runSpeakQueue = async () => {
+    if (queueRunning) return;
+    queueRunning = true;
     try {
-      if (audioCtx?.state === "suspended") {
-        await audioCtx.resume().catch(() => undefined);
-      }
-      const chunks = chunkSpeakText(text);
-      if (!chunks.length) return;
-      handlers.onOrb?.("speaking");
-      const enginesUsed = new Set<string>();
-      let nextFetch: Promise<ClonedSpeakBuffer | null> = fetchClonedSpeakBuffer(chunks[0]);
-      for (let i = 0; i < chunks.length; i++) {
-        if (stopped) return;
-        const current = await nextFetch;
-        if (i + 1 < chunks.length) {
-          nextFetch = fetchClonedSpeakBuffer(chunks[i + 1]);
+      while (sentenceQueue.length) {
+        if (stopped) {
+          sentenceQueue.length = 0;
+          break;
         }
-        if (!current) continue;
-        enginesUsed.add(current.engine);
-        setMicEnabled(false);
+        const item = sentenceQueue.shift()!;
+        if (item.gen !== turnGeneration) {
+          pendingSpeakCount = Math.max(0, pendingSpeakCount - 1);
+          continue;
+        }
+        const bufPromise =
+          lookahead && lookahead.key === item ? lookahead.promise : fetchClonedSpeakBuffer(item.text, item.gen);
+        lookahead = null;
+        // Start fetching whatever's next in line right away — overlaps its
+        // synthesis with this item's fetch/playback below.
+        startLookahead();
+        const itemStartedAt = performance.now();
+        let buf: ClonedSpeakBuffer | null = null;
         try {
-          await playClonedMpeg(current.buf);
-        } catch (playErr) {
-          const msg = playErr instanceof Error ? playErr.message : "playback failed";
-          if (/NotAllowedError|user interaction/i.test(msg)) {
-            handlers.onError?.(
-              "Voice output blocked — click the Mentrix window, then speak again",
-            );
-            return;
+          if (audioCtx?.state === "suspended") await audioCtx.resume().catch(() => undefined);
+          buf = await bufPromise;
+        } catch {
+          buf = null;
+        }
+        if (item.gen !== turnGeneration || stopped) {
+          pendingSpeakCount = Math.max(0, pendingSpeakCount - 1);
+          continue;
+        }
+        if (buf) {
+          turnEnginesUsed.add(buf.engine);
+          handlers.onOrb?.("speaking");
+          setMicEnabled(false);
+          try {
+            await playClonedMpeg(buf.buf);
+          } catch (playErr) {
+            const msg = playErr instanceof Error ? playErr.message : "playback failed";
+            if (/NotAllowedError|user interaction/i.test(msg)) {
+              handlers.onError?.("Voice output blocked — click the Mentrix window, then speak again");
+            } else {
+              handlers.onError?.(`Voice output: ${msg}`);
+            }
+          } finally {
+            setMicEnabled(true);
           }
-          handlers.onError?.(`Voice output: ${msg}`);
-        } finally {
-          setMicEnabled(true);
+          // Per-sentence timing (distinct from the once-per-turn perf marks
+          // above) — verifies there's no multi-second gap reappearing at
+          // every period, not just on the first sentence of a reply.
+          const preview = item.text.length > 40 ? `${item.text.slice(0, 40)}…` : item.text;
+          handlers.onLog?.(`sentence spoken in ${Math.round(performance.now() - itemStartedAt)}ms: "${preview}"`);
+        }
+        pendingSpeakCount = Math.max(0, pendingSpeakCount - 1);
+        if (pendingSpeakCount === 0 && !stopped) {
+          if (turnEnginesUsed.size) {
+            const label = [...turnEnginesUsed].join(" + ");
+            const isClone = turnEnginesUsed.size === 1 && turnEnginesUsed.has("chatterbox");
+            handlers.onLog?.(isClone ? "Spoke via your cloned voice" : `Spoke via: ${label} (not your cloned voice)`);
+            turnEnginesUsed.clear();
+          }
+          handlers.onOrb?.("listening");
         }
       }
-      if (enginesUsed.size) {
-        const label = [...enginesUsed].join(" + ");
-        const isClone = enginesUsed.size === 1 && enginesUsed.has("chatterbox");
-        handlers.onLog?.(isClone ? `Spoke via your cloned voice` : `Spoke via: ${label} (not your cloned voice)`);
-      }
-      // pendingSpeakCount still includes this call (decremented after it
-      // returns, in enqueueSpeak's .finally) — <= 1 means nothing else is
-      // queued behind it, so it's safe to show "listening" now instead of
-      // flickering back to speaking for the next queued sentence.
-      if (!stopped && pendingSpeakCount <= 1) handlers.onOrb?.("listening");
-    } catch (e) {
-      stopClonedSpeakEl();
-      const msg = e instanceof Error ? e.message : "cloned TTS failed";
-      handlers.onLog?.(`cloned TTS error: ${msg}`);
-      handlers.onError?.(
-        /NotAllowedError|user interaction/i.test(msg)
-          ? "Voice output blocked — click the Mentrix window, then speak again"
-          : `Voice output: ${msg}`,
-      );
     } finally {
-      setMicEnabled(true);
+      queueRunning = false;
     }
   };
 
-  /** Serializes queued sentences through speakWithClonedVoice one at a time
-   * (never concurrently — that would overlap/garble audio and mic-mute
-   * state), while letting each sentence be enqueued the instant it streams
-   * in rather than waiting for the whole reply. Also logs the latency split
-   * so it's visible whether a slow reply is LLM generation or Chatterbox
-   * synthesis, instead of that being a guess. */
-  let speakChain: Promise<void> = Promise.resolve();
   const enqueueSpeak = (text: string) => {
-    const queuedAt = performance.now();
-    const genMs = Math.round(queuedAt - responseStartedAt);
-    pendingSpeakCount += 1;
-    speakChain = speakChain
-      .then(() => speakWithClonedVoice(text))
-      .finally(() => {
-        pendingSpeakCount -= 1;
-        const speakMs = Math.round(performance.now() - queuedAt);
-        const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
-        handlers.onLog?.(`TTS latency — text ready ${genMs}ms after response start, spoke in ${speakMs}ms: "${preview}"`);
-      });
+    if (!text.trim() || stopped) return;
+    for (const chunk of chunkSpeakText(text)) {
+      sentenceQueue.push({ text: chunk, gen: turnGeneration });
+      pendingSpeakCount += 1;
+    }
+    startLookahead();
+    void runSpeakQueue();
   };
 
   ws.onerror = () => {
@@ -742,14 +823,27 @@ export async function startMentrixRealtime(
       return;
     }
     const t = msg.type as string;
-    if (t === "input_audio_buffer.speech_started") handlers.onOrb?.("listening");
+    if (t === "input_audio_buffer.speech_started") {
+      handlers.onOrb?.("listening");
+      // Barge-in: a new user turn (interrupting mid-reply, or just starting
+      // a fresh one) invalidates whatever was queued/playing/in-flight from
+      // before. If nothing was active this is a no-op beyond bumping the
+      // generation counter.
+      cancelCurrentTurn("user_speech_started");
+    }
+    if (t === "input_audio_buffer.speech_stopped") {
+      // "Response time" is measured from here, not from response.created —
+      // this is the actual moment the user is waiting on a reply from.
+      perf.reset();
+      markPerf("user_speech_stopped");
+    }
     if (t === "response.created") {
       handlers.onOrb?.("thinking");
       if (clonedVoiceActive) {
         clonedTextAcc = "";
         clonedSpokenUpTo = 0;
       }
-      responseStartedAt = performance.now();
+      markPerf("llm_request_started");
     }
     // Paint cloned text as it streams so the bubble is not stuck waiting for TTS.
     if (
@@ -758,6 +852,7 @@ export async function startMentrixRealtime(
       typeof msg.delta === "string" &&
       msg.delta
     ) {
+      markPerf("llm_first_token");
       clonedTextAcc += msg.delta;
       handlers.onTranscript?.("assistant", clonedTextAcc);
       // Speak each completed sentence the instant it streams in, rather than
@@ -793,6 +888,7 @@ export async function startMentrixRealtime(
         t === "conversation.item.input_audio_transcription.done") &&
       userTranscript
     ) {
+      markPerf("transcript_final");
       lastUserTranscript = String(userTranscript);
       handlers.onTranscript?.("user", lastUserTranscript);
     }

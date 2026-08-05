@@ -12,10 +12,31 @@ import time
 import uuid
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.core.allowed_paths import path_under_allowed_roots
+from app.core.auth.deps import CurrentUser, get_current_user
+from app.core.auth.rbac import log_audit, require_role
+from app.database import get_db
 
 router = APIRouter(prefix="/api/runner", tags=["app-runner"])
+
+
+def _validate_cwd(raw: str | None) -> str:
+    """Resolve and enforce the same filesystem allowlist git_ops.py and
+    file_explorer.py already use — previously this only checked the
+    directory existed, so an arbitrary-shell-command endpoint could also
+    target any directory on the host, not just the workspace root."""
+    candidate = raw or os.path.expanduser("~")
+    try:
+        p = path_under_allowed_roots(candidate)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    if not p.is_dir():
+        raise HTTPException(status_code=400, detail=f"Directory not found: {candidate}")
+    return str(p)
 
 _IS_WINDOWS = sys.platform.startswith("win")
 
@@ -164,11 +185,25 @@ async def _read_process_output(proc_info: ProcessInfo):
 # ---------------------------------------------------------------------------
 
 @router.post("/execute")
-async def execute_command(req: ExecuteRequest):
-    """Run a one-shot command and return the full output (blocking, with timeout)."""
-    cwd = req.cwd or os.path.expanduser("~")
-    if not os.path.isdir(cwd):
-        raise HTTPException(400, f"Directory not found: {cwd}")
+@require_role("admin")
+async def execute_command(
+    req: ExecuteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Run a one-shot command and return the full output (blocking, with timeout).
+
+    Runs an arbitrary shell command as the backend process user — admin-only
+    and confined to the same workspace allowlist as Git Ops/File Explorer.
+    """
+    cwd = _validate_cwd(req.cwd)
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="runner_execute",
+        resource_type="app_runner",
+        details={"command": req.command[:300], "cwd": cwd},
+    )
 
     try:
         result = subprocess.run(
@@ -199,11 +234,22 @@ async def execute_command(req: ExecuteRequest):
 
 
 @router.post("/start")
-async def start_process(req: StartRequest):
-    """Start a long-running process (e.g. dev server) in background."""
-    cwd = req.cwd or os.path.expanduser("~")
-    if not os.path.isdir(cwd):
-        raise HTTPException(400, f"Directory not found: {cwd}")
+@require_role("admin")
+async def start_process(
+    req: StartRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Start a long-running process (e.g. dev server) in background. Admin-only,
+    confined to the same workspace allowlist as Git Ops/File Explorer."""
+    cwd = _validate_cwd(req.cwd)
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="runner_start",
+        resource_type="app_runner",
+        details={"command": req.command[:300], "cwd": cwd, "label": req.label or ""},
+    )
 
     env = os.environ.copy()
     if req.env_vars:
@@ -301,20 +347,35 @@ async def remove_process(process_id: str):
 
 
 @router.post("/configure")
-async def configure_project(req: ConfigureRequest):
+@require_role("admin")
+async def configure_project(
+    req: ConfigureRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Configure a project: validate path, optionally install deps, set env vars,
-    and start the dev server."""
-    if not os.path.isdir(req.repo_path):
-        raise HTTPException(400, f"Repo path not found: {req.repo_path}")
+    and start the dev server. Admin-only, confined to the workspace allowlist."""
+    repo_path = _validate_cwd(req.repo_path)
+    log_audit(
+        db=db,
+        user_id=current_user.user_id,
+        action="runner_configure",
+        resource_type="app_runner",
+        details={
+            "repo_path": repo_path,
+            "install_command": (req.install_command or "")[:300],
+            "startup_command": (req.startup_command or "")[:300],
+        },
+    )
 
-    results = {"repo_path": req.repo_path, "steps": []}
+    results = {"repo_path": repo_path, "steps": []}
 
     # 1. Install deps if requested
     if req.install_command:
         install = subprocess.run(
             req.install_command,
             shell=True,
-            cwd=req.repo_path,
+            cwd=repo_path,
             capture_output=True,
             text=True,
             timeout=120,
@@ -336,15 +397,15 @@ async def configure_project(req: ConfigureRequest):
         proc = subprocess.Popen(
             req.startup_command,
             shell=True,
-            cwd=req.repo_path,
+            cwd=repo_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
             **_popen_kwargs(),
         )
-        label = f"Dev Server ({os.path.basename(req.repo_path)})"
-        info = ProcessInfo(pid=proc.pid, proc=proc, label=label, cwd=req.repo_path, cmd=req.startup_command)
+        label = f"Dev Server ({os.path.basename(repo_path)})"
+        info = ProcessInfo(pid=proc.pid, proc=proc, label=label, cwd=repo_path, cmd=req.startup_command)
         _processes[info.id] = info
         task = asyncio.create_task(_read_process_output(info))
         _bg_tasks[info.id] = task

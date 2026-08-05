@@ -1045,6 +1045,28 @@ export const gitCreatePR = (repoPath: string, title: string, body = "", baseBran
     method: "POST",
     body: JSON.stringify({ repo_path: repoPath, title, body, base_branch: baseBranch, ...(headBranch ? { head_branch: headBranch } : {}) }),
   });
+export const gitRestore = (repoPath: string, files: string[]) =>
+  request<any>("/api/git/restore", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, files }),
+  });
+
+/** Compare two strings via /api/diff/compare (unified + side_by_side + stats). */
+export const diffCompare = (
+  left: string,
+  right: string,
+  opts?: { left_label?: string; right_label?: string; context_lines?: number },
+) =>
+  request<any>("/api/diff/compare", {
+    method: "POST",
+    body: JSON.stringify({
+      left,
+      right,
+      left_label: opts?.left_label ?? "baseline",
+      right_label: opts?.right_label ?? "current",
+      context_lines: opts?.context_lines ?? 3,
+    }),
+  });
 
 // CI/CD Monitor
 export const ciRuns = (owner: string, repo: string, branch?: string, limit = 10) =>

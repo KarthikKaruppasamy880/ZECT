@@ -39,3 +39,26 @@ export function languageFromPath(path: string): string {
   };
   return map[ext] || "plaintext";
 }
+
+/** Relative path of `candidate` under `root`, or null if outside. */
+export function relativeToRoot(candidate: string, root: string): string | null {
+  if (!isPathInsideRoot(candidate, root)) return null;
+  const c = normalizePath(candidate);
+  const r = normalizePath(root);
+  if (c.toLowerCase() === r.toLowerCase()) return "";
+  return c.slice(r.length + 1);
+}
+
+/** True when path (abs or rel) matches any marker entry (abs or rel under root). */
+export function pathMatchesMarker(filePath: string, root: string, markers: Iterable<string>): boolean {
+  const rel = relativeToRoot(filePath, root);
+  const normFile = normalizePath(filePath).toLowerCase();
+  const normRel = (rel ?? "").toLowerCase();
+  for (const m of markers) {
+    const nm = normalizePath(m).toLowerCase();
+    if (!nm) continue;
+    if (nm === normFile || (normRel && (nm === normRel || nm.endsWith("/" + normRel)))) return true;
+    if (isPathInsideRoot(m, root) && normalizePath(m).toLowerCase() === normFile) return true;
+  }
+  return false;
+}

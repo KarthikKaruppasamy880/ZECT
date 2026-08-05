@@ -68,6 +68,40 @@ class TestElevenLabsClient:
         assert audio == b"fake-mp3-bytes"
 
 
+class TestSpeakRateLimit:
+    """30/hour was sized for one /speak call per full reply. Sentence-level
+    TTS streaming and Present Deck's chunking both call /speak several times
+    per turn/slide, so the old ceiling started blocking normal single-user
+    use well before an hour of active conversation."""
+
+    def test_default_limit_raised_for_per_sentence_chunking(self):
+        from app.routers import voice_clone as vc
+
+        assert vc.SPEAK_RATE_LIMIT >= 300
+
+    def test_rate_limit_still_blocks_once_actually_exceeded(self):
+        from collections import defaultdict
+
+        from app.routers.voice_clone import _rate_limit
+
+        bucket: dict[int, list[float]] = defaultdict(list)
+        for _ in range(3):
+            _rate_limit(bucket, user_id=1, limit=3)
+        with pytest.raises(HTTPException) as exc:
+            _rate_limit(bucket, user_id=1, limit=3)
+        assert exc.value.status_code == 429
+
+    def test_rate_limit_is_per_user(self):
+        from app.routers.voice_clone import _rate_limit
+        from collections import defaultdict
+
+        bucket: dict[int, list[float]] = defaultdict(list)
+        for _ in range(3):
+            _rate_limit(bucket, user_id=1, limit=3)
+        # A different user must not be blocked by user 1's usage.
+        _rate_limit(bucket, user_id=2, limit=3)
+
+
 class TestChatterboxClient:
     def test_available_reflects_server_reachability(self, monkeypatch):
         mock_resp = Mock(status_code=200)

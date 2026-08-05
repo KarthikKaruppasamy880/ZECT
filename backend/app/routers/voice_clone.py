@@ -26,7 +26,12 @@ MAX_SAMPLE_BYTES = 10_000_000
 MAX_NAME_LEN = 100
 MAX_REFERENCE_TEXT_LEN = 2000
 MAX_SPEAK_TEXT_LEN = 4000
-SPEAK_RATE_LIMIT = 30  # per user per hour
+# 30/hour was sized for one /speak call per full reply. Realtime companion
+# now dispatches one call per SENTENCE as it streams (lower time-to-first-
+# audio), and Present Deck already chunks per ~220 chars — both multiply
+# calls per turn/slide 3-5x, so the old ceiling started 429ing legitimate
+# single-user conversations/presentations well within normal use.
+SPEAK_RATE_LIMIT = int(os.getenv("MENTRIX_SPEAK_RATE_LIMIT", "300"))  # per user per hour
 CLONE_RATE_LIMIT = 5
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]

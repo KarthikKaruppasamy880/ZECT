@@ -19,7 +19,7 @@ CURRENT_USER = Mock(user_id=7, email="dev@zinnia.com")
 class TestTriggerWorkflow:
     def test_dispatches_immediately_when_policy_allows(self, monkeypatch):
         monkeypatch.setattr(
-            "app.routers.permissions.check_permission",
+            "app.domains.permissions.permissions.check_permission",
             lambda data, db: {"result": "granted", "permission_level": "allow", "audit_id": 1},
         )
         monkeypatch.setattr(
@@ -36,7 +36,7 @@ class TestTriggerWorkflow:
 
     def test_returns_pending_approval_when_policy_requires_it(self, monkeypatch):
         monkeypatch.setattr(
-            "app.routers.permissions.check_permission",
+            "app.domains.permissions.permissions.check_permission",
             lambda data, db: {"result": "pending_approval", "permission_level": "require_approval", "audit_id": 42},
         )
 
@@ -49,7 +49,7 @@ class TestTriggerWorkflow:
 
     def test_denied_by_policy_raises_403(self, monkeypatch):
         monkeypatch.setattr(
-            "app.routers.permissions.check_permission",
+            "app.domains.permissions.permissions.check_permission",
             lambda data, db: {"result": "denied", "permission_level": "never", "audit_id": 1},
         )
 
@@ -99,7 +99,7 @@ class TestTriggerWorkflow:
 
     def test_github_dispatch_failure_returns_502(self, monkeypatch):
         monkeypatch.setattr(
-            "app.routers.permissions.check_permission",
+            "app.domains.permissions.permissions.check_permission",
             lambda data, db: {"result": "granted", "permission_level": "allow", "audit_id": 1},
         )
 

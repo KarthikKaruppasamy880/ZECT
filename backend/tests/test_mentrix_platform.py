@@ -54,8 +54,8 @@ def test_auth_dev_defaults_when_unset(monkeypatch):
     monkeypatch.delenv("ZECT_ENV", raising=False)
     monkeypatch.delenv("ZECT_USERNAME", raising=False)
     monkeypatch.delenv("ZECT_PASSWORD", raising=False)
-    monkeypatch.setattr("app.routers.auth.load_dotenv", lambda *a, **k: None)
-    from app.routers import auth as auth_mod
+    monkeypatch.setattr("app.domains.permissions.auth.load_dotenv", lambda *a, **k: None)
+    from app.domains.permissions import auth as auth_mod
 
     auth_mod._dev_defaults_logged = False
     user, password = auth_mod._auth_creds()

@@ -252,7 +252,7 @@ class TestSastChecksOk:
 
 class TestDesktopDeleteNever:
     def test_delete_file_seed_is_never(self):
-        from app.routers.permissions import DEFAULT_RULES
+        from app.domains.permissions.permissions import DEFAULT_RULES
         from app.services.mentrix.org_policy import COMPANION_SEED_RULES
 
         delete = next(r for r in DEFAULT_RULES if r["action_pattern"] == "delete_file")

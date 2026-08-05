@@ -7,10 +7,6 @@ import {
   BarChart3,
   FileText,
   Settings,
-  MessageSquare,
-  ClipboardList,
-  Hammer,
-  Rocket,
   Microscope,
   Sparkles,
   BookOpen,
@@ -21,7 +17,6 @@ import {
   Menu,
   X,
   Coins,
-  Shield,
   ScrollText,
   Plug,
   Scale,
@@ -57,7 +52,7 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 const workflowItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
   { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: AlertTriangle },
-  { href: "/mentrix", label: "Mentrix Delivery", icon: Bot },
+  { href: "/mentrix", label: "Agent Workspace", icon: Bot },
 ];
 
 const workspaceItems: NavItem[] = [
@@ -76,12 +71,8 @@ const understandItems: NavItem[] = [
   { href: "/docs", label: "Docs Center", icon: FileText },
 ];
 
+/** Ask/Plan/Build/Review/Deploy live in the Agent Workspace rail — not duplicated here. */
 const deliverItemsBase: NavItem[] = [
-  { href: "/ask", label: "Ask", icon: MessageSquare },
-  { href: "/plan", label: "Plan", icon: ClipboardList },
-  { href: "/build", label: "Build", icon: Hammer },
-  { href: "/review", label: "Snippet Review", icon: Shield },
-  { href: "/deploy", label: "Deploy", icon: Rocket },
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
 ];
 

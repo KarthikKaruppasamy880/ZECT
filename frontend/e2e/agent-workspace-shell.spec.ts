@@ -25,4 +25,15 @@ test.describe("Agent Workspace shell", () => {
     await page.goto("/agent-mode");
     await expect(page.getByTestId("agent-mode-page")).toBeVisible({ timeout: 30_000 });
   });
+
+  test("Sidebar collapses phase tools into Agent Workspace entry", async ({ page }) => {
+    await page.goto("/mentrix");
+    await expect(page.getByTestId("agent-workspace")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("link", { name: "Agent Workspace" })).toBeVisible();
+    await expect(page.getByRole("navigation").getByRole("link", { name: "Ask" })).toHaveCount(0);
+    await expect(page.getByRole("navigation").getByRole("link", { name: "Plan" })).toHaveCount(0);
+    await expect(page.getByRole("navigation").getByRole("link", { name: "Build" })).toHaveCount(0);
+    await expect(page.getByTestId("agent-workspace-step-ask")).toBeVisible();
+    await expect(page.getByTestId("agent-workspace-step-plan")).toBeVisible();
+  });
 });

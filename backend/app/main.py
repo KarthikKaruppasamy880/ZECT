@@ -19,8 +19,7 @@ except Exception as e:
 
 from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
-from app.routers import settings
-from app.domains.project import projects, analytics, export_share, token_controls, generated_outputs
+from app.domains.project import projects, analytics, export_share, token_controls, generated_outputs, settings
 from app.domains.permissions import auth, permissions, secrets_manager
 from app.domains.pr_review import github, code_review
 from app.domains.agent_run import (

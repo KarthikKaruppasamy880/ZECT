@@ -263,7 +263,7 @@ def trigger_workflow(
     audit_id to approve via POST /api/permissions/audits/{id}/approve, then
     retry this call with that audit_id."""
     from app.models import PermissionAudit
-    from app.routers.audit_trail import log_audit
+    from app.domains.audit.audit_trail import log_audit
     from app.routers.permissions import PermissionCheck, check_permission
 
     action = f"deploy_{req.environment}"

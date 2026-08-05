@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import PermissionAudit, PermissionRule
-from app.routers.audit_trail import log_audit
+from app.domains.audit.audit_trail import log_audit
 
 # Companion tool → permission action mapping
 TOOL_ACTIONS: dict[str, str] = {

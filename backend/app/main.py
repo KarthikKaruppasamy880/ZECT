@@ -21,7 +21,8 @@ from app.infrastructure.database import init_db, SessionLocal
 from app.models import Project, Repo, Rule
 from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
 from app.routers import build_phase, review_phase, deploy_phase, token_controls, model_selection, orchestration, context_management
-from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
+from app.routers import ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
+from app.domains.audit import audit_trail
 from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
 from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
 from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights

@@ -162,23 +162,14 @@ def toggle_schedule(schedule_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{schedule_id}/trigger")
 def trigger_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    """Manually trigger a scheduled task."""
+    """Manually trigger a scheduled task — executes real work (Phase 10 Stage A)."""
     try:
+        from app.domains.personal_agent.schedule_executor import execute_schedule
+
         sched = db.query(Schedule).filter(Schedule.id == schedule_id).first()
         if not sched:
             raise HTTPException(status_code=404, detail="Schedule not found")
-        run = ScheduleRun(
-            schedule_id=schedule_id,
-            trigger_type="manual",
-            status="completed",
-            output_summary=f"Manual trigger of '{sched.name}' at {datetime.now(timezone.utc).isoformat()}",
-            completed_at=datetime.now(timezone.utc),
-        )
-        db.add(run)
-        sched.run_count = (sched.run_count or 0) + 1
-        sched.last_run_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(run)
+        run = execute_schedule(db, sched, trigger_type="manual")
         return _run_to_dict(run)
     except HTTPException:
         raise

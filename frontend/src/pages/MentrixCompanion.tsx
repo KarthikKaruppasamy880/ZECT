@@ -177,6 +177,15 @@ export default function MentrixCompanion() {
                   </p>
                   <p className="text-xs text-slate-400" data-testid="mentrix-companion-status">
                     ● {s.statusLine}
+                    {s.voiceTelemetry?.mode && s.voiceTelemetry.mode !== "idle" && (
+                      <span className="ml-2 text-[10px] text-slate-400">
+                        [{s.voiceTelemetry.mode}
+                        {s.voiceTelemetry.lastMark
+                          ? ` · ${s.voiceTelemetry.lastMark} ${s.voiceTelemetry.lastMs}ms`
+                          : ""}
+                        ]
+                      </span>
+                    )}
                     {s.runsHint ? ` · Delivery ${s.runsHint}` : ""}
                   </p>
                   <p

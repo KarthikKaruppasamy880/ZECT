@@ -60,6 +60,7 @@ from app.domains.personal_agent import (
     session_insights,
     persistent_sessions,
     user_sessions,
+    file_organize,
 )
 from app.domains.voice import realtime, voice_clone
 
@@ -109,6 +110,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(knowledge_base.router)
     app.include_router(playbooks.router)
     app.include_router(scheduler.router)
+    app.include_router(file_organize.router)
     app.include_router(secrets_manager.router)
     app.include_router(code_index.router)
     app.include_router(session_insights.router)

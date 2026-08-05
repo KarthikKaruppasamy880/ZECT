@@ -1026,8 +1026,24 @@ class ScheduleRun(Base):
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
+    idempotency_key = Column(String, nullable=True, index=True)
 
     schedule = relationship("Schedule", back_populates="runs")
+
+
+class OutboundDraft(Base):
+    """Phase 8 Stage A — draft-before-send for Slack/email (and future channels)."""
+    __tablename__ = "outbound_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    channel = Column(String, nullable=False)  # slack | email | jira
+    status = Column(String, default="draft")  # draft | sent | cancelled
+    payload_json = Column(JSON, default=dict)
+    provider_message_id = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    sent_at = Column(DateTime, nullable=True)
 
 
 # ---------------------------------------------------------------------------

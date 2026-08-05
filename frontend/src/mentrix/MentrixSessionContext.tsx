@@ -155,6 +155,8 @@ type MentrixSessionValue = {
   browserTtsEnabled: boolean;
   voiceConnected: boolean;
   voiceConnecting: boolean;
+  /** Phase 6 — Mentrix voice provider + last latency checkpoint */
+  voiceTelemetry: { mode: "realtime" | "fallback" | "idle"; lastMark: string; lastMs: number; ttsEngine: string };
   computerMode: boolean;
   setComputerMode: Dispatch<SetStateAction<boolean>>;
   displayMode: boolean;
@@ -206,6 +208,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const [tts, setTts] = useState(true);
   const [voiceConnected, setVoiceConnected] = useState(false);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
+  const [voiceTelemetry, setVoiceTelemetry] = useState<{
+    mode: "realtime" | "fallback" | "idle";
+    lastMark: string;
+    lastMs: number;
+    ttsEngine: string;
+  }>({ mode: "idle", lastMark: "", lastMs: 0, ttsEngine: "" });
   const [computerMode, setComputerMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false);
   const [showArtifacts, setShowArtifacts] = useState(true);
@@ -411,6 +419,13 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           onDesktopOutput: (output) => handleDesktopOutput(output),
           onOrb: (s) => setAvatar(s as AvatarState),
           onLog: pushLog,
+          onPerfMark: (m) => {
+            setVoiceTelemetry((prev) => ({
+              ...prev,
+              lastMark: m.name,
+              lastMs: m.elapsedMs,
+            }));
+          },
           onTranscript: (role, text) => {
             if (!text?.trim()) return;
             setMessages((m) => {
@@ -483,10 +498,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         },
       });
       if (handle.mode !== "realtime") {
+        setVoiceTelemetry((prev) => ({ ...prev, mode: "fallback", ttsEngine: prev.ttsEngine || "browser" }));
         setVoiceConnected(false);
         setAvatar("idle");
         return;
       }
+      setVoiceTelemetry((prev) => ({ ...prev, mode: "realtime" }));
       realtimeRef.current = handle;
       const ok = await handle.ready;
       if (!ok || realtimeRef.current !== handle) {
@@ -855,6 +872,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       browserTtsEnabled,
       voiceConnected,
       voiceConnecting,
+      voiceTelemetry,
       computerMode,
       setComputerMode,
       displayMode,
@@ -903,6 +921,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       browserTtsEnabled,
       voiceConnected,
       voiceConnecting,
+      voiceTelemetry,
       computerMode,
       displayMode,
       showArtifacts,

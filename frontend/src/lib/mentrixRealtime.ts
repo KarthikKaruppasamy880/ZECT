@@ -16,6 +16,8 @@ import {
 export type RealtimeHandlers = {
   onOrb?: (state: string) => void;
   onLog?: (line: string) => void;
+  /** Phase 6 Stage A — surface named latency checkpoints to the HUD */
+  onPerfMark?: (mark: { name: string; elapsedMs: number }) => void;
   onTranscript?: (role: "user" | "assistant", text: string) => void;
   onNavigate?: (path: string) => void;
   onArtifact?: (item: Record<string, unknown>) => void;
@@ -47,6 +49,8 @@ export type RealtimeSessionHandle = {
   mode: "realtime" | "fallback";
   resumeAfterTool: (output: string) => void;
   ready: Promise<boolean>;
+  /** Mentrix-facing provider label (never third-party product names in UI) */
+  providerLabel: "realtime" | "fallback";
 };
 
 const TARGET_SAMPLE_RATE = 24000;
@@ -259,6 +263,7 @@ export async function startMentrixRealtime(
     handlers.onReady?.(false);
     return {
       mode: "fallback",
+      providerLabel: "fallback",
       stop: () => undefined,
       resumeAfterTool: () => undefined,
       ready: noopReady,
@@ -286,6 +291,7 @@ export async function startMentrixRealtime(
       handlers.onReady?.(false);
       return {
         mode: "fallback",
+        providerLabel: "fallback",
         stop: () => undefined,
         resumeAfterTool: () => undefined,
         ready: noopReady,
@@ -614,7 +620,10 @@ export async function startMentrixRealtime(
   const perf = createPerfTracker();
   const markPerf = (name: string) => {
     const m = perf.mark(name);
-    if (m) handlers.onLog?.(`perf: ${m.name} at +${m.elapsedMs}ms`);
+    if (m) {
+      handlers.onLog?.(`perf: ${m.name} at +${m.elapsedMs}ms`);
+      handlers.onPerfMark?.(m);
+    }
   };
 
   // --- Barge-in cancellation ---------------------------------------------
@@ -982,7 +991,7 @@ export async function startMentrixRealtime(
     }
   };
 
-  return { mode: "realtime", stop, resumeAfterTool, ready };
+  return { mode: "realtime", providerLabel: "realtime", stop, resumeAfterTool, ready };
 }
 
 /** Confirm pending tools from Realtime Allow overlay. */

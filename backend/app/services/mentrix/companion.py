@@ -1015,19 +1015,52 @@ def _exec_tool(
     if name == "slack_send":
         try:
             from app.services.mcp.hub import execute_tool
+            from app.services.mentrix.outbound_drafts import (
+                create_outbound_draft,
+                get_draft,
+                mark_sent,
+                serialize_draft,
+            )
 
             channel = args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "general")
             text = args.get("text") or ""
-            sent = execute_tool(
+            draft_id = args.get("draft_id")
+            if draft_id:
+                draft = get_draft(db, int(draft_id))
+                if not draft or draft.channel != "slack":
+                    return {"ok": False, "error": "draft_not_found", "spoken_summary": "Slack draft not found."}
+                payload = draft.payload_json or {}
+                sent = execute_tool(
+                    db,
+                    server_id="slack",
+                    tool_name="send_message",
+                    arguments={
+                        "channel": str(payload.get("channel") or channel).lstrip("#"),
+                        "text": payload.get("text") or text,
+                    },
+                )
+                mark_sent(db, draft, str(sent.get("ts") or sent.get("id") or ""))
+                return {
+                    "ok": True,
+                    "sent": sent,
+                    "draft": serialize_draft(draft),
+                    "spoken_summary": f"Slack message sent to {channel}." if not sent.get("dry_run") else "Slack send queued (token missing).",
+                }
+            draft = create_outbound_draft(
                 db,
-                server_id="slack",
-                tool_name="send_message",
-                arguments={"channel": str(channel).lstrip("#"), "text": text},
+                channel="slack",
+                payload={"channel": str(channel).lstrip("#"), "text": text},
             )
             return {
                 "ok": True,
-                "sent": sent,
-                "spoken_summary": f"Slack message sent to {channel}." if not sent.get("dry_run") else "Slack send queued (token missing).",
+                "draft": serialize_draft(draft),
+                "needs_send_approval": True,
+                "spoken_summary": f"Slack draft #{draft.id} ready for {channel}. Approve send to deliver.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Slack draft #{draft.id}",
+                    "body": f"**Channel:** #{channel}\n\n{text[:2000]}",
+                },
             }
         except Exception as exc:  # noqa: BLE001
             return {
@@ -1043,12 +1076,40 @@ def _exec_tool(
     if name == "email_send":
         try:
             from app.services.mcp.hub import execute_tool
+            from app.services.mentrix.outbound_drafts import (
+                create_outbound_draft,
+                get_draft,
+                mark_sent,
+                serialize_draft,
+            )
 
-            sent = execute_tool(
+            draft_id = args.get("draft_id")
+            if draft_id:
+                draft = get_draft(db, int(draft_id))
+                if not draft or draft.channel != "email":
+                    return {"ok": False, "error": "draft_not_found", "spoken_summary": "Email draft not found."}
+                payload = draft.payload_json or {}
+                sent = execute_tool(
+                    db,
+                    server_id="email",
+                    tool_name="send_email",
+                    arguments={
+                        "to": payload.get("to") or "",
+                        "subject": payload.get("subject") or "Mentrix",
+                        "body": payload.get("body") or "",
+                    },
+                )
+                mark_sent(db, draft, str(sent.get("id") or ""))
+                return {
+                    "ok": True,
+                    "sent": sent,
+                    "draft": serialize_draft(draft),
+                    "spoken_summary": "Email sent." if not sent.get("dry_run") else "Email not sent — configure SMTP_HOST.",
+                }
+            draft = create_outbound_draft(
                 db,
-                server_id="email",
-                tool_name="send_email",
-                arguments={
+                channel="email",
+                payload={
                     "to": args.get("to") or "",
                     "subject": args.get("subject") or "Mentrix",
                     "body": args.get("body") or "",
@@ -1056,8 +1117,14 @@ def _exec_tool(
             )
             return {
                 "ok": True,
-                "sent": sent,
-                "spoken_summary": "Email sent." if not sent.get("dry_run") else "Email not sent — configure SMTP_HOST.",
+                "draft": serialize_draft(draft),
+                "needs_send_approval": True,
+                "spoken_summary": f"Email draft #{draft.id} ready. Approve send to deliver.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Email draft #{draft.id}",
+                    "body": f"**To:** {args.get('to') or '(unset)'}\n**Subject:** {args.get('subject') or 'Mentrix'}\n\n{(args.get('body') or '')[:2000]}",
+                },
             }
         except Exception as exc:  # noqa: BLE001
             return {

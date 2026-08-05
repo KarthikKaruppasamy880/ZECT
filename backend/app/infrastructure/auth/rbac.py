@@ -1,7 +1,6 @@
 """Role-Based Access Control (RBAC) decorators and helpers."""
 
 import inspect
-import json
 from functools import wraps
 from typing import Optional, Callable
 from fastapi import Depends, HTTPException, status
@@ -10,7 +9,6 @@ from sqlalchemy.orm import Session
 from app.infrastructure.database import get_db
 from app.models import User, AuditLog
 from app.infrastructure.auth.deps import get_current_user, CurrentUser
-from datetime import datetime, timezone
 
 
 class PermissionDenied(HTTPException):
@@ -125,7 +123,8 @@ def log_audit(
     details: Optional[dict] = None,
 ) -> AuditLog:
     """
-    Log an action to the audit trail.
+    Compatibility wrapper → canonical `domains.audit.audit_trail.log_audit`
+    (Phase 5 Stage A). Prefer importing from audit_trail for new call sites.
 
     Usage:
         log_audit(
@@ -137,30 +136,17 @@ def log_audit(
             details={"reason": "expired"}
         )
     """
-    try:
-        # audit_logs.details is Text — SQLite cannot bind a raw dict.
-        if details is None:
-            details_value = ""
-        elif isinstance(details, str):
-            details_value = details
-        else:
-            details_value = json.dumps(details, default=str)
-        audit_entry = AuditLog(
-            user_id=user_id,
-            action=action,
-            resource_id=resource_id,
-            resource_type=resource_type,
-            details=details_value,
-            created_at=datetime.now(timezone.utc)
-        )
-        db.add(audit_entry)
-        db.commit()
-        return audit_entry
-    except Exception as e:
-        db.rollback()
-        # Don't raise — audit logging failures shouldn't break operations
-        print(f"[audit] logging failed: {e}")
-        return None
+    # Lazy import avoids circular import (audit_trail imports require_authentication).
+    from app.domains.audit.audit_trail import log_audit as _canonical_log_audit
+
+    return _canonical_log_audit(
+        db,
+        action=action,
+        resource_type=resource_type or "unknown",
+        resource_id=resource_id,
+        details=details if details is not None else "",
+        user_id=user_id,
+    )
 
 
 def can_user_access_resource(

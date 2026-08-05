@@ -55,24 +55,39 @@ def log_audit(
     resource_type: str,
     resource_id: int | None = None,
     resource_name: str = "",
-    details: str = "",
+    details: str | dict | None = "",
     user_id: int | None = None,
     ip_address: str | None = None,
     user_agent: str | None = None,
 ):
-    entry = AuditLog(
-        user_id=user_id,
-        action=action,
-        resource_type=resource_type,
-        resource_id=resource_id,
-        resource_name=resource_name,
-        details=details if isinstance(details, str) else json.dumps(details),
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    db.add(entry)
-    db.commit()
-    return entry
+    """Canonical audit writer (Phase 5 Stage A). Soft-fails so ops never break on audit errors."""
+    try:
+        if details is None:
+            details_value = ""
+        elif isinstance(details, str):
+            details_value = details
+        else:
+            details_value = json.dumps(details, default=str)
+        entry = AuditLog(
+            user_id=user_id,
+            action=action,
+            resource_type=resource_type or "unknown",
+            resource_id=resource_id,
+            resource_name=resource_name or "",
+            details=details_value,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.add(entry)
+        db.commit()
+        return entry
+    except Exception as e:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        print(f"[audit] logging failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------

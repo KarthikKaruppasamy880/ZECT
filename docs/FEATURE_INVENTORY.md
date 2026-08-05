@@ -58,7 +58,7 @@
 | Route | Status | Note |
 |---|---|---|
 | Integrations `/integrations` | Working | Real MCP adapters (GitHub/Jira/Slack/Confluence/Datadog/Email). |
-| Audit Trail `/audit-trail` | Working | `log_audit` pervasive. |
+| Audit Trail `/audit-trail` | Working | Canonical `domains.audit.audit_trail.log_audit` (rbac wrapper delegates). |
 | Export/Share `/export` | Not verified | |
 | Output History `/output-history` | Not verified | |
 | Analytics `/analytics` | Not verified | |
@@ -75,14 +75,14 @@
 | Dream Engine `/dream-engine` | Not verified | |
 | Data Layer `/data-layer` | Not verified | |
 | Data Flywheel `/data-flywheel` | Not verified | |
-| Permissions `/permissions` | Partial | RBAC roles exist; no granular per-capability grant/expiry UI yet. |
+| Permissions `/permissions` | Partial | Rules + `/check` + approvals auth-gated (Stage A). Missing: grants/expiry UI, diagnostics (Stage B/C). |
 | Transfer & Onboard `/transfer` | Not verified | |
 | Knowledge Base `/knowledge-base` | Not verified | Possible overlap with Lattice/Docs Center. |
 | Playbooks `/playbooks` | Not verified | |
 | Scheduled Tasks `/scheduled-tasks` | Not verified — confirm real cron/scheduling backend exists | |
 | Session Insights `/session-insights` | Not verified | |
 | Conversations `/conversations` | Not verified | |
-| App Runner `/app-runner` | **Working but high-risk** | See THREAT_MODEL.md — arbitrary shell execution, no RBAC, no path allowlist. |
+| App Runner `/app-runner` | Working — admin RBAC + path allowlist + audit | Critical threat findings fixed; still privileged. |
 | File Explorer `/file-explorer` | Working — path-allowlisted | Requires `ZECT_WORKSPACE_ROOT` set (Windows deploys won't match the Unix default roots otherwise). |
 
 ## Duplicate-concept candidates flagged for Phase 1 review

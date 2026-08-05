@@ -11,7 +11,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 2 | Coding-engine provider | **Done (A–D)** | Worktree isolation + optional Docker sandbox (falls back when Docker unavailable); remote HTTP adapter; Mentrix opt-in engine slice; health/version/isolation reporting. See `PHASE_2_EXECUTION_PLAN.md`. |
 | 3 | Cursor-like workspace | **Done (A–E)** | `/workspace` tree+Monaco+git+terminal+Mentrix timeline+diff/hunks+inline Ask+symbols/worktrees. See `PHASE_3_EXECUTION_PLAN.md`. |
 | 4 | PR review platform | **Done (A–D)** | Schema + validate/dedupe/rank; deterministic secrets/TODO/rules; approve-before-post + Mentrix bugfix hook. See `PHASE_4_EXECUTION_PLAN.md`. |
-| 5 | Permissions/secrets/audit | ~55% | RBAC + Fernet secrets + pervasive audit log + permission broker exist. Missing granular capability grants w/ expiry, permission-diagnostics page, emergency stop. **Inherits THREAT_MODEL.md findings 1-6 as backlog**, especially the two Critical items (app_runner.py, sandbox.py). |
+| 5 | Permissions/secrets/audit | **In progress (Stage A)** | RBAC + Fernet + audit + broker exist. Stage A: unify `log_audit`, auth-gate permission GETs/check, threat docs synced (findings 3–6 fixed in code). Remaining: grants/expiry, secret refs + diagnostics, emergency-stop. See `PHASE_5_EXECUTION_PLAN.md`. |
 | 6 | Realtime voice | **~75% — most complete phase** | Persistent session, per-sentence streaming speech, true cross-sentence prefetch, barge-in cancellation, 8 named latency checkpoints, short-timeout no-silent-retry — all shipped this session. Built on the OpenAI Realtime API directly (already brand-clean); no LiveKit dependency needed unless a future provider swap is wanted. |
 | 7 | Browser/desktop access | ~15% — and inverted priority order | "Computer Mode" is OS-level simulated input (SendKeys/window activation) — the tier the target architecture says should be *last resort*, currently the *only* method. No DOM/accessibility-tree automation. File-organization workflow (hash+rollback) not built. |
 | 8 | Email/Slack/Calendar/Jira | ~40% | Real Jira/Slack/Confluence/Datadog MCP adapters work today. Admin-configured credentials, not per-user OAuth; no draft-before-send gate; no Calendar adapter. |
@@ -23,7 +23,7 @@ Branding rule applies to every phase below: third-party projects may be used int
 
 Carry into whichever phase naturally owns each:
 
-- **Security (→ Phase 5):** ~~`app_runner.py` arbitrary shell exec with no RBAC/path-allowlist~~ and ~~`sandbox.py` silent host-fallback + command injection in its Docker path~~ — both Critical findings **fixed** (`fix/app-runner-sandbox-rbac-and-injection`). Remaining: GitHub webhook signature check is opt-in not mandatory (High); `auth.py` reloads `.env` with `override=True` on every login, breaking test isolation and creating a live-credential-swap side effect (High, confirmed reproducible); CORS allowlist bypass on unhandled 500s (Medium); `diff_viewer.py`'s `repo_path` not confirmed path-allowlisted (Medium, needs closer read).
+- **Security (→ Phase 5):** ~~`app_runner.py`~~, ~~`sandbox.py`~~, ~~webhook signature~~, ~~auth `.env` override~~, ~~CORS on 500s~~, ~~diff_viewer path allowlist~~ — all **fixed in code** (see `THREAT_MODEL.md`). Remaining Phase 5 product gaps: temporary capability grants, secret references, diagnostics UI, global emergency-stop (`PHASE_5_EXECUTION_PLAN.md`).
 - **Dead code (→ Phase 1 or 11 cleanup):** `services/llm/voicebox_client.py`, `services/llm/elevenlabs_client.py` (legacy, test-only references); `frontend/src/pages/StagePage.tsx` / `/stages/:stage` route (no nav link, no in-app navigation to it).
 - **Correctness (→ Phase 1):** `build_phase_svc.py`'s offline-stub gate checks only `OPENAI_API_KEY`, not `ANTHROPIC_API_KEY` — an Anthropic-only deployment would silently hit the placeholder instead of calling Claude.
 - **Duplicate-concept check (→ Phase 1/10):** Skill Library vs. Skills Engine; Memory System vs. Mentrix Notes; Knowledge Base vs. Lattice Graph vs. Docs Center. Naming similarity only, not yet confirmed as real duplication — needs a hands-on look before deciding to merge/remove anything.
@@ -32,4 +32,4 @@ Carry into whichever phase naturally owns each:
 
 ## Next decision point
 
-**Phase 4 is complete (A–D).** Next: Phase 5 (permissions/secrets/audit). Phase 9 remains ON HOLD.
+**Phase 5 Stage A** is the current deliverable (audit unify + permission auth gates). Phase 9 remains ON HOLD.

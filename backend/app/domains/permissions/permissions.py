@@ -13,6 +13,7 @@ from app.models import PermissionRule, PermissionAudit
 from app.infrastructure.auth.deps import get_current_user, CurrentUser
 from app.infrastructure.auth.rbac import (
     require_role,
+    require_authentication,
     log_audit,
     get_user_from_current_user,
     PermissionDenied,
@@ -109,10 +110,12 @@ class ApprovalAction(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/rules")
+@require_authentication
 def list_rules(
     project_id: Optional[int] = None,
     category: Optional[str] = None,
     permission_level: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     q = db.query(PermissionRule).filter(PermissionRule.is_active == True)
@@ -226,8 +229,22 @@ def delete_rule(
 # ---------------------------------------------------------------------------
 
 @router.post("/check")
-def check_permission(data: PermissionCheck, db: Session = Depends(get_db)):
+@require_authentication
+def check_permission(
+    data: PermissionCheck,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """Check if an action is allowed, requires approval, or is blocked."""
+    # Prefer authenticated identity when body omits user_id
+    if not data.user_id:
+        try:
+            db_user = get_user_from_current_user(current_user, db)
+            if db_user:
+                data.user_id = db_user.id
+        except Exception:
+            pass
+
     # Get all active rules (project-specific + global)
     rules = db.query(PermissionRule).filter(
         PermissionRule.is_active == True,
@@ -329,10 +346,12 @@ def approve_action(
 
 
 @router.get("/audits")
+@require_authentication
 def list_audits(
     project_id: Optional[int] = None,
     result: Optional[str] = None,
     limit: int = 50,
+    current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     q = db.query(PermissionAudit)
@@ -345,7 +364,11 @@ def list_audits(
 
 
 @router.get("/audits/pending")
-def list_pending_approvals(db: Session = Depends(get_db)):
+@require_authentication
+def list_pending_approvals(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     audits = db.query(PermissionAudit).filter(
         PermissionAudit.result == "pending_approval",
     ).order_by(PermissionAudit.created_at.desc()).all()

@@ -36,3 +36,14 @@ SOFTWARE.
 Source references (implementation detail, not product branding):
 - https://github.com/OpenHands/software-agent-sdk
 - https://github.com/OpenHands/OpenHands
+
+## Monaco Editor (Phase 3 Developer Workspace)
+
+The Developer Workspace embeds the Monaco editor via `monaco-editor` and
+`@monaco-editor/react` for in-browser code editing. This is an editor
+component, not a product brand in ZECT UI.
+
+Monaco Editor is licensed under the MIT License.
+Copyright (c) Microsoft Corporation.
+
+https://github.com/microsoft/monaco-editor

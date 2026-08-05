@@ -259,6 +259,14 @@ Provide your review as valid JSON following the specified structure."""
                     )
                     merged_findings.append(finding)
 
+        from app.domains.pr_review.finding_pipeline import finalize_pr_findings
+
+        merged_findings = finalize_pr_findings(
+            merged_findings,
+            files,
+            repository=f"{owner}/{repo}",
+        )
+
         review = {
             "summary": " ".join(s for s in summaries if s) or "Review completed.",
             "quality_score": int(sum(scores) / len(scores)) if scores else 50,
@@ -271,6 +279,7 @@ Provide your review as valid JSON following the specified structure."""
             "model": "gpt-4o-mini",
             "pr_number": pr_number,
             "repo": f"{owner}/{repo}",
+            "repository": f"{owner}/{repo}",
             "chunks_reviewed": len(chunks),
         }
         review["review_session_id"] = _persist_review_session(

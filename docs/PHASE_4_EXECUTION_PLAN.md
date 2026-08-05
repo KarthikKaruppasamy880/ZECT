@@ -6,20 +6,19 @@ Companion to `Upgrade.md` Phase 4. Staged PRs to `develop`. **Phase 9 remains ON
 
 | Stage | Scope | Status |
 |---|---|---|
-| A | Canonical `ReviewFinding` schema (Upgrade.md fields) + fingerprint + normalize LLM/DB/rules; ultrareview GET returns spec shape | **This PR** |
-| B | Diff-line validation + dedupe by fingerprint + rank by severity/confidence | Pending |
+| A | Canonical `ReviewFinding` schema (Upgrade.md fields) + fingerprint + normalize LLM/DB/rules; ultrareview GET returns spec shape | **Done** (re-landed on develop via Stage B PR — #94 had merged only into the Stage E branch) |
+| B | Diff-line validation + dedupe by fingerprint + rank by severity/confidence | **This PR** |
 | C | Deterministic checks → findings (`source=deterministic`): lint/secrets/rules | Pending |
 | D | Approval gate before GitHub post + coding-engine fix-run hook for accepted findings | Pending |
 
-## Stage A files
+## Stage B files
 
-- `backend/app/domains/pr_review/finding_schema.py` — canonical Upgrade.md shape + fingerprint/normalizers
-- `backend/app/review_service.py` — persist via normalizer (line_end filled)
-- `backend/app/domains/agent_run/ultrareview.py` — `FindingOut = ReviewFindingSpec`
-- `backend/tests/fixes_and_phases/test_review_finding_schema.py`
-- `docs/PHASE_4_EXECUTION_PLAN.md`, `docs/ROADMAP.md`
+- `backend/app/domains/pr_review/finding_pipeline.py` — validate / dedupe / rank / `finalize_pr_findings`
+- `backend/app/review_service.py` — PR reviews run `finalize_pr_findings` before persist
+- `backend/tests/fixes_and_phases/test_finding_pipeline.py`
+- Also includes Stage A cherry-pick onto `develop` (`finding_schema.py`, ultrareview wiring)
 
 ## Guardrails
 
 - Do not auto-post speculative findings to GitHub.
-- Do not invent DB migrations that break existing SQLite installs in Stage A (fingerprint computed at read time).
+- Invalidated findings (file/line not in diff) are kept but ranked last — not silently dropped.

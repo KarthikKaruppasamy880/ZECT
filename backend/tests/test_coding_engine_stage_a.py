@@ -30,6 +30,9 @@ def _init_git_repo(root: Path) -> Path:
 
 def test_factory_defaults_to_mock(monkeypatch):
     monkeypatch.delenv("ZECT_CODING_ENGINE", raising=False)
+    from app.adapters.coding_runtime import reset_coding_runtime_for_tests
+
+    reset_coding_runtime_for_tests()
     assert selected_coding_engine() == "mock"
     rt = get_coding_runtime()
     assert isinstance(rt, MockCodingRuntime)
@@ -42,6 +45,9 @@ def test_factory_remote_requires_config(monkeypatch):
     monkeypatch.setenv("ZECT_CODING_ENGINE", "remote")
     monkeypatch.delenv("ZECT_CODING_ENGINE_URL", raising=False)
     monkeypatch.delenv("ZECT_CODING_ENGINE_API_KEY", raising=False)
+    from app.adapters.coding_runtime import reset_coding_runtime_for_tests
+
+    reset_coding_runtime_for_tests()
     with pytest.raises(CodingEngineConfigError):
         get_coding_runtime()
     health = coding_engine_health()
@@ -114,6 +120,9 @@ def test_provision_and_dispose_worktree(tmp_path, monkeypatch):
 
 def test_coding_engine_health_endpoint(client, auth_headers, monkeypatch):
     monkeypatch.setenv("ZECT_CODING_ENGINE", "mock")
+    from app.adapters.coding_runtime import reset_coding_runtime_for_tests
+
+    reset_coding_runtime_for_tests()
     resp = client.get("/api/coding-engine/health", headers=auth_headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()

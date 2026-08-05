@@ -144,19 +144,53 @@ def selected_coding_engine() -> str:
     return (os.getenv("ZECT_CODING_ENGINE") or "mock").strip().lower() or "mock"
 
 
+_runtime_singleton: CodingAgentRuntime | None = None
+_runtime_singleton_key: str | None = None
+
+
+def _runtime_config_key() -> str:
+    mode = selected_coding_engine()
+    if mode == "remote":
+        return (
+            f"remote|{(os.getenv('ZECT_CODING_ENGINE_URL') or '').strip()}|"
+            f"{bool((os.getenv('ZECT_CODING_ENGINE_API_KEY') or '').strip())}"
+        )
+    return mode
+
+
+def reset_coding_runtime_for_tests() -> None:
+    """Clear process-local engine singleton (tests only)."""
+    global _runtime_singleton, _runtime_singleton_key
+    _runtime_singleton = None
+    _runtime_singleton_key = None
+
+
 def get_coding_runtime() -> CodingAgentRuntime:
-    """Factory — default mock; remote requires URL + API key (server-side)."""
+    """Factory — default mock; remote requires URL + API key (server-side).
+
+    Returns a process-local singleton so run state survives across HTTP handlers.
+    """
+    global _runtime_singleton, _runtime_singleton_key
+    key = _runtime_config_key()
+    if _runtime_singleton is not None and _runtime_singleton_key == key:
+        return _runtime_singleton
+
     mode = selected_coding_engine()
     if mode == "mock":
-        return MockCodingRuntime()
-    if mode == "remote":
+        rt: CodingAgentRuntime = MockCodingRuntime()
+    elif mode == "remote":
         from app.adapters.coding_engine_remote import CodingEngineConfigError, RemoteCodingEngine
 
         try:
-            return RemoteCodingEngine.from_env()
+            rt = RemoteCodingEngine.from_env()
         except CodingEngineConfigError:
             raise
-    raise ValueError(f"Unknown ZECT_CODING_ENGINE={mode!r}; use mock|remote")
+    else:
+        raise ValueError(f"Unknown ZECT_CODING_ENGINE={mode!r}; use mock|remote")
+
+    _runtime_singleton = rt
+    _runtime_singleton_key = key
+    return rt
 
 
 def coding_engine_health() -> dict[str, Any]:

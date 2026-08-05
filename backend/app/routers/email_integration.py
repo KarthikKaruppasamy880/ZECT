@@ -9,7 +9,7 @@ from email.message import EmailMessage
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.core.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
 
 router = APIRouter(prefix="/api/email", tags=["email"])
 

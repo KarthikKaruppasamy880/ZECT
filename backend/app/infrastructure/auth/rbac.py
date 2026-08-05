@@ -7,9 +7,9 @@ from typing import Optional, Callable
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import User, AuditLog
-from app.core.auth.deps import get_current_user, CurrentUser
+from app.infrastructure.auth.deps import get_current_user, CurrentUser
 from datetime import datetime, timezone
 
 

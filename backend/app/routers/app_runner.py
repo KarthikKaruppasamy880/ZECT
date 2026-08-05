@@ -1,8 +1,6 @@
 """App Runner — execute shell commands, manage long-running processes, and
 stream output so users can configure, run, and test repos directly inside ZECT."""
 
-from __future__ import annotations
-
 import asyncio
 import os
 import signal
@@ -16,15 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.allowed_paths import path_under_allowed_roots
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.auth.rbac import log_audit, require_role
-from app.database import get_db
+from app.infrastructure.allowed_paths import path_under_allowed_roots
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.rbac import log_audit, require_role
+from app.infrastructure.database import get_db
 
 router = APIRouter(prefix="/api/runner", tags=["app-runner"])
 
 
-def _validate_cwd(raw: str | None) -> str:
+def _validate_cwd(raw: Optional[str]) -> str:
     """Resolve and enforce the same filesystem allowlist git_ops.py and
     file_explorer.py already use — previously this only checked the
     directory existed, so an arbitrary-shell-command endpoint could also

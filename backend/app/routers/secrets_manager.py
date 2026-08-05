@@ -9,11 +9,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import SecretEntry, User
 from app.security.vault import vault
-from app.core.auth.deps import get_current_user, CurrentUser
-from app.core.auth.rbac import (
+from app.infrastructure.auth.deps import get_current_user, CurrentUser
+from app.infrastructure.auth.rbac import (
     require_role,
     log_audit,
     can_user_access_resource,

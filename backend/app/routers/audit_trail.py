@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import AuditLog
-from app.core.auth.deps import get_current_user, CurrentUser
-from app.core.auth.rbac import require_authentication
+from app.infrastructure.auth.deps import get_current_user, CurrentUser
+from app.infrastructure.auth.rbac import require_authentication
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
 

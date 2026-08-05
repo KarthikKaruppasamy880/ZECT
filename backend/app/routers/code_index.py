@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import CodeSymbol, Repo
 
 router = APIRouter(prefix="/api/code-index", tags=["code-index"])

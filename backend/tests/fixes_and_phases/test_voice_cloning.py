@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.datastructures import Headers, UploadFile
 
 import app.models  # noqa: F401 — register ClonedVoice
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import ClonedVoice
 from app.services.llm import chatterbox_client, elevenlabs_client
 from app.services.mentrix.realtime import _cloned_voice_for_user, mint_realtime_session

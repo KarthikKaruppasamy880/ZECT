@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
-from app.database import Base
+from app.infrastructure.database import Base
 from app.models import MentrixRun
 from app.services.forge_loop import orchestrator as orch
 from app.services.quality.gates_policy import gates_allow_approve, gates_allow_create_pr

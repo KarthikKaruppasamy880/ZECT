@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import TokenLog
 
 # Pricing per 1M tokens (gpt-4o-mini as of 2025)

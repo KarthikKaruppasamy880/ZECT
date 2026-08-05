@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from app.core.allowed_paths import allowed_roots, path_under_allowed_roots
+from app.infrastructure.allowed_paths import allowed_roots, path_under_allowed_roots
 
 
 def test_allowed_roots_includes_zect_workspace_root(monkeypatch, tmp_path):

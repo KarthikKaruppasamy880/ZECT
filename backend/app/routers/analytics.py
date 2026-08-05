@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.database import get_db
+from app.infrastructure.database import get_db
 from app.models import Project, Repo
 from app.schemas import AnalyticsOverview
 from app.token_tracker import get_usage_summary

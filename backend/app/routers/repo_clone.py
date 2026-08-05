@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser
-from app.core.budget import enforce_token_budget
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser
+from app.infrastructure.budget import enforce_token_budget
+from app.infrastructure.database import get_db
 from app.models import Repo, Setting
 from app.services.repo_clone import (
     checkout_branch,

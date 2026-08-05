@@ -8,8 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from app.core.auth.session_store import get_token_row
-from app.database import SessionLocal
+from app.infrastructure.auth.session_store import get_token_row
+from app.infrastructure.database import SessionLocal
 
 _OPEN_EXACT = frozenset({
     "/healthz",

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import UserSession, ContextFile
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])

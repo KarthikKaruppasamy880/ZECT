@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import PersistentSession, SessionMessage
 
 router = APIRouter(prefix="/api/persistent-sessions", tags=["persistent-sessions"])

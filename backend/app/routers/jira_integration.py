@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet
 from datetime import datetime, timezone
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import JiraConfig, JiraTicketLink
 from app.security.vault import vault
 

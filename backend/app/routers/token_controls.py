@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import TokenLog, TokenBudget, User, UserSession, GeneratedOutput
 from app.token_tracker import get_usage_summary
 from datetime import datetime, timezone, timedelta

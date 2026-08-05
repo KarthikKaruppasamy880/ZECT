@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.middleware.rate_limiter import RateLimiter, _rate_limit_key, _is_expensive
-from app.core.budget import check_budget, BudgetExceeded, _get_budget
+from app.infrastructure.budget import check_budget, BudgetExceeded, _get_budget
 from app.models import TokenBudget, TokenLog
 
 

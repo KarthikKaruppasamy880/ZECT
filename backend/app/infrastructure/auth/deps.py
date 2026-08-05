@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.core.auth.session_store import get_token_row
-from app.database import get_db
+from app.infrastructure.auth.session_store import get_token_row
+from app.infrastructure.database import get_db
 
 
 @dataclass

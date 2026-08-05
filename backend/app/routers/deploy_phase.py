@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.database import get_db
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/deploy", tags=["deploy"])

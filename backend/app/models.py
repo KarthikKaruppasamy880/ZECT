@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-from app.database import Base
+from app.infrastructure.database import Base
 
 
 # ---------------------------------------------------------------------------

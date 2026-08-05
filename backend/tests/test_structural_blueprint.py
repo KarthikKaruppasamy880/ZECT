@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 — register LatticeStructuralBlueprint
-from app.database import Base
+from app.infrastructure.database import Base
 from app.services.lattice.indexer import communities, god_nodes, ingest_path
 from app.services.lattice.structural_blueprint import (
     build_deep_prompt,

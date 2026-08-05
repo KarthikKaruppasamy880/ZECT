@@ -6,7 +6,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 from app.models import ExportJob, GeneratedOutput, ReviewSession
 
 router = APIRouter(prefix="/api/export", tags=["export"])

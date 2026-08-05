@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.budget import enforce_token_budget
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.budget import enforce_token_budget
+from app.infrastructure.database import get_db
 from app.services.lattice.indexer import (
     communities as lattice_communities,
     explain as lattice_explain,

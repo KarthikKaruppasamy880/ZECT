@@ -13,7 +13,7 @@ import subprocess
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.allowed_paths import path_under_allowed_roots
+from app.infrastructure.allowed_paths import path_under_allowed_roots
 
 router = APIRouter(prefix="/api/diff", tags=["diff-viewer"])
 

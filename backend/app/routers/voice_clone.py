@@ -16,9 +16,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.auth.deps import CurrentUser, get_current_user
-from app.core.auth.rbac import log_audit
-from app.database import get_db
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.rbac import log_audit
+from app.infrastructure.database import get_db
 from app.models import ClonedVoice
 
 router = APIRouter(prefix="/api/mentrix/voice", tags=["mentrix-voice"])

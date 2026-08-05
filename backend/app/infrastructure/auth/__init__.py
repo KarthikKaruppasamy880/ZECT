@@ -1,5 +1,5 @@
-from app.core.auth.deps import CurrentUser, get_current_user, get_optional_user
-from app.core.auth.rbac import (
+from app.infrastructure.auth.deps import CurrentUser, get_current_user, get_optional_user
+from app.infrastructure.auth.rbac import (
     require_role,
     require_authentication,
     log_audit,

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
+from app.infrastructure.database import SessionLocal
 
 router = APIRouter(prefix="/api/agent", tags=["agent-mode"])
 

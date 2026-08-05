@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-from app.database import engine, DATABASE_URL  # noqa: E402
+from app.infrastructure.database import engine, DATABASE_URL  # noqa: E402
 
 
 def mask_url(u: str) -> str:

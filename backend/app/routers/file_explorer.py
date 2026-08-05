@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.core.allowed_paths import path_under_allowed_roots
+from app.infrastructure.allowed_paths import path_under_allowed_roots
 
 router = APIRouter(prefix="/api/files", tags=["file-explorer"])
 

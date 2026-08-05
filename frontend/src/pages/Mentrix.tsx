@@ -35,7 +35,6 @@ export default function Mentrix() {
     runs,
     active,
     messages,
-    setMessages,
     loading,
     setLoading,
     error,

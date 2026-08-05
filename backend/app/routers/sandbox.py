@@ -89,6 +89,11 @@ def _run_local_sandbox(code: str, language: str, timeout: int, stdin: str, extra
             "stderr": result.stderr[:MAX_OUTPUT],
             "exit_code": result.returncode,
             "sandbox_id": sandbox_id,
+            # No container isolation here — plain host subprocess with only a
+            # scratch cwd/HOME/TMPDIR. Callers (e.g. pr_readiness) must not
+            # treat this as equivalent to a docker-isolated pass without
+            # surfacing that distinction.
+            "mode": "local_unsandboxed",
         }
     except subprocess.TimeoutExpired:
         return {
@@ -97,6 +102,7 @@ def _run_local_sandbox(code: str, language: str, timeout: int, stdin: str, extra
             "stderr": f"Execution timed out after {timeout}s",
             "exit_code": -1,
             "sandbox_id": sandbox_id,
+            "mode": "local_unsandboxed",
         }
     except Exception as e:
         return {
@@ -105,6 +111,7 @@ def _run_local_sandbox(code: str, language: str, timeout: int, stdin: str, extra
             "stderr": str(e),
             "exit_code": -1,
             "sandbox_id": sandbox_id,
+            "mode": "local_unsandboxed",
         }
     finally:
         shutil.rmtree(sandbox_path, ignore_errors=True)
@@ -131,24 +138,30 @@ def _run_docker_sandbox(req: SandboxDockerRequest) -> dict:
             safe_name = Path(fname).name
             (sandbox_path / safe_name).write_text(fcontent)
 
-        network_flag = "" if req.network else "--network=none"
         effective_timeout = min(req.timeout, MAX_TIMEOUT)
 
-        cmd = (
-            f"docker run --rm "
-            f"--memory={req.memory_limit} "
-            f"--cpus={req.cpu_limit} "
-            f"{network_flag} "
-            f"-v {sandbox_path}:/workspace "
-            f"-w /workspace "
-            f"--user 1000:1000 "
-            f"{req.image} "
-            f"{req.command}"
-        )
+        # Argument list, not a shell string — req.image/req.command/
+        # req.memory_limit/req.cpu_limit previously got concatenated into a
+        # shell=True string, so shell metacharacters in any of those fields
+        # executed on the HOST shell before docker even started, defeating
+        # the container isolation this endpoint exists to provide. req.command
+        # itself is still interpreted by a shell, but that's the container's
+        # own /bin/sh, confined by the same --network/--memory/--cpus/--user
+        # limits as everything else run inside it.
+        args = ["docker", "run", "--rm", f"--memory={req.memory_limit}", f"--cpus={req.cpu_limit}"]
+        if not req.network:
+            args.append("--network=none")
+        args += [
+            "-v", f"{sandbox_path}:/workspace",
+            "-w", "/workspace",
+            "--user", "1000:1000",
+            req.image,
+            "sh", "-c", req.command,
+        ]
 
         result = subprocess.run(
-            cmd,
-            shell=True,
+            args,
+            shell=False,
             capture_output=True,
             text=True,
             timeout=effective_timeout + 10,
@@ -254,4 +267,7 @@ def pr_readiness(req: PRReadinessRequest):
         "blockers": blockers,
         "sandbox": sandbox_result,
         "create_pr_hard_blocked": len(blockers) > 0,
+        # Surfaced explicitly — a passing local_unsandboxed run is not the
+        # same guarantee as a passing docker-isolated one.
+        "docker_isolated": bool(sandbox_result and sandbox_result.get("mode") == "docker"),
     }

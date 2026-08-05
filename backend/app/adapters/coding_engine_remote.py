@@ -10,7 +10,6 @@ import os
 import time
 from typing import Any, Callable
 from urllib.parse import urljoin
-from uuid import uuid4
 
 import httpx
 

@@ -6,7 +6,7 @@ isn't silently mis-costed at gpt-4o-mini's rate.
 
 from __future__ import annotations
 
-from app.routers.model_selection import MODELS, _find_model
+from app.domains.agent_run.model_selection import MODELS, _find_model
 from app.token_tracker import PRICING, _estimate_cost
 
 

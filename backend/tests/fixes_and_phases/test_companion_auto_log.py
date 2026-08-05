@@ -90,7 +90,7 @@ class TestIterCompanionEventsAutoLogs:
 
 class TestLogExchangeEndpoint:
     def test_endpoint_delegates_to_auto_log_exchange(self):
-        from app.routers.mentrix import LogExchangeRequest, companion_log_exchange
+        from app.domains.agent_run.mentrix import LogExchangeRequest, companion_log_exchange
 
         with patch("app.services.mentrix.companion._auto_log_exchange") as mock_log:
             result = companion_log_exchange(

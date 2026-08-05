@@ -138,7 +138,7 @@ class TestRunHldGenerate:
 
 class TestHldRouterEndpoint:
     def test_endpoint_returns_hld_document(self, monkeypatch):
-        from app.routers.lattice import HldRequest, hld_generate_api
+        from app.domains.repository.lattice import HldRequest, hld_generate_api
 
         monkeypatch.setattr(
             "app.services.phases.hld_phase.run_hld_generate",
@@ -160,7 +160,7 @@ class TestHldRouterEndpoint:
     def test_endpoint_raises_503_on_value_error(self, monkeypatch):
         from fastapi import HTTPException
 
-        from app.routers.lattice import HldRequest, hld_generate_api
+        from app.domains.repository.lattice import HldRequest, hld_generate_api
 
         def boom(db, project_key, goal="", user_id=None):
             raise ValueError("OpenAI API error: no key")

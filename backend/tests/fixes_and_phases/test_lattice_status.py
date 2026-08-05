@@ -37,8 +37,8 @@ def authed_client(client, monkeypatch):
 
 
 class TestLatticeStatus:
-    @patch("app.routers.lattice.get_graph")
-    @patch("app.routers.lattice.get_structural_blueprint")
+    @patch("app.domains.repository.lattice.get_graph")
+    @patch("app.domains.repository.lattice.get_structural_blueprint")
     def test_status_not_indexed(self, mock_bp, mock_graph, authed_client):
         mock_graph.return_value = None
         mock_bp.return_value = None
@@ -50,8 +50,8 @@ class TestLatticeStatus:
         assert data["project_key"] == "missing-key"
         assert data["has_blueprint"] is False
 
-    @patch("app.routers.lattice.get_graph")
-    @patch("app.routers.lattice.get_structural_blueprint")
+    @patch("app.domains.repository.lattice.get_graph")
+    @patch("app.domains.repository.lattice.get_structural_blueprint")
     def test_status_indexed(self, mock_bp, mock_graph, authed_client):
         mock_graph.return_value = MagicMock(
             files_indexed=10,

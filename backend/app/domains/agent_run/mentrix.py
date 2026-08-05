@@ -436,8 +436,8 @@ def create_pr_for_run(
                 detail="repo_path required (or set MENTRIX_WORKSPACE) when MENTRIX_PR_DRY_RUN is false",
             )
         try:
-            from app.routers.git_ops import CreatePRRequest as GitPRReq
-            from app.routers.git_ops import create_pull_request as git_create_pr
+            from app.domains.repository.git_ops import CreatePRRequest as GitPRReq
+            from app.domains.repository.git_ops import create_pull_request as git_create_pr
 
             pr_meta = git_create_pr(
                 GitPRReq(

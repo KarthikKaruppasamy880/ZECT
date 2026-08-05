@@ -21,7 +21,7 @@ def run_ask(
     """Clarify requirements (Ask Mode). Offline fallback when no API key."""
     context = repo_context or ""
     if repo_id and db is not None and not context:
-        from app.routers.llm import _build_repo_context
+        from app.domains.agent_run.llm import _build_repo_context
 
         context = _build_repo_context(db, repo_id)
 
@@ -93,7 +93,7 @@ def run_plan(
     """Structured engineering plan. Upgrade mode forces phased inventory→port→tests→eval."""
     context = repo_context or ""
     if repo_id and db is not None and not context:
-        from app.routers.llm import _build_repo_context
+        from app.domains.agent_run.llm import _build_repo_context
 
         context = _build_repo_context(db, repo_id)
 

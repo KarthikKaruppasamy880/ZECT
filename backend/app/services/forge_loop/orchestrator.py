@@ -418,7 +418,7 @@ def _run_sandbox_check(
     if not test_cmd:
         return _run_sandbox_gate(review_score, critical, events)
 
-    from app.routers.autofix import AutoFixRequest, run_and_fix
+    from app.domains.workspace.autofix import AutoFixRequest, run_and_fix
 
     _emit(events, "orchestrator", f"Sandbox: running real test command: {test_cmd}", phase="sandbox")
     autofix_result = run_and_fix(AutoFixRequest(command=test_cmd, cwd=workspace, max_retries=_max_recovery()))
@@ -813,7 +813,7 @@ def run_mentrix(
             _emit_phase(events, "reproduce", 0.25, "trace_impacted", "Reproduce the reported issue")
             test_cmd = _detect_test_command(workspace) if workspace else None
             if test_cmd:
-                from app.routers.autofix import _run_command
+                from app.domains.workspace.autofix import _run_command
 
                 run_result = _run_command(test_cmd, workspace)
                 reproduction = {

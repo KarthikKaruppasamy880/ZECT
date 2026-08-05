@@ -13,8 +13,8 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401
 from app.infrastructure.database import Base
 from app.models import JiraConfig
-from app.routers import jira_integration
-from app.routers.jira_integration import JiraTicketCreate, create_ticket
+from app.domains.integration import jira_integration
+from app.domains.integration.jira_integration import JiraTicketCreate, create_ticket
 
 
 def _session():

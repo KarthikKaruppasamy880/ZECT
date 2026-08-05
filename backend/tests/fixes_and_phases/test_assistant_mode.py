@@ -140,7 +140,7 @@ class TestExecuteHeavyTool:
     def test_trigger_deploy_delegates_to_gated_endpoint(self, monkeypatch):
         fake_response = Mock(status="pending_approval", message="needs approval", audit_id=42)
         monkeypatch.setattr(
-            "app.routers.deploy_phase.trigger_workflow",
+            "app.domains.agent_run.deploy_phase.trigger_workflow",
             lambda req, current_user, db: fake_response,
         )
 

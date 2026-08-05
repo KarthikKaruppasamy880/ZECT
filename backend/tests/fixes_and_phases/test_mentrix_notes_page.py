@@ -13,7 +13,7 @@ from fastapi import HTTPException
 
 class TestListMentrixNotes:
     def test_returns_notes_from_list_notes(self):
-        from app.routers.mentrix import list_mentrix_notes
+        from app.domains.agent_run.mentrix import list_mentrix_notes
 
         with patch("app.services.mentrix.notes.list_notes", return_value=[{"id": "1", "text": "hi"}]) as mock_list:
             result = list_mentrix_notes(_user=Mock(user_id=1))
@@ -22,7 +22,7 @@ class TestListMentrixNotes:
         assert result == {"notes": [{"id": "1", "text": "hi"}]}
 
     def test_clamps_limit_to_500(self):
-        from app.routers.mentrix import list_mentrix_notes
+        from app.domains.agent_run.mentrix import list_mentrix_notes
 
         with patch("app.services.mentrix.notes.list_notes", return_value=[]) as mock_list:
             list_mentrix_notes(limit=10_000, _user=Mock(user_id=1))
@@ -30,7 +30,7 @@ class TestListMentrixNotes:
         mock_list.assert_called_once_with(limit=500)
 
     def test_clamps_limit_to_at_least_1(self):
-        from app.routers.mentrix import list_mentrix_notes
+        from app.domains.agent_run.mentrix import list_mentrix_notes
 
         with patch("app.services.mentrix.notes.list_notes", return_value=[]) as mock_list:
             list_mentrix_notes(limit=-5, _user=Mock(user_id=1))
@@ -40,7 +40,7 @@ class TestListMentrixNotes:
 
 class TestCreateMentrixNote:
     def test_creates_a_note(self):
-        from app.routers.mentrix import NoteCreate, create_mentrix_note
+        from app.domains.agent_run.mentrix import NoteCreate, create_mentrix_note
 
         with patch("app.services.mentrix.notes.add_note", return_value={"id": "abc", "text": "buy milk"}) as mock_add:
             result = create_mentrix_note(NoteCreate(text="buy milk", tags=["personal"]), _user=Mock(user_id=1))
@@ -49,7 +49,7 @@ class TestCreateMentrixNote:
         assert result["id"] == "abc"
 
     def test_rejects_blank_text(self):
-        from app.routers.mentrix import NoteCreate, create_mentrix_note
+        from app.domains.agent_run.mentrix import NoteCreate, create_mentrix_note
 
         with pytest.raises(HTTPException) as exc_info:
             create_mentrix_note(NoteCreate(text="   "), _user=Mock(user_id=1))
@@ -59,7 +59,7 @@ class TestCreateMentrixNote:
 
 class TestDeleteMentrixNote:
     def test_deletes_an_existing_note(self):
-        from app.routers.mentrix import delete_mentrix_note
+        from app.domains.agent_run.mentrix import delete_mentrix_note
 
         with patch("app.services.mentrix.notes.delete_note", return_value=True) as mock_delete:
             result = delete_mentrix_note("abc-123", _user=Mock(user_id=1))
@@ -68,7 +68,7 @@ class TestDeleteMentrixNote:
         assert result == {"deleted": True, "id": "abc-123"}
 
     def test_404_when_note_missing(self):
-        from app.routers.mentrix import delete_mentrix_note
+        from app.domains.agent_run.mentrix import delete_mentrix_note
 
         with patch("app.services.mentrix.notes.delete_note", return_value=False):
             with pytest.raises(HTTPException) as exc_info:

@@ -162,6 +162,60 @@ def test_build_agent_context_empty_without_data():
         db.close()
 
 
+def test_build_agent_context_reads_active_skill_from_skills_engine():
+    """The "Active Skill" picker (Mentrix Companion / Persistent Dock) used
+    to read from the standalone Skill Library table, now merged into the
+    Skills Engine's SkillDefinition — its template lives in
+    manifest["template"] rather than its own column."""
+    from app.models import SkillDefinition
+    from app.services.mentrix.companion import build_agent_context
+
+    db = _db()
+    skill = SkillDefinition(
+        name="zinnia-test-skill",
+        description="A test skill",
+        category="general",
+        manifest={"template": "Always write a test first."},
+        is_active=True,
+    )
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
+
+    context = build_agent_context(db, skill_id=skill.id)
+
+    assert "zinnia-test-skill" in context
+    assert "Always write a test first." in context
+
+
+def test_build_agent_context_falls_back_to_description_without_template():
+    from app.models import SkillDefinition
+    from app.services.mentrix.companion import build_agent_context
+
+    db = _db()
+    skill = SkillDefinition(
+        name="no-template-skill",
+        description="Falls back to this",
+        category="general",
+        manifest={},
+        is_active=True,
+    )
+    db.add(skill)
+    db.commit()
+    db.refresh(skill)
+
+    context = build_agent_context(db, skill_id=skill.id)
+
+    assert "Falls back to this" in context
+
+
+def test_build_agent_context_unknown_skill_id_does_not_raise():
+    from app.services.mentrix.companion import build_agent_context
+
+    db = _db()
+    assert build_agent_context(db, skill_id=999999) == ""
+
+
 def test_open_browser_maps_to_chrome():
     from app.services.mentrix.companion import _parse_intents
 

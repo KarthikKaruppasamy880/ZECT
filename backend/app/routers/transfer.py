@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import (
     TransferBundle, OnboardingResponse, UserPreference,
-    Lesson, Decision, EpisodicMemory, Skill,
+    Lesson, Decision, EpisodicMemory, SkillDefinition,
 )
 
 router = APIRouter(prefix="/api/transfer", tags=["transfer"])
@@ -100,12 +100,13 @@ def export_bundle(data: ExportRequest, db: Session = Depends(get_db)):
         ]
 
     if data.bundle_type in ("full", "skills_only"):
-        skills = db.query(Skill).filter(
-            Skill.scope == "global",
+        skills = db.query(SkillDefinition).filter(
+            SkillDefinition.project_id.is_(None),
         ).all()
         bundle["skills"] = [
             {"name": s.name, "description": s.description, "category": s.category,
-             "template": s.template, "trigger_pattern": s.trigger_pattern, "tags": s.tags}
+             "template": (s.manifest or {}).get("template", ""),
+             "trigger_pattern": s.trigger_pattern, "tags": (s.manifest or {}).get("tags", [])}
             for s in skills
         ]
 
@@ -232,17 +233,18 @@ def import_bundle(data: ImportRequest, db: Session = Depends(get_db)):
     # Import skills
     for s_data in bundle.get("skills", []):
         if data.merge_strategy == "skip_duplicates":
-            existing = db.query(Skill).filter(Skill.name == s_data["name"]).first()
+            existing = db.query(SkillDefinition).filter(SkillDefinition.name == s_data["name"]).first()
             if existing:
                 continue
 
-        skill = Skill(
+        skill = SkillDefinition(
             name=s_data["name"],
             description=s_data.get("description", ""),
             category=s_data.get("category", "general"),
-            template=s_data.get("template", ""),
-            trigger_pattern=s_data.get("trigger_pattern"),
-            tags=s_data.get("tags", "[]"),
+            trigger_pattern=s_data.get("trigger_pattern") or "",
+            manifest={"template": s_data.get("template", ""), "tags": s_data.get("tags", [])},
+            project_id=None,
+            is_active=True,
         )
         db.add(skill)
         imported["skills"] += 1

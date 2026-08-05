@@ -57,7 +57,6 @@ const LazyCodeReview = lazy(() => import("@/pages/CodeReview"));
 const LazyBuildPhase = lazy(() => import("@/pages/BuildPhase"));
 const LazyReviewPhase = lazy(() => import("@/pages/ReviewPhase"));
 const LazyDeployPhase = lazy(() => import("@/pages/DeployPhase"));
-const LazySkillLibrary = lazy(() => import("@/pages/SkillLibrary"));
 
 function PageLoader() {
   return (
@@ -146,7 +145,6 @@ export default function App() {
           <Route path="/build" element={<Suspense fallback={<PageLoader />}><LazyBuildPhase /></Suspense>} />
           <Route path="/review" element={<Suspense fallback={<PageLoader />}><LazyReviewPhase /></Suspense>} />
           <Route path="/deploy" element={<Suspense fallback={<PageLoader />}><LazyDeployPhase /></Suspense>} />
-          <Route path="/skills" element={<Suspense fallback={<PageLoader />}><LazySkillLibrary /></Suspense>} />
           <Route path="/token-controls" element={<TokenControls />} />
           <Route path="/audit-trail" element={<AuditTrail />} />
           <Route path="/rules" element={<RulesEngine />} />

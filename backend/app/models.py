@@ -138,26 +138,6 @@ class Setting(Base):
     options = Column(String, default="")  # JSON array for select options
 
 
-class Skill(Base):
-    """Reusable skill templates for AI agents — can be global or scoped to a repo."""
-    __tablename__ = "skills"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(Text, default="")
-    category = Column(String, default="general")  # general, testing, deployment, review, architecture
-    template = Column(Text, default="")  # The actual skill content/template
-    trigger_pattern = Column(String, nullable=True)  # Regex or keyword that triggers this skill
-    tags = Column(String, default="[]")  # JSON array of tags
-    usage_count = Column(Integer, default=0)
-    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)  # null = global skill
-    scope = Column(String, default="global")  # global, repo
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    repo = relationship("Repo", backref="skills")
-
-
 class TokenBudget(Base):
     """Token budget configuration and limits — per-user or global."""
     __tablename__ = "token_budgets"

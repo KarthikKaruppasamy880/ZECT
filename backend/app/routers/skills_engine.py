@@ -1,5 +1,17 @@
-"""Zinnia Skills Engine — skill registry, trigger matching, and seed skills."""
+"""Zinnia Skills Engine — skill registry, trigger matching, and seed skills.
 
+Also the sole home of the "template" concept (a freeform reusable
+prompt/snippet a skill carries) and the AI pattern-detector, both merged in
+from the standalone Skill Library page/router — that page duplicated this
+one's purpose with a thinner data model (no versioning, no trigger
+matching, no execution tracking) and was never wired into anything beyond
+itself except Mentrix's "Active Skill" picker, which now reads from here.
+A skill's template lives in manifest["template"] rather than its own column
+— no schema change needed, and every other skill attribute (inputs/outputs/
+config for the seed skills) already lives in manifest too.
+"""
+
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -23,6 +35,8 @@ class SkillCreate(BaseModel):
     category: str = "general"
     trigger_pattern: str = ""
     manifest: dict = {}
+    template: str = ""
+    tags: list[str] = []
     script_body: str = ""
     project_id: Optional[int] = None
     is_seed: bool = False
@@ -33,8 +47,22 @@ class SkillUpdate(BaseModel):
     version: Optional[str] = None
     trigger_pattern: Optional[str] = None
     manifest: Optional[dict] = None
+    template: Optional[str] = None
+    tags: Optional[list[str]] = None
     script_body: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class DetectSkillRequest(BaseModel):
+    code: str
+    context: Optional[str] = None
+
+
+class DetectSkillResponse(BaseModel):
+    detected_patterns: list[dict]
+    suggested_skills: list[dict]
+    model: str
+    tokens_used: int
 
 
 class TriggerMatch(BaseModel):
@@ -190,6 +218,7 @@ def _seed_if_empty(db: Session):
 
 def _skill_to_dict(skill: SkillDefinition) -> dict:
     """Convert a SkillDefinition ORM object to a JSON-friendly dict."""
+    manifest = skill.manifest or {}
     return {
         "id": skill.id,
         "name": skill.name,
@@ -197,7 +226,12 @@ def _skill_to_dict(skill: SkillDefinition) -> dict:
         "description": skill.description,
         "category": skill.category,
         "trigger_pattern": skill.trigger_pattern,
-        "manifest": skill.manifest or {},
+        "manifest": manifest,
+        # Surfaced at the top level for convenience — same data as
+        # manifest["template"]/manifest["tags"], just not nested, matching
+        # the flat shape the old Skill Library UI/API expected.
+        "template": manifest.get("template", ""),
+        "tags": manifest.get("tags", []),
         "script_body": skill.script_body or "",
         "project_id": skill.project_id,
         "is_seed": skill.is_seed,
@@ -271,13 +305,18 @@ def create_skill(body: SkillCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail=f"Skill '{body.name}' already exists")
 
     now = datetime.now(timezone.utc)
+    manifest = dict(body.manifest or {})
+    if body.template:
+        manifest["template"] = body.template
+    if body.tags:
+        manifest["tags"] = body.tags
     skill = SkillDefinition(
         name=body.name,
         version=body.version,
         description=body.description,
         category=body.category,
         trigger_pattern=body.trigger_pattern,
-        manifest=body.manifest,
+        manifest=manifest,
         script_body=body.script_body,
         project_id=body.project_id,
         is_seed=body.is_seed,
@@ -306,8 +345,13 @@ def update_skill(skill_id: int, body: SkillUpdate, db: Session = Depends(get_db)
         skill.version = body.version
     if body.trigger_pattern is not None:
         skill.trigger_pattern = body.trigger_pattern
-    if body.manifest is not None:
-        skill.manifest = body.manifest
+    manifest = dict(body.manifest) if body.manifest is not None else dict(skill.manifest or {})
+    if body.template is not None:
+        manifest["template"] = body.template
+    if body.tags is not None:
+        manifest["tags"] = body.tags
+    if body.manifest is not None or body.template is not None or body.tags is not None:
+        skill.manifest = manifest
     if body.script_body is not None:
         skill.script_body = body.script_body
     if body.is_active is not None:
@@ -448,3 +492,94 @@ def skill_stats(db: Session = Depends(get_db)):
         "successful_executions": success_execs,
         "categories": cat_count,
     }
+
+
+# ── AI pattern detection (merged in from the standalone Skill Library) ─
+
+def _get_openai_client():
+    from openai import OpenAI
+
+    key = os.getenv("OPENAI_API_KEY", "")
+    if not key:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured.")
+    return OpenAI(api_key=key)
+
+
+@router.post("/detect", response_model=DetectSkillResponse)
+def detect_patterns(req: DetectSkillRequest):
+    """Detect reusable patterns in code and suggest skills to register."""
+    import json
+
+    from openai import APIError
+
+    from app.token_tracker import log_tokens
+
+    client = _get_openai_client()
+
+    system_prompt = (
+        "You are ZECT AI Skills Detector. Analyze the provided code and identify "
+        "reusable patterns that could be saved as skills/templates for future use. "
+        "Look for:\n"
+        "- Common design patterns (singleton, factory, observer, etc.)\n"
+        "- Boilerplate code that could be templated\n"
+        "- Testing patterns\n"
+        "- API endpoint patterns\n"
+        "- Error handling patterns\n"
+        "- Configuration patterns\n\n"
+        "Respond in JSON format:\n"
+        "{\n"
+        '  "detected_patterns": [\n'
+        '    {"name": "<pattern name>", "type": "<design|boilerplate|testing|api|config>", '
+        '"description": "<what it does>", "lines": "<line range>"}\n'
+        "  ],\n"
+        '  "suggested_skills": [\n'
+        '    {"name": "<skill name>", "category": "<category>", '
+        '"description": "<what it does>", "template": "<templated version>"}\n'
+        "  ]\n"
+        "}\nOnly return valid JSON."
+    )
+
+    user_content = f"Code:\n```\n{req.code[:6000]}\n```"
+    if req.context:
+        user_content += f"\nContext: {req.context[:1000]}"
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+            max_tokens=2000,
+            temperature=0.2,
+        )
+        content = resp.choices[0].message.content or "{}"
+        tokens = resp.usage.total_tokens if resp.usage else 0
+
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+
+        try:
+            data = json.loads(content.strip())
+        except json.JSONDecodeError:
+            data = {"detected_patterns": [], "suggested_skills": []}
+
+        log_tokens(
+            action="skills_detect",
+            feature="skills_engine",
+            model="gpt-4o-mini",
+            prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
+            completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
+            total_tokens=tokens,
+        )
+
+        return DetectSkillResponse(
+            detected_patterns=data.get("detected_patterns", []),
+            suggested_skills=data.get("suggested_skills", []),
+            model="gpt-4o-mini",
+            tokens_used=tokens,
+        )
+    except APIError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")

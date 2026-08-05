@@ -840,25 +840,17 @@ export const approvePermissionAudit = (auditId: number, approved: boolean, reaso
   });
 
 // Skills
-export const getSkills = (category?: string, repoId?: number, scope?: string) => {
+// Skill Library was merged into the Skills Engine — genuinely duplicate
+// concepts (name/description/category/template/tags CRUD), and Skills
+// Engine is the more complete system (versioning, trigger matching,
+// execution logs). getSkills() is kept for the Mentrix "Active Skill"
+// picker (MentrixSessionContext.tsx), now backed by the registry.
+export const getSkills = (category?: string) => {
   const params = new URLSearchParams();
   if (category) params.set("category", category);
-  if (repoId) params.set("repo_id", String(repoId));
-  if (scope) params.set("scope", scope);
   const qs = params.toString();
-  return request<any[]>(`/api/skills${qs ? `?${qs}` : ""}`);
+  return request<any[]>(`/api/skills-engine/skills${qs ? `?${qs}` : ""}`);
 };
-export const createSkill = (data: any) =>
-  request<any>("/api/skills", { method: "POST", body: JSON.stringify(data) });
-export const updateSkill = (id: number, data: any) =>
-  request<any>(`/api/skills/${id}`, { method: "PUT", body: JSON.stringify(data) });
-export const deleteSkill = (id: number) =>
-  request<void>(`/api/skills/${id}`, { method: "DELETE" });
-export const detectSkillPatterns = (code: string, context?: string) =>
-  request<any>("/api/skills/detect", {
-    method: "POST",
-    body: JSON.stringify({ code, ...(context ? { context } : {}) }),
-  });
 
 // Repos (for skill scoping)
 export const getRepos = () => request<any[]>("/api/projects").then((projects: any[]) =>

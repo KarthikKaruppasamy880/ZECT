@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
-from app.models import Lesson, MentrixRun, Skill
+from app.models import Lesson, MentrixRun, SkillDefinition
 from app.services.lattice.indexer import get_graph, query_graph
 from app.services.mentrix.permission_broker import (
     ALWAYS_CONFIRM_TOOLS,
@@ -97,9 +97,10 @@ def build_agent_context(
         bits.append(raw[:4000])
     try:
         if skill_id is not None:
-            skill = db.query(Skill).filter(Skill.id == int(skill_id)).first()
+            skill = db.query(SkillDefinition).filter(SkillDefinition.id == int(skill_id)).first()
             if skill:
-                body = (skill.template or skill.description or "").strip()
+                template = (skill.manifest or {}).get("template", "")
+                body = (template or skill.description or "").strip()
                 bits.append(
                     f"Active skill ({skill.name}): {body[:1200]}"
                     if body

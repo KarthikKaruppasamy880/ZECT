@@ -1,5 +1,6 @@
 """Role-Based Access Control (RBAC) decorators and helpers."""
 
+import inspect
 import json
 from functools import wraps
 from typing import Optional, Callable
@@ -30,6 +31,21 @@ class RequiresAuthentication(HTTPException):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=message
         )
+
+
+async def _call_maybe_async(func: Callable, *args, **kwargs):
+    """Both @require_role and @require_authentication unconditionally did
+    `return await func(*args, **kwargs)` — every single route handler either
+    decorator was ever applied to in this codebase (list_audit_logs,
+    audit_stats, create/update/delete_rule, approve_action, delete_secret) is
+    a plain `def`, not `async def`, so that `await` raised
+    TypeError: '<return type>' object can't be awaited on EVERY call,
+    regardless of role/auth outcome — not a permission bug, a total outage
+    of 7 endpoints. Detect which kind we were handed instead of assuming."""
+    result = func(*args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 def require_role(*allowed_roles: str):
@@ -69,7 +85,7 @@ def require_role(*allowed_roles: str):
                             f"Requires one of these roles: {', '.join(allowed_roles)}. Your role: {user.role if user else 'unknown'}"
                         )
 
-            return await func(*args, **kwargs)
+            return await _call_maybe_async(func, *args, **kwargs)
 
         return wrapper
 
@@ -78,7 +94,8 @@ def require_role(*allowed_roles: str):
 
 def require_authentication(func: Callable) -> Callable:
     """
-    Decorator to enforce that user is authenticated.
+    Decorator to enforce that user is authenticated. Wraps either a sync or
+    an async route handler — see _call_maybe_async.
 
     Usage:
         @router.get("/api/projects")
@@ -94,7 +111,7 @@ def require_authentication(func: Callable) -> Callable:
         if not current_user:
             raise RequiresAuthentication("User must be authenticated")
 
-        return await func(*args, **kwargs)
+        return await _call_maybe_async(func, *args, **kwargs)
 
     return wrapper
 

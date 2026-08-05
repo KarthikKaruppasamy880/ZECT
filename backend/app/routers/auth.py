@@ -40,7 +40,16 @@ def _auth_mode() -> str:
 def _auth_creds() -> tuple[str, str]:
     global _dev_defaults_logged
     if _ENV_FILE.is_file():
-        load_dotenv(_ENV_FILE, override=True)
+        # override=False — only fills in ZECT_USERNAME/ZECT_PASSWORD if they
+        # aren't already set in the process environment. This still loads
+        # real .env credentials on a cold start (nothing set yet), but no
+        # longer stomps credentials the process environment already has —
+        # override=True previously re-read .env on every single login call,
+        # so a test suite injecting its own credentials before importing the
+        # app had them silently overwritten by real .env values on the very
+        # next login attempt. Picking up an edited .env now requires a
+        # restart, same as any other env-var config in this app.
+        load_dotenv(_ENV_FILE, override=False)
     user = os.getenv("ZECT_USERNAME", "").strip()
     password = os.getenv("ZECT_PASSWORD", "")
     mode = _auth_mode()

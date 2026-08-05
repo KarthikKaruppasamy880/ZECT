@@ -11,7 +11,6 @@ import Analytics from "@/pages/Analytics";
 import Settings from "@/pages/Settings";
 import Orchestration from "@/pages/Orchestration";
 import Docs from "@/pages/Docs";
-import StagePage from "@/pages/StagePage";
 import RepoAnalysis from "@/pages/RepoAnalysis";
 import BlueprintGenerator from "@/pages/BlueprintGenerator";
 import DocGenerator from "@/pages/DocGenerator";
@@ -179,7 +178,6 @@ export default function App() {
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
           <Route path="/mentrix" element={<Mentrix />} />
           <Route path="/sandbox" element={<SandboxGate />} />
-          <Route path="/stages/:stage" element={<StagePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

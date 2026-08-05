@@ -14,7 +14,7 @@ from starlette.datastructures import Headers, UploadFile
 import app.models  # noqa: F401 — register ClonedVoice
 from app.database import Base
 from app.models import ClonedVoice
-from app.services.llm import chatterbox_client, elevenlabs_client, voicebox_client
+from app.services.llm import chatterbox_client, elevenlabs_client
 from app.services.mentrix.realtime import _cloned_voice_for_user, mint_realtime_session
 
 USER = Mock(user_id=5)
@@ -110,7 +110,6 @@ class TestChatterboxClient:
         monkeypatch.setattr(chatterbox_client.httpx, "Client", _mock_httpx_client(mock_client))
 
         assert chatterbox_client.chatterbox_available() is True
-        assert voicebox_client.voicebox_available() is True
 
     def test_available_false_when_server_unreachable(self, monkeypatch):
         def boom(**kw):

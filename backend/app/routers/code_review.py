@@ -641,13 +641,20 @@ async def github_webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "skipped", "reason": "Auto-review not enabled for this repo"}
     config = _webhook_to_dict(row)
 
-    # Verify signature if secret is configured
+    # Signature verification was previously opt-in — any repo where an admin
+    # hadn't gotten around to setting webhook_secret accepted unauthenticated
+    # POSTs that triggered a real review run. Now mandatory: no secret
+    # configured means the webhook is rejected, not silently trusted.
     secret = config.get("webhook_secret", "")
-    if secret:
-        sig_header = request.headers.get("X-Hub-Signature-256", "")
-        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig_header, expected):
-            raise HTTPException(status_code=403, detail="Invalid webhook signature")
+    if not secret:
+        raise HTTPException(
+            status_code=403,
+            detail="Webhook secret not configured for this repo — set one via POST /webhook/configure before GitHub events will be accepted",
+        )
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig_header, expected):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
 
     # Check Rules Engine kill switch
     block_rules = db.query(Rule).filter(

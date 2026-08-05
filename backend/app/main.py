@@ -107,19 +107,25 @@ async def global_exception_handler(request: Request, exc: Exception):
         print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
     except UnicodeEncodeError:
         print(f"[ZECT ERROR] {request.method} {request.url}: {type(exc).__name__}")
-    origin = request.headers.get("origin", "*")
+    # Echoing back any Origin header (previously done unconditionally) bypasses
+    # the CORSMiddleware allowlist above for this response class specifically —
+    # only reflect it when it's actually on the allowlist, same policy as every
+    # other response.
+    origin = request.headers.get("origin", "")
+    headers = {
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    if origin in _ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
         content={
             "detail": str(exc).encode("ascii", "replace").decode("ascii"),
             "error_type": type(exc).__name__,
         },
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
+        headers=headers,
     )
 
 app.include_router(projects.router)

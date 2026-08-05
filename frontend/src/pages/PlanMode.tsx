@@ -37,6 +37,7 @@ export default function PlanMode() {
   const {
     activeRepoId,
     projectKey,
+    localPath,
     blueprintPrompt,
     loadSavedBlueprint,
     clearBlueprintContext,
@@ -178,7 +179,13 @@ export default function PlanMode() {
   const handleOpenMentrix = async () => {
     if (!plan) return;
     await saveContext(contextPageFor("workspace", projectKey), "last_plan", plan).catch(() => {});
-    navigate("/mentrix", { state: { agentContext: plan.slice(0, 4000) } });
+    navigate("/mentrix", {
+      state: {
+        goal: plan.slice(0, 4000),
+        projectKey: projectKey || undefined,
+        workspace: localPath || undefined,
+      },
+    });
   };
 
   return (

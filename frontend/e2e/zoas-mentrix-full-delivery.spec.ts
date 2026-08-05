@@ -346,5 +346,6 @@ test.describe("ZOAS Mentrix full delivery (mocked)", () => {
 
     await expect(page).toHaveURL(/\/mentrix/, { timeout: 15_000 });
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
+    await expect(page.getByTestId("mentrix-goal")).not.toHaveValue("", { timeout: 10_000 });
   });
 });

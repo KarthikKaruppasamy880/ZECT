@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush, loadContext } from "@/lib/api";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { contextPageFor } from "@/lib/workspaceContext";
 import CodeOutput from "@/components/CodeOutput";
 import DiffViewer from "@/components/DiffViewer";
 import ModelSelector from "@/components/ModelSelector";
@@ -38,6 +40,7 @@ interface AttachedFile {
 
 export default function BuildPhase() {
   const location = useLocation();
+  const { projectKey } = useWorkspaceRepoContext();
   const [planStep, setPlanStep] = useState("");
   const [techStack, setTechStack] = useState("");
   const [filePath, setFilePath] = useState("");
@@ -68,11 +71,11 @@ export default function BuildPhase() {
         setPlanStep(state.planStep);
         return;
       }
-      const ws = await loadContext("workspace", ["last_plan"]).catch(() => null);
+      const ws = await loadContext(contextPageFor("workspace", projectKey), ["last_plan"]).catch(() => null);
       const savedPlan = ws?.entries.find((e) => e.key === "last_plan")?.value;
       if (savedPlan) setPlanStep(savedPlan.slice(0, 6000));
     })();
-  }, [location.state]);
+  }, [location.state, projectKey]);
 
   // Auto-fix state
   const [autoFixRunning, setAutoFixRunning] = useState(false);

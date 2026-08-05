@@ -19,7 +19,7 @@ def _generation_ready() -> bool:
     OPENAI_API_KEY, so an Anthropic-only deployment (no OpenAI key at all)
     hit the offline placeholder on every build step instead of calling
     Claude, despite the app's own documented Anthropic-preferred behavior."""
-    from app.services.llm.anthropic_client import anthropic_available
+    from app.adapters.llm.anthropic_client import anthropic_available
 
     return _openai_ready() or anthropic_available()
 
@@ -121,8 +121,8 @@ def _generate_core(
 ) -> dict[str, Any]:
     from openai import APIError, OpenAI
 
-    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
-    from app.services.llm.anthropic_client import resolve_generation_model
+    from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.adapters.llm.anthropic_client import resolve_generation_model
     from app.token_tracker import log_tokens
 
     # Prefer Claude Sonnet for generation quality when configured — current

@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 — register LLMResponseCache
 from app.infrastructure.database import Base
-from app.services.llm.response_cache import cache_key_for, get_cached, store_cached
+from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
 
 
 def _session():

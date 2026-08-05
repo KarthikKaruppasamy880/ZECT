@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from app.services.mcp.adapters import jira
+from app.adapters import jira
 
 
 def test_search_issues_posts_jql():
@@ -25,7 +25,7 @@ def test_search_issues_posts_jql():
             "JIRA_API_TOKEN": "tok",
         },
         clear=False,
-    ), patch("app.services.mcp.adapters.jira.httpx.Client", return_value=mock_client):
+    ), patch("app.adapters.jira.httpx.Client", return_value=mock_client):
         out = jira.execute(
             "search_issues",
             {"jql": "issuetype = Incident", "max_results": 10},
@@ -61,7 +61,7 @@ def test_add_comment_sends_adf():
             "JIRA_API_TOKEN": "tok",
         },
         clear=False,
-    ), patch("app.services.mcp.adapters.jira.httpx.Client", return_value=mock_client):
+    ), patch("app.adapters.jira.httpx.Client", return_value=mock_client):
         out = jira.execute(
             "add_comment",
             {"issue_key": "INC-1", "body": "Mentrix PR: https://example.com/pr/1"},

@@ -127,8 +127,8 @@ def chat_with_model(req: ChatRequest):
 
     try:
         if provider == "anthropic":
-            from app.services.llm.anthropic_client import anthropic_available
-            from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
+            from app.adapters.llm.anthropic_client import anthropic_available
+            from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
 
             if not anthropic_available():
                 raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured.")

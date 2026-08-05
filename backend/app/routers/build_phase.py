@@ -181,8 +181,8 @@ def generate_code(
     db: Session = Depends(get_db),
 ):
     """Generate code for a single plan step."""
-    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
-    from app.services.llm.anthropic_client import resolve_generation_model
+    from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.adapters.llm.anthropic_client import resolve_generation_model
 
     use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else _get_client()
@@ -392,8 +392,8 @@ def generate_multi_file(
     if len(req.target_files) > MAX_MULTI_FILE_TARGETS:
         raise HTTPException(status_code=400, detail=f"target_files exceeds the {MAX_MULTI_FILE_TARGETS}-file limit per call")
 
-    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
-    from app.services.llm.anthropic_client import resolve_generation_model
+    from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.adapters.llm.anthropic_client import resolve_generation_model
 
     use_anthropic, model_name = resolve_generation_model()
     client = None if use_anthropic else _get_client()

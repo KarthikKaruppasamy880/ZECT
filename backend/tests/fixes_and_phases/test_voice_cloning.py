@@ -14,7 +14,7 @@ from starlette.datastructures import Headers, UploadFile
 import app.models  # noqa: F401 — register ClonedVoice
 from app.infrastructure.database import Base
 from app.models import ClonedVoice
-from app.services.llm import chatterbox_client, elevenlabs_client
+from app.adapters.llm import chatterbox_client
 from app.services.mentrix.realtime import _cloned_voice_for_user, mint_realtime_session
 
 USER = Mock(user_id=5)
@@ -28,44 +28,6 @@ def _session():
 
 def _mock_httpx_client(mock_client):
     return lambda **kw: Mock(__enter__=lambda s: mock_client, __exit__=lambda s, *a: None)
-
-
-class TestElevenLabsClient:
-    """Dormant but still-correct — kept in case a hosted provider is wanted later."""
-
-    def test_available_reflects_env(self, monkeypatch):
-        monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
-        assert elevenlabs_client.elevenlabs_available() is False
-        monkeypatch.setenv("ELEVENLABS_API_KEY", "sk-test")
-        assert elevenlabs_client.elevenlabs_available() is True
-
-    def test_clone_voice_raises_without_key(self, monkeypatch):
-        monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
-        with pytest.raises(ValueError, match="ELEVENLABS_API_KEY"):
-            elevenlabs_client.clone_voice("Me", b"audio", "s.mp3")
-
-    def test_clone_voice_success(self, monkeypatch):
-        monkeypatch.setenv("ELEVENLABS_API_KEY", "sk-test")
-        mock_resp = Mock(status_code=200)
-        mock_resp.json.return_value = {"voice_id": "abc123"}
-        mock_client = Mock()
-        mock_client.post.return_value = mock_resp
-        monkeypatch.setattr(elevenlabs_client.httpx, "Client", _mock_httpx_client(mock_client))
-
-        result = elevenlabs_client.clone_voice("Me", b"audio-bytes", "s.mp3")
-
-        assert result["voice_id"] == "abc123"
-
-    def test_synthesize_speech_returns_bytes(self, monkeypatch):
-        monkeypatch.setenv("ELEVENLABS_API_KEY", "sk-test")
-        mock_resp = Mock(status_code=200, content=b"fake-mp3-bytes")
-        mock_client = Mock()
-        mock_client.post.return_value = mock_resp
-        monkeypatch.setattr(elevenlabs_client.httpx, "Client", _mock_httpx_client(mock_client))
-
-        audio = elevenlabs_client.synthesize_speech("hello", "abc123")
-
-        assert audio == b"fake-mp3-bytes"
 
 
 class TestEnsureEngineProfileReprovisionCooldown:
@@ -95,7 +57,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         clone_calls = []
 
@@ -103,7 +65,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
             clone_calls.append(timeout)
             raise RuntimeError("Chatterbox profile creation failed (500): engine error")
 
-        monkeypatch.setattr("app.services.llm.chatterbox_client.clone_voice", boom)
+        monkeypatch.setattr("app.adapters.llm.chatterbox_client.clone_voice", boom)
 
         row = self._row(tmp_path)
         with pytest.raises(HTTPException) as exc:
@@ -118,7 +80,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         clone_calls = []
 
@@ -126,7 +88,7 @@ class TestEnsureEngineProfileReprovisionCooldown:
             clone_calls.append(1)
             raise RuntimeError("engine error")
 
-        monkeypatch.setattr("app.services.llm.chatterbox_client.clone_voice", boom)
+        monkeypatch.setattr("app.adapters.llm.chatterbox_client.clone_voice", boom)
         row = self._row(tmp_path)
 
         with pytest.raises(HTTPException):
@@ -144,10 +106,10 @@ class TestEnsureEngineProfileReprovisionCooldown:
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.clone_voice",
+            "app.adapters.llm.chatterbox_client.clone_voice",
             lambda *a, **kw: {"voice_id": "engine-2"},
         )
         row = self._row(tmp_path, voice_id="v2")
@@ -163,10 +125,10 @@ class TestEnsureEngineProfileReprovisionCooldown:
 
         vc._reprovision_blocked_until.clear()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.clone_voice",
+            "app.adapters.llm.chatterbox_client.clone_voice",
             lambda *a, **kw: {"voice_id": "engine-3"},
         )
         row = self._row(tmp_path, voice_id="v3")
@@ -322,10 +284,10 @@ class TestVoiceCloneEndpoints:
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         db = _session()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.clone_voice",
+            "app.adapters.llm.chatterbox_client.clone_voice",
             lambda name, audio_bytes, filename, content_type=None, *, reference_text, language="en": {
                 "voice_id": "engine-1",
                 "name": name,
@@ -366,7 +328,7 @@ class TestVoiceCloneEndpoints:
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: False
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: False
         )
         monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
         db = _session()
@@ -395,7 +357,7 @@ class TestVoiceCloneEndpoints:
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
         db = _session()
         upload = UploadFile(
@@ -424,7 +386,7 @@ class TestVoiceCloneEndpoints:
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.delete_voice", lambda vid: None
+            "app.adapters.llm.chatterbox_client.delete_voice", lambda vid: None
         )
         db = _session()
         a = ClonedVoice(
@@ -486,7 +448,7 @@ class TestVoiceCloneEndpoints:
         )
         db.commit()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.delete_voice", lambda vid: None
+            "app.adapters.llm.chatterbox_client.delete_voice", lambda vid: None
         )
         monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
 
@@ -519,7 +481,7 @@ class TestVoiceCloneEndpoints:
         )
         db.commit()
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.synthesize_speech",
+            "app.adapters.llm.chatterbox_client.synthesize_speech",
             lambda text, voice_id: b"wav-bytes",
         )
         monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
@@ -536,9 +498,9 @@ class TestVoiceCloneEndpoints:
         # No ClonedVoice row at all for this user — a stock voice request
         # must not need one.
         captured = {}
-        monkeypatch.setattr("app.services.llm.openai_tts.openai_tts_available", lambda: True)
+        monkeypatch.setattr("app.adapters.llm.openai_tts.openai_tts_available", lambda: True)
         monkeypatch.setattr(
-            "app.services.llm.openai_tts.synthesize_openai_speech",
+            "app.adapters.llm.openai_tts.synthesize_openai_speech",
             lambda text, voice=None, model=None: (captured.setdefault("voice", voice), b"mp3-bytes")[1],
         )
         monkeypatch.setattr("app.routers.voice_clone.log_audit", lambda **kw: None)
@@ -561,7 +523,7 @@ class TestVoiceCloneEndpoints:
         from app.routers.voice_clone import SpeakRequest, speak
 
         db = _session()
-        monkeypatch.setattr("app.services.llm.openai_tts.openai_tts_available", lambda: False)
+        monkeypatch.setattr("app.adapters.llm.openai_tts.openai_tts_available", lambda: False)
         with pytest.raises(HTTPException) as exc:
             speak(SpeakRequest(text="hello", stock_voice="alloy"), current_user=USER, db=db)
         assert exc.value.status_code == 503
@@ -571,7 +533,7 @@ class TestVoiceCloneEndpoints:
 
         monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
         monkeypatch.setattr(
-            "app.services.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
 
         sample = UploadFile(

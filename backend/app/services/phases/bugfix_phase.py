@@ -23,8 +23,8 @@ def run_root_cause_analysis(
 ) -> dict[str, Any]:
     from openai import APIError, OpenAI
 
-    from app.services.llm.anthropic_client import create_fn as anthropic_create_fn
-    from app.services.llm.anthropic_client import resolve_generation_model
+    from app.adapters.llm.anthropic_client import create_fn as anthropic_create_fn
+    from app.adapters.llm.anthropic_client import resolve_generation_model
     from app.services.quality.truncation import complete_with_continuations
     from app.token_tracker import log_tokens
 

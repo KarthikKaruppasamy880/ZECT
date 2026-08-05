@@ -1,4 +1,4 @@
-from app.services.llm.openai_tts import openai_tts_available
+from app.adapters.llm.openai_tts import openai_tts_available
 
 
 def test_openai_tts_available_false_without_key(monkeypatch):

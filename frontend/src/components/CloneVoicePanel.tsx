@@ -8,8 +8,10 @@ import {
   cloneMyVoice,
   deleteClonedVoice,
   listMyClonedVoices,
+  mentrixVoiceEngineStatus,
   setDefaultClonedVoice,
   type ClonedVoiceInfo,
+  type VoiceEngineStatus,
 } from "@/lib/api";
 import { speakMentrix } from "@/mentrix/speak";
 
@@ -47,6 +49,7 @@ export default function CloneVoicePanel({
   const [recordSecs, setRecordSecs] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readyNote, setReadyNote] = useState("");
+  const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -59,6 +62,32 @@ export default function CloneVoicePanel({
   useEffect(() => {
     if (defaultExpanded) setExpanded(true);
   }, [defaultExpanded]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      mentrixVoiceEngineStatus()
+        .then((s) => {
+          if (!cancelled) setEngineStatus(s);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setEngineStatus({
+              online: false,
+              base_url: "http://localhost:17493",
+              default_voice: null,
+              hint: "Could not reach ZECT API for engine status.",
+            });
+          }
+        });
+    };
+    load();
+    const iv = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(iv);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -174,7 +203,7 @@ export default function CloneVoicePanel({
       setSampleFile(null);
       setName("");
       setReferenceText(SAMPLE_SCRIPT);
-      setReadyNote("Ready for Present & voice sessions.");
+      setReadyNote("Voice saved in your account. Use Present, narrate, or Test speak to verify audio.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to clone voice";
       setError(msg);
@@ -216,12 +245,23 @@ export default function CloneVoicePanel({
     setError("");
     setReadyNote("");
     try {
+      if (engineStatus && !engineStatus.online) {
+        setError(
+          `Chatterbox offline at ${engineStatus.base_url} — start the local engine to Test speak with your clone (sample in ZECT ≠ engine online).`,
+        );
+        return;
+      }
       const result = await speakMentrix(
         "Mentrix voice check. If you hear this, TTS output is working.",
         true,
+        { requireClone: true },
       );
       if (result.ok) {
-        setReadyNote(`Voice check OK via ${result.engine}.`);
+        if (result.engine !== "chatterbox") {
+          setError(`Expected clone TTS (chatterbox), got ${result.engine}`);
+        } else {
+          setReadyNote(`Voice check OK via ${result.engine}.`);
+        }
       } else {
         setError(result.error);
       }
@@ -268,10 +308,22 @@ export default function CloneVoicePanel({
           <span
             data-testid="clone-voice-chatterbox-status"
             className={`text-[10px] px-2 py-0.5 rounded ${
-              dark ? "text-teal-200 bg-teal-900/40" : "text-teal-700 bg-teal-50"
+              defaultVoice.sample_missing
+                ? dark
+                  ? "text-red-200 bg-red-900/40"
+                  : "text-red-700 bg-red-50"
+                : dark
+                  ? "text-teal-200 bg-teal-900/40"
+                  : "text-teal-700 bg-teal-50"
             }`}
           >
-            Default ready
+            {defaultVoice.sample_missing
+              ? "Sample missing — re-clone"
+              : defaultVoice.engine_ready
+                ? "Default ready (engine)"
+                : defaultVoice.has_sample
+                  ? "Default saved (sample OK)"
+                  : "Default ready"}
           </span>
         )}
       </div>
@@ -279,6 +331,27 @@ export default function CloneVoicePanel({
       <p className={`text-xs ${dark ? "text-slate-400" : "text-slate-500"}`}>
         Record 10–60 seconds reading the script (or upload a clean sample). ZECT stores the clone
         in your account — use it for Present, narrate, and Connect Voice sessions. Delete anytime.
+        A saved sample is not the same as Chatterbox online — start the local engine to hear your voice.
+      </p>
+
+      <p
+        data-testid="clone-voice-engine-status"
+        className={`text-[11px] rounded border px-2 py-1 ${
+          engineStatus?.online
+            ? dark
+              ? "border-emerald-800 text-emerald-200 bg-emerald-950/40"
+              : "border-emerald-200 text-emerald-800 bg-emerald-50"
+            : dark
+              ? "border-amber-800 text-amber-200 bg-amber-950/40"
+              : "border-amber-200 text-amber-900 bg-amber-50"
+        }`}
+        title={engineStatus?.hint || undefined}
+      >
+        {!engineStatus
+          ? "Checking Chatterbox engine…"
+          : engineStatus.online
+            ? `Chatterbox online (${engineStatus.base_url})`
+            : `Chatterbox offline (${engineStatus.base_url}) — start local engine to Test speak / Present`}
       </p>
 
       {voices.length > 0 && (
@@ -339,13 +412,18 @@ export default function CloneVoicePanel({
         <button
           type="button"
           data-testid="clone-voice-test-speak"
-          disabled={loading}
+          disabled={loading || (engineStatus !== null && !engineStatus.online)}
           onClick={() => void handleTestSpeak()}
           className={`rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-40 ${
             dark
               ? "border-teal-700 text-teal-200 hover:bg-teal-950"
               : "border-teal-300 text-teal-800 hover:bg-teal-50"
           }`}
+          title={
+            engineStatus && !engineStatus.online
+              ? "Start local Chatterbox to Test speak with your clone"
+              : "Speak a short line with your default clone"
+          }
         >
           Test speak
         </button>

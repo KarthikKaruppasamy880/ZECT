@@ -6,7 +6,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { mentrixSpeakClonedDetailed } from "@/lib/api";
-import { cancelMentrixSpeech, speakMentrixStreamedAwait } from "./speak";
+import { cancelMentrixSpeech, requireCloneSpeech, speakMentrixStreamedAwait } from "./speak";
 
 class FakeAudio extends EventTarget {
   ended = false;
@@ -40,6 +40,19 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("requireCloneSpeech", () => {
+  it("defaults to true for clone path", () => {
+    expect(requireCloneSpeech(undefined)).toBe(true);
+    expect(requireCloneSpeech({ requireClone: true })).toBe(true);
+    expect(requireCloneSpeech({ voiceId: "v1" })).toBe(true);
+  });
+
+  it("is false for stock voice or explicit opt-out", () => {
+    expect(requireCloneSpeech({ stockVoice: "nova" })).toBe(false);
+    expect(requireCloneSpeech({ requireClone: false })).toBe(false);
+  });
+});
 
 describe("speakMentrixStreamedAwait", () => {
   beforeEach(() => {
@@ -107,7 +120,7 @@ describe("speakMentrixStreamedAwait", () => {
     expect((mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0][0])).toEqual(["A", "B", "C"]);
   });
 
-  it("reports mixed when chunks come back from different engines", async () => {
+  it("rejects non-chatterbox engines on the default clone path (no silent mixed fallback)", async () => {
     const s1 = "A".repeat(150) + ".";
     const s2 = "B".repeat(150) + ".";
     const text = `${s1} ${s2}`;
@@ -117,9 +130,24 @@ describe("speakMentrixStreamedAwait", () => {
 
     const result = await speakMentrixStreamedAwait(text, true);
 
-    expect(result).toEqual({ ok: true, engine: "mixed(chatterbox+openai_tts_fallback)" });
+    expect(result).toEqual({
+      ok: false,
+      error: "Expected your clone (chatterbox), got openai_tts_fallback — start local Chatterbox",
+    });
   });
 
+  it("allows mixed engines when requireClone is false", async () => {
+    const s1 = "A".repeat(150) + ".";
+    const s2 = "B".repeat(150) + ".";
+    const text = `${s1} ${s2}`;
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ url: "blob:chunk-0", engine: "chatterbox" })
+      .mockResolvedValueOnce({ url: "blob:chunk-1", engine: "openai_tts_fallback" });
+
+    const result = await speakMentrixStreamedAwait(text, true, { requireClone: false });
+
+    expect(result).toEqual({ ok: true, engine: "mixed(chatterbox+openai_tts_fallback)" });
+  });
   it("returns off when disabled without calling the API", async () => {
     const result = await speakMentrixStreamedAwait("Some text.", false);
 

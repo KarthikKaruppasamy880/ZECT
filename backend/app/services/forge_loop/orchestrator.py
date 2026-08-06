@@ -31,16 +31,24 @@ from app.services.quality.grounding import validate_grounding
 from app.services.quality.incomplete_files import check_incomplete_files
 from app.services.quality.lint_runner import run_lint
 from app.services.rag.retriever import hybrid_retrieve
+from app.services.forge_loop.batch_build import (
+    MENTRIX_BUILD_BATCH_SIZE,
+    attach_files_expected,
+    chunk_files,
+    collect_files_expected,
+)
 
 # Re-export for mentrix router / tests
 __all__ = [
     "run_mentrix",
     "continue_mentrix_after_plan",
+    "continue_mentrix_after_batch",
     "validate_context_pack",
     "gates_allow_approve",
     "gates_allow_create_pr",
     "MODE_PIPELINE",
     "AGENT_ROLES",
+    "collect_files_expected",
 ]
 
 AGENT_ROLES = (
@@ -310,7 +318,7 @@ def _run_planner(goal: str, scout: dict, rules: str, events: list[dict]) -> dict
         "summary": f"Plan for: {goal[:200]}",
         "steps": [
             {"step": 1, "action": "Review retrieved context and rules", "files": files[:3]},
-            {"step": 2, "action": "Implement minimal diff changes", "files": files[3:8] or ["(new files as needed)"]},
+            {"step": 2, "action": "Implement minimal diff changes", "files": files[3:8] or []},
             {"step": 3, "action": "Lint + sandbox / tests", "files": []},
             {"step": 4, "action": "Human approve then open PR", "files": []},
         ],
@@ -323,7 +331,8 @@ def _run_planner(goal: str, scout: dict, rules: str, events: list[dict]) -> dict
         "rules_applied": rules[:2000],
         "skills": skills[:3000],
     }
-    _emit(events, "planner", f"Plan ready with {len(plan['steps'])} steps + skill packs")
+    plan = attach_files_expected(plan, files)
+    _emit(events, "planner", f"Plan ready with {len(plan['steps'])} steps, {len(plan.get('files_expected') or [])} files_expected")
     return plan
 
 
@@ -736,7 +745,7 @@ def run_mentrix(
     rs = resume_state or {}
     scout: dict = rs.get("scout") or {}
     plan: dict = rs.get("plan") or {}
-    builder: dict = {}
+    builder: dict = dict((rs.get("result") or {}).get("builder") or {})
     review: dict = {}
     blueprint: dict = rs.get("blueprint") or {}
     ask: dict = rs.get("ask") or {}
@@ -756,10 +765,21 @@ def run_mentrix(
     if resume_from:
         result.setdefault("agents_run", [])
         result["plan_confirmed"] = True
+        if rs.get("batch_index") is not None:
+            result["batch_index"] = rs.get("batch_index")
+        if rs.get("files_written"):
+            result.setdefault("builder", {})
+            if not isinstance(result["builder"], dict):
+                result["builder"] = {}
+            result["builder"]["files_written"] = list(rs.get("files_written") or [])
     recovery_attempt = 0
     next_step = ""
     strict_lint = _lint_strict(mode)
     paused_for_plan = False
+    # Hoisted so incomplete recovery can see build aggregates even if names change
+    all_files_written: list[str] = list(rs.get("files_written") or result.get("builder", {}).get("files_written") or [])
+    all_files_expected: list[str] = list(collect_files_expected(plan) or result.get("builder", {}).get("files_expected") or [])
+    num_steps = len(plan.get("steps") or []) or 1
 
     steps = 0
     for agent in pipeline:
@@ -868,21 +888,42 @@ def run_mentrix(
             # produce — so the existing "build" stage needs zero changes to
             # consume it.
             fix_steps = root_cause.get("fix_steps") or ["Fix the reported issue based on the root-cause analysis"]
+            impact_files = []
+            for h in (trace.get("impacted") or scout.get("graph_hits") or [])[:12]:
+                if isinstance(h, dict) and h.get("path"):
+                    impact_files.append(h["path"])
+                elif isinstance(h, str):
+                    impact_files.append(h)
             plan = {
                 "plan": root_cause.get("fix_plan_text") or root_cause.get("analysis") or goal,
                 "phases": fix_steps,
-                "steps": [{"step": i + 1, "title": s, "action": s, "files": []} for i, s in enumerate(fix_steps)],
+                "steps": [
+                    {
+                        "step": i + 1,
+                        "title": s,
+                        "action": s,
+                        "files": impact_files if i == 0 else [],
+                    }
+                    for i, s in enumerate(fix_steps)
+                ],
                 "model": root_cause.get("model"),
                 "tokens_used": root_cause.get("tokens_used", 0),
             }
+            plan = attach_files_expected(plan, impact_files)
             result["plan"] = {
                 "summary": (plan.get("plan") or "")[:1500],
                 "phases": plan.get("phases"),
                 "steps": plan.get("steps"),
+                "files_expected": plan.get("files_expected") or [],
                 "model": plan.get("model"),
                 "source": "root_cause",
             }
-            push("planner", f"Fix plan has {len(fix_steps)} step(s)", phase="root_cause", next_step="build")
+            push(
+                "planner",
+                f"Fix plan has {len(fix_steps)} step(s), {len(plan.get('files_expected') or [])} files_expected",
+                phase="root_cause",
+                next_step="build",
+            )
             if _plan_confirm_required(mode) and not resume_from:
                 paused_for_plan = True
                 next_step = "await_plan_confirm"
@@ -923,15 +964,23 @@ def run_mentrix(
                     crit.append(str(title)[:160])
             contract["acceptance_criteria"] = crit[:12]
             blueprint["design_contract"] = contract
+            sampled = list((blueprint.get("files_sampled") or [])[:20])
+            plan = attach_files_expected(plan, sampled)
             result["plan"] = {
                 "summary": (plan.get("plan") or "")[:1500],
                 "phases": plan.get("phases"),
                 "steps": plan.get("steps"),
+                "files_expected": plan.get("files_expected") or [],
                 "model": plan.get("model"),
                 "design_contract": contract,
                 "source": "plan",
             }
-            push("planner", f"Plan ready with {len(plan.get('phases') or [])} phases", phase="plan", next_step="api_analyze")
+            push(
+                "planner",
+                f"Plan ready with {len(plan.get('phases') or [])} phases, {len(plan.get('files_expected') or [])} files_expected",
+                phase="plan",
+                next_step="api_analyze",
+            )
             if _plan_confirm_required(mode) and not resume_from:
                 paused_for_plan = True
                 next_step = "await_plan_confirm"
@@ -984,65 +1033,201 @@ def run_mentrix(
                     paused_for_plan = True
                     next_step = "await_plan_confirm"
                     break
-            _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — all plan steps")
-            # upgrade/bugfix/deliver all call the real LLM builder — run_build_from_plan
-            # itself already gates actually writing to disk on workspace/repo_id being
-            # set (write_to_repo=bool(workspace or repo_id) below), so a workspace-less
-            # deliver run still gets real generated_code back for review/approve, it
-            # just isn't written to a repo yet. Previously deliver with no workspace
-            # fell to _run_builder(), a hardcoded stub that never calls an LLM at all —
-            # Agent Mode/chat "build this" always hit that path and produced zero code.
+            _emit_phase(events, "build", 0.65, "incomplete", "Build Phase — batched plan files")
             can_write_build = mode in ("upgrade", "bugfix", "deliver")
+            # Preserve prior batch progress when resuming after human batch confirm
+            all_files_written: list[str] = list(rs.get("files_written") or result.get("builder", {}).get("files_written") or [])
+            all_files_expected: list[str] = []
+            rule_violations: list[dict] = []
+            builder: dict[str, Any] = dict(result.get("builder") or {})
+            num_steps = len(plan.get("steps") or []) or 1
+            paused_for_batch = False
             if can_write_build:
                 from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
+                plan = attach_files_expected(plan)
+                if isinstance(result.get("plan"), dict):
+                    result["plan"]["files_expected"] = plan.get("files_expected") or []
+                files_expected = collect_files_expected(plan)
+                all_files_expected = list(files_expected)
                 plan_text = plan.get("plan") or goal
-                # Previously hardcoded step_index=0 — a multi-phase plan (inventory,
-                # port module 1, port module 2, tests, review...) only ever built its
-                # first step. Loop every step so the whole plan actually gets built.
-                num_steps = len(plan.get("steps") or []) or 1
-                all_files_written: list[str] = []
-                all_files_expected: list[str] = []
-                rule_violations: list[dict] = []
-                builder: dict[str, Any] = {}
-                for step_idx in range(num_steps):
-                    step_builder = run_build_from_plan(
-                        plan_text,
-                        step_index=step_idx,
-                        project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
-                        tech_stack=f"{source_lang}->{target_lang}" if source_lang or target_lang else "",
-                        workspace=workspace,
-                        write_to_repo=bool(workspace or repo_id),
-                        repo_id=repo_id,
-                        db=db,
-                    )
-                    builder = step_builder  # last step's fields (language/model/etc.) represent the run
-                    for f in step_builder.get("files_written") or (
-                        [step_builder["file_path"]] if step_builder.get("file_path") else []
-                    ):
-                        if f not in all_files_written:
-                            all_files_written.append(f)
-                    for f in step_builder.get("files_expected") or (
-                        [step_builder["file_path"]] if step_builder.get("file_path") else []
-                    ):
-                        if f not in all_files_expected:
-                            all_files_expected.append(f)
-                    if step_builder.get("truncated") or step_builder.get("incomplete"):
-                        rejected_files.append(step_builder.get("file_path") or "(generated)")
-                    if step_builder.get("generated_code") and db is not None:
-                        violations = check_rule_violations(
-                            db, step_builder["generated_code"], step_builder.get("language") or "text"
+                batch_index = int(rs.get("batch_index") or result.get("batch_index") or 0)
+                batches = chunk_files(files_expected, MENTRIX_BUILD_BATCH_SIZE)
+
+                if batches:
+                    # File-list batched build with human confirm between batches
+                    while batch_index < len(batches):
+                        batch = batches[batch_index]
+                        push(
+                            "builder",
+                            f"Building batch {batch_index + 1}/{len(batches)} ({len(batch)} file(s))",
+                            phase="build",
+                            event="build_batch",
+                            batch_index=batch_index,
+                            batch_files=batch,
                         )
-                        for v in violations:
-                            rule_violations.append({**v, "file_path": step_builder.get("file_path")})
-                            if v.get("severity") in ("critical", "high"):
-                                rejected_files.append(step_builder.get("file_path") or "(generated)")
-                builder["files_written"] = all_files_written
-                builder["files_expected"] = all_files_expected or builder.get("files_expected")
+                        for target in batch:
+                            step_builder = run_build_from_plan(
+                                plan_text,
+                                step_index=min(batch_index, max(num_steps - 1, 0)),
+                                project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
+                                tech_stack=f"{source_lang}->{target_lang}" if source_lang or target_lang else "",
+                                workspace=workspace,
+                                write_to_repo=bool(workspace or repo_id),
+                                repo_id=repo_id,
+                                db=db,
+                                expected_files=[target],
+                                target_file=target,
+                            )
+                            builder = step_builder
+                            for f in step_builder.get("files_written") or (
+                                [step_builder["file_path"]] if step_builder.get("file_path") else []
+                            ):
+                                if f not in all_files_written:
+                                    all_files_written.append(f)
+                            if step_builder.get("truncated") or step_builder.get("incomplete"):
+                                rejected_files.append(step_builder.get("file_path") or target)
+                            if step_builder.get("generated_code") and db is not None:
+                                violations = check_rule_violations(
+                                    db, step_builder["generated_code"], step_builder.get("language") or "text"
+                                )
+                                for v in violations:
+                                    rule_violations.append({**v, "file_path": step_builder.get("file_path") or target})
+                                    if v.get("severity") in ("critical", "high"):
+                                        rejected_files.append(step_builder.get("file_path") or target)
+
+                        builder["files_written"] = list(all_files_written)
+                        builder["files_expected"] = list(all_files_expected)
+                        result["builder"] = {
+                            k: builder.get(k)
+                            for k in (
+                                "file_path",
+                                "language",
+                                "explanation",
+                                "model",
+                                "files_expected",
+                                "files_written",
+                                "offline",
+                                "strategy",
+                                "note",
+                            )
+                            if k in builder
+                        }
+                        result["builder"]["files_written"] = list(all_files_written)
+                        result["builder"]["files_expected"] = list(all_files_expected)
+                        result["batch_index"] = batch_index
+                        result["batch_total"] = len(batches)
+                        result["batch_files"] = batch
+
+                        batch_index += 1
+                        if batch_index < len(batches):
+                            # Pause for human review before next write wave
+                            paused_for_batch = True
+                            next_step = "await_human_batch"
+                            push(
+                                "orchestrator",
+                                f"Batch {batch_index}/{len(batches)} done — confirm to continue Build "
+                                "(phased build — not zero-defect)",
+                                phase="build",
+                                event="awaiting_batch_confirm",
+                                next_step=next_step,
+                                batch_index=batch_index,
+                            )
+                            break
+                else:
+                    # No files_expected — fall back to one-LLM-call-per-plan-step
+                    for step_idx in range(num_steps):
+                        step_files = []
+                        steps_list = plan.get("steps") or []
+                        if step_idx < len(steps_list) and isinstance(steps_list[step_idx], dict):
+                            step_files = list(steps_list[step_idx].get("files") or [])
+                        step_builder = run_build_from_plan(
+                            plan_text,
+                            step_index=step_idx,
+                            project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
+                            tech_stack=f"{source_lang}->{target_lang}" if source_lang or target_lang else "",
+                            workspace=workspace,
+                            write_to_repo=bool(workspace or repo_id),
+                            repo_id=repo_id,
+                            db=db,
+                            expected_files=step_files or None,
+                            target_file=(step_files[0] if step_files else None),
+                        )
+                        builder = step_builder
+                        for f in step_builder.get("files_written") or (
+                            [step_builder["file_path"]] if step_builder.get("file_path") else []
+                        ):
+                            if f not in all_files_written:
+                                all_files_written.append(f)
+                        for f in step_builder.get("files_expected") or (
+                            [step_builder["file_path"]] if step_builder.get("file_path") else []
+                        ):
+                            if f not in all_files_expected:
+                                all_files_expected.append(f)
+                        if step_builder.get("truncated") or step_builder.get("incomplete"):
+                            rejected_files.append(step_builder.get("file_path") or "(generated)")
+                        if step_builder.get("generated_code") and db is not None:
+                            violations = check_rule_violations(
+                                db, step_builder["generated_code"], step_builder.get("language") or "text"
+                            )
+                            for v in violations:
+                                rule_violations.append({**v, "file_path": step_builder.get("file_path")})
+                                if v.get("severity") in ("critical", "high"):
+                                    rejected_files.append(step_builder.get("file_path") or "(generated)")
+                    builder["files_written"] = all_files_written
+                    builder["files_expected"] = all_files_expected or builder.get("files_expected")
             else:
                 builder = _run_builder(goal, plan or {"steps": []}, scout, events)
                 rule_violations = []
+
+            if paused_for_batch:
+                result["builder"] = {
+                    **(result.get("builder") or {}),
+                    "files_written": list(all_files_written),
+                    "files_expected": list(all_files_expected),
+                }
+                result["_batch_checkpoint"] = {
+                    "scout": scout,
+                    "blueprint": blueprint,
+                    "ask": ask,
+                    "plan": plan,
+                    "reproduction": reproduction,
+                    "trace": trace,
+                    "root_cause": root_cause,
+                    "api_inv": api_inv,
+                    "resume_from": "build",
+                    "batch_index": batch_index,
+                    "files_written": list(all_files_written),
+                    "workspace": workspace,
+                    "project_key": project_key,
+                    "source_lang": source_lang,
+                    "target_lang": target_lang,
+                    "repo_id": repo_id,
+                    "result": {
+                        "mode": mode,
+                        "agents_run": result.get("agents_run") or [],
+                        "engine": "forge_loop",
+                        "plan": result.get("plan"),
+                        "plan_confirmed": True,
+                        "builder": result.get("builder"),
+                        "batch_index": result.get("batch_index"),
+                        "batch_total": result.get("batch_total"),
+                        "batch_files": result.get("batch_files"),
+                    },
+                }
+                run.status = "awaiting_batch_confirm"
+                run.next_step = "await_human_batch"
+                run.result_json = json.dumps(result)
+                run.events_json = json.dumps(events)
+                gates = json.loads(run.gates_json or "{}")
+                gates["plan_confirmed"] = True
+                gates["batch_pending"] = True
+                run.gates_json = json.dumps(gates)
+                db.commit()
+                db.refresh(run)
+                return run
+
             result["builder"] = {
                 k: builder.get(k)
                 for k in (
@@ -1058,6 +1243,10 @@ def run_mentrix(
                 )
                 if k in builder
             }
+            result["builder"]["files_written"] = list(all_files_written or builder.get("files_written") or [])
+            result["builder"]["files_expected"] = list(
+                all_files_expected or builder.get("files_expected") or collect_files_expected(plan)
+            )
             if builder.get("generated_code"):
                 result["builder"]["code_chars"] = len(builder["generated_code"])
             if not can_write_build and (builder.get("truncated") or builder.get("incomplete")):
@@ -1070,16 +1259,22 @@ def run_mentrix(
                     phase="build",
                     event="rule_violations",
                 )
-            # Bind design contract required_files to what Build claimed
             contract = dict(blueprint.get("design_contract") or {})
-            if builder.get("files_written"):
-                contract["required_files"] = list(builder.get("files_written") or [])
+            if result["builder"].get("files_expected"):
+                contract["required_files"] = list(result["builder"]["files_expected"])
+            elif result["builder"].get("files_written"):
+                contract["required_files"] = list(result["builder"]["files_written"])
             elif builder.get("file_path"):
                 contract["required_files"] = [builder["file_path"]]
             blueprint["design_contract"] = contract
             result["builder"]["finish_reason"] = builder.get("finish_reason")
             result["builder"]["continuations"] = builder.get("continuations")
-            push("builder", f"Build wrote {len(builder.get('files_written') or [])} file(s)", phase="build")
+            push(
+                "builder",
+                f"Build wrote {len(result['builder'].get('files_written') or [])} file(s) "
+                f"(expected {len(result['builder'].get('files_expected') or [])})",
+                phase="build",
+            )
 
         elif agent == "grounding":
             _emit_phase(events, "grounding", 0.68, "incomplete", "Grounding validator (invented API)")
@@ -1132,8 +1327,13 @@ def run_mentrix(
         elif agent == "incomplete":
             _emit_phase(events, "incomplete", 0.7, "acceptance", "Incomplete-file gate")
             incomplete = check_incomplete_files(
-                files_expected=builder.get("files_expected"),
-                files_written=builder.get("files_written"),
+                files_expected=result.get("builder", {}).get("files_expected")
+                or builder.get("files_expected")
+                or all_files_expected
+                or collect_files_expected(plan),
+                files_written=result.get("builder", {}).get("files_written")
+                or builder.get("files_written")
+                or all_files_written,
                 generated_code=builder.get("generated_code") or "",
             )
             if builder.get("truncated") or builder.get("structure_ok") is False:
@@ -1170,36 +1370,62 @@ def run_mentrix(
                 from app.services.phases.build_phase_svc import run_build_from_plan
 
                 plan_text = plan.get("plan") or goal
-                retry_step_index = (num_steps - 1) if mode in ("upgrade", "bugfix") else 0
-                builder = run_build_from_plan(
-                    plan_text,
-                    step_index=retry_step_index,
-                    project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
-                    workspace=workspace,
-                    write_to_repo=bool(workspace or repo_id),
-                    repo_id=repo_id,
-                    db=db,
+                expected_now = list(
+                    result.get("builder", {}).get("files_expected")
+                    or all_files_expected
+                    or collect_files_expected(plan)
+                    or []
                 )
+                written_now = list(
+                    result.get("builder", {}).get("files_written") or all_files_written or []
+                )
+                missing = [f for f in expected_now if f not in written_now]
+                retry_targets = missing or (
+                    [builder.get("file_path")] if builder.get("file_path") else []
+                )
+                if not retry_targets:
+                    retry_targets = [None]
+                for target in retry_targets[:MENTRIX_BUILD_BATCH_SIZE]:
+                    builder = run_build_from_plan(
+                        plan_text,
+                        step_index=max(num_steps - 1, 0),
+                        project_context=(blueprint.get("enhanced_prompt") or "")[:4000],
+                        workspace=workspace,
+                        write_to_repo=bool(workspace or repo_id),
+                        repo_id=repo_id,
+                        db=db,
+                        expected_files=[target] if target else expected_now[:1] or None,
+                        target_file=target,
+                    )
+                    for f in builder.get("files_written") or (
+                        [builder["file_path"]] if builder.get("file_path") else []
+                    ):
+                        if f not in all_files_written:
+                            all_files_written.append(f)
+                        if f not in written_now:
+                            written_now.append(f)
                 if not builder.get("files_expected") and builder.get("file_path"):
                     builder["files_expected"] = [builder["file_path"]]
+                builder["files_written"] = list(all_files_written)
+                builder["files_expected"] = list(expected_now or builder.get("files_expected") or [])
                 incomplete = check_incomplete_files(
                     files_expected=builder.get("files_expected"),
                     files_written=builder.get("files_written"),
                     generated_code=builder.get("generated_code") or "",
                 )
                 result["incomplete"] = incomplete
-                if mode in ("upgrade", "bugfix"):
-                    for f in builder.get("files_written") or (
-                        [builder["file_path"]] if builder.get("file_path") else []
-                    ):
-                        if f not in all_files_written:
-                            all_files_written.append(f)
-                    builder["files_written"] = all_files_written
-                    builder["files_expected"] = all_files_expected or builder.get("files_expected")
                 result["builder"] = {
+                    **(result.get("builder") or {}),
+                    "files_written": list(all_files_written),
+                    "files_expected": list(builder.get("files_expected") or expected_now),
+                }
+                if mode in ("upgrade", "bugfix", "deliver"):
+                    all_files_expected = list(builder.get("files_expected") or all_files_expected)
+                result["builder"] = {
+                    **(result.get("builder") or {}),
                     "file_path": builder.get("file_path"),
-                    "files_written": builder.get("files_written"),
-                    "files_expected": builder.get("files_expected"),
+                    "files_written": list(all_files_written),
+                    "files_expected": list(builder.get("files_expected") or expected_now),
                     "model": builder.get("model"),
                 }
             if not incomplete.get("ok"):
@@ -1588,6 +1814,11 @@ def continue_mentrix_after_plan(
         if "phases" in plan_patch:
             plan_obj["phases"] = plan_patch["phases"]
             plan_view["phases"] = plan_patch["phases"]
+        if "files_expected" in plan_patch and isinstance(plan_patch["files_expected"], list):
+            plan_obj["files_expected"] = plan_patch["files_expected"]
+            plan_view["files_expected"] = plan_patch["files_expected"]
+        plan_obj = attach_files_expected(plan_obj)
+        plan_view["files_expected"] = plan_obj.get("files_expected") or []
         result["plan"] = plan_view
         cp["plan"] = plan_obj
 
@@ -1641,4 +1872,74 @@ def continue_mentrix_after_plan(
         resume_state=resume_state,
     )
 
+
+def continue_mentrix_after_batch(
+    db: Session,
+    run: MentrixRun,
+    *,
+    confirmed_by: str = "",
+) -> MentrixRun:
+    """Resume Build after human confirms the current file batch."""
+    if run.status != "awaiting_batch_confirm":
+        raise ValueError(f"Run is not awaiting batch confirm (status={run.status})")
+    result = json.loads(run.result_json or "{}")
+    cp = result.get("_batch_checkpoint") or {}
+    if not cp.get("resume_from"):
+        raise ValueError("Missing batch checkpoint — cannot resume")
+
+    gates = json.loads(run.gates_json or "{}")
+    gates["plan_confirmed"] = True
+    gates["batch_pending"] = False
+    run.gates_json = json.dumps(gates)
+    run.status = "running"
+    events = json.loads(run.events_json or "[]")
+    _emit(
+        events,
+        "orchestrator",
+        f"Batch confirmed by {confirmed_by or 'human'} — resuming Build at batch {cp.get('batch_index')}",
+        event="batch_confirmed",
+        next_step="build",
+        phase="build",
+    )
+    run.events_json = json.dumps(events)
+    result["plan_confirmed"] = True
+    run.result_json = json.dumps(result)
+    db.commit()
+
+    plan_obj = attach_files_expected(cp.get("plan") or result.get("plan") or {})
+    resume_state = {
+        "scout": cp.get("scout") or {},
+        "blueprint": cp.get("blueprint") or {},
+        "ask": cp.get("ask") or {},
+        "plan": plan_obj,
+        "reproduction": cp.get("reproduction") or {},
+        "trace": cp.get("trace") or {},
+        "root_cause": cp.get("root_cause") or {},
+        "api_inv": cp.get("api_inv") or {},
+        "batch_index": int(cp.get("batch_index") or 0),
+        "files_written": list(cp.get("files_written") or []),
+        "result": {
+            **(cp.get("result") or {}),
+            "plan": result.get("plan"),
+            "plan_confirmed": True,
+            "agents_run": result.get("agents_run") or [],
+            "builder": result.get("builder") or (cp.get("result") or {}).get("builder"),
+            "batch_index": cp.get("batch_index"),
+        },
+    }
+    return run_mentrix(
+        db,
+        goal=run.goal or "",
+        mode=run.mode or "upgrade",
+        project_key=cp.get("project_key") or result.get("project_key") or "",
+        project_id=run.project_id,
+        created_by=run.created_by or "",
+        workspace=cp.get("workspace") or result.get("workspace") or "",
+        source_lang=cp.get("source_lang") or "",
+        target_lang=cp.get("target_lang") or "",
+        repo_id=cp.get("repo_id") or result.get("repo_id"),
+        existing_run=run,
+        resume_from="build",
+        resume_state=resume_state,
+    )
 

@@ -84,10 +84,10 @@ Clone → Lattice ingest → Engage (context pack) → Confirm plan → Build/ga
    - `upgrade` — feature / port / enhancement
    - `bugfix` — targeted fix
 4. Write a clear **goal** → **Mentrix engage**.
-5. When status is **`awaiting_plan_confirm`**: review/edit the Fix Plan / Plan steps + files → **Confirm plan**. Build does not continue until confirmed. Scorecard language: *grounded plan + gates green* (never “100% / 0 error”).
-6. Watch Live Status: Lattice → Plan → Build → Gates (lint, sandbox, Ultra Review, API eval, optional Semgrep) → Approve → PR.
+5. When status is **`awaiting_plan_confirm`**: review/edit the Fix Plan / Plan steps + `files_expected` → **Confirm plan**. Build does not continue until confirmed. Scorecard language: *grounded plan + gates green* (never “100% / 0 error”).
+6. Watch Live Status: Lattice → Plan → Build **batches** → on **`awaiting_batch_confirm`**, Open in Workspace → **Confirm batch** → Gates (incomplete, lint, sandbox, Ultra Review, API eval, optional Semgrep) → Approve → PR.
 7. When status is awaiting approval:
-   - Review gates
+   - Review gates (incomplete / missing expected files block Approve)
    - Optionally acknowledge residual issues (does **not** waive `plan_confirmed`, `security_critical`, or checked Semgrep/`sast_ok` on create-pr)
    - **Approve** → **Create PR** (dry-run by default unless configured otherwise)
 8. If `MENTRIX_SAST_REQUIRED=true`, after PR creation Mentrix polls GitHub Check Runs (Semgrep). Status may be **`awaiting_sast`** until green — use **Refresh SAST** (`POST /api/mentrix/runs/{id}/refresh-sast`) or the Ultra Review SAST panel.
@@ -169,7 +169,7 @@ One shell (`/mentrix-home`) with tabs: **Chat** | **Incident** | **Voice**. Side
 - **A. Mentrix Board** — ask Mentrix for a brief/artifacts → **Present / Narrate** (browser or Electron). No `.pptx` import.
 - **B. Prepared PPTX + Zoom** — Electron Computer Mode opens PowerPoint + Zoom for a local deck; ZECT does **not** join Zoom or auto screen-share. You share the PowerPoint window.
 
-**Persistence:** Samples + metadata are stored in ZECT (`cloned_voices` + `backend/data/voices/`). Present and Realtime sessions use the default clone via `/api/mentrix/voice/speak`. Local synthesis uses the Chatterbox engine (`CHATTERBOX_BASE_URL`, optional; legacy `VOICEBOX_BASE_URL` still accepted). The UI does not ask you to “connect Voicebox.” Last Present Deck path/notes are remembered in browser `localStorage` only.
+**Persistence:** Samples + metadata are stored in ZECT (`cloned_voices` + `backend/data/voices/`). Present and Realtime sessions use the default clone via `/api/mentrix/voice/speak`. Local synthesis uses the Chatterbox engine (`CHATTERBOX_BASE_URL`; see [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md)). Clone path does **not** silently fall back to OpenAI — start the local engine, or pick an OpenAI stock voice in Present. The UI does not ask you to “connect Voicebox.” Last Present Deck path/notes are remembered in browser `localStorage` only.
 
 **Long replies:** Connect Voice + cloned voice finalizes each OpenAI response once (no duplicate chat bubbles / double speak).
 

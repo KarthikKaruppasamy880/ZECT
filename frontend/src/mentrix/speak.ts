@@ -1,4 +1,4 @@
-/** Mentrix speech — cloned Chatterbox / OpenAI TTS fallback / browser speechSynthesis. */
+/** Mentrix speech — cloned Chatterbox / OpenAI stock TTS / optional browser fallback. */
 import { getMyClonedVoice, mentrixSpeakClonedDetailed, type SpeakVoiceOptions } from "@/lib/api";
 import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
 
@@ -8,6 +8,17 @@ let lastAudio: HTMLAudioElement | null = null;
 let awaitGeneration = 0;
 
 export type SpeakResult = { ok: true; engine: string } | { ok: false; error: string };
+
+/** Clone path unless an explicit OpenAI stock voice is selected. */
+export function usesClonePath(voiceOpts?: SpeakVoiceOptions): boolean {
+  return !(voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== "");
+}
+
+/** Present / Test speak: require Chatterbox — no browser/OpenAI silent swap. */
+export function requireCloneSpeech(voiceOpts?: SpeakVoiceOptions): boolean {
+  if (!usesClonePath(voiceOpts)) return false;
+  return voiceOpts?.requireClone !== false;
+}
 
 export function cancelBrowserSpeech() {
   awaitGeneration += 1;
@@ -118,18 +129,24 @@ export function speakBrowser(text: string, enabled: boolean) {
 }
 
 /**
- * Prefer Mentrix /voice/speak (Chatterbox clone or OpenAI TTS fallback); then speechSynthesis.
- * Throws / returns errors so UI can show why audio is silent.
+ * Prefer Mentrix /voice/speak (Chatterbox clone or explicit OpenAI stock).
+ * Browser speechSynthesis only when require_clone is off (legacy / Companion).
  */
 export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
   if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
   if (!text.trim()) return { ok: false, error: "Nothing to speak" };
   cancelBrowserSpeech();
+  const mustClone = requireCloneSpeech(voiceOpts);
 
   let apiError = "";
   try {
-    // Prefer API speak whenever possible (works with OpenAI fallback even without a clone).
     const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
+    if (mustClone && engine !== "chatterbox") {
+      return {
+        ok: false,
+        error: `Expected your clone (chatterbox), got ${engine} — start local Chatterbox to narrate in your voice`,
+      };
+    }
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
       lastAudio = audio;
@@ -151,11 +168,17 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
     apiError = e instanceof Error ? e.message : "Speak API failed";
   }
 
+  if (mustClone) {
+    return {
+      ok: false,
+      error: apiError || "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+    };
+  }
+
   // Browser TTS last resort (often silent in Electron)
   try {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       speakBrowser(text, true);
-      // If API failed, still report so operator knows clone/engine path failed
       if (apiError) {
         return {
           ok: false,
@@ -168,13 +191,12 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
     /* ignore */
   }
 
-  // Last attempt: if we have a clone listed but speak failed, surface clone hint
   try {
     const voice = await getMyClonedVoice();
     if (!voice?.voice_id && apiError) {
       return {
         ok: false,
-        error: `${apiError}. Tip: clone a voice in Companion → Voice, or ensure OPENAI_API_KEY for TTS fallback.`,
+        error: `${apiError}. Tip: clone a voice in Companion → Voice, or pick an OpenAI stock voice.`,
       };
     }
   } catch {
@@ -193,10 +215,17 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
   if (!text.trim()) return { ok: false, error: "Nothing to speak" };
   cancelBrowserSpeech();
   const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
 
   let apiError = "";
   try {
     const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
+    if (mustClone && engine !== "chatterbox") {
+      return {
+        ok: false,
+        error: `Expected your clone (chatterbox), got ${engine} — start local Chatterbox to narrate in your voice`,
+      };
+    }
     if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
@@ -227,6 +256,13 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
 
   if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
 
+  if (mustClone) {
+    return {
+      ok: false,
+      error: apiError || "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+    };
+  }
+
   try {
     if (typeof window !== "undefined" && window.speechSynthesis) {
       const result = await speakBrowserAwait(text);
@@ -247,7 +283,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
     if (!voice?.voice_id && apiError) {
       return {
         ok: false,
-        error: `${apiError}. Tip: clone a voice in Companion → Voice, or ensure OPENAI_API_KEY for TTS fallback.`,
+        error: `${apiError}. Tip: clone a voice in Companion → Voice, or pick an OpenAI stock voice.`,
       };
     }
   } catch {
@@ -279,6 +315,7 @@ export async function speakMentrixStreamedAwait(
 
   cancelBrowserSpeech();
   const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
   const apiEngines = new Set<string>();
   let usedBrowserFallback = false;
 
@@ -309,6 +346,13 @@ export async function speakMentrixStreamedAwait(
 
     let played = false;
     if (url && typeof Audio !== "undefined") {
+      if (mustClone && current && current.engine !== "chatterbox") {
+        URL.revokeObjectURL(url);
+        return {
+          ok: false,
+          error: `Expected your clone (chatterbox), got ${current.engine} — start local Chatterbox`,
+        };
+      }
       const audio = new Audio(url);
       lastAudio = audio;
       try {
@@ -336,14 +380,14 @@ export async function speakMentrixStreamedAwait(
     }
 
     if (!played) {
-      // A voice you explicitly picked (a saved clone, or a stock voice for this
-      // presentation) failing should say so, not silently swap to a generic
-      // browser voice with no explanation — that's indistinguishable from the
-      // selector "just not working."
-      if (voiceOpts && lastFetchError) {
-        return { ok: false, error: `Selected voice failed: ${lastFetchError}` };
+      if (mustClone || (voiceOpts && lastFetchError)) {
+        return {
+          ok: false,
+          error: lastFetchError
+            ? `Selected voice failed: ${lastFetchError}`
+            : "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+        };
       }
-      // Per-chunk fallback: one bad chunk shouldn't derail the rest of the narration.
       if (typeof window === "undefined" || !window.speechSynthesis) {
         return { ok: false, error: "No audio output for this chunk — check TTS backend/Chatterbox/OpenAI" };
       }

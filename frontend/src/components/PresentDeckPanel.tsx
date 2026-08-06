@@ -1,10 +1,19 @@
 /**
  * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (Chatterbox).
- * Electron-only Present all slides: parse notes → F5 → speak await → Right Arrow.
+ * Electron: parse notes → F5 → speak await → Right Arrow.
+ * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
  */
 import { useEffect, useRef, useState } from "react";
-import { Presentation, Mic, MonitorPlay, Sparkles, Square } from "lucide-react";
-import { mentrixCompanionIntegrations, mentrixPresentonGenerate, listMyClonedVoices, type ClonedVoiceInfo } from "@/lib/api";
+import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
+import {
+  mentrixCompanionIntegrations,
+  mentrixPresentonGenerate,
+  mentrixParsePptx,
+  listMyClonedVoices,
+  mentrixVoiceEngineStatus,
+  type ClonedVoiceInfo,
+  type VoiceEngineStatus,
+} from "@/lib/api";
 import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
@@ -13,8 +22,6 @@ const PROMPT_KEY = "zect_mentrix_present_deck_prompt";
 const JOIN_KEY = "zect_mentrix_zoom_join_url";
 const VOICE_CHOICE_KEY = "zect_mentrix_present_deck_voice";
 
-// OpenAI's real TTS voice names — offered as an explicit alternative to your
-// clone, e.g. when you want a stock male/female voice for a given presentation.
 const STOCK_VOICES: { id: string; label: string }[] = [
   { id: "alloy", label: "OpenAI — Alloy (neutral)" },
   { id: "echo", label: "OpenAI — Echo (male)" },
@@ -65,9 +72,15 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [presentonReady, setPresentonReady] = useState(false);
   const [myVoices, setMyVoices] = useState<ClonedVoiceInfo[]>([]);
   const [voiceChoice, setVoiceChoice] = useState("");
+  const [pptxFile, setPptxFile] = useState<File | null>(null);
+  const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus | null>(null);
   const abortRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
+  const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
+  const usingStock = voiceChoice.startsWith("stock:");
+  const cloneNarrateBlocked = !usingStock && engineStatus !== null && !engineStatus.online;
 
   useEffect(() => {
     try {
@@ -80,16 +93,37 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       /* ignore */
     }
     mentrixCompanionIntegrations()
-      .then((s) => {
-        setPresentonReady(!!s.presenton);
-        if (!localStorage.getItem(JOIN_KEY) && s.zoom_join_url_configured) {
-          /* env-backed join is opened server-side via Electron env; UI field optional */
-        }
-      })
+      .then((s) => setPresentonReady(!!s.presenton))
       .catch(() => setPresentonReady(false));
     listMyClonedVoices()
       .then((v) => setMyVoices(Array.isArray(v) ? v : []))
       .catch(() => setMyVoices([]));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      mentrixVoiceEngineStatus()
+        .then((s) => {
+          if (!cancelled) setEngineStatus(s);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setEngineStatus({
+              online: false,
+              base_url: "http://localhost:17493",
+              default_voice: null,
+              hint: "Could not reach ZECT API for engine status.",
+            });
+          }
+        });
+    };
+    load();
+    const iv = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(iv);
+    };
   }, []);
 
   const persistVoiceChoice = (value: string) => {
@@ -101,13 +135,30 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     }
   };
 
-  /** Turns the dropdown value into what speak.ts/the /speak endpoint expects.
-   * Empty string = your default cloned voice, unchanged from before this existed. */
-  const voiceOptsFromChoice = (choice: string): SpeakVoiceOptions | undefined => {
-    if (!choice) return undefined;
-    if (choice.startsWith("clone:")) return { voiceId: choice.slice("clone:".length) };
-    if (choice.startsWith("stock:")) return { stockVoice: choice.slice("stock:".length) };
-    return undefined;
+  const voiceOptsFromChoice = (choice: string): SpeakVoiceOptions => {
+    if (choice.startsWith("clone:")) {
+      return { voiceId: choice.slice("clone:".length), requireClone: true };
+    }
+    if (choice.startsWith("stock:")) {
+      return { stockVoice: choice.slice("stock:".length), requireClone: false };
+    }
+    return { requireClone: true };
+  };
+
+  const formatSpeakStatus = (
+    result: { ok: true; engine: string } | { ok: false; error: string },
+    fallbackOk: string,
+  ) => {
+    if (!result.ok) return result.error;
+    if (usingStock) {
+      return result.engine.startsWith("openai_stock:")
+        ? `Narrating with OpenAI stock voice (${result.engine.replace("openai_stock:", "")}).`
+        : `Narrating via ${result.engine}.`;
+    }
+    if (result.engine !== "chatterbox") {
+      return `Expected clone TTS (chatterbox), got ${result.engine} — start local Chatterbox.`;
+    }
+    return fallbackOk;
   };
 
   const persistPath = (value: string) => {
@@ -253,19 +304,27 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setBusy(true);
     setStatus("");
     try {
+      if (cloneNarrateBlocked) {
+        setStatus(
+          `Chatterbox offline at ${engineStatus?.base_url || "local engine"} — start local engine to narrate in your voice.`,
+        );
+        return;
+      }
+      if (!defaultVoice && !usingStock) {
+        setStatus("No cloned voice saved — open Voice tab → clone a sample, or pick an OpenAI stock voice.");
+      }
       const text =
         notes.trim() ||
         "Mentrix Present Deck. Paste talking points, then Narrate again with your default Chatterbox voice.";
       const result = await speakMentrix(text.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
-      if (result.ok) {
-        setStatus(
-          result.engine === "browser_speechSynthesis"
-            ? "Narrating via browser speech (Chatterbox/OpenAI unavailable)."
-            : "Narrating talking points (Mentrix TTS).",
-        );
-      } else {
-        setStatus(result.error);
-      }
+      setStatus(
+        formatSpeakStatus(
+          result,
+          defaultVoice
+            ? `Narrating with saved voice “${defaultVoice.name}”.`
+            : "Narrating talking points with your clone.",
+        ),
+      );
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Narrate failed");
     } finally {
@@ -281,75 +340,107 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setBusy(false);
   };
 
-  const presentAllSlides = async () => {
-    if (!isDesktop) {
-      setStatus("Present all slides requires the Electron desktop app (Computer Mode).");
-      return;
+  const narrateSlideList = async (slides: SlideParsed[], modeLabel: string) => {
+    for (let i = 0; i < slides.length; i++) {
+      if (abortRef.current) {
+        setStatus("Stopped presenting.");
+        return;
+      }
+      const slide = slides[i];
+      const n = slides.length;
+      const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
+      setStatus(`${modeLabel}: slide ${i + 1} / ${n}`);
+      const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
+      if (abortRef.current) {
+        setStatus("Stopped presenting.");
+        return;
+      }
+      if (!spoken.ok && spoken.error !== "cancelled") {
+        setStatus(`Slide ${i + 1}: ${spoken.error}`);
+        return;
+      }
+      if (i < slides.length - 1 && isDesktop) {
+        const right = await runComputer("powerpoint_key", { key: "right" });
+        if (!right.ok || abortRef.current) {
+          if (abortRef.current) setStatus("Stopped presenting.");
+          return;
+        }
+        await sleep(400);
+      } else if (i < slides.length - 1) {
+        await sleep(350);
+      }
     }
-    const target = path.trim().replace(/^["']+|["']+$/g, "");
-    if (!target) {
-      setStatus("Enter a .pptx path under Desktop, Documents, or Downloads (OneDrive OK).");
-      return;
-    }
-    if (!/\.pptx$/i.test(target)) {
-      setStatus("Present all slides requires a .pptx file.");
-      return;
-    }
+    setStatus(`Finished presenting ${slides.length} slides${isDesktop ? "" : " (audio only — advance slides manually in PowerPoint)"}.`);
+  };
 
+  const presentAllSlides = async () => {
     abortRef.current = false;
     setPresenting(true);
     setBusy(true);
     setStatus("");
-    persistPath(target);
 
     try {
-      const parsed = await runComputer("parse_presentation_slides", { path: target });
-      if (!parsed.ok) return;
-      const slides = parsed.slides || [];
+      if (cloneNarrateBlocked) {
+        setStatus(
+          `Chatterbox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
+        );
+        return;
+      }
+      if (!defaultVoice && !usingStock) {
+        setStatus("Clone a voice first (Voice tab) or pick an OpenAI stock voice — Present uses your saved clone.");
+      }
+
+      // Browser / no Computer Mode: upload .pptx → API parse → narrate
+      if (!isDesktop) {
+        if (!pptxFile) {
+          setStatus("In browser: choose a .pptx file below, then click Present again. (Electron unlocks PowerPoint F5 + auto-advance.)");
+          return;
+        }
+        setStatus("Parsing PPTX…");
+        const parsed = await mentrixParsePptx(pptxFile);
+        const slides = parsed.slides || [];
+        if (!slides.length) {
+          setStatus("No slides found in that .pptx.");
+          return;
+        }
+        await narrateSlideList(slides, "Narrating");
+        return;
+      }
+
+      const target = path.trim().replace(/^["']+|["']+$/g, "");
+      if (!target && !pptxFile) {
+        setStatus("Enter a .pptx path or upload a .pptx file.");
+        return;
+      }
+
+      let slides: SlideParsed[] = [];
+      if (pptxFile && (!target || !/\.pptx$/i.test(target))) {
+        const parsed = await mentrixParsePptx(pptxFile);
+        slides = parsed.slides || [];
+      } else {
+        if (!/\.pptx$/i.test(target)) {
+          setStatus("Present all slides requires a .pptx file.");
+          return;
+        }
+        persistPath(target);
+        const parsed = await runComputer("parse_presentation_slides", { path: target });
+        if (!parsed.ok) return;
+        slides = parsed.slides || [];
+        const opened = await runComputer("open_presentation", { path: target });
+        if (!opened.ok || abortRef.current) return;
+        setStatus(`Starting slideshow (F5)… ${slides.length} slides`);
+        await sleep(2000);
+        if (abortRef.current) return;
+        const f5 = await runComputer("powerpoint_key", { key: "f5" });
+        if (!f5.ok || abortRef.current) return;
+        await sleep(400);
+      }
+
       if (!slides.length) {
         setStatus("No slides found in that .pptx.");
         return;
       }
-
-      const opened = await runComputer("open_presentation", { path: target });
-      if (!opened.ok || abortRef.current) return;
-
-      setStatus(`Starting slideshow (F5)… ${slides.length} slides`);
-      await sleep(2000);
-      if (abortRef.current) return;
-
-      const f5 = await runComputer("powerpoint_key", { key: "f5" });
-      if (!f5.ok || abortRef.current) return;
-      await sleep(400);
-
-      for (let i = 0; i < slides.length; i++) {
-        if (abortRef.current) {
-          setStatus("Stopped presenting.");
-          return;
-        }
-        const slide = slides[i];
-        const n = slides.length;
-        const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
-        setStatus(`Slide ${i + 1} / ${n}`);
-        const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
-        if (abortRef.current) {
-          setStatus("Stopped presenting.");
-          return;
-        }
-        if (!spoken.ok && spoken.error !== "cancelled") {
-          setStatus(`Slide ${i + 1}: ${spoken.error}`);
-          return;
-        }
-        if (i < slides.length - 1) {
-          const right = await runComputer("powerpoint_key", { key: "right" });
-          if (!right.ok || abortRef.current) {
-            if (abortRef.current) setStatus("Stopped presenting.");
-            return;
-          }
-          await sleep(400);
-        }
-      }
-      setStatus(`Finished presenting ${slides.length} slides.`);
+      await narrateSlideList(slides, "Presenting");
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Present all failed");
     } finally {
@@ -357,6 +448,25 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setBusy(false);
     }
   };
+
+  const voiceStatusText = (() => {
+    if (!defaultVoice) return "No cloned voice saved — clone in Voice tab or pick a stock voice below.";
+    if (defaultVoice.sample_missing) {
+      return `Voice “${defaultVoice.name}” is in DB but sample file is missing — clone again.`;
+    }
+    if (defaultVoice.has_sample && !defaultVoice.engine_ready) {
+      return `Voice “${defaultVoice.name}” saved (sample OK). Chatterbox will provision on first speak.`;
+    }
+    return `Voice saved: “${defaultVoice.name}”${defaultVoice.engine_ready ? " (engine ready)" : ""}.`;
+  })();
+
+  const engineBannerText = (() => {
+    if (!engineStatus) return "Checking Chatterbox engine…";
+    if (engineStatus.online) {
+      return `Chatterbox online (${engineStatus.base_url}). Present can narrate with your clone.`;
+    }
+    return `Chatterbox offline (${engineStatus.base_url}). Start local engine to narrate in your voice — sample in ZECT ≠ engine online.`;
+  })();
 
   return (
     <div
@@ -378,9 +488,38 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         </p>
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
-        Generate with Presenton (optional), open PowerPoint + Zoom in Electron. You join the meeting
-        and share the PowerPoint window — Mentrix narrates with your clone. Desktop: Present all
-        slides uses speaker notes (or slide text), F5, then Right after each narration ends.
+        {isDesktop
+          ? "Electron: open PowerPoint + Zoom, then Present & narrate advances slides (F5 / Right). You share the window in Zoom."
+          : "Browser: upload a .pptx to narrate every slide with your clone. For PowerPoint auto-advance, use the Electron desktop app."}
+      </p>
+      <p
+        data-testid="present-deck-voice-status"
+        className={`text-[11px] rounded border px-2 py-1 ${
+          defaultVoice?.has_sample
+            ? dark
+              ? "border-teal-800 text-teal-200 bg-teal-950/40"
+              : "border-teal-200 text-teal-800 bg-teal-50"
+            : dark
+              ? "border-amber-800 text-amber-200 bg-amber-950/40"
+              : "border-amber-200 text-amber-900 bg-amber-50"
+        }`}
+      >
+        {voiceStatusText}
+      </p>
+      <p
+        data-testid="present-deck-engine-status"
+        className={`text-[11px] rounded border px-2 py-1 ${
+          engineStatus?.online
+            ? dark
+              ? "border-emerald-800 text-emerald-200 bg-emerald-950/40"
+              : "border-emerald-200 text-emerald-800 bg-emerald-50"
+            : dark
+              ? "border-amber-800 text-amber-200 bg-amber-950/40"
+              : "border-amber-200 text-amber-900 bg-amber-50"
+        }`}
+        title={engineStatus?.hint || undefined}
+      >
+        {engineBannerText}
       </p>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Generate deck prompt (Presenton)
@@ -413,7 +552,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         Generate deck
       </button>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
-        Presentation path (.pptx)
+        Presentation path (.pptx){isDesktop ? "" : " — optional in browser; prefer upload below"}
         <input
           data-testid="present-deck-path"
           value={path}
@@ -426,6 +565,26 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           }
         />
       </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Upload .pptx (required for Present in browser)
+        <input
+          ref={fileInputRef}
+          data-testid="present-deck-file"
+          type="file"
+          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-teal-800 file:px-2 file:py-1 file:text-teal-50"
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            setPptxFile(f);
+            if (f) setStatus(`Ready: ${f.name}`);
+          }}
+        />
+      </label>
+      {pptxFile && (
+        <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+          Selected: {pptxFile.name}
+        </p>
+      )}
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Zoom join URL (optional)
         <input
@@ -467,14 +626,16 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
               : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
           }
         >
-          <option value="">My default cloned voice</option>
-          {myVoices
-            .filter((v) => !v.is_default)
-            .map((v) => (
-              <option key={v.voice_id} value={`clone:${v.voice_id}`}>
-                My voice — {v.name}
-              </option>
-            ))}
+          <option value="">
+            {defaultVoice ? `My default — ${defaultVoice.name}` : "My default cloned voice (none saved)"}
+          </option>
+          {myVoices.map((v) => (
+            <option key={v.voice_id} value={`clone:${v.voice_id}`}>
+              My voice — {v.name}
+              {v.is_default ? " (default)" : ""}
+              {!v.has_sample ? " — sample missing" : ""}
+            </option>
+          ))}
           {STOCK_VOICES.map((v) => (
             <option key={v.id} value={`stock:${v.id}`}>
               {v.label}
@@ -486,9 +647,10 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         <button
           type="button"
           data-testid="present-deck-open-pptx"
-          disabled={busy}
+          disabled={busy || !isDesktop}
           onClick={() => void openPresentation()}
           className="inline-flex items-center gap-1.5 rounded-lg border border-teal-700 px-2.5 py-1.5 text-xs text-teal-200 hover:bg-teal-950 disabled:opacity-40"
+          title={isDesktop ? "Open in PowerPoint" : "Electron only"}
         >
           <MonitorPlay className="h-3.5 w-3.5" />
           Open presentation
@@ -496,19 +658,24 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         <button
           type="button"
           data-testid="present-deck-open-zoom"
-          disabled={busy}
+          disabled={busy || !isDesktop}
           onClick={() => void openZoom()}
           className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+          title={isDesktop ? "Open Zoom" : "Electron only"}
         >
           Open Zoom
         </button>
         <button
           type="button"
           data-testid="present-deck-narrate"
-          disabled={busy}
+          disabled={busy || cloneNarrateBlocked}
           onClick={() => void narrateNotes()}
           className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-40"
-          title="Speaks the Manual script text above — does not read your .pptx file"
+          title={
+            cloneNarrateBlocked
+              ? "Start local Chatterbox to narrate with your clone (or pick a stock voice)"
+              : "Speaks the Manual script text above — does not read your .pptx file"
+          }
         >
           <Mic className="h-3.5 w-3.5" />
           Narrate manual script (not the PPTX)
@@ -516,18 +683,30 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         <button
           type="button"
           data-testid="present-deck-present-all"
-          disabled={busy || !isDesktop}
+          disabled={busy || cloneNarrateBlocked}
           onClick={() => void presentAllSlides()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-700 px-2.5 py-1.5 text-xs text-amber-100 hover:bg-amber-950 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-900/40 px-2.5 py-1.5 text-xs text-amber-50 hover:bg-amber-900 disabled:opacity-40"
           title={
-            isDesktop
-              ? "Reads real slide text + speaker notes from your .pptx, opens PowerPoint, F5 slideshow, narrates each slide, advances with Right Arrow"
-              : "Electron desktop only"
+            cloneNarrateBlocked
+              ? "Start local Chatterbox to Present with your clone (or pick a stock voice)"
+              : isDesktop
+                ? "Reads slide text + speaker notes, opens PowerPoint, F5, narrates, advances with Right Arrow"
+                : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
           }
         >
           <Presentation className="h-3.5 w-3.5" />
           Present &amp; narrate my PPTX (all slides)
         </button>
+        {!pptxFile && !isDesktop && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Choose PPTX
+          </button>
+        )}
         {presenting && (
           <button
             type="button"

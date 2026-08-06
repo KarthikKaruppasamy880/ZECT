@@ -38,6 +38,22 @@ POST /api/schedules/due/run
 
 Wire a cron/job runner (or call manually during demos) so **Scheduled Tasks** fire Mentrix or playbook runs.
 
+## Mentrix phased Build (large projects)
+
+Large goals use **Plan → human confirm → batched Build → Workspace review → Approve → PR**:
+
+1. Mentrix Delivery (`/mentrix`) — start upgrade/bugfix/deliver with workspace + Lattice key.
+2. Confirm the plan (`files_expected` listed). Build will not start until confirmed.
+3. After each file batch, status is `awaiting_batch_confirm` — open **Workspace** (`/workspace?run=<id>`) to review diffs, then **Confirm batch**.
+4. Gates (incomplete / grounding / lint / Ultra Review) must be green; incomplete or missing expected files **cannot** approve.
+5. Human **Approve**, then **Create PR**. Quality bar is gated delivery — not “100% / zero error.”
+
+Env knobs: `MENTRIX_BUILD_BATCH_SIZE` (default 6), `MENTRIX_MAX_FILES_PER_RUN` (default 40), `MENTRIX_REQUIRE_PLAN_CONFIRM`.
+
 ## Quality bar
 
 Gates + verify + approve + CI. Do not claim zero-defect codegen.
+
+## Local Chatterbox (clone TTS)
+
+Present / Test speak with your saved clone need a local engine at `CHATTERBOX_BASE_URL` (default `http://localhost:17493`). See [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md).

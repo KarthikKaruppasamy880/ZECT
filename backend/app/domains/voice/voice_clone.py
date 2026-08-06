@@ -136,13 +136,16 @@ def _clear_defaults(db: Session, user_id: int) -> None:
 
 
 def _row_out(row: ClonedVoice) -> "ClonedVoiceOut":
+    sample_ok = bool(row.sample_path) and Path(row.sample_path).is_file()
     return ClonedVoiceOut(
         id=row.id,
         voice_id=row.voice_id,
         name=row.name or "",
         provider=row.provider or "chatterbox",
         is_default=bool(row.is_default),
-        has_sample=bool(row.sample_path),
+        has_sample=sample_ok,
+        engine_ready=bool(row.external_voice_id),
+        sample_missing=bool(row.sample_path) and not sample_ok,
     )
 
 
@@ -214,6 +217,8 @@ class ClonedVoiceOut(BaseModel):
     provider: str
     is_default: bool = False
     has_sample: bool = False
+    engine_ready: bool = False
+    sample_missing: bool = False
 
 
 OPENAI_STOCK_VOICES = ("alloy", "echo", "fable", "onyx", "nova", "shimmer")
@@ -226,6 +231,55 @@ class SpeakRequest(BaseModel):
     # with this specific OpenAI stock voice instead — e.g. "let me pick a
     # male/female voice for this presentation" rather than my own clone.
     stock_voice: str | None = None
+    # When True (default for clone path), do not fall back to OpenAI stock TTS.
+    # Present/narrate must use the real clone or fail loudly.
+    require_clone: bool = True
+
+
+def _chatterbox_offline_detail() -> str:
+    from app.adapters.llm.chatterbox_client import CHATTERBOX_BASE_URL
+
+    return (
+        f"Chatterbox offline at {CHATTERBOX_BASE_URL} — start the local engine "
+        "to use your clone (see docs/CHATTERBOX_LOCAL.md)."
+    )
+
+
+@router.get("/engine-status")
+def engine_status(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Non-secret Chatterbox health for Present / Voice UI."""
+    from app.adapters.llm.chatterbox_client import CHATTERBOX_BASE_URL, chatterbox_available
+
+    online = bool(chatterbox_available())
+    row = _default_voice(db, current_user.user_id)
+    default_voice = None
+    if row:
+        out = _row_out(row)
+        default_voice = {
+            "voice_id": out.voice_id,
+            "name": out.name,
+            "has_sample": out.has_sample,
+            "engine_ready": out.engine_ready,
+            "sample_missing": out.sample_missing,
+            "is_default": out.is_default,
+        }
+    hint = (
+        "Chatterbox online — Present can narrate with your clone."
+        if online
+        else (
+            f"Start local Chatterbox so GET {CHATTERBOX_BASE_URL}/profiles succeeds, "
+            "then Test speak / Present with your default voice."
+        )
+    )
+    return {
+        "online": online,
+        "base_url": CHATTERBOX_BASE_URL,
+        "default_voice": default_voice,
+        "hint": hint,
+    }
 
 
 @router.post("/clone", response_model=ClonedVoiceOut)
@@ -271,6 +325,7 @@ async def clone_my_voice(
     )
 
     external_id: str | None = None
+    engine_error: str | None = None
     if chatterbox_available():
         try:
             result = clone_voice(
@@ -282,8 +337,9 @@ async def clone_my_voice(
             )
             external_id = result["voice_id"]
         except (RuntimeError, ValueError) as e:
-            _delete_sample_file(sample_path)
-            raise HTTPException(status_code=502, detail=str(e)) from e
+            # Keep the sample in ZECT so Present/speak can re-provision later.
+            engine_error = str(e)[:400]
+            logger.warning("Chatterbox clone provision failed; sample kept: %s", engine_error)
     # Engine offline: still persist sample in ZECT DB for later provision/speak.
 
     _clear_defaults(db, current_user.user_id)
@@ -312,10 +368,12 @@ async def clone_my_voice(
             "filename": safe_name,
             "voice_id": zect_voice_id,
             "engine_provisioned": bool(external_id),
+            "engine_error": engine_error or "",
         },
     )
 
-    return _row_out(row)
+    out = _row_out(row)
+    return out
 
 
 @router.get("/voices", response_model=list[ClonedVoiceOut])
@@ -464,6 +522,9 @@ def speak(
             headers={"X-Mentrix-TTS-Engine": f"openai_stock:{req.stock_voice}"},
         )
 
+    # Clone path — require_clone defaults True (Present must not silently use stock TTS).
+    require_clone = bool(req.require_clone)
+
     if req.voice_id:
         row = (
             db.query(ClonedVoice)
@@ -473,55 +534,61 @@ def speak(
     else:
         row = _default_voice(db, current_user.user_id)
 
-    # Prefer Chatterbox clone; if engine offline and OpenAI is configured, still speak
-    # (stock OpenAI voice — not the clone) so Present/Companion is not silent.
-    audio: bytes | None = None
-    engine_used = "none"
-    if row:
-        try:
-            if chatterbox_available():
-                engine_id = _ensure_engine_profile(row)
-                if engine_id != row.external_voice_id:
-                    row.external_voice_id = engine_id
-                    db.commit()
-                audio = synthesize_speech(text, engine_id)
-                engine_used = "chatterbox"
-            elif row.external_voice_id:
-                # Profile id exists but engine may be down — try once, then fall back
-                audio = synthesize_speech(text, row.external_voice_id)
-                engine_used = "chatterbox"
-        except HTTPException as e:
-            if e.status_code not in (502, 503, 404) or not openai_tts_available():
-                raise
-            audio = None
-        except Exception:
-            # httpx ConnectError / RuntimeError when Chatterbox is down
-            if not openai_tts_available():
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        "Chatterbox speak failed — start local engine (CHATTERBOX_BASE_URL) "
-                        "or set OPENAI_API_KEY for TTS fallback"
-                    ),
-                )
-            audio = None
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="No cloned voice configured — clone a voice in Companion → Voice, or pick an OpenAI stock voice",
+        )
 
-    if audio is None:
+    if not chatterbox_available():
+        if require_clone:
+            raise HTTPException(status_code=503, detail=_chatterbox_offline_detail())
+        # Legacy allow_fallback path for non-Present callers that set require_clone=false
         if not openai_tts_available():
-            if not row:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No cloned voice configured — clone a voice in Companion → Voice, or set OPENAI_API_KEY for TTS fallback",
-                )
-            raise HTTPException(
-                status_code=503,
-                detail="Chatterbox engine offline — start CHATTERBOX_BASE_URL service, or set OPENAI_API_KEY for TTS fallback",
-            )
+            raise HTTPException(status_code=503, detail=_chatterbox_offline_detail())
+        try:
+            audio = synthesize_openai_speech(text)
+        except RuntimeError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return Response(
+            content=audio,
+            media_type="audio/mpeg",
+            headers={"X-Mentrix-TTS-Engine": "openai_tts_fallback"},
+        )
+
+    try:
+        engine_id = _ensure_engine_profile(row)
+        if engine_id != row.external_voice_id:
+            row.external_voice_id = engine_id
+            db.commit()
+        audio = synthesize_speech(text, engine_id)
+        engine_used = "chatterbox"
+    except HTTPException:
+        if require_clone:
+            raise
+        if not openai_tts_available():
+            raise
         try:
             audio = synthesize_openai_speech(text)
             engine_used = "openai_tts_fallback"
         except RuntimeError as e:
             raise HTTPException(status_code=502, detail=str(e)) from e
+    except Exception as e:
+        if require_clone:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Chatterbox speak failed — {_chatterbox_offline_detail()} ({e})",
+            ) from e
+        if not openai_tts_available():
+            raise HTTPException(
+                status_code=502,
+                detail=f"Chatterbox speak failed and no OPENAI_API_KEY fallback ({e})",
+            ) from e
+        try:
+            audio = synthesize_openai_speech(text)
+            engine_used = "openai_tts_fallback"
+        except RuntimeError as err:
+            raise HTTPException(status_code=502, detail=str(err)) from err
 
     try:
         log_audit(
@@ -533,10 +600,10 @@ def speak(
                 "chars": len(text),
                 "voice_id": (row.voice_id[:32] if row else ""),
                 "engine": engine_used,
+                "require_clone": require_clone,
             },
         )
     except Exception:
-        # Windows consoles (cp1252) can break on emoji in audit helpers — never block audio.
         pass
 
     return Response(

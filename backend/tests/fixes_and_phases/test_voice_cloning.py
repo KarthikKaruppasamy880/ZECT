@@ -481,8 +481,15 @@ class TestVoiceCloneEndpoints:
         )
         db.commit()
         monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        monkeypatch.setattr(
             "app.adapters.llm.chatterbox_client.synthesize_speech",
             lambda text, voice_id: b"wav-bytes",
+        )
+        monkeypatch.setattr(
+            "app.domains.voice.voice_clone._ensure_engine_profile",
+            lambda row: row.external_voice_id,
         )
         monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
 
@@ -490,6 +497,90 @@ class TestVoiceCloneEndpoints:
 
         assert result.body == b"wav-bytes"
         assert result.media_type == "audio/mpeg"
+        assert result.headers["X-Mentrix-TTS-Engine"] == "chatterbox"
+
+    def test_speak_clone_offline_503_no_openai(self, monkeypatch):
+        from app.domains.voice.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        db.add(
+            ClonedVoice(
+                user_id=5,
+                voice_id="zect-1",
+                external_voice_id="engine-1",
+                name="Me",
+                provider="chatterbox",
+                is_default=True,
+            )
+        )
+        db.commit()
+        openai_calls = []
+        monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: False
+        )
+        monkeypatch.setattr("app.adapters.llm.openai_tts.openai_tts_available", lambda: True)
+        monkeypatch.setattr(
+            "app.adapters.llm.openai_tts.synthesize_openai_speech",
+            lambda *a, **k: openai_calls.append(1) or b"should-not-run",
+        )
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
+
+        with pytest.raises(HTTPException) as exc:
+            speak(SpeakRequest(text="hello", require_clone=True), current_user=USER, db=db)
+        assert exc.value.status_code == 503
+        assert "Chatterbox offline" in str(exc.value.detail)
+        assert openai_calls == []
+
+    def test_speak_stock_voice_works_without_chatterbox(self, monkeypatch):
+        from app.domains.voice.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: False
+        )
+        monkeypatch.setattr("app.adapters.llm.openai_tts.openai_tts_available", lambda: True)
+        monkeypatch.setattr(
+            "app.adapters.llm.openai_tts.synthesize_openai_speech",
+            lambda text, voice=None, model=None: b"stock-mp3",
+        )
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
+
+        result = speak(
+            SpeakRequest(text="hello", stock_voice="onyx"),
+            current_user=USER,
+            db=db,
+        )
+        assert result.body == b"stock-mp3"
+        assert result.headers["X-Mentrix-TTS-Engine"] == "openai_stock:onyx"
+
+    def test_engine_status_reports_online_and_default(self, monkeypatch):
+        from app.domains.voice.voice_clone import engine_status
+
+        db = _session()
+        db.add(
+            ClonedVoice(
+                user_id=5,
+                voice_id="zect-1",
+                external_voice_id="engine-1",
+                name="Me",
+                provider="chatterbox",
+                is_default=True,
+            )
+        )
+        db.commit()
+        monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
+        )
+        monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.CHATTERBOX_BASE_URL",
+            "http://localhost:17493",
+        )
+
+        out = engine_status(current_user=USER, db=db)
+        assert out["online"] is True
+        assert out["base_url"] == "http://localhost:17493"
+        assert out["default_voice"]["name"] == "Me"
+        assert "online" in out["hint"].lower() or "Present" in out["hint"]
 
     def test_speak_stock_voice_bypasses_chatterbox_entirely(self, monkeypatch):
         from app.domains.voice.voice_clone import SpeakRequest, speak

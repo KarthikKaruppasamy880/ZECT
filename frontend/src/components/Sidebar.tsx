@@ -11,9 +11,11 @@ import {
   Sparkles,
   BookOpen,
   ShieldCheck,
+  GitCompareArrows,
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Menu,
   X,
   Coins,
@@ -22,24 +24,20 @@ import {
   Scale,
   Download,
   History,
-  MonitorPlay,
-  FolderOpen,
   Activity,
   Brain,
-  Repeat,
   ShieldAlert,
   ArrowRightLeft,
-  Layers,
   Wrench,
   BookMarked,
   Calendar,
   KeyRound,
   Code2,
-  TrendingUp,
   MessageCircle,
   HardDrive,
   PanelLeft,
   Bot,
+  Rocket,
   Network,
   FlaskConical,
   Box,
@@ -53,7 +51,8 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 const workflowItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
   { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: AlertTriangle },
-  { href: "/mentrix", label: "Agent Workspace", icon: Bot },
+  { href: "/ask", label: "Agent Workspace", icon: Bot },
+  { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
 ];
 
 const workspaceItems: NavItem[] = [
@@ -98,23 +97,23 @@ const enterpriseItems: NavItem[] = [
   { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
 ];
 
+/** Primary Labs — productivity spine (Skills / Playbooks / Knowledge / Schedules / Memory / Permissions). */
 const labsItems: NavItem[] = [
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
-  { href: "/memory", label: "Memory System", icon: Brain },
-  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
-  { href: "/dream-engine", label: "Dream Engine", icon: Sparkles },
-  { href: "/data-layer", label: "Data Layer", icon: Layers },
-  { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },
-  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
-  { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
-  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
-  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
-  { href: "/session-insights", label: "Session Insights", icon: TrendingUp },
+  { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
+];
+
+/** Advanced Labs — still first-class routes; collapsed under More Labs. */
+const labsAdvancedItems: NavItem[] = [
+  { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
+  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
+  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
   { href: "/conversations", label: "Conversations", icon: MessageCircle },
-  { href: "/app-runner", label: "App Runner", icon: MonitorPlay },
-  { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
+  { href: "/tool-comparison", label: "Architecture", icon: GitCompareArrows },
 ];
 
 const sections: { title: string; items: NavItem[] }[] = [
@@ -144,6 +143,9 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
+  const [labsMoreOpen, setLabsMoreOpen] = useState(() =>
+    labsAdvancedItems.some((item) => location.pathname === item.href),
+  );
 
   useEffect(() => {
     onMobileClose();
@@ -159,6 +161,12 @@ export default function Sidebar({
     };
   }, []);
 
+  useEffect(() => {
+    if (labsAdvancedItems.some((item) => location.pathname === item.href)) {
+      setLabsMoreOpen(true);
+    }
+  }, [location.pathname]);
+
   const navSections = sections.map((section) =>
     section.title === "Deliver"
       ? {
@@ -167,6 +175,42 @@ export default function Sidebar({
         }
       : section,
   );
+
+  const renderNavLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const itemUrl = new URL(item.href, "http://local");
+    const pathMatch = location.pathname === itemUrl.pathname;
+    const voiceDeepLink = itemUrl.searchParams.get("voice");
+    const incidentDeepLink = itemUrl.searchParams.get("incident");
+    const search = new URLSearchParams(location.search);
+    const active = voiceDeepLink
+      ? pathMatch && search.get("voice") === voiceDeepLink
+      : incidentDeepLink
+        ? pathMatch && search.get("incident") === incidentDeepLink
+        : pathMatch &&
+          !(
+            itemUrl.pathname === "/mentrix-home" &&
+            (search.get("voice") || search.get("incident"))
+          );
+    return (
+      <li key={item.href}>
+        <Link
+          to={item.href}
+          title={collapsed ? item.label : undefined}
+          className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
+            collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
+          } text-sm transition-colors ${
+            active
+              ? "bg-slate-800 text-white font-medium"
+              : "hover:bg-slate-800/60 hover:text-white"
+          }`}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>{item.label}</span>}
+        </Link>
+      </li>
+    );
+  };
 
   const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
     <div key={title}>
@@ -185,41 +229,27 @@ export default function Sidebar({
         !isFirst && <div className="my-4 border-t border-slate-700" />
       )}
       <ul className="space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const itemUrl = new URL(item.href, "http://local");
-          const pathMatch = location.pathname === itemUrl.pathname;
-          const voiceDeepLink = itemUrl.searchParams.get("voice");
-          const incidentDeepLink = itemUrl.searchParams.get("incident");
-          const search = new URLSearchParams(location.search);
-          const active = voiceDeepLink
-            ? pathMatch && search.get("voice") === voiceDeepLink
-            : incidentDeepLink
-              ? pathMatch && search.get("incident") === incidentDeepLink
-              : pathMatch &&
-                !(
-                  itemUrl.pathname === "/mentrix-home" &&
-                  (search.get("voice") || search.get("incident"))
-                );
-          return (
-            <li key={item.href}>
-              <Link
-                to={item.href}
-                title={collapsed ? item.label : undefined}
-                className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
-                  collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
-                } text-sm transition-colors ${
-                  active
-                    ? "bg-slate-800 text-white font-medium"
-                    : "hover:bg-slate-800/60 hover:text-white"
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
-            </li>
-          );
-        })}
+        {items.map((item) => renderNavLink(item))}
+        {title === "Labs" && (
+          <>
+            {!collapsed && (
+              <li>
+                <button
+                  type="button"
+                  data-testid="sidebar-labs-more"
+                  onClick={() => setLabsMoreOpen((o) => !o)}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-white"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 transition-transform ${labsMoreOpen ? "" : "-rotate-90"}`}
+                  />
+                  <span>More Labs</span>
+                </button>
+              </li>
+            )}
+            {(labsMoreOpen || collapsed) && labsAdvancedItems.map((item) => renderNavLink(item))}
+          </>
+        )}
       </ul>
     </div>
   );

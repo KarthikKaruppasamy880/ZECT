@@ -1,10 +1,10 @@
-# ZECT Commercial Release Notes (Phase 11 Stage A)
+# ZECT Commercial Release Notes (Phase 11)
 
-Placeholders for packaging, licensing, and operational readiness. **Phase 9 security monitoring remains ON HOLD.**
+Placeholders for packaging, licensing, and operational readiness.
 
 ## Branding
 
-Third-party engines (coding runtimes, editors, browser automation libraries, voice providers) run behind ZECT-owned adapters. Product UI, routes, and public APIs must not brand those vendors. Legal attribution lives in `THIRD_PARTY_NOTICES.md`.
+Third-party engines (coding runtimes, editors, browser automation libraries, voice providers) run behind ZECT-owned adapters. Product UI, routes, and public APIs must not brand those vendors. Architecture diagrams live at `/tool-comparison`. Legal attribution lives in `THIRD_PARTY_NOTICES.md`.
 
 ## Self-host vs paid APIs
 
@@ -17,21 +17,20 @@ Third-party engines (coding runtimes, editors, browser automation libraries, voi
 
 ## Release checklist (gates)
 
-- [ ] Dependency / license scan reflected in `THIRD_PARTY_NOTICES.md`
-- [ ] Sample credentials removed from shipped configs
-- [ ] Electron `appId` stable (`com.zinnia.zect`)
-- [ ] Support bundle generated with secret redaction (`scripts/support_bundle.py`)
-- [ ] EULA / privacy placeholders reviewed by legal
-- [ ] Code signing / notarization (deferred Stage B)
-- [ ] Secure auto-update channel (deferred Stage B)
+- [x] Dependency / license scan reflected in `THIRD_PARTY_NOTICES.md`
+- [x] Sample credentials removed from shipped configs (gitignore `.env*`)
+- [x] Electron `appId` stable (`com.zinnia.zect`)
+- [x] Support bundle generated with secret redaction (`scripts/support_bundle.py`)
+- [x] EULA / privacy placeholders (`docs/EULA.md`, `docs/PRIVACY.md`) — legal review pending
+- [x] Backup / DR runbook (`docs/BACKUP.md`)
+- [x] Architecture + workflows (`docs/ARCHITECTURE_AND_WORKFLOWS.md`)
+- [x] Electron production CSP header (Stage B)
+- [ ] Code signing / notarization (deferred Stage C)
+- [ ] Secure auto-update channel (deferred Stage C)
 
-## EULA / Privacy (placeholder)
+## Telemetry
 
-ZECT is provided for authorized organizational use. Do not process regulated personal data without a documented DPA. Telemetry, if enabled later, requires explicit consent and redaction of secrets.
-
-## Disaster recovery (placeholder)
-
-Backup SQLite/Postgres data directories and `backend/data/` voice/artifact stores. Restore via documented ops runbook (to be expanded).
+Optional product telemetry must be off by default. Enable only after explicit user consent via Settings key `telemetry_consent=true`. Voice HUD latency marks are local diagnostics, not external telemetry.
 
 ## Support bundle
 

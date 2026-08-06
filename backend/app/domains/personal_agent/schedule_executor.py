@@ -106,14 +106,92 @@ def execute_schedule(db: Session, schedule: Schedule, *, trigger_type: str = "ma
         run.output_summary = f"Failed: {e}"
         run.completed_at = datetime.now(timezone.utc)
         schedule.failure_count = (schedule.failure_count or 0) + 1
+        schedule.retry_count = (getattr(schedule, "retry_count", 0) or 0) + 1
+        max_attempts = int(getattr(schedule, "max_attempts", 3) or 0)
+        if max_attempts > 0 and schedule.retry_count >= max_attempts:
+            schedule.is_active = False
+            run.output_summary = (run.output_summary or "") + " (paused: max_attempts reached)"
         db.commit()
         db.refresh(run)
         return run
 
 
+def list_due_schedules(db: Session) -> list[Schedule]:
+    """Active schedules whose next_run_at is due (or once/interval heuristic)."""
+    now = datetime.now(timezone.utc)
+
+    def _aware(dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    due: list[Schedule] = []
+    for s in db.query(Schedule).filter(Schedule.is_active == True).all():  # noqa: E712
+        max_attempts = int(getattr(s, "max_attempts", 3) or 0)
+        retry_count = int(getattr(s, "retry_count", 0) or 0)
+        if max_attempts > 0 and retry_count >= max_attempts:
+            continue
+        next_run = _aware(s.next_run_at)
+        if next_run and next_run <= now:
+            due.append(s)
+            continue
+        scheduled_time = _aware(s.scheduled_time)
+        if s.schedule_type == "once" and scheduled_time and scheduled_time <= now and not s.last_run_at:
+            due.append(s)
+            continue
+        if s.schedule_type == "interval" and s.interval_minutes:
+            if not s.last_run_at:
+                due.append(s)
+            else:
+                last = _aware(s.last_run_at)
+                elapsed = (now - last).total_seconds() / 60.0  # type: ignore[operator]
+                if elapsed >= float(s.interval_minutes):
+                    due.append(s)
+    return due
+
+
+def run_due_schedules(db: Session) -> list[ScheduleRun]:
+    results = []
+    for sched in list_due_schedules(db):
+        results.append(execute_schedule(db, sched, trigger_type="scheduled"))
+        # Advance next_run_at for interval jobs
+        if sched.schedule_type == "interval" and sched.interval_minutes:
+            from datetime import timedelta
+
+            sched.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=int(sched.interval_minutes))
+            db.commit()
+        elif sched.schedule_type == "once":
+            sched.is_active = False
+            db.commit()
+    return results
+
+
 def _dispatch(db: Session, schedule: Schedule) -> str:
     cfg = schedule.task_config or {}
     task = (schedule.task_type or "custom").lower()
+
+    # Prefer playbook pipeline when playbook_id is set
+    if schedule.playbook_id:
+        from app.domains.personal_agent.playbook_executor import execute_playbook
+        from app.models import Playbook
+
+        pb = db.query(Playbook).filter(Playbook.id == schedule.playbook_id).first()
+        if not pb:
+            raise RuntimeError(f"Playbook #{schedule.playbook_id} not found")
+        variables = cfg.get("variables") or cfg.get("variables_used") or {}
+        prun = execute_playbook(
+            db,
+            pb,
+            variables_used=variables if isinstance(variables, dict) else {},
+            user_id=schedule.user_id,
+            project_id=schedule.project_id or pb.project_id,
+        )
+        return (
+            f"Playbook '{pb.name}' run #{prun.id} status={prun.status} "
+            f"steps={prun.steps_completed}/{prun.total_steps}"
+        )
 
     if task in ("custom", "mentrix", "report", "build", "deploy", "review"):
         goal = cfg.get("goal") or cfg.get("prompt") or schedule.description or schedule.name

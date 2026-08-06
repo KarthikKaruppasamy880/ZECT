@@ -822,6 +822,16 @@ class SkillDefinition(Base):
     is_active = Column(Boolean, default=True)
     execution_count = Column(Integer, default=0)
     last_executed_at = Column(DateTime, nullable=True)
+    # Phase 10 Stage B — Upgrade skill contract fields
+    owner = Column(String, default="")
+    provenance = Column(String, default="local")  # local | imported | seed
+    approval_required = Column(Boolean, default=True)
+    timeout_seconds = Column(Integer, default=300)
+    required_capabilities = Column(JSON, default=list)
+    allowed_tools = Column(JSON, default=list)
+    input_schema = Column(JSON, default=dict)
+    output_schema = Column(JSON, default=dict)
+    test_cases = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -1003,6 +1013,9 @@ class Schedule(Base):
     next_run_at = Column(DateTime, nullable=True)
     run_count = Column(Integer, default=0)
     failure_count = Column(Integer, default=0)
+    # Phase 10 Stage B — retries / max attempts (0 = unlimited until paused)
+    max_attempts = Column(Integer, default=3)
+    retry_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -1459,3 +1472,76 @@ class LLMResponseCache(Base):
     model = Column(String, default="")
     tokens_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 Stage B — typed memory records + condition watches + retention
+# ---------------------------------------------------------------------------
+
+MEMORY_TYPES = (
+    "conversation_history",
+    "project_knowledge",
+    "user_preferences",
+    "reusable_procedures",
+    "integration_metadata",
+    "security_incidents",
+)
+
+
+class TypedMemoryRecord(Base):
+    """Unified typed memory with attribution, retention, and project/identity scope."""
+    __tablename__ = "typed_memory_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    memory_type = Column(String, nullable=False, index=True)
+    title = Column(String, default="")
+    content = Column(Text, default="")
+    source = Column(String, default="")  # attribution source (user, mentrix, import, adapter)
+    attribution = Column(String, default="")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    retention_days = Column(Integer, default=90)  # 0 = keep forever
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+    project = relationship("Project", backref="typed_memory_records")
+    user = relationship("User", backref="typed_memory_records")
+
+
+class MemoryRetentionPolicy(Base):
+    """User-controlled default retention for typed memory."""
+    __tablename__ = "memory_retention_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    memory_type = Column(String, nullable=False, index=True)
+    retention_days = Column(Integer, default=90)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="memory_retention_policies")
+
+
+class AutomationWatch(Base):
+    """Condition-based automation watch (Phase 10 Stage B)."""
+    __tablename__ = "automation_watches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    condition_type = Column(String, default="keyword")  # keyword | file_change | finding
+    condition_config = Column(JSON, default=dict)
+    action_type = Column(String, default="mentrix")  # mentrix | schedule_trigger | notify
+    action_config = Column(JSON, default=dict)
+    is_active = Column(Boolean, default=True)
+    last_triggered_at = Column(DateTime, nullable=True)
+    trigger_count = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="automation_watches")
+    project = relationship("Project", backref="automation_watches")

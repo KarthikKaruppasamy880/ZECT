@@ -1,0 +1,190 @@
+/**
+ * ZECT architecture flows (Labs). Capability diagrams only — no third-party product names.
+ */
+import { useEffect, useId, useRef } from "react";
+import { Link } from "react-router-dom";
+import { Workflow, ArrowRight, Map } from "lucide-react";
+
+const SYSTEM_FLOW = `flowchart TB
+  subgraph You["You"]
+    U[User goal]
+  end
+  subgraph Client["ZECT client"]
+    UI[React UI]
+    Voice[Mentrix Voice]
+  end
+  subgraph Core["Mentrix control plane"]
+    Run[Agent run Ask/Plan/Build/Review/Deploy]
+    Gates[Permissions + audit + emergency stop]
+  end
+  subgraph Work["Work surfaces"]
+    WS[Workspace / coding engine]
+    Labs[Skills Knowledge Playbooks Schedules Memory]
+    Sec[Security incidents]
+    Int[Jira Slack email drafts]
+  end
+  U --> UI
+  U --> Voice
+  Voice --> Run
+  UI --> Run
+  Run --> Gates
+  Gates --> WS
+  Gates --> Labs
+  Gates --> Sec
+  Gates --> Int`;
+
+const MENTRIX_FLOW = `flowchart LR
+  A[1. Open Mentrix] --> B[2. Set goal + mode]
+  B --> C[3. Gates check permissions]
+  C --> D[4. Adapters run tools]
+  D --> E[5. Timeline + artifacts]
+  E --> F[6. Approve outbound / PR]
+  F --> G[7. Audit recorded]`;
+
+const LABS_FLOW = `flowchart LR
+  K[Knowledge Base] --> Ctx[Mentrix context]
+  M[Memory] --> Ctx
+  S[Skills] --> Proj[New project scaffold]
+  P[Playbooks] --> Run[Mentrix steps]
+  Sch[Scheduled Tasks] --> Run
+  Ctx --> Run`;
+
+const IR_FLOW = `flowchart LR
+  S[Scan / ingest] --> F[Findings]
+  F --> D[Draft incident]
+  D --> A[You approve]
+  A --> J[Jira + Slack]
+  D -.-> X[Containment off by default]`;
+
+const USER_PATHS = [
+  {
+    title: "Ship code with Mentrix",
+    steps: [
+      { label: "Open Mentrix Companion or Agent Workspace", to: "/mentrix-home" },
+      { label: "Choose Ask → Plan → Build → Review → Deploy", to: "/mentrix" },
+      { label: "Inspect diffs in Developer Workspace", to: "/workspace" },
+      { label: "Approve PR / outbound actions before send", to: "/review" },
+    ],
+  },
+  {
+    title: "10x Labs productivity loop",
+    steps: [
+      { label: "Store conventions in Knowledge Base", to: "/knowledge-base" },
+      { label: "Register a Skill or Playbook", to: "/skills-engine" },
+      { label: "Schedule Mentrix or playbook runs", to: "/scheduled-tasks" },
+      { label: "Recall Memory + Permissions gates", to: "/memory" },
+    ],
+  },
+  {
+    title: "Personal ops (Slack / email / Jira)",
+    steps: [
+      { label: "Ask Mentrix to draft a reply or ticket", to: "/mentrix" },
+      { label: "Review draft (never auto-send)", to: "/integrations" },
+      { label: "Approve → provider API send", to: "/integrations" },
+    ],
+  },
+  {
+    title: "Security incident response",
+    steps: [
+      { label: "Open Security Incidents", to: "/security-incidents" },
+      { label: "Run scan or wait for signed ingest", to: "/security-incidents" },
+      { label: "Draft incident → approve → Jira/Slack", to: "/security-incidents" },
+    ],
+  },
+];
+
+function MermaidDiagram({ body, title }: { body: string; title: string }) {
+  const id = useId().replace(/:/g, "");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: "neutral",
+          securityLevel: "loose",
+          flowchart: { curve: "basis", htmlLabels: true },
+        });
+        const { svg } = await mermaid.render(`arch-${id}-${Date.now()}`, body);
+        if (!cancelled && ref.current) ref.current.innerHTML = svg;
+      } catch (e) {
+        if (!cancelled && ref.current) {
+          ref.current.innerHTML = `<pre class="text-xs text-red-700 whitespace-pre-wrap p-3">${String(e)}</pre>`;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [body, id]);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="border-b border-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{title}</div>
+      <div ref={ref} className="overflow-x-auto p-4 bg-slate-50 min-h-[160px]" />
+    </div>
+  );
+}
+
+export default function ToolComparison() {
+  return (
+    <div className="mx-auto max-w-6xl space-y-6 p-6" data-testid="architecture-guide">
+      <header className="space-y-2">
+        <div className="flex items-center gap-2 text-indigo-700">
+          <Map className="h-6 w-6" />
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Architecture</h1>
+        </div>
+        <p className="max-w-3xl text-sm text-slate-600">
+          How ZECT Mentrix fits together — Client → control plane → Workspace and Labs. Day-to-day
+          work happens in Companion, Agent Workspace, and Developer Workspace.
+        </p>
+      </header>
+
+      <section className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4 text-sm text-slate-700">
+        <p className="font-semibold text-indigo-900 mb-1 inline-flex items-center gap-2">
+          <Workflow className="h-4 w-4" /> How to use this page
+        </p>
+        <ol className="list-decimal pl-5 space-y-1">
+          <li>Read the system diagram to see Client → Mentrix → adapters.</li>
+          <li>Use the Labs loop diagram for Knowledge → Skills → Playbooks → Schedules.</li>
+          <li>Pick a path below and open the real ZECT screen.</li>
+        </ol>
+      </section>
+
+      <MermaidDiagram title="System architecture — where your clicks go" body={SYSTEM_FLOW} />
+      <MermaidDiagram title="Mentrix run — step order" body={MENTRIX_FLOW} />
+      <MermaidDiagram title="Labs productivity loop" body={LABS_FLOW} />
+      <MermaidDiagram title="Security incident response" body={IR_FLOW} />
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900">Follow these paths in the product</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          {USER_PATHS.map((path) => (
+            <div key={path.title} className="rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-slate-900 mb-3">{path.title}</h3>
+              <ol className="space-y-2">
+                {path.steps.map((step, i) => (
+                  <li key={step.label}>
+                    <Link
+                      to={step.to}
+                      className="group flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-800 hover:border-indigo-200 hover:bg-indigo-50"
+                    >
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">
+                        {i + 1}
+                      </span>
+                      <span className="flex-1">{step.label}</span>
+                      <ArrowRight className="h-4 w-4 shrink-0 text-slate-400 group-hover:text-indigo-600" />
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}

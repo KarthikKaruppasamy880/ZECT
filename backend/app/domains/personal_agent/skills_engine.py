@@ -40,6 +40,15 @@ class SkillCreate(BaseModel):
     script_body: str = ""
     project_id: Optional[int] = None
     is_seed: bool = False
+    owner: str = ""
+    provenance: str = "local"
+    approval_required: bool = True
+    timeout_seconds: int = 300
+    required_capabilities: list[str] = []
+    allowed_tools: list[str] = []
+    input_schema: dict = {}
+    output_schema: dict = {}
+    test_cases: list = []
 
 
 class SkillUpdate(BaseModel):
@@ -51,6 +60,27 @@ class SkillUpdate(BaseModel):
     tags: Optional[list[str]] = None
     script_body: Optional[str] = None
     is_active: Optional[bool] = None
+    owner: Optional[str] = None
+    provenance: Optional[str] = None
+    approval_required: Optional[bool] = None
+    timeout_seconds: Optional[int] = None
+    required_capabilities: Optional[list[str]] = None
+    allowed_tools: Optional[list[str]] = None
+    input_schema: Optional[dict] = None
+    output_schema: Optional[dict] = None
+    test_cases: Optional[list] = None
+
+
+class SkillExecLog(BaseModel):
+    skill_id: int
+    project_id: Optional[int] = None
+    input_data: dict = {}
+    output_data: dict = {}
+    success: bool = True
+    duration_seconds: float = 0.0
+    error_message: Optional[str] = None
+    approved: bool = False  # required when skill.approval_required
+    requested_tools: list[str] = []
 
 
 class DetectSkillRequest(BaseModel):
@@ -68,16 +98,6 @@ class DetectSkillResponse(BaseModel):
 class TriggerMatch(BaseModel):
     intent: str
     project_id: Optional[int] = None
-
-
-class SkillExecLog(BaseModel):
-    skill_id: int
-    project_id: Optional[int] = None
-    input_data: dict = {}
-    output_data: dict = {}
-    success: bool = True
-    duration_seconds: float = 0.0
-    error_message: Optional[str] = None
 
 
 # ── Seed skill definitions ─────────────────────────────────────────
@@ -175,15 +195,32 @@ SEED_SKILLS = [
         "is_seed": True,
     },
     {
-        "name": "zinnia-migration",
+        "name": "zinnia-project-scaffold",
         "version": "1.0.0",
-        "description": "Database and API migration planner with rollback scripts and data validation",
-        "category": "migration",
-        "trigger_pattern": "migrate|migration|schema.change|database.update",
+        "description": "Scaffold a new ZECT project from a stack template — name, description, starter Mentrix prompts, and folder conventions",
+        "category": "project_scaffold",
+        "trigger_pattern": "new.project|scaffold|bootstrap|create.project|greenfield",
         "manifest": {
-            "inputs": ["source_schema", "target_schema", "data_constraints"],
-            "outputs": ["migration_plan", "rollback_script", "validation_queries"],
-            "config": {"auto_rollback": True, "dry_run_first": True},
+            "template": (
+                "Create a new project named {{project_name}} using stack {{stack}}. "
+                "Follow ZECT conventions: Projects → Developer Workspace → Index/Lattice → Mentrix. "
+                "Starter folders: src/, docs/, tests/. First Mentrix goal: bootstrap README and CI."
+            ),
+            "inputs": ["project_name", "stack", "description"],
+            "outputs": ["project_fields", "starter_prompts", "folder_layout"],
+            "config": {
+                "stacks": ["python-fastapi", "react-vite", "full-stack"],
+                "default_stack": "full-stack",
+                "scaffold": True,
+            },
+            "scaffold": {
+                "default_name": "New Mentrix Project",
+                "default_description": "Scaffolded via Skills Engine — Mentrix delivery ready.",
+                "starter_prompts": [
+                    "Index the repo and summarize architecture",
+                    "Propose Ask → Plan → Build milestones",
+                ],
+            },
         },
         "is_seed": True,
     },
@@ -191,12 +228,13 @@ SEED_SKILLS = [
 
 
 def _seed_if_empty(db: Session):
-    """Seed the database with default skills if empty."""
-    count = db.query(func.count(SkillDefinition.id)).scalar()
-    if count > 0:
-        return
+    """Ensure default seed skills exist (insert any missing by name)."""
     now = datetime.now(timezone.utc)
+    existing = {r[0] for r in db.query(SkillDefinition.name).all()}
+    added = False
     for s in SEED_SKILLS:
+        if s["name"] in existing:
+            continue
         skill = SkillDefinition(
             name=s["name"],
             version=s["version"],
@@ -213,7 +251,9 @@ def _seed_if_empty(db: Session):
             updated_at=now,
         )
         db.add(skill)
-    db.commit()
+        added = True
+    if added:
+        db.commit()
 
 
 def _skill_to_dict(skill: SkillDefinition) -> dict:
@@ -227,9 +267,6 @@ def _skill_to_dict(skill: SkillDefinition) -> dict:
         "category": skill.category,
         "trigger_pattern": skill.trigger_pattern,
         "manifest": manifest,
-        # Surfaced at the top level for convenience — same data as
-        # manifest["template"]/manifest["tags"], just not nested, matching
-        # the flat shape the old Skill Library UI/API expected.
         "template": manifest.get("template", ""),
         "tags": manifest.get("tags", []),
         "script_body": skill.script_body or "",
@@ -238,6 +275,15 @@ def _skill_to_dict(skill: SkillDefinition) -> dict:
         "is_active": skill.is_active,
         "execution_count": skill.execution_count,
         "last_executed_at": skill.last_executed_at.isoformat() if skill.last_executed_at else None,
+        "owner": getattr(skill, "owner", "") or "",
+        "provenance": getattr(skill, "provenance", None) or ("seed" if skill.is_seed else "local"),
+        "approval_required": bool(getattr(skill, "approval_required", True)),
+        "timeout_seconds": int(getattr(skill, "timeout_seconds", None) or 300),
+        "required_capabilities": getattr(skill, "required_capabilities", None) or [],
+        "allowed_tools": getattr(skill, "allowed_tools", None) or [],
+        "input_schema": getattr(skill, "input_schema", None) or {},
+        "output_schema": getattr(skill, "output_schema", None) or {},
+        "test_cases": getattr(skill, "test_cases", None) or [],
         "created_at": skill.created_at.isoformat() if skill.created_at else None,
         "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
     }
@@ -322,6 +368,15 @@ def create_skill(body: SkillCreate, db: Session = Depends(get_db)):
         is_seed=body.is_seed,
         is_active=True,
         execution_count=0,
+        owner=body.owner or "",
+        provenance=body.provenance or ("seed" if body.is_seed else "local"),
+        approval_required=body.approval_required,
+        timeout_seconds=body.timeout_seconds,
+        required_capabilities=body.required_capabilities or [],
+        allowed_tools=body.allowed_tools or [],
+        input_schema=body.input_schema or {},
+        output_schema=body.output_schema or {},
+        test_cases=body.test_cases or [],
         created_at=now,
         updated_at=now,
     )
@@ -356,6 +411,24 @@ def update_skill(skill_id: int, body: SkillUpdate, db: Session = Depends(get_db)
         skill.script_body = body.script_body
     if body.is_active is not None:
         skill.is_active = body.is_active
+    if body.owner is not None:
+        skill.owner = body.owner
+    if body.provenance is not None:
+        skill.provenance = body.provenance
+    if body.approval_required is not None:
+        skill.approval_required = body.approval_required
+    if body.timeout_seconds is not None:
+        skill.timeout_seconds = body.timeout_seconds
+    if body.required_capabilities is not None:
+        skill.required_capabilities = body.required_capabilities
+    if body.allowed_tools is not None:
+        skill.allowed_tools = body.allowed_tools
+    if body.input_schema is not None:
+        skill.input_schema = body.input_schema
+    if body.output_schema is not None:
+        skill.output_schema = body.output_schema
+    if body.test_cases is not None:
+        skill.test_cases = body.test_cases
     skill.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(skill)
@@ -417,11 +490,41 @@ def match_skills(body: TriggerMatch, db: Session = Depends(get_db)):
 
 @router.post("/execute/{skill_id}")
 def log_execution(skill_id: int, body: SkillExecLog, db: Session = Depends(get_db)):
-    """Log a skill execution result."""
+    """Gate + log a skill execution (never auto-runs untrusted script_body)."""
     _seed_if_empty(db)
     skill = db.query(SkillDefinition).filter(SkillDefinition.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+    if not skill.is_active:
+        raise HTTPException(status_code=403, detail="Skill is inactive")
+
+    approval_required = bool(getattr(skill, "approval_required", True))
+    if approval_required and not body.approved:
+        raise HTTPException(
+            status_code=403,
+            detail="Skill requires explicit approval before execution logging",
+        )
+
+    allowed = list(getattr(skill, "allowed_tools", None) or [])
+    if allowed and body.requested_tools:
+        disallowed = [t for t in body.requested_tools if t not in allowed]
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Tools not allowed for this skill: {disallowed}",
+            )
+
+    timeout = int(getattr(skill, "timeout_seconds", None) or 300)
+    if body.duration_seconds and body.duration_seconds > timeout:
+        raise HTTPException(
+            status_code=408,
+            detail=f"Skill exceeded timeout_seconds={timeout}",
+        )
+
+    # Untrusted skills never auto-execute script_body — Stage B only records gated runs.
+    if (skill.script_body or "").strip() and (getattr(skill, "provenance", "") or "") == "imported":
+        if not body.approved:
+            raise HTTPException(status_code=403, detail="Imported skills require approval")
 
     now = datetime.now(timezone.utc)
     skill.execution_count = (skill.execution_count or 0) + 1
@@ -432,7 +535,15 @@ def log_execution(skill_id: int, body: SkillExecLog, db: Session = Depends(get_d
         skill_name=skill.name,
         project_id=body.project_id,
         input_data=body.input_data,
-        output_data=body.output_data,
+        output_data={
+            **(body.output_data or {}),
+            "_gate": {
+                "approved": body.approved,
+                "timeout_seconds": timeout,
+                "allowed_tools": allowed,
+                "script_executed": False,
+            },
+        },
         success=body.success,
         duration_seconds=body.duration_seconds,
         error_message=body.error_message,

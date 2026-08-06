@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
-from app.models import Lesson, MentrixRun, SkillDefinition
+from app.models import Lesson, MentrixRun, SkillDefinition, TypedMemoryRecord
 from app.services.lattice.indexer import get_graph, query_graph
 from app.services.mentrix.permission_broker import (
     ALWAYS_CONFIRM_TOOLS,
@@ -86,10 +86,12 @@ def build_agent_context(
     skill_id: int | None = None,
     project_id: int | None = None,
     agent_context: str = "",
+    query: str = "",
 ) -> str:
-    """Compose Active Skill + staged Dream lessons for companion / Realtime turns.
+    """Compose skill + Knowledge + typed memory + Dream lessons for Mentrix turns.
 
-    Silent empty string when nothing is configured — never raises to callers.
+    Prefer Knowledge/Memory snippets (token-capped) so callers can avoid dumping
+    large repo slices. Silent empty string when nothing is configured.
     """
     bits: list[str] = []
     raw = (agent_context or "").strip()
@@ -106,6 +108,44 @@ def build_agent_context(
                     if body
                     else f"Active skill: {skill.name}"
                 )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.domains.repository.knowledge_base import retrieve_knowledge_for_context
+
+        kb_block, _meta = retrieve_knowledge_for_context(
+            db,
+            query=query or raw[:200],
+            project_id=project_id,
+            max_tokens=600,
+            limit=4,
+        )
+        if kb_block:
+            bits.append(kb_block)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if project_id is not None:
+            typed = (
+                db.query(TypedMemoryRecord)
+                .filter(
+                    TypedMemoryRecord.project_id == int(project_id),
+                    TypedMemoryRecord.memory_type.in_(
+                        ("project_knowledge", "reusable_procedures")
+                    ),
+                )
+                .order_by(TypedMemoryRecord.created_at.desc())
+                .limit(4)
+                .all()
+            )
+            lines = []
+            for row in typed:
+                title = (row.title or row.memory_type or "memory").strip()
+                content = (row.content or "").strip()
+                if content:
+                    lines.append(f"- {title}: {content[:280]}")
+            if lines:
+                bits.append("Typed memory:\n" + "\n".join(lines))
     except Exception:  # noqa: BLE001
         pass
     try:

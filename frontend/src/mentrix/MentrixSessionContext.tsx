@@ -254,12 +254,16 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   computerModeRef.current = computerMode;
   const voiceConnectedRef = useRef(voiceConnected);
   voiceConnectedRef.current = voiceConnected;
-  // Typed Companion replies use Mentrix /voice/speak when TTS is on.
-  // Connect Voice synthesizes separately via speakWithClonedVoice — do not
-  // mute chat TTS just because the mic session is connected.
-  const browserTtsEnabled = tts;
+  // When Connect Voice / Realtime owns the speaker, companion chat TTS must stay
+  // silent — otherwise users hear two overlapping voices (Realtime + speakMentrix).
+  const browserTtsEnabled = tts && !voiceConnected;
 
-  const speakAllowed = useCallback(() => ttsRef.current, []);
+  const speakAllowed = useCallback(() => ttsRef.current && !voiceConnectedRef.current && !realtimeRef.current, []);
+
+  const speakChat = useCallback((text: string, onFail?: (err: string) => void) => {
+    if (!speakAllowed()) return;
+    speak(text, true, onFail);
+  }, [speakAllowed]);
 
   const pushLog = useCallback((text: string) => {
     const ts = new Date().toLocaleTimeString();
@@ -468,7 +472,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             });
             setPending(mapped);
             setAvatar("needs_permission");
-            speak("I need your permission to continue.", speakAllowed());
+            speakChat("I need your permission to continue.");
           },
           onError: (err) => {
             if (/Voice output:/i.test(String(err))) {
@@ -528,7 +532,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       voiceConnectingRef.current = false;
       setVoiceConnecting(false);
     }
-  }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakAllowed, stopVoice]);
+  }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakChat, stopVoice]);
 
   const handleStreamEvent = useCallback(
     (ev: MentrixStreamEvent) => {
@@ -578,7 +582,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             setAvatar("needs_permission");
           } else {
             setAvatar("speaking");
-            speak(reply, ttsRef.current, (err) => setStatusLine(`Voice: ${err}`));
+            speakChat(reply, (err) => setStatusLine(`Voice: ${err}`));
           }
           setStatusLine(d.latency_mode === "fast_tools" ? "Replied (instant)" : "SYSTEMS OPERATIONAL");
           pushLog(`done ${d.latency_ms || 0}ms`);
@@ -593,7 +597,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           break;
       }
     },
-    [applyNavPath, pushLog],
+    [applyNavPath, pushLog, speakChat],
   );
 
   const runTurn = useCallback(
@@ -651,7 +655,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               setTurnId(res.turn_id || "");
               setLastMessageKeep(message);
               setAvatar("needs_permission");
-              speak("I need your permission to continue.", speakAllowed());
+              speakChat("I need your permission to continue.");
             } else {
               setPending([]);
               setMessages((m) => {
@@ -662,7 +666,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               });
               if (res.board?.length) setBoard((b) => [...res.board, ...b].slice(0, 16));
               setAvatar("speaking");
-              speak(res.reply || "", speakAllowed());
+              speakChat(res.reply || "");
             }
             for (const t of res.tools || []) {
               if (t.result?.desktop && !t.denied) {
@@ -686,7 +690,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         setTimeout(() => setAvatar((a) => (a === "speaking" ? "idle" : a)), 2200);
       }
     },
-    [activeSkillId, applyNavPath, handleDesktopOutput, handleStreamEvent, speakAllowed],
+    [activeSkillId, applyNavPath, handleDesktopOutput, handleStreamEvent, speakChat],
   );
 
   const onSend = useCallback(async () => {
@@ -723,6 +727,11 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     }
     setAvatar("speaking");
     setStatusLine("Present / Narrate");
+    if (voiceConnectedRef.current || realtimeRef.current) {
+      setStatusLine("Present text shown — Disconnect Voice to narrate with chat TTS");
+      setAvatar("idle");
+      return;
+    }
     let lastErr = "";
     for (const chunk of chunks) {
       const result = await speakMentrix(chunk, true);

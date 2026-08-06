@@ -1226,7 +1226,26 @@ export const deleteKnowledgeEntry = (id: number) =>
   request<void>(`/api/knowledge/${id}`, { method: "DELETE" });
 export const getKnowledgeCategories = () => request<any[]>("/api/knowledge/categories");
 export const searchKnowledge = (query: string, category?: string) =>
-  request<any[]>(`/api/knowledge/search?query=${encodeURIComponent(query)}${category ? `&category=${category}` : ""}`);
+  request<any[]>("/api/knowledge/search", {
+    method: "POST",
+    body: JSON.stringify({ query, category: category || undefined }),
+  });
+export const knowledgeForContext = (data: {
+  query?: string;
+  project_id?: number;
+  category?: string;
+  tags?: string[];
+  max_tokens?: number;
+  limit?: number;
+}) =>
+  request<{
+    context: string;
+    entry_ids: number[];
+    entry_count: number;
+    chars: number;
+    tokens_estimated: number;
+    max_tokens: number;
+  }>("/api/knowledge/context", { method: "POST", body: JSON.stringify(data) });
 
 // Playbooks
 export const getPlaybooks = (category?: string, skip = 0, limit = 50) => {
@@ -1257,10 +1276,28 @@ export const getSchedules = (taskType?: string, isActive?: boolean, skip = 0, li
   params.set("limit", String(limit));
   return request<any>(`/api/schedules?${params}`);
 };
-export const createSchedule = (data: { name: string; description?: string; schedule_type?: string; cron_expression?: string; interval_minutes?: number; task_type?: string; task_config?: Record<string, any> }) =>
+export const createSchedule = (data: {
+  name: string;
+  description?: string;
+  schedule_type?: string;
+  cron_expression?: string;
+  interval_minutes?: number;
+  task_type?: string;
+  playbook_id?: number;
+  task_config?: Record<string, any>;
+  project_id?: number;
+}) =>
   request<any>("/api/schedules", { method: "POST", body: JSON.stringify(data) });
 export const getSchedule = (id: number) => request<any>(`/api/schedules/${id}`);
-export const updateSchedule = (id: number, data: { name?: string; description?: string; cron_expression?: string; task_config?: Record<string, any>; is_active?: boolean }) =>
+export const updateSchedule = (id: number, data: {
+  name?: string;
+  description?: string;
+  cron_expression?: string;
+  task_config?: Record<string, any>;
+  is_active?: boolean;
+  playbook_id?: number | null;
+  task_type?: string;
+}) =>
   request<any>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteSchedule = (id: number) =>
   request<void>(`/api/schedules/${id}`, { method: "DELETE" });

@@ -108,7 +108,7 @@ const labsItems: NavItem[] = [
   { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },
   { href: "/permissions", label: "Permissions", icon: ShieldAlert },
   { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
-  { href: "/tool-comparison", label: "Tool Comparison", icon: GitCompareArrows },
+  { href: "/tool-comparison", label: "Architecture & Compare", icon: GitCompareArrows },
   { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
   { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },

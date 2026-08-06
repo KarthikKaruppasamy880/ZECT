@@ -1,0 +1,3 @@
+# Ignore dropped Chatterbox/Voicebox binaries (large; licensed separately)
+resources/chatterbox/bin/*
+!resources/chatterbox/bin/.gitkeep

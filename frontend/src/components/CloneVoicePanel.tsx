@@ -50,6 +50,13 @@ export default function CloneVoicePanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readyNote, setReadyNote] = useState("");
   const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus | null>(null);
+  const [desktopCb, setDesktopCb] = useState<{
+    bundled?: boolean;
+    online?: boolean;
+    running?: boolean;
+    hint?: string;
+    binaryPath?: string;
+  } | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -80,12 +87,35 @@ export default function CloneVoicePanel({
             });
           }
         });
+      const desktop = (
+        window as unknown as {
+          zectDesktop?: {
+            mentrix?: { chatterboxStatus?: () => Promise<Record<string, unknown>> };
+          };
+        }
+      ).zectDesktop?.mentrix;
+      if (desktop?.chatterboxStatus) {
+        desktop
+          .chatterboxStatus()
+          .then((s) => {
+            if (!cancelled) {
+              setDesktopCb({
+                bundled: Boolean(s.bundled),
+                online: Boolean(s.online),
+                running: Boolean(s.running),
+                hint: typeof s.hint === "string" ? s.hint : undefined,
+                binaryPath: typeof s.binaryPath === "string" ? s.binaryPath : undefined,
+              });
+            }
+          })
+          .catch(() => {});
+      }
     };
     load();
-    const iv = window.setInterval(load, 15000);
+    const t = window.setInterval(load, 8000);
     return () => {
       cancelled = true;
-      window.clearInterval(iv);
+      window.clearInterval(t);
     };
   }, []);
 
@@ -353,31 +383,62 @@ export default function CloneVoicePanel({
             ? `Chatterbox online (${engineStatus.base_url})`
             : `Chatterbox offline (${engineStatus.base_url}) — start local engine to Test speak / Present`}
       </p>
+      {desktopCb?.bundled ? (
+        <p className={`text-[10px] ${dark ? "text-teal-300/80" : "text-teal-700"}`} data-testid="clone-voice-bundled">
+          Bundled Chatterbox sidecar detected
+          {desktopCb.binaryPath ? ` (${desktopCb.binaryPath.split(/[/\\]/).pop()})` : ""}
+        </p>
+      ) : null}
       {typeof window !== "undefined" &&
         (window as unknown as { zectDesktop?: { mentrix?: { chatterboxStart?: () => Promise<unknown> } } })
           .zectDesktop?.mentrix?.chatterboxStart && (
-        <button
-          type="button"
-          data-testid="clone-voice-chatterbox-start"
-          className={`text-[11px] px-2 py-1 rounded border ${
-            dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
-          }`}
-          onClick={async () => {
-            try {
-              await (
-                window as unknown as {
-                  zectDesktop: { mentrix: { chatterboxStart: () => Promise<unknown> } };
-                }
-              ).zectDesktop.mentrix.chatterboxStart();
-              const st = await mentrixVoiceEngineStatus();
-              setEngineStatus(st);
-            } catch {
-              /* ignore */
-            }
-          }}
-        >
-          Start local Chatterbox (Electron managed)
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="clone-voice-chatterbox-start"
+            className={`text-[11px] px-2 py-1 rounded border ${
+              dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
+            }`}
+            onClick={async () => {
+              try {
+                await (
+                  window as unknown as {
+                    zectDesktop: { mentrix: { chatterboxStart: () => Promise<unknown> } };
+                  }
+                ).zectDesktop.mentrix.chatterboxStart();
+                await new Promise((r) => setTimeout(r, 1500));
+                const st = await mentrixVoiceEngineStatus();
+                setEngineStatus(st);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            {desktopCb?.bundled ? "Start bundled Chatterbox" : "Start local Chatterbox (Electron)"}
+          </button>
+          <button
+            type="button"
+            data-testid="clone-voice-chatterbox-stop"
+            className={`text-[11px] px-2 py-1 rounded border ${
+              dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
+            }`}
+            onClick={async () => {
+              try {
+                await (
+                  window as unknown as {
+                    zectDesktop: { mentrix: { chatterboxStop: () => Promise<unknown> } };
+                  }
+                ).zectDesktop.mentrix.chatterboxStop();
+                const st = await mentrixVoiceEngineStatus();
+                setEngineStatus(st);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Stop engine
+          </button>
+        </div>
       )}
 
       {voices.length > 0 && (

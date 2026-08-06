@@ -404,6 +404,14 @@ ipcMain.handle("mentrix-computer-audit", () => ({
 ipcMain.handle("mentrix-chatterbox-status", async () => chatterbox.status());
 ipcMain.handle("mentrix-chatterbox-start", async () => chatterbox.start());
 ipcMain.handle("mentrix-chatterbox-stop", async () => chatterbox.stop());
+ipcMain.handle("mentrix-chatterbox-resolve", async () => {
+  const launch = chatterbox.resolveLaunch();
+  return {
+    launch,
+    bundled: Boolean(launch && launch.bundled),
+    binaryPath: launch && launch.mode === "bin" ? launch.path : "",
+  };
+});
 ipcMain.handle("mentrix-desktop-queue-push", (_e, cmd) => {
   const item = {
     id: `dc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -680,6 +688,17 @@ app.whenReady().then(() => {
 
   // Native Windows wake uses default recording device (set headset mic in Windows Sound settings)
   startNativeWake();
+
+  // Bundled Chatterbox sidecar: auto-start when binary is present (or CHATTERBOX_AUTO_START=1)
+  chatterbox.maybeAutoStart().then((out) => {
+    if (out && out.ok && !out.skipped) {
+      console.log("[chatterbox] auto-started", out.pid || "", out.binaryPath || "");
+    } else if (out && out.skipped) {
+      console.log("[chatterbox]", out.skipped, out.hint || "");
+    } else if (out && out.error) {
+      console.warn("[chatterbox] auto-start failed:", out.error);
+    }
+  }).catch((err) => console.warn("[chatterbox] auto-start error", err));
 });
 
 app.on("will-quit", () => {
@@ -689,6 +708,11 @@ app.on("will-quit", () => {
     winWakeHandle = null;
   }
   stopDictation();
+  try {
+    chatterbox.stop();
+  } catch {
+    /* ignore */
+  }
 });
 
 app.on("window-all-closed", () => {

@@ -33,7 +33,10 @@ function mockRun(overrides: Record<string, unknown> = {}) {
       batch_index: 0,
       batch_total: 2,
       batch_files: ["src/auth/retry.ts"],
-      builder: { files_written: ["src/auth/retry.ts"], files_expected: ["src/auth/retry.ts", "tests/auth_retry.test.ts"] },
+      builder: {
+        files_written: ["src/auth/retry.ts"],
+        files_expected: ["src/auth/retry.ts", "tests/auth_retry.test.ts"],
+      },
     },
     ...overrides,
   };
@@ -49,18 +52,38 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
         body: JSON.stringify({ wake_phrases: ["Hey Mentrix"], roles: [], pipelines: {} }),
       });
     });
+    await page.route("**/api/mentrix/runs/**", async (route) => {
+      // Detail / action routes: /runs/9101, /runs/9101/confirm-batch, etc.
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(run),
+      });
+    });
     await page.route("**/api/mentrix/runs**", async (route) => {
       const method = route.request().method();
       const url = route.request().url();
-      if (method === "GET" && /\/runs\/\d+(\?|$)/.test(url)) {
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(run) });
+      if (method === "GET" && /\/runs\/\d+/.test(url)) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(run),
+        });
         return;
       }
       if (method === "GET") {
-        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([run]) });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([run]),
+        });
         return;
       }
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(run) });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(run),
+      });
     });
 
     await page.goto("/mentrix");
@@ -71,14 +94,12 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
 
     const [getRun] = await Promise.all([
       page.waitForResponse(
-        (res) =>
-          res.request().method() === "GET" &&
-          /\/api\/mentrix\/runs\/9101(?:\?|$)/.test(res.url()),
+        (res) => res.request().method() === "GET" && /\/api\/mentrix\/runs\/9101/.test(res.url()),
         { timeout: 15_000 },
       ),
       page.getByTestId("mentrix-run-9101").click(),
     ]);
-    expect(getRun.ok()).toBeTruthy();
+    expect(getRun.status(), await getRun.text()).toBe(200);
     await expect(page.getByTestId("mentrix-run-owns-build")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("mentrix-batch-confirm")).toBeVisible();
     const ws = page.getByTestId("mentrix-open-workspace");

@@ -53,6 +53,121 @@ def default_save_dir() -> Path:
     return home
 
 
+# Presenton built-in template names (docs.presenton.ai).
+BUILTIN_TEMPLATES: list[dict[str, str]] = [
+    {"id": "general", "name": "General"},
+    {"id": "modern", "name": "Modern"},
+    {"id": "standard", "name": "Standard"},
+    {"id": "swift", "name": "Swift"},
+]
+
+
+def _normalize_template_rows(raw: Any) -> list[dict[str, str]]:
+    """Map Presenton template payloads to {id, name}."""
+    rows: list[Any]
+    if isinstance(raw, list):
+        rows = raw
+    elif isinstance(raw, dict):
+        rows = raw.get("templates") or raw.get("data") or []
+        if not isinstance(rows, list):
+            rows = []
+    else:
+        rows = []
+
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in rows:
+        if isinstance(item, str):
+            tid = item.strip()
+            if not tid or tid in seen:
+                continue
+            seen.add(tid)
+            out.append({"id": tid, "name": tid.replace("-", " ").replace("_", " ").title()})
+            continue
+        if not isinstance(item, dict):
+            continue
+        tid = str(
+            item.get("id")
+            or item.get("name")
+            or item.get("template")
+            or item.get("template_name")
+            or ""
+        ).strip()
+        if not tid or tid in seen:
+            continue
+        seen.add(tid)
+        label = str(item.get("title") or item.get("display_name") or item.get("name") or tid).strip()
+        out.append({"id": tid, "name": label or tid})
+    return out
+
+
+def list_templates() -> dict[str, Any]:
+    """List Presenton templates; fall back to built-ins when unset/unreachable."""
+    base = presenton_base_url()
+    if not base:
+        return {
+            "ok": True,
+            "source": "builtin",
+            "templates": list(BUILTIN_TEMPLATES),
+            "reachable": False,
+            "configured": False,
+            "hint": "Set PRESENTON_BASE_URL and run Presenton Docker to load remote templates",
+        }
+
+    url = f"{base}/api/v1/ppt/template/all"
+    headers = {**_bearer_headers()}
+    try:
+        with httpx.Client(timeout=15.0, auth=_auth()) as client:
+            res = client.get(url, params={"include_defaults": "true"}, headers=headers)
+            if res.status_code >= 400:
+                return {
+                    "ok": True,
+                    "source": "builtin",
+                    "templates": list(BUILTIN_TEMPLATES),
+                    "reachable": False,
+                    "configured": True,
+                    "hint": f"Presenton templates HTTP {res.status_code} — using built-ins",
+                    "detail": (res.text or "")[:400],
+                }
+            mapped = _normalize_template_rows(res.json())
+            if not mapped:
+                mapped = list(BUILTIN_TEMPLATES)
+            return {
+                "ok": True,
+                "source": "presenton",
+                "templates": mapped,
+                "reachable": True,
+                "configured": True,
+            }
+    except httpx.ConnectError:
+        return {
+            "ok": True,
+            "source": "builtin",
+            "templates": list(BUILTIN_TEMPLATES),
+            "reachable": False,
+            "configured": True,
+            "hint": f"Cannot reach {base} — start Presenton Docker; showing built-ins",
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": True,
+            "source": "builtin",
+            "templates": list(BUILTIN_TEMPLATES),
+            "reachable": False,
+            "configured": True,
+            "hint": "Presenton template list failed — using built-ins",
+            "detail": str(exc)[:500],
+        }
+
+
+def presenton_reachable() -> bool:
+    """True when PRESENTON_BASE_URL is set and template list (or ping) succeeds."""
+    if not presenton_configured():
+        return False
+    result = list_templates()
+    return bool(result.get("reachable"))
+
+
 def generate_presentation(
     content: str,
     *,

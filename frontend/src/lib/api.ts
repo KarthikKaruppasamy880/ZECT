@@ -535,7 +535,19 @@ export const mentrixCompanionIntegrations = () =>
     slack_channel?: string;
   }>("/api/mentrix/companion/integrations");
 export const mentrixPresentonStatus = () =>
-  request<{ configured: boolean; base_url: string }>("/api/mentrix/presenton/status");
+  request<{ configured: boolean; reachable?: boolean; base_url: string; hint?: string }>(
+    "/api/mentrix/presenton/status",
+  );
+export type PresentonTemplate = { id: string; name: string };
+export const mentrixPresentonTemplates = () =>
+  request<{
+    ok: boolean;
+    source: "presenton" | "builtin";
+    templates: PresentonTemplate[];
+    reachable?: boolean;
+    configured?: boolean;
+    hint?: string;
+  }>("/api/mentrix/presenton/templates");
 export const mentrixPresentonGenerate = (data: {
   content: string;
   n_slides?: number;

@@ -8,10 +8,12 @@ import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide
 import {
   mentrixCompanionIntegrations,
   mentrixPresentonGenerate,
+  mentrixPresentonTemplates,
   mentrixParsePptx,
   listMyClonedVoices,
   mentrixVoiceEngineStatus,
   type ClonedVoiceInfo,
+  type PresentonTemplate,
   type VoiceEngineStatus,
 } from "@/lib/api";
 import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
@@ -21,6 +23,17 @@ const NOTES_KEY = "zect_mentrix_present_deck_notes";
 const PROMPT_KEY = "zect_mentrix_present_deck_prompt";
 const JOIN_KEY = "zect_mentrix_zoom_join_url";
 const VOICE_CHOICE_KEY = "zect_mentrix_present_deck_voice";
+const TEMPLATE_KEY = "mentrix_present_template";
+const N_SLIDES_KEY = "mentrix_present_n_slides";
+const CUSTOM_TEMPLATE_KEY = "mentrix_present_custom_template";
+const CUSTOM_TEMPLATE_OPTION = "__custom__";
+
+const BUILTIN_TEMPLATES: PresentonTemplate[] = [
+  { id: "general", name: "General" },
+  { id: "modern", name: "Modern" },
+  { id: "standard", name: "Standard" },
+  { id: "swift", name: "Swift" },
+];
 
 const STOCK_VOICES: { id: string; label: string }[] = [
   { id: "alloy", label: "OpenAI — Alloy (neutral)" },
@@ -70,6 +83,10 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [busy, setBusy] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [presentonReady, setPresentonReady] = useState(false);
+  const [templates, setTemplates] = useState<PresentonTemplate[]>(BUILTIN_TEMPLATES);
+  const [templateChoice, setTemplateChoice] = useState("general");
+  const [customTemplateId, setCustomTemplateId] = useState("");
+  const [nSlides, setNSlides] = useState(6);
   const [myVoices, setMyVoices] = useState<ClonedVoiceInfo[]>([]);
   const [voiceChoice, setVoiceChoice] = useState("");
   const [pptxFile, setPptxFile] = useState<File | null>(null);
@@ -89,12 +106,28 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setPrompt(localStorage.getItem(PROMPT_KEY) || "");
       setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
       setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
+      const savedTemplate = localStorage.getItem(TEMPLATE_KEY) || "general";
+      setTemplateChoice(savedTemplate);
+      setCustomTemplateId(localStorage.getItem(CUSTOM_TEMPLATE_KEY) || "");
+      const savedSlides = Number(localStorage.getItem(N_SLIDES_KEY) || "6");
+      setNSlides(Number.isFinite(savedSlides) ? Math.max(3, Math.min(20, savedSlides)) : 6);
     } catch {
       /* ignore */
     }
     mentrixCompanionIntegrations()
       .then((s) => setPresentonReady(!!s.presenton))
       .catch(() => setPresentonReady(false));
+    mentrixPresentonTemplates()
+      .then((res) => {
+        const list = Array.isArray(res.templates) && res.templates.length ? res.templates : BUILTIN_TEMPLATES;
+        setTemplates(list);
+        setTemplateChoice((prev) => {
+          if (prev === CUSTOM_TEMPLATE_OPTION) return prev;
+          if (list.some((t) => t.id === prev)) return prev;
+          return list[0]?.id || "general";
+        });
+      })
+      .catch(() => setTemplates(BUILTIN_TEMPLATES));
     listMyClonedVoices()
       .then((v) => setMyVoices(Array.isArray(v) ? v : []))
       .catch(() => setMyVoices([]));
@@ -188,6 +221,41 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     }
   };
 
+  const persistTemplateChoice = (value: string) => {
+    setTemplateChoice(value);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistCustomTemplate = (value: string) => {
+    setCustomTemplateId(value);
+    try {
+      localStorage.setItem(CUSTOM_TEMPLATE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistNSlides = (value: number) => {
+    const n = Math.max(3, Math.min(20, Math.round(value) || 6));
+    setNSlides(n);
+    try {
+      localStorage.setItem(N_SLIDES_KEY, String(n));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const resolveTemplateId = () => {
+    if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
+      return customTemplateId.trim() || "general";
+    }
+    return (templateChoice || "general").trim() || "general";
+  };
+
   const persistJoin = (value: string) => {
     setJoinUrl(value);
     try {
@@ -240,22 +308,33 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setBusy(true);
     setStatus("");
     try {
+      if (!presentonReady) {
+        setStatus("Presenton not configured — set PRESENTON_BASE_URL and run Presenton Docker (see Integrations).");
+        return;
+      }
       const content = prompt.trim();
       if (!content) {
         setStatus("Enter a deck prompt (topic + key points) for Presenton.");
         return;
       }
+      const template = resolveTemplateId();
+      if (templateChoice === CUSTOM_TEMPLATE_OPTION && !customTemplateId.trim()) {
+        setStatus("Enter a custom template id (from Presenton uploaded master), or pick a built-in template.");
+        return;
+      }
       const out = await mentrixPresentonGenerate({
         content,
-        n_slides: 6,
-        template: "general",
+        n_slides: nSlides,
+        template,
         filename: "mentrix-deck.pptx",
       });
       if (out?.path) {
         persistPath(out.path);
-        setStatus(`Deck saved to ${out.path}. Open presentation, then join Zoom and share.`);
+        setStatus(
+          `Deck saved to ${out.path} (template: ${template}, ${nSlides} slides). Open presentation, then join Zoom and share.`,
+        );
       } else {
-        setStatus("Presenton returned no path — check PRESENTON_BASE_URL.");
+        setStatus("Presenton returned no path — check PRESENTON_BASE_URL and that Presenton Docker is running.");
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Generate deck failed");
@@ -536,21 +615,79 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           }
         />
       </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Template
+          <select
+            data-testid="present-deck-template"
+            value={templateChoice}
+            onChange={(e) => persistTemplateChoice(e.target.value)}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+            <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option>
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Slides (3–20)
+          <input
+            data-testid="present-deck-n-slides"
+            type="number"
+            min={3}
+            max={20}
+            value={nSlides}
+            onChange={(e) => persistNSlides(Number(e.target.value))}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          />
+        </label>
+      </div>
+      {templateChoice === CUSTOM_TEMPLATE_OPTION && (
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Custom template id (Presenton master)
+          <input
+            data-testid="present-deck-custom-template"
+            value={customTemplateId}
+            onChange={(e) => persistCustomTemplate(e.target.value)}
+            placeholder="e.g. zinnia-brand-master"
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          />
+        </label>
+      )}
       <button
         type="button"
         data-testid="present-deck-generate"
-        disabled={busy}
+        disabled={busy || !presentonReady}
         onClick={() => void generateDeck()}
         className="inline-flex items-center gap-1.5 rounded-lg border border-violet-700 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950 disabled:opacity-40"
         title={
           presentonReady
-            ? "Calls PRESENTON_BASE_URL generate API"
+            ? "Calls PRESENTON_BASE_URL generate API with selected template"
             : "Set PRESENTON_BASE_URL and run Presenton Docker"
         }
       >
         <Sparkles className="h-3.5 w-3.5" />
         Generate deck
       </button>
+      <p className={`text-[11px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
+        Pick template + slides, then Generate. Open presentation / Open Zoom need Electron. Clone narrate needs
+        Chatterbox online (or pick an OpenAI stock voice).
+      </p>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Presentation path (.pptx){isDesktop ? "" : " — optional in browser; prefer upload below"}
         <input

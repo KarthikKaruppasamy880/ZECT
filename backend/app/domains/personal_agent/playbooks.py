@@ -152,23 +152,24 @@ def delete_playbook(playbook_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{playbook_id}/run")
 def run_playbook(playbook_id: int, data: PlaybookRunCreate, db: Session = Depends(get_db)):
-    """Start a playbook run."""
+    """Execute playbook steps (Mentrix runs + LLM summaries)."""
     try:
+        from app.domains.personal_agent.playbook_executor import execute_playbook
+
         pb = db.query(Playbook).filter(Playbook.id == playbook_id).first()
         if not pb:
             raise HTTPException(status_code=404, detail="Playbook not found")
-        run = PlaybookRun(
-            playbook_id=playbook_id,
-            variables_used=data.variables_used,
-            total_steps=len(pb.steps or []),
-            status="running",
+        if not pb.is_active:
+            raise HTTPException(status_code=400, detail="Playbook is inactive")
+        run = execute_playbook(
+            db,
+            pb,
+            variables_used=data.variables_used or {},
+            project_id=pb.project_id,
         )
-        db.add(run)
-        pb.usage_count = (pb.usage_count or 0) + 1
-        pb.last_used_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(run)
-        return _run_to_dict(run)
+        result = _run_to_dict(run)
+        result["mentrix_delivery_hint"] = "/mentrix"
+        return result
     except HTTPException:
         raise
     except Exception as e:

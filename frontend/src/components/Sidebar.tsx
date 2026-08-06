@@ -15,6 +15,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Menu,
   X,
   Coins,
@@ -23,20 +24,15 @@ import {
   Scale,
   Download,
   History,
-  MonitorPlay,
-  FolderOpen,
   Activity,
   Brain,
-  Repeat,
   ShieldAlert,
   ArrowRightLeft,
-  Layers,
   Wrench,
   BookMarked,
   Calendar,
   KeyRound,
   Code2,
-  TrendingUp,
   MessageCircle,
   HardDrive,
   PanelLeft,
@@ -48,7 +44,7 @@ import {
   AlertTriangle,
   StickyNote,
 } from "lucide-react";
-import { isAgentModeEnabled, isDemoModeEnabled } from "@/lib/featureFlags";
+import { isAgentModeEnabled } from "@/lib/featureFlags";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
@@ -76,26 +72,6 @@ const understandItems: NavItem[] = [
   { href: "/docs", label: "Docs Center", icon: FileText },
 ];
 
-/** Slim Understand set for Demo Mode team presentations. */
-const understandItemsDemo: NavItem[] = [
-  { href: "/lattice", label: "Lattice Graph", icon: Network },
-  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
-  { href: "/code-index", label: "Code Index", icon: Code2 },
-];
-
-const workspaceItemsDemo: NavItem[] = [
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/workspace", label: "Developer Workspace", icon: PanelLeft },
-  { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
-];
-
-const workflowItemsDemo: NavItem[] = [
-  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
-  { href: "/ask", label: "Agent Workspace", icon: Bot },
-  { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
-];
-
 /** Ask/Plan/Build/Review/Deploy live in the Agent Workspace rail — not duplicated here. */
 const deliverItemsBase: NavItem[] = [
   { href: "/orchestration", label: "Orchestration", icon: GitBranch },
@@ -121,24 +97,23 @@ const enterpriseItems: NavItem[] = [
   { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
 ];
 
+/** Primary Labs — productivity spine (Skills / Playbooks / Knowledge / Schedules / Memory / Permissions). */
 const labsItems: NavItem[] = [
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
-  { href: "/memory", label: "Memory System", icon: Brain },
-  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
-  { href: "/dream-engine", label: "Dream Engine", icon: Sparkles },
-  { href: "/data-layer", label: "Data Layer", icon: Layers },
-  { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },
-  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
-  { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
-  { href: "/tool-comparison", label: "Architecture & Compare", icon: GitCompareArrows },
-  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
-  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
-  { href: "/session-insights", label: "Session Insights", icon: TrendingUp },
+  { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
+];
+
+/** Advanced Labs — still first-class routes; collapsed under More Labs. */
+const labsAdvancedItems: NavItem[] = [
+  { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
+  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
+  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
   { href: "/conversations", label: "Conversations", icon: MessageCircle },
-  { href: "/app-runner", label: "App Runner", icon: MonitorPlay },
-  { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
+  { href: "/tool-comparison", label: "Architecture", icon: GitCompareArrows },
 ];
 
 const sections: { title: string; items: NavItem[] }[] = [
@@ -168,17 +143,16 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
-  const [demoModeOn, setDemoModeOn] = useState(() => isDemoModeEnabled());
+  const [labsMoreOpen, setLabsMoreOpen] = useState(() =>
+    labsAdvancedItems.some((item) => location.pathname === item.href),
+  );
 
   useEffect(() => {
     onMobileClose();
   }, [location.pathname]);
 
   useEffect(() => {
-    const sync = () => {
-      setAgentModeOn(isAgentModeEnabled());
-      setDemoModeOn(isDemoModeEnabled());
-    };
+    const sync = () => setAgentModeOn(isAgentModeEnabled());
     window.addEventListener("zect-feature-flags", sync);
     window.addEventListener("storage", sync);
     return () => {
@@ -187,7 +161,13 @@ export default function Sidebar({
     };
   }, []);
 
-  const fullSections = sections.map((section) =>
+  useEffect(() => {
+    if (labsAdvancedItems.some((item) => location.pathname === item.href)) {
+      setLabsMoreOpen(true);
+    }
+  }, [location.pathname]);
+
+  const navSections = sections.map((section) =>
     section.title === "Deliver"
       ? {
           ...section,
@@ -196,13 +176,41 @@ export default function Sidebar({
       : section,
   );
 
-  const demoSections: { title: string; items: NavItem[] }[] = [
-    { title: "Workflow", items: workflowItemsDemo },
-    { title: "Workspace", items: workspaceItemsDemo },
-    { title: "Understand", items: understandItemsDemo },
-  ];
-
-  const navSections = demoModeOn ? demoSections : fullSections;
+  const renderNavLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const itemUrl = new URL(item.href, "http://local");
+    const pathMatch = location.pathname === itemUrl.pathname;
+    const voiceDeepLink = itemUrl.searchParams.get("voice");
+    const incidentDeepLink = itemUrl.searchParams.get("incident");
+    const search = new URLSearchParams(location.search);
+    const active = voiceDeepLink
+      ? pathMatch && search.get("voice") === voiceDeepLink
+      : incidentDeepLink
+        ? pathMatch && search.get("incident") === incidentDeepLink
+        : pathMatch &&
+          !(
+            itemUrl.pathname === "/mentrix-home" &&
+            (search.get("voice") || search.get("incident"))
+          );
+    return (
+      <li key={item.href}>
+        <Link
+          to={item.href}
+          title={collapsed ? item.label : undefined}
+          className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
+            collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
+          } text-sm transition-colors ${
+            active
+              ? "bg-slate-800 text-white font-medium"
+              : "hover:bg-slate-800/60 hover:text-white"
+          }`}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>{item.label}</span>}
+        </Link>
+      </li>
+    );
+  };
 
   const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
     <div key={title}>
@@ -221,41 +229,27 @@ export default function Sidebar({
         !isFirst && <div className="my-4 border-t border-slate-700" />
       )}
       <ul className="space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const itemUrl = new URL(item.href, "http://local");
-          const pathMatch = location.pathname === itemUrl.pathname;
-          const voiceDeepLink = itemUrl.searchParams.get("voice");
-          const incidentDeepLink = itemUrl.searchParams.get("incident");
-          const search = new URLSearchParams(location.search);
-          const active = voiceDeepLink
-            ? pathMatch && search.get("voice") === voiceDeepLink
-            : incidentDeepLink
-              ? pathMatch && search.get("incident") === incidentDeepLink
-              : pathMatch &&
-                !(
-                  itemUrl.pathname === "/mentrix-home" &&
-                  (search.get("voice") || search.get("incident"))
-                );
-          return (
-            <li key={item.href}>
-              <Link
-                to={item.href}
-                title={collapsed ? item.label : undefined}
-                className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
-                  collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
-                } text-sm transition-colors ${
-                  active
-                    ? "bg-slate-800 text-white font-medium"
-                    : "hover:bg-slate-800/60 hover:text-white"
-                }`}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
-            </li>
-          );
-        })}
+        {items.map((item) => renderNavLink(item))}
+        {title === "Labs" && (
+          <>
+            {!collapsed && (
+              <li>
+                <button
+                  type="button"
+                  data-testid="sidebar-labs-more"
+                  onClick={() => setLabsMoreOpen((o) => !o)}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-white"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 transition-transform ${labsMoreOpen ? "" : "-rotate-90"}`}
+                  />
+                  <span>More Labs</span>
+                </button>
+              </li>
+            )}
+            {(labsMoreOpen || collapsed) && labsAdvancedItems.map((item) => renderNavLink(item))}
+          </>
+        )}
       </ul>
     </div>
   );
@@ -295,11 +289,6 @@ export default function Sidebar({
       <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>
         {!collapsed && (
           <>
-            {demoModeOn && (
-              <p className="mb-2 rounded bg-teal-900/40 px-2 py-1 text-[10px] font-medium text-teal-300" data-testid="sidebar-demo-mode">
-                Demo Mode — slim nav (Settings to exit)
-              </p>
-            )}
             <p className="text-xs text-slate-500">Say “Hey Mentrix”</p>
             <p className="text-xs text-slate-600">Desktop wake phrase</p>
           </>

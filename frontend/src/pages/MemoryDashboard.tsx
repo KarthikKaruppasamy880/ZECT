@@ -163,8 +163,11 @@ export default function MemoryDashboard() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Zinnia Memory System</h1>
-          <p className="text-slate-500 text-sm">4-layer memory: working, episodic, semantic, personal</p>
+          <h1 className="text-2xl font-bold text-slate-900">Memory System</h1>
+          <p className="text-slate-500 text-sm">
+            Long-lived preferences and typed project knowledge Mentrix recalls with Knowledge Base —
+            durable context without re-explaining every session.
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <label className="text-sm text-slate-600">Project ID:</label>

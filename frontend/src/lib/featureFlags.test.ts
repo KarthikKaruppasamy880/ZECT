@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isDemoModeEnabled, setDemoModeEnabled } from "@/lib/featureFlags";
+import { isAgentModeEnabled, setAgentModeEnabled } from "@/lib/featureFlags";
 
-describe("demoMode feature flag", () => {
+describe("agentMode feature flag", () => {
   afterEach(() => {
-    setDemoModeEnabled(false);
+    setAgentModeEnabled(false);
   });
 
   it("toggles via localStorage", () => {
-    setDemoModeEnabled(false);
-    expect(isDemoModeEnabled()).toBe(false);
-    setDemoModeEnabled(true);
-    expect(isDemoModeEnabled()).toBe(true);
-    setDemoModeEnabled(false);
-    expect(isDemoModeEnabled()).toBe(false);
+    setAgentModeEnabled(false);
+    expect(isAgentModeEnabled()).toBe(false);
+    setAgentModeEnabled(true);
+    expect(isAgentModeEnabled()).toBe(true);
+    setAgentModeEnabled(false);
+    expect(isAgentModeEnabled()).toBe(false);
   });
 });

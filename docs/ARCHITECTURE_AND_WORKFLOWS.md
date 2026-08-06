@@ -51,8 +51,29 @@ flowchart TB
 | Slack/Email drafts + Jira | OutboundDraft + integrations | 8 |
 | Security incidents | `/security-incidents`, `/api/security/*` | 9 |
 | Typed memory / skills / schedules / watches | `/memory`, `/skills-engine`, `/scheduled-tasks`, `/api/automation-watches` | 10 |
+| Knowledge Base + Playbooks | `/knowledge-base`, `/playbooks` — inject + executable steps | 10 |
 | Release / support / legal | `docs/RELEASE.md`, `scripts/support_bundle.py`, EULA/PRIVACY | 11 |
-| Tool comparison | `/tool-comparison` | 11 |
+| Architecture (ZECT diagrams) | `/tool-comparison` | 11 |
+
+## Labs productivity spine
+
+Primary Labs (sidebar): **Skills Engine**, **Playbooks**, **Knowledge Base**, **Scheduled Tasks**, **Memory**, **Permissions**.
+
+Advanced Labs (More Labs): Security Incidents, Mentrix Notes, Transfer & Onboard, Conversations, Architecture.
+
+Not in sidebar (routes remain): Dream Engine, Data Layer, Data Flywheel, Session Insights, App Runner, File Explorer.
+
+```mermaid
+flowchart LR
+  Knowledge[Knowledge_Base] --> MentrixCtx[Mentrix_context]
+  Memory[Memory] --> MentrixCtx
+  Skills[Skills] --> NewProject[New_Project]
+  Playbooks[Playbooks] --> MentrixRun[Mentrix_steps]
+  Schedules[Scheduled_Tasks] --> MentrixRun
+  MentrixCtx --> MentrixRun
+```
+
+Team talk track: [`TEAM_PRESENTATION.md`](TEAM_PRESENTATION.md). Local ports/isolation: [`RUNBOOK_LOCAL.md`](RUNBOOK_LOCAL.md).
 
 ## Mentrix run workflow
 

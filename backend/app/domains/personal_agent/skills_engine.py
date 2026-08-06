@@ -195,15 +195,32 @@ SEED_SKILLS = [
         "is_seed": True,
     },
     {
-        "name": "zinnia-migration",
+        "name": "zinnia-project-scaffold",
         "version": "1.0.0",
-        "description": "Database and API migration planner with rollback scripts and data validation",
-        "category": "migration",
-        "trigger_pattern": "migrate|migration|schema.change|database.update",
+        "description": "Scaffold a new ZECT project from a stack template — name, description, starter Mentrix prompts, and folder conventions",
+        "category": "project_scaffold",
+        "trigger_pattern": "new.project|scaffold|bootstrap|create.project|greenfield",
         "manifest": {
-            "inputs": ["source_schema", "target_schema", "data_constraints"],
-            "outputs": ["migration_plan", "rollback_script", "validation_queries"],
-            "config": {"auto_rollback": True, "dry_run_first": True},
+            "template": (
+                "Create a new project named {{project_name}} using stack {{stack}}. "
+                "Follow ZECT conventions: Projects → Developer Workspace → Index/Lattice → Mentrix. "
+                "Starter folders: src/, docs/, tests/. First Mentrix goal: bootstrap README and CI."
+            ),
+            "inputs": ["project_name", "stack", "description"],
+            "outputs": ["project_fields", "starter_prompts", "folder_layout"],
+            "config": {
+                "stacks": ["python-fastapi", "react-vite", "full-stack"],
+                "default_stack": "full-stack",
+                "scaffold": True,
+            },
+            "scaffold": {
+                "default_name": "New Mentrix Project",
+                "default_description": "Scaffolded via Skills Engine — Mentrix delivery ready.",
+                "starter_prompts": [
+                    "Index the repo and summarize architecture",
+                    "Propose Ask → Plan → Build milestones",
+                ],
+            },
         },
         "is_seed": True,
     },
@@ -211,12 +228,13 @@ SEED_SKILLS = [
 
 
 def _seed_if_empty(db: Session):
-    """Seed the database with default skills if empty."""
-    count = db.query(func.count(SkillDefinition.id)).scalar()
-    if count > 0:
-        return
+    """Ensure default seed skills exist (insert any missing by name)."""
     now = datetime.now(timezone.utc)
+    existing = {r[0] for r in db.query(SkillDefinition.name).all()}
+    added = False
     for s in SEED_SKILLS:
+        if s["name"] in existing:
+            continue
         skill = SkillDefinition(
             name=s["name"],
             version=s["version"],
@@ -233,7 +251,9 @@ def _seed_if_empty(db: Session):
             updated_at=now,
         )
         db.add(skill)
-    db.commit()
+        added = True
+    if added:
+        db.commit()
 
 
 def _skill_to_dict(skill: SkillDefinition) -> dict:

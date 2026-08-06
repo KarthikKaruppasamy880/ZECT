@@ -32,6 +32,8 @@ class ScheduleUpdate(BaseModel):
     cron_expression: Optional[str] = None
     interval_minutes: Optional[int] = None
     task_config: Optional[dict] = None
+    task_type: Optional[str] = None
+    playbook_id: Optional[int] = None
     is_active: Optional[bool] = None
     max_attempts: Optional[int] = None
     next_run_at: Optional[str] = None
@@ -66,13 +68,18 @@ def list_schedules(
 def create_schedule(data: ScheduleCreate, db: Session = Depends(get_db)):
     """Create a new schedule."""
     try:
+        if not data.playbook_id and not (data.task_type or "").strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Provide task_type and/or playbook_id",
+            )
         sched = Schedule(
             name=data.name,
             description=data.description,
             schedule_type=data.schedule_type,
             cron_expression=data.cron_expression,
             interval_minutes=data.interval_minutes,
-            task_type=data.task_type,
+            task_type=data.task_type or "custom",
             task_config=data.task_config,
             playbook_id=data.playbook_id,
             project_id=data.project_id,
@@ -87,6 +94,8 @@ def create_schedule(data: ScheduleCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(sched)
         return _sched_to_dict(sched)
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -115,7 +124,17 @@ def update_schedule(schedule_id: int, data: ScheduleUpdate, db: Session = Depend
         sched = db.query(Schedule).filter(Schedule.id == schedule_id).first()
         if not sched:
             raise HTTPException(status_code=404, detail="Schedule not found")
-        for field in ["name", "description", "cron_expression", "interval_minutes", "task_config", "is_active", "max_attempts"]:
+        for field in [
+            "name",
+            "description",
+            "cron_expression",
+            "interval_minutes",
+            "task_config",
+            "task_type",
+            "playbook_id",
+            "is_active",
+            "max_attempts",
+        ]:
             val = getattr(data, field, None)
             if val is not None:
                 setattr(sched, field, val)

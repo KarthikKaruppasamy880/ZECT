@@ -4,7 +4,7 @@ Placeholders for packaging, licensing, and operational readiness.
 
 ## Branding
 
-Third-party engines (coding runtimes, editors, browser automation libraries, voice providers) run behind ZECT-owned adapters. Product UI, routes, and public APIs must not brand those vendors (except the dedicated `/tool-comparison` planning page). Legal attribution lives in `THIRD_PARTY_NOTICES.md`.
+Third-party engines (coding runtimes, editors, browser automation libraries, voice providers) run behind ZECT-owned adapters. Product UI, routes, and public APIs must not brand those vendors. Architecture diagrams live at `/tool-comparison`. Legal attribution lives in `THIRD_PARTY_NOTICES.md`.
 
 ## Self-host vs paid APIs
 

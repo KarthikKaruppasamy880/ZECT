@@ -172,6 +172,27 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
     cfg = schedule.task_config or {}
     task = (schedule.task_type or "custom").lower()
 
+    # Prefer playbook pipeline when playbook_id is set
+    if schedule.playbook_id:
+        from app.domains.personal_agent.playbook_executor import execute_playbook
+        from app.models import Playbook
+
+        pb = db.query(Playbook).filter(Playbook.id == schedule.playbook_id).first()
+        if not pb:
+            raise RuntimeError(f"Playbook #{schedule.playbook_id} not found")
+        variables = cfg.get("variables") or cfg.get("variables_used") or {}
+        prun = execute_playbook(
+            db,
+            pb,
+            variables_used=variables if isinstance(variables, dict) else {},
+            user_id=schedule.user_id,
+            project_id=schedule.project_id or pb.project_id,
+        )
+        return (
+            f"Playbook '{pb.name}' run #{prun.id} status={prun.status} "
+            f"steps={prun.steps_completed}/{prun.total_steps}"
+        )
+
     if task in ("custom", "mentrix", "report", "build", "deploy", "review"):
         goal = cfg.get("goal") or cfg.get("prompt") or schedule.description or schedule.name
         mode = cfg.get("mode") or ("bugfix" if task == "review" else "build" if task == "build" else "ask")

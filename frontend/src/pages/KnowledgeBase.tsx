@@ -102,7 +102,10 @@ export default function KnowledgeBase() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-indigo-600" /> Knowledge Base
           </h1>
-          <p className="text-sm text-slate-500 mt-1">{total} entries — persistent tips, instructions, project notes</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {total} entries — conventions and prompt snippets Mentrix injects automatically (token-capped)
+            so you paste less and answer faster.
+          </p>
         </div>
         <button
           onClick={() => { setShowCreate(true); setEditId(null); setForm({ title: "", content: "", category: "general", tags: "" }); }}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Wrench,
   Plus,
@@ -11,6 +12,7 @@ import {
   Wand2,
   Loader2,
   Tag,
+  FolderKanban,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -34,7 +36,10 @@ interface Skill {
   created_at: string;
 }
 
+const ACTIVE_SKILL_KEY = "mentrix_active_skill_id";
+
 export default function SkillsEngine() {
+  const navigate = useNavigate();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
@@ -58,6 +63,24 @@ export default function SkillsEngine() {
   const [detectCode, setDetectCode] = useState("");
   const [detectLoading, setDetectLoading] = useState(false);
   const [detectResult, setDetectResult] = useState<any>(null);
+
+  const useSkillForNewProject = (s: Skill) => {
+    try {
+      localStorage.setItem(ACTIVE_SKILL_KEY, String(s.id));
+    } catch {
+      /* ignore */
+    }
+    const scaffold = s.manifest?.scaffold || {};
+    const params = new URLSearchParams();
+    params.set("skill_id", String(s.id));
+    params.set("name", String(scaffold.default_name || s.name.replace(/^zinnia-/, "").replace(/-/g, " ")));
+    params.set(
+      "description",
+      String(scaffold.default_description || s.description || `Scaffolded from skill ${s.name}`),
+    );
+    showToast("success", `Active skill set: ${s.name}`);
+    navigate(`/projects/new?${params.toString()}`);
+  };
 
   const fetchSkills = async () => {
     try {
@@ -183,7 +206,10 @@ export default function SkillsEngine() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Wrench className="h-6 w-6 text-emerald-600" /> Skills Engine
           </h1>
-          <p className="text-slate-500 text-sm">Skill registry, trigger-based matching, and execution tracking</p>
+          <p className="text-slate-500 text-sm">
+            Reusable procedures and templates — speed Mentrix and scaffold new projects. Saves tokens by
+            reusing approved prompts instead of re-explaining stack conventions every run.
+          </p>
         </div>
         <button onClick={() => { fetchSkills(); fetchStats(); fetchCategories(); fetchLogs(); }} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />
@@ -258,6 +284,18 @@ export default function SkillsEngine() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
+                    <button
+                      type="button"
+                      data-testid="skill-use-new-project"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useSkillForNewProject(s);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                      title="Use skill → New Project"
+                    >
+                      <FolderKanban className="h-3.5 w-3.5" /> New Project
+                    </button>
                     <span className="text-xs text-slate-400">{s.execution_count} runs</span>
                     <button onClick={(e) => { e.stopPropagation(); handleDeactivate(s.id); }} className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600" title="Deactivate">
                       <XCircle className="h-4 w-4" />

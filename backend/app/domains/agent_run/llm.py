@@ -36,6 +36,7 @@ class AskRequest(BaseModel):
     question: str
     repo_context: str | None = None  # optional repo analysis context
     repo_id: int | None = None  # auto-inject context from cloned repo
+    project_id: int | None = None  # Knowledge Base / Memory inject
 
 
 class AskResponse(BaseModel):
@@ -49,6 +50,7 @@ class PlanRequest(BaseModel):
     repo_context: str | None = None
     repo_id: int | None = None  # auto-inject context from cloned repo
     constraints: str | None = None
+    project_id: int | None = None
 
 
 class PlanResponse(BaseModel):
@@ -164,15 +166,32 @@ def ask_question(
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Auto-inject repo context if repo_id provided
+    # Prefer token-capped Knowledge snippets when available
+    try:
+        from app.domains.repository.knowledge_base import retrieve_knowledge_for_context
+
+        kb_block, _meta = retrieve_knowledge_for_context(
+            db,
+            query=req.question,
+            project_id=req.project_id,
+            max_tokens=500,
+            limit=4,
+        )
+        if kb_block:
+            messages.append({"role": "user", "content": kb_block})
+    except Exception:
+        pass
+
+    # Auto-inject repo context if repo_id provided (trimmed when knowledge present)
     context = req.repo_context or ""
     if req.repo_id and not context:
         context = _build_repo_context(db, req.repo_id)
 
+    repo_cap = 4000 if len(messages) > 1 else 8000
     if context:
         messages.append({
             "role": "user",
-            "content": f"Here is the repository context for reference:\n\n{context[:8000]}",
+            "content": f"Here is the repository context for reference:\n\n{context[:repo_cap]}",
         })
 
     messages.append({"role": "user", "content": req.question})
@@ -227,9 +246,26 @@ def generate_plan(
     if req.repo_id and not context:
         context = _build_repo_context(db, req.repo_id)
 
+    kb_block = ""
+    try:
+        from app.domains.repository.knowledge_base import retrieve_knowledge_for_context
+
+        kb_block, _meta = retrieve_knowledge_for_context(
+            db,
+            query=req.project_description,
+            project_id=req.project_id,
+            max_tokens=500,
+            limit=4,
+        )
+    except Exception:
+        pass
+
     user_content = f"Project Description:\n{req.project_description}"
+    if kb_block:
+        user_content += f"\n\n{kb_block}"
+    repo_cap = 3500 if kb_block else 6000
     if context:
-        user_content += f"\n\nExisting Repository Context:\n{context[:6000]}"
+        user_content += f"\n\nExisting Repository Context:\n{context[:repo_cap]}"
     if req.constraints:
         user_content += f"\n\nConstraints:\n{req.constraints}"
 

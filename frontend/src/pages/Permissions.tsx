@@ -299,7 +299,9 @@ export default function Permissions() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Shield className="h-6 w-6 text-red-600" /> Permissions Protocol
           </h1>
-          <p className="text-slate-500 text-sm">Allow / Require Approval / Never — security enforcement for agent actions</p>
+          <p className="text-slate-500 text-sm">
+            Capability gates before Mentrix and Scheduled Task actions — Allow / Require Approval / Never.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <button

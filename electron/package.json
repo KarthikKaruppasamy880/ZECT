@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "start:dev": "electron .",
-    "start:prod": "electron .",
+    "start:prod": "cross-env ZECT_USE_DIST=1 electron .",
     "chatterbox:fetch": "powershell -NoProfile -File resources/chatterbox/scripts/fetch-chatterbox.ps1",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
@@ -17,6 +17,7 @@
     "build:all": "electron-builder --win --mac --linux"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.0"
   },
@@ -43,20 +44,30 @@
       {
         "from": "resources/chatterbox",
         "to": "chatterbox",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "icons/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "icons/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "icons/icon.png",
       "category": "Development"
     },

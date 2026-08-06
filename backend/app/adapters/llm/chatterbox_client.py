@@ -14,10 +14,16 @@ from typing import Any
 
 import httpx
 
-CHATTERBOX_BASE_URL = os.getenv(
-    "CHATTERBOX_BASE_URL",
-    os.getenv("VOICEBOX_BASE_URL", "http://localhost:17493"),
-)
+def _base_url() -> str:
+    return (
+        os.getenv("CHATTERBOX_BASE_URL")
+        or os.getenv("VOICEBOX_BASE_URL")
+        or "http://127.0.0.1:17493"
+    ).strip().rstrip("/")
+
+
+# Back-compat for imports that read the module constant (prefer _base_url() at call sites).
+CHATTERBOX_BASE_URL = _base_url()
 CHATTERBOX_AUDIO_PATH_TEMPLATE = os.getenv(
     "CHATTERBOX_AUDIO_PATH_TEMPLATE",
     os.getenv("VOICEBOX_AUDIO_PATH_TEMPLATE", "/audio/{filename}"),
@@ -41,7 +47,7 @@ def chatterbox_available() -> bool:
     """Engine is available when the local server answers."""
     try:
         with httpx.Client(timeout=2.0) as client:
-            resp = client.get(f"{CHATTERBOX_BASE_URL}/profiles")
+            resp = client.get(f"{_base_url()}/profiles")
         return resp.status_code < 500
     except Exception:
         return False
@@ -72,7 +78,7 @@ def clone_voice(
 
     with httpx.Client(timeout=timeout) as client:
         profile_resp = client.post(
-            f"{CHATTERBOX_BASE_URL}/profiles",
+            f"{_base_url()}/profiles",
             json={"name": name[:100], "language": language, "voice_type": "cloned"},
         )
         if profile_resp.status_code >= 400:
@@ -84,7 +90,7 @@ def clone_voice(
             raise RuntimeError(f"Chatterbox profile response missing id: {profile_resp.text[:300]}")
 
         sample_resp = client.post(
-            f"{CHATTERBOX_BASE_URL}/profiles/{profile_id}/samples",
+            f"{_base_url()}/profiles/{profile_id}/samples",
             files={"file": (filename, audio_bytes, content_type)},
             data={"reference_text": reference_text[:2000]},
         )
@@ -100,14 +106,14 @@ def _resolve_audio_url(audio_path: str) -> str:
     if audio_path.startswith("http://") or audio_path.startswith("https://"):
         return audio_path
     filename = Path(audio_path).name
-    return f"{CHATTERBOX_BASE_URL}{CHATTERBOX_AUDIO_PATH_TEMPLATE.format(filename=filename)}"
+    return f"{_base_url()}{CHATTERBOX_AUDIO_PATH_TEMPLATE.format(filename=filename)}"
 
 
 def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine: str | None = None) -> bytes:
     """Synthesize text in the given cloned voice profile. Returns raw audio bytes."""
     with httpx.Client(timeout=SPEAK_TIMEOUT) as client:
         gen_resp = client.post(
-            f"{CHATTERBOX_BASE_URL}/generate",
+            f"{_base_url()}/generate",
             json={
                 "profile_id": voice_id,
                 "text": text[:4000],
@@ -143,6 +149,6 @@ def delete_voice(voice_id: str) -> None:
     """Best-effort cleanup of an engine-side profile."""
     try:
         with httpx.Client(timeout=15.0) as client:
-            client.delete(f"{CHATTERBOX_BASE_URL}/profiles/{voice_id}")
+            client.delete(f"{_base_url()}/profiles/{voice_id}")
     except Exception:
         pass

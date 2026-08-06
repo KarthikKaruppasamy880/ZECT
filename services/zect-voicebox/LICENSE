@@ -1,0 +1,8 @@
+ZECT Voicebox Service — Copyright (c) ZECT / Zinnia.
+
+This service wrapper (code under services/zect-voicebox/) is proprietary to ZECT
+unless a separate license file supersedes this notice.
+
+Upstream TTS engines (for example jamiepine/voicebox when used as a proxied
+backend) remain under their own licenses. ZECT does not claim ownership of
+third-party model weights or upstream application code.

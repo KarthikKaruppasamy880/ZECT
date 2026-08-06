@@ -516,6 +516,30 @@ export const mentrixPresentonGenerate = (data: {
     "/api/mentrix/presenton/generate",
     { method: "POST", body: JSON.stringify(data) },
   );
+
+/** Upload .pptx → slide text + speaker notes (browser Present narration). */
+export const mentrixParsePptx = async (
+  file: File,
+): Promise<{ ok: boolean; count: number; slides: { index: number; notes?: string; text?: string }[]; filename: string }> => {
+  const form = new FormData();
+  form.append("file", file);
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const url = `${API}/api/mentrix/present/parse-pptx`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", body: form, headers });
+  } catch {
+    throw new Error(`Cannot reach ZECT API at ${API}`);
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = err.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || `Parse failed (${res.status})`);
+  }
+  return res.json();
+};
 export const mentrixRealtimeSession = () =>
   request<{
     ok: boolean;
@@ -545,6 +569,8 @@ export type ClonedVoiceInfo = {
   provider: string;
   is_default?: boolean;
   has_sample?: boolean;
+  engine_ready?: boolean;
+  sample_missing?: boolean;
 };
 
 export const cloneMyVoice = async (
@@ -632,11 +658,8 @@ export async function mentrixSpeakCloned(text: string, voiceOpts?: SpeakVoiceOpt
 
 /**
  * Same call as mentrixSpeakCloned, but also surfaces which engine actually
- * produced the audio (chatterbox / openai_tts_fallback / none) via the
- * backend's X-Mentrix-TTS-Engine response header. /speak falls back
- * transparently server-side on failure and still returns 200 — without
- * reading this header, the frontend has no way to tell your real cloned
- * voice apart from a silent fallback to a generic one.
+ * produced the audio via X-Mentrix-TTS-Engine. Clone path defaults to
+ * require_clone (no silent OpenAI fallback); stock_voice bypasses Chatterbox.
  */
 export type SpeakVoiceOptions = {
   /** A specific saved cloned voice id — omit to use your default clone. */
@@ -644,7 +667,30 @@ export type SpeakVoiceOptions = {
   /** An OpenAI stock voice ("alloy"|"echo"|"fable"|"onyx"|"nova"|"shimmer") —
    * when set, bypasses Chatterbox/your clone entirely. */
   stockVoice?: string;
+  /**
+   * When true (default if no stockVoice), backend must use Chatterbox clone —
+   * no OpenAI stock fallback. Present / Test speak should leave this on.
+   */
+  requireClone?: boolean;
 };
+
+export type VoiceEngineStatus = {
+  online: boolean;
+  base_url: string;
+  default_voice: {
+    voice_id: string;
+    name: string;
+    has_sample?: boolean;
+    engine_ready?: boolean;
+    sample_missing?: boolean;
+    is_default?: boolean;
+  } | null;
+  hint: string;
+};
+
+/** Chatterbox local engine health (non-secret) for Present / Voice UI. */
+export const mentrixVoiceEngineStatus = () =>
+  request<VoiceEngineStatus>("/api/mentrix/voice/engine-status");
 
 export async function mentrixSpeakClonedDetailed(
   text: string,
@@ -654,6 +700,10 @@ export async function mentrixSpeakClonedDetailed(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
   const url = `${API}/api/mentrix/voice/speak`;
+  const requireClone =
+    voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== ""
+      ? false
+      : voiceOpts?.requireClone !== false;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -663,6 +713,7 @@ export async function mentrixSpeakClonedDetailed(
         text: text.slice(0, 4000),
         voice_id: voiceOpts?.voiceId,
         stock_voice: voiceOpts?.stockVoice,
+        require_clone: requireClone,
       }),
     });
   } catch {
@@ -744,11 +795,16 @@ export const mentrixPatchRunPlan = (
   });
 export const mentrixConfirmPlan = (
   runId: number,
-  data?: { summary?: string; steps?: any[]; phases?: any[] },
+  data?: { summary?: string; steps?: any[]; phases?: any[]; files_expected?: string[] },
 ) =>
   request<any>(`/api/mentrix/runs/${runId}/confirm-plan`, {
     method: "POST",
     body: JSON.stringify(data || {}),
+  });
+export const mentrixConfirmBatch = (runId: number) =>
+  request<any>(`/api/mentrix/runs/${runId}/confirm-batch`, {
+    method: "POST",
+    body: JSON.stringify({}),
   });
 export const mentrixCreatePr = (
   runId: number,

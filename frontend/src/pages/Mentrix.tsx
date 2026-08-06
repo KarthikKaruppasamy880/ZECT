@@ -4,6 +4,7 @@ import { Bot, Check, FileCode, GitPullRequest, MonitorPlay, Play, RotateCcw, Spa
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import {
   mentrixApproveRun,
+  mentrixConfirmBatch,
   mentrixConfirmPlan,
   mentrixCreatePr,
   mentrixRealtimeTool,
@@ -273,6 +274,7 @@ export default function Mentrix() {
       const run = await mentrixConfirmPlan(active.id, {
         summary: planSummary || undefined,
         steps: active?.result?.plan?.steps,
+        files_expected: active?.result?.plan?.files_expected || active?.files_expected,
       });
       applyRun(run);
       await refresh();
@@ -282,6 +284,31 @@ export default function Mentrix() {
       setLoading(false);
     }
   };
+
+  const confirmBatch = async () => {
+    if (!active?.id) return;
+    setError("");
+    setLoading(true);
+    try {
+      const run = await mentrixConfirmBatch(active.id);
+      applyRun(run);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Confirm batch failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const workspaceDeepLink = (() => {
+    if (!active?.id) return "/workspace";
+    const q = new URLSearchParams();
+    q.set("run", String(active.id));
+    const files = (active.batch_files || active.files_written || []) as string[];
+    if (files[0]) q.set("path", String(files[0]));
+    if (active.batch_index != null) q.set("batch", String(active.batch_index));
+    return `/workspace?${q.toString()}`;
+  })();
 
   const approve = async () => {
     if (!active?.id) return;
@@ -603,7 +630,8 @@ export default function Mentrix() {
                   >
                     <div className="font-semibold text-sm text-teal-900">Confirm plan before Build</div>
                     <p className="text-xs text-slate-600">
-                      Edit the grounded plan if needed, then confirm. Build will not start until you confirm.
+                      Phased build — human confirms plan and each file batch. Edit the grounded plan if needed, then
+                      confirm. Build will not start until you confirm. Gates refuse incomplete ship (not “zero defect”).
                     </p>
                     <textarea
                       data-testid="mentrix-plan-summary"
@@ -612,6 +640,21 @@ export default function Mentrix() {
                       rows={5}
                       className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-mono"
                     />
+                    {((active.result?.plan?.files_expected as string[]) || active.files_expected || []).length > 0 && (
+                      <div className="text-xs text-slate-700" data-testid="mentrix-files-expected">
+                        <div className="font-medium mb-1">
+                          files_expected (
+                          {((active.result?.plan?.files_expected as string[]) || active.files_expected || []).length})
+                        </div>
+                        <ul className="list-disc pl-4 max-h-24 overflow-auto font-mono">
+                          {((active.result?.plan?.files_expected as string[]) || active.files_expected || [])
+                            .slice(0, 40)
+                            .map((f: string) => (
+                              <li key={f}>{f}</li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
                     {(active.result?.plan?.steps || []).length > 0 && (
                       <ol className="text-xs text-slate-700 list-decimal pl-4 space-y-0.5 max-h-28 overflow-auto">
                         {(active.result.plan.steps as any[]).slice(0, 12).map((s, i) => (
@@ -629,6 +672,46 @@ export default function Mentrix() {
                       <Check className="h-3.5 w-3.5" />
                       Confirm plan and continue
                     </button>
+                  </div>
+                )}
+                {active.status === "awaiting_batch_confirm" && (
+                  <div
+                    className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 space-y-2"
+                    data-testid="mentrix-batch-confirm"
+                  >
+                    <div className="font-semibold text-sm text-amber-900">Confirm Build batch</div>
+                    <p className="text-xs text-slate-600">
+                      Batch {(Number(active.batch_index) || 0) + 1}
+                      {active.batch_total != null ? ` / ${active.batch_total}` : ""} written. Review diffs in Workspace,
+                      then confirm to continue the next batch (or finish gates).
+                    </p>
+                    {(active.batch_files || []).length > 0 && (
+                      <ul className="text-xs font-mono list-disc pl-4 max-h-24 overflow-auto">
+                        {(active.batch_files as string[]).map((f) => (
+                          <li key={f}>{f}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        to={workspaceDeepLink}
+                        data-testid="mentrix-open-workspace"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-800"
+                      >
+                        <FileCode className="h-3.5 w-3.5" />
+                        Open in Workspace
+                      </Link>
+                      <button
+                        type="button"
+                        data-testid="mentrix-confirm-batch"
+                        onClick={() => void confirmBatch()}
+                        disabled={loading}
+                        className="inline-flex items-center gap-2 rounded-lg bg-amber-700 px-3 py-2 text-white text-xs disabled:opacity-40"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        Confirm batch and continue
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div
@@ -674,7 +757,12 @@ export default function Mentrix() {
                   <button
                     data-testid="mentrix-approve"
                     onClick={approve}
-                    disabled={!canApprove || loading || active.status === "awaiting_plan_confirm"}
+                    disabled={
+                      !canApprove ||
+                      loading ||
+                      active.status === "awaiting_plan_confirm" ||
+                      active.status === "awaiting_batch_confirm"
+                    }
                     className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-white text-xs disabled:opacity-40"
                   >
                     <Check className="h-3.5 w-3.5" />

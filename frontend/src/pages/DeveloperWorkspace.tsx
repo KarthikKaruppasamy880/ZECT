@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -30,6 +31,7 @@ import {
   gitRestore,
   gitStatus,
   gitWorktrees,
+  mentrixGetRun,
   mentrixListRuns,
 } from "@/lib/api";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
@@ -111,6 +113,9 @@ function collectGitPaths(st: Record<string, unknown> | null | undefined): string
  * Phase 3 — unified developer workspace (Stages A–E).
  */
 export default function DeveloperWorkspace() {
+  const [searchParams] = useSearchParams();
+  const deepRunId = searchParams.get("run");
+  const deepPath = searchParams.get("path") || "";
   const { activeLocalPath, activeRepo, activeRepoId } = useActiveProject();
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
@@ -167,6 +172,15 @@ export default function DeveloperWorkspace() {
 
   const refreshAgentMarkers = useCallback(async () => {
     try {
+      if (deepRunId && /^\d+$/.test(deepRunId)) {
+        const run = await mentrixGetRun(Number(deepRunId));
+        const files = [
+          ...(Array.isArray(run?.batch_files) ? run.batch_files : []),
+          ...(Array.isArray(run?.files_written) ? run.files_written : []),
+        ].map(String);
+        setAgentFiles([...new Set(files)]);
+        return;
+      }
       const runs = await mentrixListRuns(5);
       const arr = Array.isArray(runs) ? runs : [];
       const withFiles = arr.find((r) => Array.isArray(r?.files_written) && r.files_written.length > 0);
@@ -174,7 +188,7 @@ export default function DeveloperWorkspace() {
     } catch {
       setAgentFiles([]);
     }
-  }, []);
+  }, [deepRunId]);
 
   const loadTree = useCallback(async () => {
     if (!rootPath) {
@@ -248,6 +262,20 @@ export default function DeveloperWorkspace() {
       setLoadingFile(false);
     }
   };
+
+  useEffect(() => {
+    if (!deepPath || !rootPath) return;
+    const abs =
+      deepPath.includes("/") || deepPath.includes("\\")
+        ? deepPath
+        : `${rootPath.replace(/[/\\]+$/, "")}/${deepPath}`;
+    const t = window.setTimeout(() => {
+      void openFile(abs);
+      setShowDiff(true);
+    }, 400);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deep-link one-shot
+  }, [deepPath, rootPath, deepRunId]);
 
   const openDirectory = async (path: string) => {
     const norm = normalizePath(path);

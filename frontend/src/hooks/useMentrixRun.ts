@@ -32,7 +32,7 @@ export function mentrixWorkflowStepIndex(run: any): number {
   const phases = new Set(events.map((e: any) => e.phase).filter(Boolean));
   const agents = new Set(events.map((e: any) => e.agent).filter(Boolean));
   if (
-    (gates.review_ok != null && run.status !== "awaiting_plan_confirm") ||
+    (gates.review_ok != null && run.status !== "awaiting_plan_confirm" && run.status !== "awaiting_batch_confirm") ||
     phases.has("review") ||
     agents.has("reviewer") ||
     run.result?.ultra_review
@@ -41,6 +41,7 @@ export function mentrixWorkflowStepIndex(run: any): number {
   }
   if (
     run.status !== "awaiting_plan_confirm" &&
+    run.status !== "awaiting_batch_confirm" &&
     (gates.lint_ok != null ||
       gates.sandbox_ready != null ||
       phases.has("lint") ||
@@ -52,6 +53,7 @@ export function mentrixWorkflowStepIndex(run: any): number {
   }
   if (
     run.status === "awaiting_plan_confirm" ||
+    run.status === "awaiting_batch_confirm" ||
     phases.has("plan") ||
     phases.has("root_cause") ||
     phases.has("ask") ||

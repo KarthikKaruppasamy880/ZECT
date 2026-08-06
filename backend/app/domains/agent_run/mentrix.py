@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import time
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Any
 
@@ -23,6 +23,7 @@ from app.models import FineTuneSample, MentrixRun
 from app.services.forge_loop.orchestrator import (
     AGENT_ROLES,
     MODE_PIPELINE,
+    continue_mentrix_after_batch,
     continue_mentrix_after_plan,
     gates_allow_approve,
     gates_allow_create_pr,
@@ -85,6 +86,7 @@ class ConfirmPlanRequest(BaseModel):
     plan: str | None = None
     phases: list[Any] | None = None
     steps: list[dict[str, Any]] | None = None
+    files_expected: list[str] | None = None
 
 
 def _normalize_events(raw: Any) -> list[dict[str, Any]]:
@@ -151,6 +153,12 @@ def _run_to_dict(run: MentrixRun) -> dict:
         "approved_by": run.approved_by or "",
         "pr_url": run.pr_url or "",
         "files_written": files_written,
+        "batch_index": result.get("batch_index"),
+        "batch_total": result.get("batch_total"),
+        "batch_files": result.get("batch_files") or [],
+        "files_expected": (result.get("plan") or {}).get("files_expected")
+        or (result.get("builder") or {}).get("files_expected")
+        or [],
         "artifacts": _artifacts_from_run(run, result, files_written),
         "terminal": terminal_lines[-80:],
         "test_results": {
@@ -348,11 +356,36 @@ def confirm_run_plan(
         patch["phases"] = req.phases
     if req.steps is not None:
         patch["steps"] = req.steps
+    if req.files_expected is not None:
+        patch["files_expected"] = req.files_expected
     try:
         run = continue_mentrix_after_plan(
             db,
             run,
             plan_patch=patch or None,
+            confirmed_by=user.email or user.username or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _run_to_dict(run)
+
+
+@router.post("/runs/{run_id}/confirm-batch")
+def confirm_run_batch(
+    run_id: int,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Human confirms a Build file batch — continue next batch or remaining gates."""
+    run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.status != "awaiting_batch_confirm":
+        raise HTTPException(status_code=400, detail="Run is not awaiting batch confirmation")
+    try:
+        run = continue_mentrix_after_batch(
+            db,
+            run,
             confirmed_by=user.email or user.username or "",
         )
     except ValueError as e:
@@ -1283,6 +1316,31 @@ def presenton_generate(
             detail=out.get("detail") or out.get("hint") or out.get("error") or "presenton_failed",
         )
     return out
+
+
+@router.post("/present/parse-pptx")
+async def present_parse_pptx(
+    file: UploadFile = File(...),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Parse uploaded .pptx into slide text + speaker notes for browser Present narration."""
+    from app.services.pptx_parse import parse_pptx_bytes
+
+    name = (file.filename or "").lower()
+    if not name.endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Upload a .pptx file")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 40_000_000:
+        raise HTTPException(status_code=400, detail="PPTX too large (max 40MB)")
+    try:
+        slides = parse_pptx_bytes(data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse PPTX: {e}") from e
+    if not slides:
+        raise HTTPException(status_code=400, detail="No slides found in that .pptx")
+    return {"ok": True, "count": len(slides), "slides": slides, "filename": file.filename or "deck.pptx"}
 
 
 @router.post("/companion/realtime/session")

@@ -300,8 +300,10 @@ def run_build_from_plan(
     repo_id: int | None = None,
     db: Any = None,
     user_id: int | None = None,
+    expected_files: list[str] | None = None,
+    target_file: str | None = None,
 ) -> dict[str, Any]:
-    """Parse plan into steps and build the current step."""
+    """Parse plan into steps and build the current step (optionally targeting one file)."""
     # Lightweight step parse without requiring OpenAI
     headers = re.findall(r"^#{1,3}\s+(.+)$", full_plan or "", re.MULTILINE)
     if headers:
@@ -311,6 +313,11 @@ def run_build_from_plan(
     idx = min(max(step_index, 0), len(steps) - 1)
     current = steps[idx]
     plan_step = f"{current.get('title', '')}: {current.get('description', '')}"
+    if target_file:
+        plan_step = f"Implement or update file `{target_file}` for: {plan_step}"
+    expect = list(expected_files or [])
+    if target_file and target_file not in expect:
+        expect = [target_file, *expect]
     built = run_build_generate(
         plan_step,
         project_context=project_context,
@@ -319,8 +326,9 @@ def run_build_from_plan(
         workspace=workspace,
         repo_id=repo_id,
         db=db,
-        expected_files=[],
+        expected_files=expect,
         user_id=user_id,
+        file_path=target_file or None,
     )
     return {
         "steps": steps,

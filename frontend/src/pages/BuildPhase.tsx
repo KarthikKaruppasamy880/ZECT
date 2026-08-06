@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { buildGenerate, buildApply, autofixRunAndFix, gitCreatePR, gitCommit, gitAdd, gitPush, loadContext } from "@/lib/api";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { contextPageFor } from "@/lib/workspaceContext";
@@ -211,7 +211,7 @@ export default function BuildPhase() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Build Phase</h1>
-            <p className="text-slate-500">Generate production-ready code from plan steps using AI</p>
+            <p className="text-slate-500">Prep form — generate a step locally. For ZOAS/ship, use Mentrix Delivery.</p>
           </div>
         </div>
         {generatedFiles.length > 0 && (
@@ -225,6 +225,24 @@ export default function BuildPhase() {
             </button>
           </div>
         )}
+      </div>
+
+      <div
+        className="rounded-lg border border-teal-200 bg-teal-50/70 px-3 py-2.5 text-sm text-teal-950 flex flex-wrap items-center justify-between gap-2"
+        data-testid="build-mentrix-handoff"
+      >
+        <p className="text-xs leading-snug">
+          Classic Build is for prep only. One goal should have <strong>one Mentrix Delivery run</strong> (confirm plan →
+          batches → Approve → PR).
+        </p>
+        <Link
+          to={`/mentrix?goal=${encodeURIComponent(planStep.trim() || "Continue delivery from Build prep")}`}
+          className="inline-flex items-center gap-1.5 shrink-0 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-600"
+          data-testid="build-continue-mentrix"
+        >
+          Continue in Mentrix Delivery
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
       {/* Prompt Hygiene Tips */}

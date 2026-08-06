@@ -389,10 +389,13 @@ export default function Mentrix() {
           <Bot className="h-6 w-6" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Mentrix</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Mentrix Delivery</h1>
           <p className="text-sm text-slate-600">
-            Primary delivery — Lattice → Confirm plan → Build → Gates → Ultra Review → Approve → PR
-            (scorecard: grounded plan + gates green)
+            Primary ship path — Lattice → Confirm plan → Build batches → Gates → Approve → PR
+            (scorecard: grounded plan + gates green — not “100% / 0 error”)
+          </p>
+          <p className="text-xs text-teal-800 mt-1" data-testid="mentrix-spine-hint">
+            Ship here. Use Agent Workspace Ask/Plan/Build only for prep. Inspect diffs in Developer Workspace.
           </p>
           {agents?.wake_phrases && (
             <p className="text-xs text-slate-500 mt-1">
@@ -608,6 +611,23 @@ export default function Mentrix() {
               <p className="text-sm text-slate-500">Start a run to see phases.</p>
             ) : (
               <>
+                {(active.status === "running" ||
+                  active.status === "awaiting_plan_confirm" ||
+                  active.status === "awaiting_batch_confirm" ||
+                  active.status === "awaiting_approval" ||
+                  active.status === "needs_human") && (
+                  <div
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950"
+                    data-testid="mentrix-run-owns-build"
+                  >
+                    This Mentrix run owns Build for this goal — do not also run classic Agent Workspace{" "}
+                    <strong>Build</strong> for the same work. Review files in{" "}
+                    <Link to={workspaceDeepLink} className="underline text-teal-800">
+                      Developer Workspace
+                    </Link>
+                    .
+                  </div>
+                )}
                 <div className="text-sm" data-testid="mentrix-run-status">
                   <div>
                     <span className="text-slate-500">Status:</span>{" "}

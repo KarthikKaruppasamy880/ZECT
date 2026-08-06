@@ -54,7 +54,14 @@ contextBridge.exposeInMainWorld("zectDesktop", {
       return () => ipcRenderer.removeListener("mentrix-computer-mode", handler);
     },
     getPolicy: () => ipcRenderer.invoke("mentrix-get-policy"),
+    computerAudit: () => ipcRenderer.invoke("mentrix-computer-audit"),
     confirmAction: (payload) => ipcRenderer.invoke("mentrix-confirm-action", payload),
     computer: (action, args) => ipcRenderer.invoke("mentrix-computer", action, args || {}),
+    chatterboxStatus: () => ipcRenderer.invoke("mentrix-chatterbox-status"),
+    chatterboxStart: () => ipcRenderer.invoke("mentrix-chatterbox-start"),
+    chatterboxStop: () => ipcRenderer.invoke("mentrix-chatterbox-stop"),
+    desktopQueuePush: (cmd) => ipcRenderer.invoke("mentrix-desktop-queue-push", cmd),
+    desktopQueueList: () => ipcRenderer.invoke("mentrix-desktop-queue-list"),
+    desktopQueueAck: (id) => ipcRenderer.invoke("mentrix-desktop-queue-ack", id),
   },
 });

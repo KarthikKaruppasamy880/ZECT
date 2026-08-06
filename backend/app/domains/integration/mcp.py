@@ -102,10 +102,24 @@ BUILTIN_SERVERS: list[MCPServer] = [
     ),
     MCPServer(
         id="playwright",
-        name="Playwright",
-        description="ZECT Mentrix browser automation — navigate, snapshot, click, fill (local Chromium)",
+        name="Browser automation",
+        description="ZECT Mentrix browser automation via BrowserRuntime → Playwright (local Chromium)",
         status="available",
         tools_count=5,
+    ),
+    MCPServer(
+        id="notion",
+        name="Notion",
+        description="Notion stub — not_configured until NOTION_API_TOKEN (no fake success)",
+        status="available",
+        tools_count=3,
+    ),
+    MCPServer(
+        id="gmail",
+        name="Gmail",
+        description="Thin Gmail path when GMAIL_* set; otherwise use Email/SMTP adapter",
+        status="available",
+        tools_count=2,
     ),
 ]
 
@@ -162,11 +176,20 @@ BUILTIN_TOOLS: dict[str, list[MCPTool]] = {
         MCPTool(name="get_page", description="Get Confluence page", server_id="confluence", parameters={"page_id": "string"}),
     ],
     "playwright": [
-        MCPTool(name="status", description="Playwright engine readiness", server_id="playwright"),
+        MCPTool(name="status", description="Browser automation readiness", server_id="playwright"),
         MCPTool(name="navigate", description="Open a URL in Chromium", server_id="playwright", parameters={"url": "string"}),
         MCPTool(name="snapshot", description="Capture page text snapshot", server_id="playwright", parameters={"url": "string"}),
         MCPTool(name="click", description="Click a selector", server_id="playwright", parameters={"selector": "string"}),
         MCPTool(name="fill", description="Fill an input", server_id="playwright", parameters={"selector": "string", "value": "string"}),
+    ],
+    "notion": [
+        MCPTool(name="status", description="Notion configuration status", server_id="notion"),
+        MCPTool(name="search", description="Search Notion (stub until tokens)", server_id="notion", parameters={"query": "string"}),
+        MCPTool(name="get_page", description="Get Notion page (stub until tokens)", server_id="notion", parameters={"page_id": "string"}),
+    ],
+    "gmail": [
+        MCPTool(name="status", description="Gmail OAuth configuration status", server_id="gmail"),
+        MCPTool(name="send_email", description="Send via Gmail path or fall back to SMTP email", server_id="gmail", parameters={"to": "string", "subject": "string", "body": "string"}),
     ],
 }
 
@@ -208,6 +231,7 @@ def call_tool(
 
     if server_id not in BUILTIN_TOOLS and server_id not in {
         "github", "jira", "confluence", "slack", "datadog", "filesystem", "email", "playwright",
+        "notion", "gmail",
     }:
         raise HTTPException(status_code=404, detail=f"MCP server '{server_id}' not found")
 
@@ -292,6 +316,7 @@ async def mcp_status():
         "version": "2.0.0-mentrix",
         "live_adapters": [
             "github", "jira", "confluence", "slack", "datadog", "filesystem", "email", "playwright",
+            "notion", "gmail",
         ],
         "outbound_wave1": ["slack.send_message", "email.send_email", "datadog.query_logs", "jira.search_issues"],
         "wave2": ["slack_events_inbound", "email_inbox_poll"],

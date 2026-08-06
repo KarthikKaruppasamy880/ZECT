@@ -18,6 +18,7 @@ import { showToast } from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import Pagination from "@/components/Pagination";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
 interface Skill {
   id: number;
@@ -40,6 +41,7 @@ const ACTIVE_SKILL_KEY = "mentrix_active_skill_id";
 
 export default function SkillsEngine() {
   const navigate = useNavigate();
+  const { activeProjectId, activeProject } = useActiveProject();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
@@ -49,6 +51,7 @@ export default function SkillsEngine() {
   const [matchResults, setMatchResults] = useState<any>(null);
   const [execLogs, setExecLogs] = useState<any[]>([]);
   const [filterCategory, setFilterCategory] = useState("");
+  const [scopeToActiveProject, setScopeToActiveProject] = useState(true);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [skillsPage, setSkillsPage] = useState(1);
   const skillsPerPage = 10;
@@ -86,6 +89,9 @@ export default function SkillsEngine() {
     try {
       const params = new URLSearchParams();
       if (filterCategory) params.set("category", filterCategory);
+      if (scopeToActiveProject && activeProjectId != null) {
+        params.set("project_id", String(activeProjectId));
+      }
       const res = await apiFetch(`/api/skills-engine/skills?${params}`);
       if (res.ok) setSkills(await res.json());
       else showToast("error", `Failed to load skills (${res.status})`);
@@ -120,7 +126,7 @@ export default function SkillsEngine() {
     setLoading(true);
     Promise.all([fetchSkills(), fetchStats(), fetchCategories(), fetchLogs()])
       .finally(() => setLoading(false));
-  }, [filterCategory]);
+  }, [filterCategory, scopeToActiveProject, activeProjectId]);
 
   const handleMatch = async () => {
     if (!matchIntent.trim()) return;
@@ -144,6 +150,7 @@ export default function SkillsEngine() {
         body: JSON.stringify({
           ...newSkill,
           tags: newSkill.tags.split(",").map((t) => t.trim()).filter(Boolean),
+          ...(scopeToActiveProject && activeProjectId != null ? { project_id: activeProjectId } : {}),
         }),
       });
       if (res.ok) {
@@ -209,7 +216,18 @@ export default function SkillsEngine() {
           <p className="text-slate-500 text-sm">
             Reusable procedures and templates — speed Mentrix and scaffold new projects. Saves tokens by
             reusing approved prompts instead of re-explaining stack conventions every run.
+            {" "}See docs/SKILLS_OPERATOR.md.
           </p>
+          <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-600" data-testid="skills-project-scope">
+            <input
+              type="checkbox"
+              checked={scopeToActiveProject}
+              onChange={(e) => setScopeToActiveProject(e.target.checked)}
+            />
+            Scope to active project
+            {activeProject ? ` (${activeProject.name})` : " (select a project in the header)"}
+            — shows global seeds + project packs
+          </label>
         </div>
         <button onClick={() => { fetchSkills(); fetchStats(); fetchCategories(); fetchLogs(); }} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />

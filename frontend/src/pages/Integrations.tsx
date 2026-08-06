@@ -43,6 +43,8 @@ export default function Integrations() {
   const [slackForm, setSlackForm] = useState({ bot_token: "", workspace_name: "", default_channel: "#zect-notifications" });
   const [testMsg, setTestMsg] = useState("");
   const [githubReady, setGithubReady] = useState(false);
+  const [browserReady, setBrowserReady] = useState(false);
+  const [browserHint, setBrowserHint] = useState("");
   const [presentonReady, setPresentonReady] = useState(false);
   const [presentonUrl, setPresentonUrl] = useState("");
   const [zoomJoinReady, setZoomJoinReady] = useState(false);
@@ -70,6 +72,8 @@ export default function Integrations() {
       try {
         const integ = await mentrixCompanionIntegrations();
         setGithubReady(!!integ.github);
+        setBrowserReady(!!integ.browser);
+        setBrowserHint(integ.browser_hint || "");
         setPresentonReady(!!integ.presenton);
         setPresentonUrl(integ.presenton_base_url || "");
         setZoomJoinReady(!!integ.zoom_join_url_configured);
@@ -148,6 +152,7 @@ export default function Integrations() {
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5 space-y-2">
           <h3 className="font-semibold text-indigo-900">How to use Integrations</h3>
           <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
+            <li><strong>Browser automation</strong> — Mentrix uses Playwright via BrowserRuntime. Install: <code>pip install playwright && playwright install chromium</code>. See docs/BROWSER_RUNTIME.md.</li>
             <li><strong>GitHub</strong> — Set <code>GITHUB_TOKEN</code> in <code>backend/.env</code> (repo read + PR create). Status card below shows readiness (never shows the token).</li>
             <li><strong>Jira</strong> — UI form below <em>or</em> env: <code>JIRA_BASE_URL</code> / <code>MCP_JIRA_URL</code>, <code>JIRA_EMAIL</code>, <code>JIRA_API_TOKEN</code>. Same credentials power Mentrix Incident + MCP.</li>
             <li><strong>Slack</strong> — Get notifications when reviews complete, deployments happen, or budget alerts trigger. Create a Slack bot at api.slack.com/apps.</li>
@@ -178,6 +183,25 @@ export default function Integrations() {
           </p>
           <p className="text-xs text-slate-500">
             Token needs repo + pull_request write for real Mentrix PRs. Keep MENTRIX_PR_DRY_RUN=true until you intend a live PR.
+          </p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-browser-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-900 font-semibold">Browser automation</h3>
+              <p className="text-xs text-slate-500">Mentrix → BrowserRuntime → Playwright</p>
+            </div>
+            {browserReady ? (
+              <CheckCircle className="h-5 w-5 text-green-500" data-testid="browser-ready" />
+            ) : (
+              <XCircle className="h-5 w-5 text-slate-300" data-testid="browser-missing" />
+            )}
+          </div>
+          <p className="text-sm text-slate-600">
+            {browserReady
+              ? "Playwright Chromium is ready for Mentrix browser tools."
+              : browserHint ||
+                "Offline — run: pip install playwright && playwright install chromium"}
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-zoom-card">

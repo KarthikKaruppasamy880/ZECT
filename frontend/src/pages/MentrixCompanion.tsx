@@ -207,6 +207,16 @@ export default function MentrixCompanion() {
                       {(s.integrations as { datadog?: boolean }).datadog ? "ready" : "not set"}
                       {" · GH "}
                       {(s.integrations as { github?: boolean }).github ? "ready" : "not set"}
+                      {" · Browser "}
+                      <span
+                        data-testid="mentrix-browser-health"
+                        title={
+                          (s.integrations as { browser_hint?: string }).browser_hint ||
+                          "Browser automation via Playwright"
+                        }
+                      >
+                        {(s.integrations as { browser?: boolean }).browser ? "online" : "offline"}
+                      </span>
                       {" · Skill "}
                       {s.activeSkillId
                         ? s.skills.find((sk) => String(sk.id) === s.activeSkillId)?.name ||
@@ -322,6 +332,10 @@ export default function MentrixCompanion() {
                       <Monitor className="h-3.5 w-3.5" />
                       Computer Mode
                     </label>
+                    <p className="text-[10px] text-slate-500 max-w-[220px]" data-testid="computer-mode-hint">
+                      Desktop actions require Electron + Computer Mode on (allowlisted apps / notes /
+                      Present Deck only — never delete).
+                    </p>
                     <button
                       type="button"
                       data-testid="mentrix-artifacts-toggle"

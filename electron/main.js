@@ -12,6 +12,7 @@ const { startWindowsWake } = require("./win-wake");
 const { startDictation } = require("./dictation");
 const computer = require("./computer");
 const shortcuts = require("./shortcuts");
+const chatterbox = require("./chatterbox");
 const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
 
 const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
@@ -86,6 +87,20 @@ function armDictation(durationMs = 15000) {
 
 let computerMode = false;
 let computerModeIdleTimer = null;
+/** Ring buffer of Computer Mode audits (never includes secrets). */
+const computerAuditLog = [];
+const COMPUTER_AUDIT_MAX = 200;
+/** Mobile Companion → desktop command queue (Electron agent). */
+const desktopCommandQueue = [];
+const DESKTOP_QUEUE_MAX = 50;
+
+function pushComputerAudit(entry) {
+  computerAuditLog.unshift({
+    ts: new Date().toISOString(),
+    ...entry,
+  });
+  if (computerAuditLog.length > COMPUTER_AUDIT_MAX) computerAuditLog.length = COMPUTER_AUDIT_MAX;
+}
 let lastOpenedApp = null;
 const COMPUTER_MODE_IDLE_MS = Number(process.env.MENTRIX_COMPUTER_IDLE_MS || 10 * 60 * 1000);
 const ALLOWLISTED_APPS =
@@ -381,20 +396,54 @@ ipcMain.handle("mentrix-get-policy", () => ({
   blockedPathFragments: BLOCKED_PATH_FRAGMENTS,
   idleMs: COMPUTER_MODE_IDLE_MS,
   platform: process.platform,
+  note: "Desktop actions require Electron + Computer Mode on.",
 }));
+ipcMain.handle("mentrix-computer-audit", () => ({
+  items: computerAuditLog.slice(0, 50),
+}));
+ipcMain.handle("mentrix-chatterbox-status", async () => chatterbox.status());
+ipcMain.handle("mentrix-chatterbox-start", async () => chatterbox.start());
+ipcMain.handle("mentrix-chatterbox-stop", async () => chatterbox.stop());
+ipcMain.handle("mentrix-desktop-queue-push", (_e, cmd) => {
+  const item = {
+    id: `dc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ts: new Date().toISOString(),
+    command: cmd || {},
+    status: "queued",
+  };
+  desktopCommandQueue.push(item);
+  if (desktopCommandQueue.length > DESKTOP_QUEUE_MAX) desktopCommandQueue.shift();
+  return { ok: true, id: item.id, queued: desktopCommandQueue.length };
+});
+ipcMain.handle("mentrix-desktop-queue-list", () => ({
+  items: desktopCommandQueue.slice(),
+  computerMode,
+  online: true,
+}));
+ipcMain.handle("mentrix-desktop-queue-ack", (_e, id) => {
+  const idx = desktopCommandQueue.findIndex((x) => x.id === id);
+  if (idx >= 0) {
+    desktopCommandQueue[idx].status = "acked";
+    return { ok: true };
+  }
+  return { ok: false, error: "not_found" };
+});
 ipcMain.handle("mentrix-confirm-action", (_e, payload) => {
   // Renderer shows modal; main records intent only
   if (computerMode) armComputerModeIdle();
+  pushComputerAudit({ kind: "confirm", payload: payload || {} });
   return { ok: true, recorded: true, payload: payload || {} };
 });
 ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   if (!computerMode) {
-    return { ok: false, error: "computer_mode_off" };
+    pushComputerAudit({ kind: "refuse", action, error: "computer_mode_off" });
+    return { ok: false, error: "computer_mode_off", hint: "Desktop actions require Electron + Computer Mode on." };
   }
   armComputerModeIdle();
   const a = args || {};
   if (DELETE_ACTIONS.has(String(action || "").toLowerCase())) {
     console.warn("[mentrix-computer] refuse delete", action, a.path || a.file || "");
+    pushComputerAudit({ kind: "refuse_delete", action, path: a.path || a.file || "" });
     return {
       ok: false,
       error: "delete_never_allowed",
@@ -403,77 +452,83 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
       note: "Mentrix never deletes, unlinks, or rmdirs files",
     };
   }
+  let result;
   if (action === "open_zoom" || action === "desktop_open_zoom") {
     lastOpenedApp = process.platform === "darwin" ? "zoom.us" : "Zoom.exe";
-    return computer.openZoom(a);
-  }
-  if (action === "open_app" || action === "open") {
+    result = await computer.openZoom(a);
+  } else if (action === "open_app" || action === "open") {
     const appName =
       a.app || a.appName || (process.platform === "darwin" ? "TextEdit" : "notepad.exe");
     lastOpenedApp = appName;
-    return computer.openApp(appName, a);
-  }
-  if (
+    result = await computer.openApp(appName, a);
+  } else if (
     action === "open_presentation" ||
     action === "desktop_open_presentation" ||
     action === "open_path"
   ) {
-    return computer.openPresentation(a.path || a.file || "");
-  }
-  if (
+    result = await computer.openPresentation(a.path || a.file || "");
+  } else if (
     action === "parse_presentation_slides" ||
     action === "desktop_parse_presentation_slides"
   ) {
-    return computer.parsePresentationSlides(a.path || a.file || "");
-  }
-  if (action === "powerpoint_key" || action === "desktop_powerpoint_key") {
-    return computer.powerpointKey(a.key || a.keycode, a.app || a.appName);
-  }
-  if (action === "screenshot" || action === "desktop_screenshot") {
+    result = await computer.parsePresentationSlides(a.path || a.file || "");
+  } else if (action === "powerpoint_key" || action === "desktop_powerpoint_key") {
+    result = await computer.powerpointKey(a.key || a.keycode, a.app || a.appName);
+  } else if (action === "screenshot" || action === "desktop_screenshot") {
     const desk = await computer.screenshotDesktop();
-    if (desk.ok) return desk;
-    try {
-      const img = await mainWindow.webContents.capturePage();
-      const png = img.toPNG();
-      return { ok: true, desktop: "screenshot", bytes: png.length, note: "window_fallback" };
-    } catch (err) {
-      return { ok: false, error: String(err) };
+    if (desk.ok) {
+      result = desk;
+    } else {
+      try {
+        const img = await mainWindow.webContents.capturePage();
+        const png = img.toPNG();
+        result = { ok: true, desktop: "screenshot", bytes: png.length, note: "window_fallback" };
+      } catch (err) {
+        result = { ok: false, error: String(err) };
+      }
     }
-  }
-  if (action === "read_path" || action === "desktop_read") {
+  } else if (action === "read_path" || action === "desktop_read") {
     const target = a.path || a.file || "";
     if (!target || pathBlocked(target)) {
-      return { ok: false, error: "path_blocked", path: target };
-    }
-    const fs = require("fs");
-    try {
-      if (!fs.existsSync(target)) return { ok: false, error: "not_found" };
-      const stat = fs.statSync(target);
-      if (!stat.isFile() || stat.size > 256_000) {
-        return { ok: false, error: "file_too_large_or_not_file" };
+      result = { ok: false, error: "path_blocked", path: target };
+    } else {
+      const fs = require("fs");
+      try {
+        if (!fs.existsSync(target)) result = { ok: false, error: "not_found" };
+        else {
+          const stat = fs.statSync(target);
+          if (!stat.isFile() || stat.size > 256_000) {
+            result = { ok: false, error: "file_too_large_or_not_file" };
+          } else {
+            const text = fs.readFileSync(target, "utf8").slice(0, 8000);
+            result = { ok: true, path: target, preview: text, audited: true };
+          }
+        }
+      } catch (err) {
+        result = { ok: false, error: String(err) };
       }
-      const text = fs.readFileSync(target, "utf8").slice(0, 8000);
-      return { ok: true, path: target, preview: text, audited: true };
-    } catch (err) {
-      return { ok: false, error: String(err) };
     }
+  } else if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
+    result = await computer.writeNoteFile(a);
+  } else if (action === "click" || action === "computer_click") {
+    result = await computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);
+  } else if (action === "type" || action === "computer_type") {
+    result = await computer.typeText(a.text, a.app || a.appName || lastOpenedApp);
+  } else if (action === "scroll" || action === "computer_scroll") {
+    result = await computer.scroll(a.direction || "down");
+  } else if (action === "ui_inspect" || action === "computer_ui_inspect") {
+    result = await computer.uiInspect();
+  } else {
+    result = { ok: false, error: "unsupported_action", action };
   }
-  if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
-    return computer.writeNoteFile(a);
-  }
-  if (action === "click" || action === "computer_click") {
-    return computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);
-  }
-  if (action === "type" || action === "computer_type") {
-    return computer.typeText(a.text, a.app || a.appName || lastOpenedApp);
-  }
-  if (action === "scroll" || action === "computer_scroll") {
-    return computer.scroll(a.direction || "down");
-  }
-  if (action === "ui_inspect" || action === "computer_ui_inspect") {
-    return computer.uiInspect();
-  }
-  return { ok: false, error: "unsupported_action", action };
+  pushComputerAudit({
+    kind: "action",
+    action,
+    ok: Boolean(result && result.ok),
+    error: result && result.error ? result.error : undefined,
+    app: a.app || a.appName || lastOpenedApp || undefined,
+  });
+  return result;
 });
 
 const menuTemplate = [

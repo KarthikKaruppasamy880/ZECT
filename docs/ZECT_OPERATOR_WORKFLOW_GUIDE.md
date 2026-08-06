@@ -54,6 +54,16 @@ Do this **once** per repo key; later Ask/Plan/Mentrix reuse it.
 
 ---
 
+## Which button? (ZOAS / ship)
+
+| Job | Use |
+|---|---|
+| Ship / PR | **Mentrix Delivery** (`/mentrix`) — one goal → one run |
+| Prep Ask/Plan/Build forms | **Agent Workspace** — not a parallel ship run |
+| Inspect / edit diffs | **Developer Workspace** (`/workspace`) |
+
+Do **not** run Mentrix Delivery and classic Build on the same goal at once.
+
 ## 3. Ask → Plan → Build (classic Deliver path)
 
 ```text

@@ -1240,8 +1240,105 @@ def companion_tools(_user: CurrentUser = Depends(get_current_user)):
             "delivery",
             "desktop",
             "media",
+            "browser",
         ],
     }
+
+
+class PreferredNameBody(BaseModel):
+    preferred_name: str = ""
+
+
+@router.get("/companion/preferred-name")
+def companion_get_preferred_name(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.preferred_name import resolve_preferred_name
+
+    uid = getattr(user, "id", None)
+    email = getattr(user, "email", "") or ""
+    name = resolve_preferred_name(db, user_id=uid if isinstance(uid, int) else None, email=email)
+    return {"preferred_name": name, "email": email}
+
+
+@router.put("/companion/preferred-name")
+def companion_set_preferred_name(
+    body: PreferredNameBody,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.preferred_name import set_preferred_name
+
+    uid = getattr(user, "id", None)
+    if not isinstance(uid, int):
+        raise HTTPException(status_code=400, detail="user id required")
+    return set_preferred_name(db, uid, (body.preferred_name or "").strip())
+
+
+@router.get("/companion/desktop-bridge/status")
+def desktop_bridge_status(
+    agent_id: str = "electron",
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.desktop_bridge import agent_status
+
+    return agent_status(getattr(user, "email", "") or "", agent_id)
+
+
+@router.post("/companion/desktop-bridge/heartbeat")
+def desktop_bridge_heartbeat(
+    agent_id: str = "electron",
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.desktop_bridge import heartbeat
+
+    return heartbeat(getattr(user, "email", "") or "", agent_id)
+
+
+class DesktopBridgeEnqueue(BaseModel):
+    command: dict = {}
+    agent_id: str = "electron"
+
+
+@router.post("/companion/desktop-bridge/enqueue")
+def desktop_bridge_enqueue(
+    body: DesktopBridgeEnqueue,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Mobile/thin client queues desktop work for the linked Electron agent."""
+    from app.services.mentrix.desktop_bridge import enqueue
+
+    out = enqueue(getattr(user, "email", "") or "", body.command or {}, body.agent_id or "electron")
+    if not out.get("ok"):
+        raise HTTPException(status_code=503, detail=out.get("hint") or out.get("error") or "desktop_offline")
+    return out
+
+
+@router.get("/companion/desktop-bridge/poll")
+def desktop_bridge_poll(
+    agent_id: str = "electron",
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.desktop_bridge import poll
+
+    return poll(getattr(user, "email", "") or "", agent_id)
+
+
+class DesktopBridgeAck(BaseModel):
+    id: str
+    agent_id: str = "electron"
+    result: dict = {}
+
+
+@router.post("/companion/desktop-bridge/ack")
+def desktop_bridge_ack(
+    body: DesktopBridgeAck,
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.desktop_bridge import ack
+
+    return ack(getattr(user, "email", "") or "", body.id, body.agent_id or "electron", body.result)
 
 
 @router.get("/companion/integrations")
@@ -1263,12 +1360,19 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     )
     github = bool((os.getenv("GITHUB_TOKEN") or "").strip())
     zoom_join = (os.getenv("ZOOM_DEFAULT_JOIN_URL") or "").strip()
+    from app.services.browser.runtime import get_browser_runtime
+
+    browser = get_browser_runtime().status()
     return {
         "slack": slack,
         "jira": jira,
         "openai": openai,
         "datadog": datadog,
         "github": github,
+        "browser": bool(browser.get("online")),
+        "browser_label": browser.get("label") or "Browser automation",
+        "browser_hint": browser.get("hint") or "",
+        "browser_provider": browser.get("provider") or "playwright",
         "presenton": presenton_configured(),
         "presenton_base_url": (os.getenv("PRESENTON_BASE_URL") or "").strip() or "",
         "zoom_join_url_configured": bool(zoom_join),

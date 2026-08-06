@@ -446,8 +446,9 @@ export default function DeveloperWorkspace() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
-          <p className="text-xs text-slate-500">
-            Full Phase 3 shell — symbols/worktrees, Ask, Diff, terminal, Mentrix. Writes stay inside the workspace.
+          <p className="text-xs text-slate-500" data-testid="workspace-spine-hint">
+            IDE for inspect/edit — Mentrix Delivery owns ship (plan → batches → Approve → PR). Prep forms live in Agent
+            Workspace.
           </p>
         </div>
         <button

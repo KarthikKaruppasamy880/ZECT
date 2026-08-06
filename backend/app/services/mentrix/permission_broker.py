@@ -48,6 +48,9 @@ TOOL_ACTIONS: dict[str, str] = {
     "computer_open_app": "companion_computer_open",
     "computer_click": "companion_computer_control",
     "computer_type": "companion_computer_control",
+    "browser_navigate": "companion_browser",
+    "browser_snapshot": "companion_browser",
+    "browser_fill": "companion_browser",
     "computer_scroll": "companion_computer_control",
     "computer_ui_inspect": "companion_computer_inspect",
     "diagnose_fix": "companion_diagnose",
@@ -82,6 +85,9 @@ ALWAYS_CONFIRM_TOOLS = {
     "computer_ui_inspect",
     "jira_comment_pr",
     "file_security_ticket",
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_fill",
 }
 
 

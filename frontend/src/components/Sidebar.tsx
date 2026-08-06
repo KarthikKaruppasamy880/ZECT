@@ -270,6 +270,9 @@ export default function Sidebar({
                 <br />
                 Control Tower
               </h1>
+              <p className="text-[10px] text-slate-400 mt-1 leading-snug" data-testid="sidebar-spine-hint">
+                Ship: Mentrix Delivery · Prep: Agent Workspace · Edit: Developer Workspace
+              </p>
             </div>
           )}
           <button

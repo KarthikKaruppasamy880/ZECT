@@ -490,6 +490,33 @@ export const mentrixCompanionPolicyImport = (pack: Record<string, unknown>, repl
     body: JSON.stringify({ pack, replace }),
   });
 export const mentrixCompanionTools = () => request<any>("/api/mentrix/companion/tools");
+export const mentrixPreferredName = () =>
+  request<{ preferred_name: string; email?: string }>("/api/mentrix/companion/preferred-name");
+export const mentrixSetPreferredName = (preferred_name: string) =>
+  request<{ preferred_name: string; user_id: number }>("/api/mentrix/companion/preferred-name", {
+    method: "PUT",
+    body: JSON.stringify({ preferred_name }),
+  });
+export const mentrixDesktopBridgeHeartbeat = () =>
+  request<{ ok?: boolean }>("/api/mentrix/companion/desktop-bridge/heartbeat", { method: "POST" });
+export const mentrixDesktopBridgePoll = () =>
+  request<{ items: { id: string; command: Record<string, unknown> }[] }>(
+    "/api/mentrix/companion/desktop-bridge/poll",
+  );
+export const mentrixDesktopBridgeAck = (id: string, result: Record<string, unknown> = {}) =>
+  request("/api/mentrix/companion/desktop-bridge/ack", {
+    method: "POST",
+    body: JSON.stringify({ id, result }),
+  });
+export const mentrixDesktopBridgeEnqueue = (command: Record<string, unknown>) =>
+  request("/api/mentrix/companion/desktop-bridge/enqueue", {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+export const mentrixDesktopBridgeStatus = () =>
+  request<{ online?: boolean; error?: string; hint?: string }>(
+    "/api/mentrix/companion/desktop-bridge/status",
+  );
 export const mentrixCompanionIntegrations = () =>
   request<{
     slack: boolean;
@@ -497,6 +524,10 @@ export const mentrixCompanionIntegrations = () =>
     openai: boolean;
     datadog?: boolean;
     github?: boolean;
+    browser?: boolean;
+    browser_label?: string;
+    browser_hint?: string;
+    browser_provider?: string;
     presenton?: boolean;
     presenton_base_url?: string;
     zoom_join_url_configured?: boolean;

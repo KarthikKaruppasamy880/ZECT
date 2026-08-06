@@ -27,6 +27,18 @@ _LLM_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_LLM_TIMEOUT", "6"))
 _RESEARCH_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_RESEARCH_TIMEOUT", "2.5"))
 _MAX_TOOLS = 5
 
+
+def _system_prompt(preferred_name: str = "") -> str:
+    address = f" Address the user as {preferred_name}." if preferred_name else ""
+    return (
+        "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences."
+        + address
+        + " Never claim you sent messages or controlled the desktop without confirmation."
+        + " Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing."
+        + " For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
+        + " Desktop actions require Electron + Computer Mode on."
+    )
+
 # In-memory resume store for Allow overlay (turn_id → state)
 _TURN_STORE: dict[str, dict[str, Any]] = {}
 
@@ -315,11 +327,12 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
         return []
 
 
-def _llm_answer(question: str, context: str = "") -> str:
+def _llm_answer(question: str, context: str = "", preferred_name: str = "") -> str:
     key = _ensure_openai_env()
     if not key:
+        greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
         return (
-            "I'm Mentrix — ready. Ask for Delivery status, research, a brief, notes, "
+            f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
             "or say Open Lattice."
             + (f"\n\n{context[:900]}" if context else "")
         )
@@ -331,12 +344,7 @@ def _llm_answer(question: str, context: str = "") -> str:
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences. "
-                    "Never claim you sent messages or controlled the desktop without confirmation. "
-                    "Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing. "
-                    "For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
-                ),
+                "content": _system_prompt(preferred_name),
             }
         ]
         if context:
@@ -363,15 +371,16 @@ def _llm_answer(question: str, context: str = "") -> str:
         )
 
 
-def _llm_answer_stream(question: str, context: str = "") -> Generator[str, None, None]:
+def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "") -> Generator[str, None, None]:
     """Same behavior/fallbacks as _llm_answer, but yields text deltas as the
     model actually generates them instead of computing the full reply first —
     the "token" SSE events this feeds reflect real progress instead of a
     fake post-hoc chunking of an already-complete string."""
     key = _ensure_openai_env()
     if not key:
+        greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
         yield (
-            "I'm Mentrix — ready. Ask for Delivery status, research, a brief, notes, "
+            f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
             "or say Open Lattice."
             + (f"\n\n{context[:900]}" if context else "")
         )
@@ -383,12 +392,7 @@ def _llm_answer_stream(question: str, context: str = "") -> Generator[str, None,
     messages = [
         {
             "role": "system",
-            "content": (
-                "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences. "
-                "Never claim you sent messages or controlled the desktop without confirmation. "
-                "Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing. "
-                "For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
-            ),
+            "content": _system_prompt(preferred_name),
         }
     ]
     if context:
@@ -524,6 +528,31 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if "send email" in m or "email send" in m:
         tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
 
+    # BrowserRuntime intents (allowlisted hosts via MENTRIX_BROWSER_ALLOWLIST)
+    url_m = re.search(r"https?://[^\s]+", message)
+    if url_m and any(w in m for w in ("open", "browse", "navigate", "go to", "visit", "load")):
+        tools.append({"name": "browser_navigate", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    elif re.search(r"\b(browse|open url|open website|open page)\b", m) and url_m:
+        tools.append({"name": "browser_navigate", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    if url_m and any(w in m for w in ("snapshot", "screenshot page", "page text", "read page", "scrape")):
+        tools.append({"name": "browser_snapshot", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    elif re.search(r"\b(browser snapshot|snapshot (the )?page|page snapshot)\b", m):
+        tools.append({"name": "browser_snapshot", "args": {"url": url_m.group(0).rstrip(".,)") if url_m else ""}})
+    fill_m = re.search(r"\bfill\b.{0,40}\b(input|field|form|selector)\b", m)
+    if fill_m or ("browser fill" in m) or re.search(r"\bfill\b.+\bwith\b", m):
+        sel_m = re.search(r"(#[\w-]+|\.[\w-]+|input\[name=['\"][^'\"]+['\"]\])", message)
+        val_m = re.search(r"\bwith\b\s+[\"']?([^\"'\n]+)[\"']?", m)
+        tools.append(
+            {
+                "name": "browser_fill",
+                "args": {
+                    "selector": sel_m.group(1) if sel_m else "input",
+                    "value": (val_m.group(1).strip() if val_m else "")[:500],
+                    "url": url_m.group(0).rstrip(".,)") if url_m else "",
+                },
+            }
+        )
+
     # Jira incident / issue tools
     issue_key_m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", message)
     if issue_key_m and any(
@@ -656,6 +685,34 @@ def _exec_tool(
 ) -> dict[str, Any]:
     if name == "navigate":
         return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
+    if name in ("browser_navigate", "browser_snapshot", "browser_fill"):
+        from app.services.browser.allowlist import host_allowed
+        from app.services.browser.runtime import get_browser_runtime
+
+        url = (args.get("url") or "").strip()
+        if name == "browser_navigate":
+            if not url:
+                return {"ok": False, "error": "url required"}
+            ok_host, reason = host_allowed(url)
+            if not ok_host:
+                return {"ok": False, "error": "host_not_allowlisted", "detail": reason}
+        elif url:
+            ok_host, reason = host_allowed(url)
+            if not ok_host:
+                return {"ok": False, "error": "host_not_allowlisted", "detail": reason}
+
+        rt = get_browser_runtime()
+        if name == "browser_navigate":
+            out = rt.navigate(url)
+        elif name == "browser_snapshot":
+            out = rt.snapshot(**({"url": url} if url else {}))
+        else:
+            selector = args.get("selector") or ""
+            value = args.get("value", "")
+            if url:
+                rt.navigate(url)
+            out = rt.fill(selector, str(value))
+        return {"ok": out.get("status") in ("ok", "ready", "success"), "browser": out, "via": "BrowserRuntime"}
     if name == "go_back":
         return {"ok": True, "navigate": "__back__"}
     if name == "delivery_status":
@@ -1501,6 +1558,9 @@ def iter_companion_events(
     yield {"event": "thinking", "turn_id": tid, "data": {"message": "Mentrix thinking…"}}
 
     intents = resume_pending or _merge_intents(message)
+    from app.services.mentrix.preferred_name import resolve_preferred_name
+
+    preferred = resolve_preferred_name(db, user_id=user_id, email=created_by)
     packed_ctx = build_agent_context(
         db,
         skill_id=skill_id,
@@ -1613,7 +1673,7 @@ def iter_companion_events(
                 # genuinely incremental to stream; every other branch below
                 # already knows its full text before any "token" event fires.
                 reply = ""
-                for delta in _llm_answer_stream(message, "\n".join(context_bits)):
+                for delta in _llm_answer_stream(message, "\n".join(context_bits), preferred_name=preferred):
                     reply += delta
                     yield {"event": "token", "turn_id": tid, "data": {"text": delta}}
                 reply_streamed = True

@@ -1391,12 +1391,35 @@ class PresentonGenerateRequest(BaseModel):
 
 @router.get("/presenton/status")
 def presenton_status(_user: CurrentUser = Depends(get_current_user)):
-    from app.services.presenton_client import presenton_base_url, presenton_configured
+    from app.services.presenton_client import (
+        list_templates,
+        presenton_base_url,
+        presenton_configured,
+    )
 
+    configured = presenton_configured()
+    reachable = False
+    hint = ""
+    if configured:
+        listed = list_templates()
+        reachable = bool(listed.get("reachable"))
+        hint = str(listed.get("hint") or "")
+    else:
+        hint = "Set PRESENTON_BASE_URL (e.g. http://127.0.0.1:5000) and run Presenton Docker"
     return {
-        "configured": presenton_configured(),
+        "configured": configured,
+        "reachable": reachable,
         "base_url": presenton_base_url() or "",
+        "hint": hint,
     }
+
+
+@router.get("/presenton/templates")
+def presenton_templates(_user: CurrentUser = Depends(get_current_user)):
+    """List Presenton templates (built-in fallback when Presenton is down)."""
+    from app.services.presenton_client import list_templates
+
+    return list_templates()
 
 
 @router.post("/presenton/generate")

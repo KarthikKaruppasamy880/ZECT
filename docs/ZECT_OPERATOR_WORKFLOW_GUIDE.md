@@ -170,7 +170,7 @@ One shell (`/mentrix-home`) with tabs: **Chat** | **Incident** | **Voice**. Side
 | Manage voices | List saved clones → **Use** (default for Present/sessions) or **Delete** anytime |
 | Speak as you | TTS on + **Connect Voice**; **Present / Narrate** uses the **default** DB voice |
 | Present Board (no files) | Companion → **Present / Narrate** — speaks Mentrix Board artifacts / last reply with Chatterbox (not PowerPoint files) |
-| Prepared PPTX + Zoom | Companion → **Voice** → **Present Deck** — **Generate deck** (Presenton / `PRESENTON_BASE_URL`) or paste `.pptx` under Desktop/Documents/Downloads (OneDrive OK; strip quotes) → **Open presentation** → **Open Zoom** (optional join URL / `ZOOM_DEFAULT_JOIN_URL`) → **you** join the meeting and share PowerPoint → **Narrate talking points** with default clone. No Meeting SDK / auto-share. |
+| Prepared PPTX + Zoom | Companion → **Voice** → **Present Deck** — pick **Template** + **Slides**, **Generate deck** (Presenton / `PRESENTON_BASE_URL`; see [`PRESENTON_LOCAL.md`](PRESENTON_LOCAL.md)) or paste `.pptx` under Desktop/Documents/Downloads (OneDrive OK; strip quotes) → **Open presentation** → **Open Zoom** (optional join URL / `ZOOM_DEFAULT_JOIN_URL`) → **you** join the meeting and share PowerPoint → **Narrate talking points** with default clone. No Meeting SDK / auto-share. |
 | Incident | Companion → **Incident** or `?incident=1` |
 | Desktop notes | Electron Computer Mode → Allow write note file (never delete) |
 

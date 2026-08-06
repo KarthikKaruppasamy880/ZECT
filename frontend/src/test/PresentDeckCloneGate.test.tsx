@@ -1,9 +1,19 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
   mentrixCompanionIntegrations: vi.fn(async () => ({ presenton: false })),
   mentrixPresentonGenerate: vi.fn(),
+  mentrixPresentonTemplates: vi.fn(async () => ({
+    ok: true,
+    source: "builtin",
+    templates: [
+      { id: "general", name: "General" },
+      { id: "modern", name: "Modern" },
+      { id: "standard", name: "Standard" },
+      { id: "swift", name: "Swift" },
+    ],
+  })),
   mentrixParsePptx: vi.fn(),
   listMyClonedVoices: vi.fn(async () => [
     {
@@ -24,12 +34,18 @@ vi.mock("@/mentrix/speak", () => ({
   speakMentrixStreamedAwait: vi.fn(),
 }));
 
-import { mentrixVoiceEngineStatus } from "@/lib/api";
+import {
+  mentrixCompanionIntegrations,
+  mentrixPresentonGenerate,
+  mentrixVoiceEngineStatus,
+} from "@/lib/api";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 
 describe("PresentDeckPanel clone narrate gate", () => {
   beforeEach(() => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockReset();
+    (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockReset();
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
   });
 
   afterEach(() => {
@@ -68,5 +84,62 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
     expect(screen.getByTestId("present-deck-narrate")).not.toBeDisabled();
     expect(screen.getByTestId("present-deck-present-all")).not.toBeDisabled();
+  });
+
+  it("disables Generate deck when Presenton is not configured", async () => {
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://localhost:17493",
+      default_voice: null,
+      hint: "online",
+    });
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
+
+    render(<PresentDeckPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
+    });
+  });
+
+  it("passes selected template and n_slides to generate", async () => {
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://localhost:17493",
+      default_voice: null,
+      hint: "online",
+    });
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: true });
+    (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      path: "C:\\Users\\me\\Documents\\mentrix-deck.pptx",
+    });
+
+    render(<PresentDeckPanel />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("present-deck-generate")).not.toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByTestId("present-deck-prompt"), {
+      target: { value: "Q2 ZOAS delivery brief" },
+    });
+    fireEvent.change(screen.getByTestId("present-deck-template"), {
+      target: { value: "modern" },
+    });
+    fireEvent.change(screen.getByTestId("present-deck-n-slides"), {
+      target: { value: "8" },
+    });
+    fireEvent.click(screen.getByTestId("present-deck-generate"));
+
+    await waitFor(() => {
+      expect(mentrixPresentonGenerate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "Q2 ZOAS delivery brief",
+          template: "modern",
+          n_slides: 8,
+        }),
+      );
+    });
   });
 });

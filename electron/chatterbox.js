@@ -1,17 +1,112 @@
 /**
- * Optional managed local Chatterbox process for Electron.
- * Does NOT bundle a binary — starts a user-provided command if configured.
+ * Chatterbox sidecar for Electron — managed process + optional bundled binary.
+ *
+ * Resolve order for start():
+ *   1. CHATTERBOX_BIN (explicit path)
+ *   2. Bundled resources/chatterbox/bin/* (packaged or electron/resources in dev)
+ *   3. CHATTERBOX_START_CMD (shell command)
+ *
+ * ZECT does not commit ML weights; drop a Voicebox/Chatterbox-compatible
+ * binary into resources/chatterbox/bin before packaging.
  */
 
 const { spawn } = require("child_process");
+const fs = require("fs");
 const http = require("http");
 const https = require("https");
+const path = require("path");
 
 let child = null;
-let lastStatus = { running: false, pid: null, baseUrl: "", error: "" };
+let lastStatus = {
+  running: false,
+  pid: null,
+  baseUrl: "",
+  error: "",
+  bundled: false,
+  binaryPath: "",
+};
 
 function baseUrl() {
-  return (process.env.CHATTERBOX_BASE_URL || "http://localhost:17493").replace(/\/$/, "");
+  return (process.env.CHATTERBOX_BASE_URL || "http://127.0.0.1:17493").replace(/\/$/, "");
+}
+
+function chatterboxRootCandidates() {
+  const roots = [];
+  // Packaged: extraResources → process.resourcesPath/chatterbox
+  if (process.resourcesPath) {
+    roots.push(path.join(process.resourcesPath, "chatterbox"));
+  }
+  // Dev: electron/resources/chatterbox next to this file
+  roots.push(path.join(__dirname, "resources", "chatterbox"));
+  // Optional override
+  if (process.env.CHATTERBOX_BUNDLE_DIR) {
+    roots.unshift(path.resolve(process.env.CHATTERBOX_BUNDLE_DIR));
+  }
+  return roots;
+}
+
+function loadManifest(root) {
+  try {
+    const p = path.join(root, "manifest.json");
+    if (!fs.existsSync(p)) return null;
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function platformBinNames(manifest) {
+  const plat = process.platform;
+  const fromManifest = manifest && manifest.binaries && manifest.binaries[plat];
+  if (Array.isArray(fromManifest) && fromManifest.length) return fromManifest;
+  if (plat === "win32") return ["chatterbox-server.exe", "Voicebox.exe", "chatterbox.exe"];
+  if (plat === "darwin") return ["chatterbox-server", "Voicebox", "Chatterbox"];
+  return ["chatterbox-server", "chatterbox"];
+}
+
+function findBundledBinary() {
+  for (const root of chatterboxRootCandidates()) {
+    const binDir = path.join(root, "bin");
+    if (!fs.existsSync(binDir)) continue;
+    const manifest = loadManifest(root);
+    for (const name of platformBinNames(manifest)) {
+      const full = path.join(binDir, name);
+      if (fs.existsSync(full)) {
+        return { path: full, root, bundled: true };
+      }
+    }
+    // Any executable-looking file in bin/
+    try {
+      const entries = fs.readdirSync(binDir);
+      for (const name of entries) {
+        if (name === ".gitkeep" || name.startsWith(".")) continue;
+        const full = path.join(binDir, name);
+        const st = fs.statSync(full);
+        if (st.isFile()) {
+          return { path: full, root, bundled: true };
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function resolveLaunch() {
+  const explicit = (process.env.CHATTERBOX_BIN || "").trim();
+  if (explicit && fs.existsSync(explicit)) {
+    return { mode: "bin", path: explicit, bundled: false };
+  }
+  const bundled = findBundledBinary();
+  if (bundled) {
+    return { mode: "bin", path: bundled.path, bundled: true };
+  }
+  const cmd = (process.env.CHATTERBOX_START_CMD || "").trim();
+  if (cmd) {
+    return { mode: "cmd", path: cmd, bundled: false };
+  }
+  return null;
 }
 
 function healthCheck() {
@@ -31,61 +126,119 @@ function healthCheck() {
 
 async function status() {
   const health = await healthCheck();
+  const launch = resolveLaunch();
+  const bundled = Boolean(launch && launch.bundled);
+  const binaryPath = launch && launch.mode === "bin" ? launch.path : "";
   return {
     ...lastStatus,
     running: Boolean(child && !child.killed),
     pid: child && !child.killed ? child.pid : null,
     baseUrl: baseUrl(),
     online: Boolean(health.online),
-    managed: Boolean(process.env.CHATTERBOX_START_CMD || process.env.CHATTERBOX_MANAGED === "1"),
+    managed: Boolean(launch || process.env.CHATTERBOX_MANAGED === "1"),
+    bundled,
+    binaryPath,
+    autoStart:
+      process.env.CHATTERBOX_AUTO_START === "1" ||
+      process.env.CHATTERBOX_AUTO_START === "true" ||
+      bundled,
     hint: health.online
-      ? "Chatterbox answering /profiles"
-      : "Offline — start local engine or use Mentrix → Voice Start (managed)",
+      ? bundled
+        ? "Bundled Chatterbox answering /profiles"
+        : "Chatterbox answering /profiles"
+      : bundled
+        ? "Bundled binary found — click Start (or enable CHATTERBOX_AUTO_START)"
+        : "Offline — drop binary in resources/chatterbox/bin, set CHATTERBOX_BIN, or CHATTERBOX_START_CMD",
   };
 }
 
 function stop() {
   if (child && !child.killed) {
     try {
-      child.kill();
+      if (process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+      } else {
+        child.kill("SIGTERM");
+      }
     } catch {
       /* ignore */
     }
   }
   child = null;
-  lastStatus = { running: false, pid: null, baseUrl: baseUrl(), error: "" };
+  lastStatus = {
+    running: false,
+    pid: null,
+    baseUrl: baseUrl(),
+    error: "",
+    bundled: lastStatus.bundled,
+    binaryPath: lastStatus.binaryPath,
+  };
   return { ok: true, ...lastStatus };
 }
 
 function start() {
-  const cmd = (process.env.CHATTERBOX_START_CMD || "").trim();
-  if (!cmd) {
+  const launch = resolveLaunch();
+  if (!launch) {
     lastStatus = {
       running: false,
       pid: null,
       baseUrl: baseUrl(),
-      error: "CHATTERBOX_START_CMD not set — configure managed launch or start Chatterbox yourself",
+      error:
+        "No Chatterbox binary — place engine in resources/chatterbox/bin, or set CHATTERBOX_BIN / CHATTERBOX_START_CMD",
+      bundled: false,
+      binaryPath: "",
     };
     return { ok: false, ...lastStatus };
   }
   if (child && !child.killed) {
-    return { ok: true, already: true, pid: child.pid, baseUrl: baseUrl() };
+    return {
+      ok: true,
+      already: true,
+      pid: child.pid,
+      baseUrl: baseUrl(),
+      bundled: launch.bundled,
+      binaryPath: launch.mode === "bin" ? launch.path : "",
+    };
   }
   try {
-    const shell = process.platform === "win32";
-    child = spawn(cmd, {
-      shell: true,
-      detached: !shell,
-      stdio: "ignore",
-      env: { ...process.env },
-    });
+    if (launch.mode === "bin") {
+      child = spawn(launch.path, [], {
+        cwd: path.dirname(launch.path),
+        detached: process.platform !== "win32",
+        stdio: "ignore",
+        windowsHide: true,
+        env: {
+          ...process.env,
+          CHATTERBOX_BASE_URL: baseUrl(),
+          PORT: "17493",
+        },
+      });
+    } else {
+      child = spawn(launch.path, {
+        shell: true,
+        detached: process.platform !== "win32",
+        stdio: "ignore",
+        windowsHide: true,
+        env: { ...process.env, CHATTERBOX_BASE_URL: baseUrl() },
+      });
+    }
     child.unref?.();
     child.on("exit", () => {
       child = null;
       lastStatus.running = false;
       lastStatus.pid = null;
     });
-    lastStatus = { running: true, pid: child.pid, baseUrl: baseUrl(), error: "" };
+    lastStatus = {
+      running: true,
+      pid: child.pid,
+      baseUrl: baseUrl(),
+      error: "",
+      bundled: launch.bundled,
+      binaryPath: launch.mode === "bin" ? launch.path : "",
+    };
     return { ok: true, ...lastStatus };
   } catch (err) {
     lastStatus = {
@@ -93,9 +246,28 @@ function start() {
       pid: null,
       baseUrl: baseUrl(),
       error: String(err && err.message ? err.message : err),
+      bundled: launch.bundled,
+      binaryPath: launch.mode === "bin" ? launch.path : "",
     };
     return { ok: false, ...lastStatus };
   }
 }
 
-module.exports = { start, stop, status, baseUrl };
+/** Start if bundled binary exists or CHATTERBOX_AUTO_START is set. */
+async function maybeAutoStart() {
+  const st = await status();
+  if (st.online) return { ok: true, skipped: "already_online", ...st };
+  if (!st.autoStart) return { ok: false, skipped: "auto_start_disabled", ...st };
+  const out = start();
+  return { ...out, auto: true };
+}
+
+module.exports = {
+  start,
+  stop,
+  status,
+  baseUrl,
+  resolveLaunch,
+  findBundledBinary,
+  maybeAutoStart,
+};

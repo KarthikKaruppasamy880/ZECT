@@ -1,6 +1,6 @@
 # Local Chatterbox (clone TTS)
 
-ZECT does **not** ship or host Chatterbox. Present / Test speak with your saved clone call **your** local synthesis engine at `CHATTERBOX_BASE_URL` (default `http://localhost:17493`).
+ZECT talks to a locally-running synthesis engine at `CHATTERBOX_BASE_URL` (default `http://127.0.0.1:17493`). Electron can manage or **bundle** a sidecar binary (see bundling section below) — ZECT still does **not** host synthesis in the cloud.
 
 “Offline” means that process is not answering `GET /profiles` — it does **not** mean your clone was deleted from ZECT.
 
@@ -41,12 +41,14 @@ Sample saved in ZECT DB ≠ Chatterbox online. See also [`RUNBOOK_LOCAL.md`](RUN
 
 ## Electron managed launch (optional)
 
-ZECT does **not** ship a Chatterbox binary. Electron can optionally **start/stop a local process** you configure:
+Electron can start/stop a local Chatterbox-compatible engine:
 
 ```env
-CHATTERBOX_BASE_URL=http://localhost:17493
+CHATTERBOX_BASE_URL=http://127.0.0.1:17493
 CHATTERBOX_START_CMD=python -m your_chatterbox_server
-# or any shell command that listens on CHATTERBOX_BASE_URL
+# or
+CHATTERBOX_BIN=C:\path\to\chatterbox-server.exe
+CHATTERBOX_AUTO_START=1
 ```
 
 From the desktop app (preload):
@@ -55,4 +57,28 @@ From the desktop app (preload):
 - `window.zectDesktop.mentrix.chatterboxStart()`
 - `window.zectDesktop.mentrix.chatterboxStop()`
 
-Present / Clone Voice still use `GET /api/mentrix/voice/engine-status` for health. True binary bundling is a separate later stage after managed-process is stable.
+Present / Clone Voice still use `GET /api/mentrix/voice/engine-status` for API health.
+
+## Electron binary bundling (sidecar)
+
+ZECT Desktop can **ship a sidecar folder** with the installer (electron-builder `extraResources` → `resources/chatterbox`).
+
+1. Place a Voicebox/Chatterbox-compatible binary in:
+
+   `electron/resources/chatterbox/bin/`  
+   (names: `chatterbox-server.exe`, `Voicebox.exe`, … — see `manifest.json`)
+
+2. Or fetch a private zip:
+
+   ```powershell
+   $env:CHATTERBOX_BUNDLE_URL = "https://your-artifacts/chatterbox-win-x64.zip"
+   npm run chatterbox:fetch --prefix electron
+   ```
+
+3. Build the desktop app (`npm run build:win` in `electron/`). The sidecar is copied next to the app as `resources/chatterbox`.
+
+4. On launch, Electron **auto-starts** the bundled binary when present (or when `CHATTERBOX_AUTO_START=1`). Companion → Voice shows Start/Stop for the bundled engine.
+
+**Resolve order:** `CHATTERBOX_BIN` → bundled `bin/*` → `CHATTERBOX_START_CMD`.
+
+ZECT **does not commit ML model weights** to git (size + licensing). Operators supply the licensed engine binary before packaging. Clone-only Present rules still apply: no silent OpenAI fallback for clone voice.

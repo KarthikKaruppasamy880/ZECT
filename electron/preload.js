@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld("zectDesktop", {
     chatterboxStatus: () => ipcRenderer.invoke("mentrix-chatterbox-status"),
     chatterboxStart: () => ipcRenderer.invoke("mentrix-chatterbox-start"),
     chatterboxStop: () => ipcRenderer.invoke("mentrix-chatterbox-stop"),
+    chatterboxResolve: () => ipcRenderer.invoke("mentrix-chatterbox-resolve"),
     desktopQueuePush: (cmd) => ipcRenderer.invoke("mentrix-desktop-queue-push", cmd),
     desktopQueueList: () => ipcRenderer.invoke("mentrix-desktop-queue-list"),
     desktopQueueAck: (id) => ipcRenderer.invoke("mentrix-desktop-queue-ack", id),

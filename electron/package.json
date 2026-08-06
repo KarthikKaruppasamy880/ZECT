@@ -10,6 +10,7 @@
     "start": "electron .",
     "start:dev": "electron .",
     "start:prod": "electron .",
+    "chatterbox:fetch": "powershell -NoProfile -File resources/chatterbox/scripts/fetch-chatterbox.ps1",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
@@ -29,10 +30,21 @@
       "main.js",
       "preload.js",
       "computer.js",
+      "chatterbox.js",
       "wake.js",
       "win-wake.js",
+      "dictation.js",
+      "voice-filter.js",
+      "shortcuts.js",
       "icons/**/*",
       "../frontend/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/chatterbox",
+        "to": "chatterbox",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": ["nsis", "portable"],

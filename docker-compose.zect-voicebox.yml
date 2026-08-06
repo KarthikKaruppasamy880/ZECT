@@ -1,0 +1,45 @@
+# ZECT Voicebox + upstream jamiepine/voicebox for real clone TTS.
+# Host: ZECT Voicebox :17493 (Mentrix CHATTERBOX_BASE_URL)
+# Host: upstream Voicebox :17494
+#
+# Prereq: clone upstream once:
+#   powershell -File services/zect-voicebox/scripts/clone-upstream.ps1
+#
+# Then:
+#   docker compose -f docker-compose.zect-voicebox.yml up -d --build
+
+services:
+  voicebox-upstream:
+    build:
+      context: ./third_party/voicebox
+    container_name: zect-voicebox-upstream
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:17494:17493"
+    volumes:
+      - voicebox-upstream-data:/app/data
+      - huggingface-cache:/home/voicebox/.cache/huggingface
+    environment:
+      - LOG_LEVEL=info
+
+  zect-voicebox:
+    build:
+      context: ./services/zect-voicebox
+    container_name: zect-voicebox
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:17493:17493"
+    environment:
+      - ZECT_VOICEBOX_PORT=17493
+      - ZECT_VOICEBOX_BACKEND=upstream
+      - ZECT_VOICEBOX_UPSTREAM_URL=http://voicebox-upstream:17493
+      - ZECT_VOICEBOX_DATA_DIR=/data
+    volumes:
+      - zect-voicebox-data:/data
+    depends_on:
+      - voicebox-upstream
+
+volumes:
+  voicebox-upstream-data:
+  huggingface-cache:
+  zect-voicebox-data:

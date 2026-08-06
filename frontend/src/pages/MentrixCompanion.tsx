@@ -1,6 +1,6 @@
 /**
- * Mentrix Companion HUD — full operator shell over shared MentrixSessionContext.
- * Modes (Chat | Incident | Voice) share one shell; deep links ?incident=1 / ?voice=1.
+ * Mentrix Companion HUD — Chat is the personal agent; Incident / Voice are focused tools.
+ * Deep links: ?incident=1 / ?voice=1.
  */
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -131,18 +131,22 @@ export default function MentrixCompanion() {
               Mentrix Delivery
             </Link>
           </div>
-          <MentrixDesktopPanel />
+          {mode === "chat" && <MentrixDesktopPanel />}
         </header>
 
         <div
-          className={`grid flex-1 gap-3 ${s.showArtifacts && !s.displayMode ? "lg:grid-cols-[1fr_380px]" : "grid-cols-1"}`}
+          className={`grid flex-1 gap-3 ${
+            mode === "chat" && s.showArtifacts && !s.displayMode
+              ? "lg:grid-cols-[1fr_380px]"
+              : "grid-cols-1"
+          }`}
         >
           <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
             {!s.displayMode && mode === "incident" && (
               <div
                 id="mentrix-incident-runbook"
                 data-testid="mentrix-incident-section"
-                className="mb-3 space-y-3"
+                className="space-y-3"
               >
                 <IncidentRunbookPanel defaultExpanded />
               </div>
@@ -151,7 +155,7 @@ export default function MentrixCompanion() {
               <div
                 id="mentrix-voice-cloning"
                 data-testid="mentrix-voice-section"
-                className="mb-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+                className="rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
               >
                 <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
                   Chatterbox — Present & sessions
@@ -162,7 +166,7 @@ export default function MentrixCompanion() {
                 </div>
               </div>
             )}
-            {!s.displayMode && (
+            {!s.displayMode && mode === "chat" && (
               <>
                 <div className="flex flex-col items-center gap-2 py-4">
                   <div
@@ -434,20 +438,23 @@ export default function MentrixCompanion() {
                   Uses Mentrix Board artifacts + your default Chatterbox voice (not PowerPoint files).
                   For a prepared deck, open the Voice tab → Present Deck.
                 </p>
-                {mode === "chat" && (
-                  <p className="mt-3 text-[11px] text-slate-500">
-                    Use the <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>Incident</button>
-                    {" "}or{" "}
-                    <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>Voice</button>
-                    {" "}tabs for runbook and Chatterbox — same Companion shell.
-                  </p>
-                )}
+                <p className="mt-3 text-[11px] text-slate-500">
+                  Chat is the personal agent. Use{" "}
+                  <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>
+                    Incident
+                  </button>{" "}
+                  for runbooks or{" "}
+                  <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>
+                    Voice
+                  </button>{" "}
+                  for Chatterbox clone + Present Deck.
+                </p>
                 {s.displayMode && (
                   <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>
                 )}
               </>
             )}
-            {s.displayMode && (
+            {mode === "chat" && s.displayMode && (
               <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                 <span className="text-xs uppercase tracking-widest text-teal-500">
                   Artifacts · Present
@@ -469,10 +476,10 @@ export default function MentrixCompanion() {
                 </button>
               </div>
             )}
-            {s.displayMode && <MentrixArtifacts items={s.board} displayMode />}
+            {mode === "chat" && s.displayMode && <MentrixArtifacts items={s.board} displayMode />}
           </section>
 
-          {s.showArtifacts && !s.displayMode && (
+          {mode === "chat" && s.showArtifacts && !s.displayMode && (
             <aside className="space-y-3 rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold text-teal-200">

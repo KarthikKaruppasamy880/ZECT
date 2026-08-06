@@ -15,7 +15,15 @@ const shortcuts = require("./shortcuts");
 const chatterbox = require("./chatterbox");
 const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
 
-const isDev = process.env.NODE_ENV === "development" || process.env.ZECT_DEV === "true";
+// Unpackaged `electron .` must hit Vite — otherwise loadFile(dist) uses file:// + absolute
+// /assets paths and the window stays blank (navy backgroundColor only).
+// Force dist locally with ZECT_USE_DIST=1. Packaged builds always use dist.
+const preferDist = process.env.ZECT_USE_DIST === "1";
+const isDev =
+  !preferDist &&
+  (process.env.NODE_ENV === "development" ||
+    process.env.ZECT_DEV === "true" ||
+    !app.isPackaged);
 const DEV_URL = process.env.ZECT_DEV_URL || "http://127.0.0.1:5173";
 const WAKE_PHRASE = process.env.WAKE_PHRASE || "Hey Mentrix";
 

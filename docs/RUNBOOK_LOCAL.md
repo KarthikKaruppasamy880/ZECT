@@ -56,4 +56,4 @@ Gates + verify + approve + CI. Do not claim zero-defect codegen.
 
 ## Local Chatterbox (clone TTS)
 
-Present / Test speak with your saved clone need a local engine at `CHATTERBOX_BASE_URL` (default `http://localhost:17493`). See [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md).
+Present / Test speak with your saved clone need a local engine at `CHATTERBOX_BASE_URL` (default `http://127.0.0.1:17493`). Preferred: run ZECT Voicebox — see [`ZECT_VOICEBOX.md`](ZECT_VOICEBOX.md) and [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md).

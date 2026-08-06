@@ -24,6 +24,7 @@ class ScheduleCreate(BaseModel):
     task_config: dict = {}
     playbook_id: Optional[int] = None
     project_id: Optional[int] = None
+    max_attempts: int = 3
 
 class ScheduleUpdate(BaseModel):
     name: Optional[str] = None
@@ -32,6 +33,8 @@ class ScheduleUpdate(BaseModel):
     interval_minutes: Optional[int] = None
     task_config: Optional[dict] = None
     is_active: Optional[bool] = None
+    max_attempts: Optional[int] = None
+    next_run_at: Optional[str] = None
 
 
 @router.get("")
@@ -73,6 +76,7 @@ def create_schedule(data: ScheduleCreate, db: Session = Depends(get_db)):
             task_config=data.task_config,
             playbook_id=data.playbook_id,
             project_id=data.project_id,
+            max_attempts=data.max_attempts,
         )
         if data.scheduled_time:
             try:
@@ -111,10 +115,15 @@ def update_schedule(schedule_id: int, data: ScheduleUpdate, db: Session = Depend
         sched = db.query(Schedule).filter(Schedule.id == schedule_id).first()
         if not sched:
             raise HTTPException(status_code=404, detail="Schedule not found")
-        for field in ["name", "description", "cron_expression", "interval_minutes", "task_config", "is_active"]:
+        for field in ["name", "description", "cron_expression", "interval_minutes", "task_config", "is_active", "max_attempts"]:
             val = getattr(data, field, None)
             if val is not None:
                 setattr(sched, field, val)
+        if data.next_run_at:
+            try:
+                sched.next_run_at = datetime.fromisoformat(data.next_run_at)
+            except ValueError:
+                pass
         db.commit()
         db.refresh(sched)
         return _sched_to_dict(sched)
@@ -155,6 +164,19 @@ def toggle_schedule(schedule_id: int, db: Session = Depends(get_db)):
         return _sched_to_dict(sched)
     except HTTPException:
         raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/due/run")
+def run_due(db: Session = Depends(get_db)):
+    """Poll-and-run due schedules (Phase 10 Stage B worker hook)."""
+    try:
+        from app.domains.personal_agent.schedule_executor import run_due_schedules
+
+        runs = run_due_schedules(db)
+        return {"ran": len(runs), "runs": [_run_to_dict(r) for r in runs]}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -209,6 +231,8 @@ def _sched_to_dict(s: Schedule) -> dict:
         "next_run_at": s.next_run_at.isoformat() if s.next_run_at else None,
         "run_count": s.run_count,
         "failure_count": s.failure_count,
+        "max_attempts": getattr(s, "max_attempts", 3),
+        "retry_count": getattr(s, "retry_count", 0),
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
     }

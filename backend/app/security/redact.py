@@ -68,3 +68,25 @@ def redact_secrets(value: Any) -> Any:
         except Exception:
             pass
     return redact_text(value)
+
+
+def contains_raw_secret(value: Any) -> bool:
+    """True when free text / nested values appear to contain raw secrets (Phase 10)."""
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if _SENSITIVE_KEY_RE.search(str(k)) and v not in (None, "", "***"):
+                return True
+            if contains_raw_secret(v):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(contains_raw_secret(v) for v in value)
+    text = str(value)
+    if not text.strip():
+        return False
+    for pat in _PATTERNS:
+        if pat.search(text):
+            return True
+    return False

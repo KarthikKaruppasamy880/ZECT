@@ -257,6 +257,41 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* Telemetry consent — Phase 11 */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6" data-testid="telemetry-consent">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Product telemetry consent</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Off by default. Enabling stores <code>telemetry_consent=true</code>. No external
+              telemetry is sent until a collector is configured.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Toggle telemetry consent"
+            onClick={async () => {
+              const current = settings.find((s) => s.key === "telemetry_consent");
+              const next = current?.value === "true" ? "false" : "true";
+              const updated = await updateSetting("telemetry_consent", next);
+              setSettings((prev) => {
+                const exists = prev.some((x) => x.key === updated.key);
+                return exists
+                  ? prev.map((x) => (x.key === updated.key ? updated : x))
+                  : [...prev, updated];
+              });
+            }}
+            className="shrink-0 ml-4"
+          >
+            {settings.find((s) => s.key === "telemetry_consent")?.value === "true" ? (
+              <ToggleRight className="h-7 w-7 text-indigo-600" />
+            ) : (
+              <ToggleLeft className="h-7 w-7 text-slate-300" />
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* Advanced — power-user surfaces */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="settings-advanced">
         <div className="flex items-center gap-2 mb-5">

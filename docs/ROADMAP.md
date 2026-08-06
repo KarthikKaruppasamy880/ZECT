@@ -1,6 +1,6 @@
 # ZECT — Roadmap (Phase 0 Audit Baseline)
 
-Status as of this audit. Work proceeds one phase at a time per the execution rules: inspect → plan → list files → state risks → wait for approval → implement → verify → report. **Phase 9 is on hold — do not implement Wazuh, osquery, Velociraptor, automatic containment, or endpoint-response workflows until explicitly unblocked.**
+Status as of this audit. Work proceeds one phase at a time per the execution rules: inspect → plan → list files → state risks → wait for approval → implement → verify → report. Phase 9 security spine is delivered; automatic containment remains disabled.
 
 Branding rule applies to every phase below: third-party projects may be used internally behind ZECT-owned adapter interfaces; never surfaced in UI, routes, DB models, public APIs, or branding; legally required attribution always preserved in `THIRD_PARTY_NOTICES.md`/dependency metadata. See TARGET_ARCHITECTURE.md for how this is encoded per-phase.
 
@@ -12,12 +12,16 @@ Branding rule applies to every phase below: third-party projects may be used int
 | 3 | Cursor-like workspace | **Done (A–E)** | `/workspace` tree+Monaco+git+terminal+Mentrix timeline+diff/hunks+inline Ask+symbols/worktrees. See `PHASE_3_EXECUTION_PLAN.md`. |
 | 4 | PR review platform | **Done (A–D)** | Schema + validate/dedupe/rank; deterministic secrets/TODO/rules; approve-before-post + Mentrix bugfix hook. See `PHASE_4_EXECUTION_PLAN.md`. |
 | 5 | Permissions/secrets/audit | **Done (A–D)** | Audit unify; grants; secret refs + redaction + diagnostics; global emergency-stop + audit hash chain. See `PHASE_5_EXECUTION_PLAN.md`. |
-| 6 | Realtime voice | **In progress (Stage A)** | Engine ~75% complete. Stage A: voice telemetry HUD (mode + latency marks). See `PHASES_6_11_STAGE_A.md`. |
-| 7 | Browser/desktop access | **In progress (Stage A)** | Browser fill verify + artifacts; file-organize dry-run/approve/hash/rollback. Computer Mode remains last-resort. |
-| 8 | Email/Slack/Calendar/Jira | **In progress (Stage A)** | Slack/email draft-before-send via `OutboundDraft`. Calendar/OAuth deferred. |
-| 9 | Security monitoring/incident response | **Done (A–D spine)** | Detection Provider + audit adapter; findings/incidents; draft→approve→Jira/Slack; signed ingest webhook; containment stubs disabled. See `PHASE_9_EXECUTION_PLAN.md`. |
-| 10 | Memory/skills/automation | **In progress (Stage A)** | Schedule trigger executes Mentrix runs with permission + idempotency. |
-| 11 | Packaging/licensing/release | **In progress (Stage A)** | `THIRD_PARTY_NOTICES.md` expanded; `docs/RELEASE.md`; `scripts/support_bundle.py`. |
+| 6 | Realtime voice | **Done (Stage A)** | Voice telemetry HUD (mode + latency marks). See `PHASES_6_11_STAGE_A.md`. |
+| 7 | Browser/desktop access | **Done (Stage A)** | Browser fill verify + artifacts; file-organize dry-run/approve/hash/rollback. |
+| 8 | Email/Slack/Calendar/Jira | **Done (Stage A)** | Slack/email draft-before-send via `OutboundDraft`. Calendar/OAuth deferred. |
+| 9 | Security monitoring/incident response | **Done (A–D spine)** | Detection Provider + findings/incidents; draft→approve→Jira/Slack; signed ingest; containment stubs disabled. |
+| 10 | Memory/skills/automation | **Done (A–B)** | Typed memory + retention/export/secret-on-write; skill approval gates; watches + due-run + max_attempts. See `PHASE_10_EXECUTION_PLAN.md`. |
+| 11 | Packaging/licensing/release | **Done (A–B)** | Notices, RELEASE, support bundle, EULA/PRIVACY/BACKUP, CSP, architecture + tool comparison. Signing deferred Stage C. |
+
+## Next decision point
+
+**Upgrade spine Stages A–B complete through Phase 11.** Remaining optional Stage C: Electron code signing / auto-update. Architecture: `docs/ARCHITECTURE_AND_WORKFLOWS.md`.
 
 ## Phase 0 exit backlog (small, concrete items surfaced by this audit — not yet actioned)
 

@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 from app.infrastructure.database import get_db
 from app.models import (
     WorkingMemory, EpisodicMemory, Lesson, Decision,
-    UserPreference, AuditLog,
+    UserPreference, AuditLog, TypedMemoryRecord, MemoryRetentionPolicy,
+    MEMORY_TYPES,
 )
+from app.security.redact import contains_raw_secret, redact_text
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -613,3 +615,205 @@ def _serialize_preference(e: UserPreference) -> dict:
         "feature_flags": e.feature_flags or {},
         "updated_at": e.updated_at.isoformat() if e.updated_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 Stage B — typed memory (Upgrade taxonomy)
+# ---------------------------------------------------------------------------
+
+class TypedMemoryCreate(BaseModel):
+    memory_type: str
+    title: str = ""
+    content: str = ""
+    source: str = "user"
+    attribution: str = ""
+    project_id: Optional[int] = None
+    user_id: Optional[int] = None
+    retention_days: Optional[int] = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class RetentionPolicyUpdate(BaseModel):
+    memory_type: str
+    retention_days: int = 90
+    user_id: Optional[int] = None
+
+
+def _serialize_typed(e: TypedMemoryRecord) -> dict:
+    return {
+        "id": e.id,
+        "memory_type": e.memory_type,
+        "title": e.title,
+        "content": e.content,
+        "source": e.source,
+        "attribution": e.attribution,
+        "project_id": e.project_id,
+        "user_id": e.user_id,
+        "retention_days": e.retention_days,
+        "metadata": e.metadata_json or {},
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+        "expires_at": e.expires_at.isoformat() if e.expires_at else None,
+    }
+
+
+@router.get("/types")
+def list_memory_types():
+    """Explicit Upgrade.md memory type taxonomy."""
+    return {"types": list(MEMORY_TYPES)}
+
+
+@router.get("/typed")
+def list_typed_memory(
+    memory_type: Optional[str] = None,
+    project_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    include_expired: bool = False,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    q = db.query(TypedMemoryRecord)
+    if memory_type:
+        q = q.filter(TypedMemoryRecord.memory_type == memory_type)
+    if project_id is not None:
+        q = q.filter(TypedMemoryRecord.project_id == project_id)
+    if user_id is not None:
+        q = q.filter(TypedMemoryRecord.user_id == user_id)
+    if not include_expired:
+        now = datetime.now(timezone.utc)
+        q = q.filter(
+            (TypedMemoryRecord.expires_at == None) | (TypedMemoryRecord.expires_at > now)  # noqa: E711
+        )
+    rows = q.order_by(TypedMemoryRecord.created_at.desc()).limit(limit).all()
+    return [_serialize_typed(r) for r in rows]
+
+
+@router.post("/typed")
+def create_typed_memory(data: TypedMemoryCreate, db: Session = Depends(get_db)):
+    if data.memory_type not in MEMORY_TYPES:
+        raise HTTPException(400, f"memory_type must be one of {list(MEMORY_TYPES)}")
+    if contains_raw_secret(data.content) or contains_raw_secret(data.metadata):
+        raise HTTPException(400, "Refusing to store raw secrets/tokens in memory")
+
+    retention = data.retention_days
+    if retention is None:
+        pol = (
+            db.query(MemoryRetentionPolicy)
+            .filter(
+                MemoryRetentionPolicy.memory_type == data.memory_type,
+                MemoryRetentionPolicy.user_id == data.user_id,
+            )
+            .first()
+        )
+        retention = pol.retention_days if pol else 90
+
+    expires_at = None
+    if retention and retention > 0:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=int(retention))
+
+    row = TypedMemoryRecord(
+        memory_type=data.memory_type,
+        title=data.title[:500],
+        content=redact_text(data.content),
+        source=data.source[:200],
+        attribution=data.attribution[:500],
+        project_id=data.project_id,
+        user_id=data.user_id,
+        retention_days=int(retention or 0),
+        metadata_json=data.metadata or {},
+        expires_at=expires_at,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _serialize_typed(row)
+
+
+@router.delete("/typed/{record_id}")
+def delete_typed_memory(record_id: int, db: Session = Depends(get_db)):
+    row = db.query(TypedMemoryRecord).filter(TypedMemoryRecord.id == record_id).first()
+    if not row:
+        raise HTTPException(404, "Typed memory record not found")
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted", "id": record_id}
+
+
+@router.get("/typed/export")
+def export_typed_memory(
+    project_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """Export typed memory (secrets already blocked on write; content redacted)."""
+    q = db.query(TypedMemoryRecord)
+    if project_id is not None:
+        q = q.filter(TypedMemoryRecord.project_id == project_id)
+    if user_id is not None:
+        q = q.filter(TypedMemoryRecord.user_id == user_id)
+    rows = q.order_by(TypedMemoryRecord.created_at.asc()).all()
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(rows),
+        "records": [_serialize_typed(r) for r in rows],
+    }
+
+
+@router.get("/retention")
+def list_retention_policies(user_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(MemoryRetentionPolicy)
+    if user_id is not None:
+        q = q.filter(MemoryRetentionPolicy.user_id == user_id)
+    rows = q.all()
+    return [
+        {
+            "id": r.id,
+            "user_id": r.user_id,
+            "memory_type": r.memory_type,
+            "retention_days": r.retention_days,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.put("/retention")
+def upsert_retention_policy(data: RetentionPolicyUpdate, db: Session = Depends(get_db)):
+    if data.memory_type not in MEMORY_TYPES:
+        raise HTTPException(400, f"memory_type must be one of {list(MEMORY_TYPES)}")
+    row = (
+        db.query(MemoryRetentionPolicy)
+        .filter(
+            MemoryRetentionPolicy.memory_type == data.memory_type,
+            MemoryRetentionPolicy.user_id == data.user_id,
+        )
+        .first()
+    )
+    if row:
+        row.retention_days = data.retention_days
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        row = MemoryRetentionPolicy(
+            user_id=data.user_id,
+            memory_type=data.memory_type,
+            retention_days=data.retention_days,
+        )
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "memory_type": row.memory_type,
+        "retention_days": row.retention_days,
+    }
+
+
+@router.post("/episodic/{entry_id}/delete")
+def delete_episode(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(EpisodicMemory).filter(EpisodicMemory.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Episode not found")
+    db.delete(entry)
+    db.commit()
+    return {"status": "deleted", "id": entry_id}

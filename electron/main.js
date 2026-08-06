@@ -212,6 +212,17 @@ function createWindow() {
     show: false,
   });
 
+  // Phase 11 Stage B — production CSP (dev keeps Vite HMR flexible)
+  if (!isDev) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      const headers = { ...details.responseHeaders };
+      headers["Content-Security-Policy"] = [
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*; media-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'",
+      ];
+      callback({ responseHeaders: headers });
+    });
+  }
+
   if (isDev) {
     loadDevUrlWithRetry(mainWindow, DEV_URL);
     // Detached DevTools + Realtime audio can destabilize the renderer; keep optional.

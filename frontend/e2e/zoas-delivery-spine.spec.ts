@@ -52,7 +52,7 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
     await page.route("**/api/mentrix/runs**", async (route) => {
       const method = route.request().method();
       const url = route.request().url();
-      if (method === "GET" && /\/runs\/\d+/.test(url)) {
+      if (method === "GET" && /\/runs\/\d+(\?|$)/.test(url)) {
         await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(run) });
         return;
       }
@@ -66,8 +66,19 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
     await expect(page.getByTestId("mentrix-spine-hint")).toContainText(/Ship here/i);
-    await expect(page.getByTestId("mentrix-run-list")).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId("mentrix-run-list").locator("button").first().click();
+    await expect(page.getByTestId("mentrix-run-9101")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("mentrix-run-9101")).toContainText("awaiting_batch_confirm");
+
+    const [getRun] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.request().method() === "GET" &&
+          /\/api\/mentrix\/runs\/9101(?:\?|$)/.test(res.url()),
+        { timeout: 15_000 },
+      ),
+      page.getByTestId("mentrix-run-9101").click(),
+    ]);
+    expect(getRun.ok()).toBeTruthy();
     await expect(page.getByTestId("mentrix-run-owns-build")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("mentrix-batch-confirm")).toBeVisible();
     const ws = page.getByTestId("mentrix-open-workspace");

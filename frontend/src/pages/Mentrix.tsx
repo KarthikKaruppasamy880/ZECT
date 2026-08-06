@@ -905,6 +905,8 @@ export default function Mentrix() {
               {runs.map((r) => (
                 <li key={r.id}>
                   <button
+                    type="button"
+                    data-testid={`mentrix-run-${r.id}`}
                     onClick={() => void openRun(r.id).catch(() => {})}
                     className="w-full text-left rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50"
                   >

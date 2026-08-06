@@ -353,6 +353,32 @@ export default function CloneVoicePanel({
             ? `Chatterbox online (${engineStatus.base_url})`
             : `Chatterbox offline (${engineStatus.base_url}) — start local engine to Test speak / Present`}
       </p>
+      {typeof window !== "undefined" &&
+        (window as unknown as { zectDesktop?: { mentrix?: { chatterboxStart?: () => Promise<unknown> } } })
+          .zectDesktop?.mentrix?.chatterboxStart && (
+        <button
+          type="button"
+          data-testid="clone-voice-chatterbox-start"
+          className={`text-[11px] px-2 py-1 rounded border ${
+            dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
+          }`}
+          onClick={async () => {
+            try {
+              await (
+                window as unknown as {
+                  zectDesktop: { mentrix: { chatterboxStart: () => Promise<unknown> } };
+                }
+              ).zectDesktop.mentrix.chatterboxStart();
+              const st = await mentrixVoiceEngineStatus();
+              setEngineStatus(st);
+            } catch {
+              /* ignore */
+            }
+          }}
+        >
+          Start local Chatterbox (Electron managed)
+        </button>
+      )}
 
       {voices.length > 0 && (
         <ul className="space-y-2" data-testid="clone-voice-list">

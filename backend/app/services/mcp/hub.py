@@ -16,7 +16,9 @@ from app.adapters import (
     email_adapter,
     filesystem,
     github,
+    gmail_adapter,
     jira,
+    notion_adapter,
     playwright_adapter,
     slack,
 )
@@ -30,6 +32,8 @@ ADAPTERS = {
     "filesystem": filesystem,
     "email": email_adapter,
     "playwright": playwright_adapter,
+    "notion": notion_adapter,
+    "gmail": gmail_adapter,
 }
 
 
@@ -129,7 +133,16 @@ def execute_tool(
     enabled = cfg.enabled if cfg else True
 
     try:
-        result = adapter.execute(tool_name, arguments, config=config, enabled=enabled)
+        if server_id == "playwright":
+            # Mentrix → BrowserRuntime → Playwright primary (no duplicate lifecycle).
+            from app.services.browser.runtime import get_browser_runtime
+
+            if tool_name == "status":
+                result = get_browser_runtime().status()
+            else:
+                result = get_browser_runtime().run(tool_name, arguments or {}, enabled=enabled)
+        else:
+            result = adapter.execute(tool_name, arguments, config=config, enabled=enabled)
         status = "success"
     except Exception as exc:  # noqa: BLE001
         result = {"error": str(exc)}

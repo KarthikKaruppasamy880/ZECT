@@ -50,6 +50,7 @@ import AgentMode from "@/pages/AgentMode";
 import LatticeGraph from "@/pages/LatticeGraph";
 import Mentrix from "@/pages/Mentrix";
 import MentrixCompanion from "@/pages/MentrixCompanion";
+import MobileCompanion from "@/pages/MobileCompanion";
 import SandboxGate from "@/pages/SandboxGate";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
@@ -184,6 +185,7 @@ export default function App() {
           <Route path="/workspace" element={<DeveloperWorkspace />} />
           <Route path="/lattice" element={<LatticeGraph />} />
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
+          <Route path="/m/companion" element={<MobileCompanion />} />
           <Route path="/sandbox" element={<SandboxGate />} />
         </Route>
       </Routes>

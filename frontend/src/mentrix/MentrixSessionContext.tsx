@@ -830,10 +830,45 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener("mentrix-wake", onDomWake);
     window.addEventListener("mentrix-spa-navigate", onSpaNav);
+
+    // Electron agent: heartbeat + poll mobile desktop-bridge queue
+    let bridgeTimer: ReturnType<typeof setInterval> | null = null;
+    if (desktop) {
+      const tickBridge = async () => {
+        try {
+          const { mentrixDesktopBridgeHeartbeat, mentrixDesktopBridgePoll, mentrixDesktopBridgeAck } =
+            await import("@/lib/api");
+          await mentrixDesktopBridgeHeartbeat();
+          const polled = await mentrixDesktopBridgePoll();
+          for (const item of polled.items || []) {
+            const cmd = item.command || {};
+            const action = String(cmd.action || "write_note");
+            let result: Record<string, unknown> = { ok: false, error: "computer_mode_off" };
+            if (computerModeRef.current && desktop.computer) {
+              result = (await desktop.computer(action, cmd)) as Record<string, unknown>;
+            } else if (!computerModeRef.current) {
+              result = {
+                ok: false,
+                error: "computer_mode_off",
+                hint: "Desktop actions require Electron + Computer Mode on.",
+              };
+            }
+            await mentrixDesktopBridgeAck(item.id, result);
+            pushLog(`Desktop bridge ${action}: ${result.ok ? "ok" : result.error || "fail"}`);
+          }
+        } catch {
+          /* ignore bridge errors */
+        }
+      };
+      void tickBridge();
+      bridgeTimer = setInterval(tickBridge, 8000);
+    }
+
     return () => {
       unsubs.forEach((u) => u());
       window.removeEventListener("mentrix-wake", onDomWake);
       window.removeEventListener("mentrix-spa-navigate", onSpaNav);
+      if (bridgeTimer) clearInterval(bridgeTimer);
     };
   }, [pushLog]);
 

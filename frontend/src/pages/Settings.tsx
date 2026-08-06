@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus } from "@/lib/api";
+import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus, mentrixPreferredName, mentrixSetPreferredName } from "@/lib/api";
 import type { Setting, ApiKeyStatus, TokenUsage, LLMKeyStatus } from "@/types";
 import { Link } from "react-router-dom";
 import {
@@ -46,6 +46,8 @@ export default function Settings() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
+  const [preferredName, setPreferredName] = useState("");
+  const [preferredSaving, setPreferredSaving] = useState(false);
 
   useEffect(() => {
     getSettings()
@@ -56,6 +58,9 @@ export default function Settings() {
       .catch(() => {});
     getLLMStatus()
       .then(setLlmStatus)
+      .catch(() => {});
+    mentrixPreferredName()
+      .then((r) => setPreferredName(r.preferred_name || ""))
       .catch(() => {});
   }, []);
 
@@ -254,6 +259,42 @@ export default function Settings() {
           >
             Manage Secrets <ArrowRight size={12} />
           </Link>
+        </div>
+      </div>
+
+      {/* Preferred name — Companion address */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6" data-testid="settings-preferred-name">
+        <h3 className="text-sm font-semibold text-slate-900 mb-1">Preferred name</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          Mentrix Companion uses this when addressing you (defaults from your email local-part).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            data-testid="preferred-name-input"
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm w-56"
+            value={preferredName}
+            onChange={(e) => setPreferredName(e.target.value)}
+            placeholder="e.g. Karthik"
+          />
+          <button
+            type="button"
+            data-testid="preferred-name-save"
+            disabled={preferredSaving}
+            onClick={async () => {
+              setPreferredSaving(true);
+              try {
+                const out = await mentrixSetPreferredName(preferredName.trim());
+                setPreferredName(out.preferred_name || preferredName.trim());
+              } catch {
+                /* ignore */
+              } finally {
+                setPreferredSaving(false);
+              }
+            }}
+            className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-900 disabled:opacity-50"
+          >
+            {preferredSaving ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
 

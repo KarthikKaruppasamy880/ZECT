@@ -67,9 +67,14 @@ export default function AgentWorkspaceShell() {
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Agent Workspace
           </p>
-          <p className="text-[11px] leading-snug text-slate-500">
-            Ask / Plan / Build / Review / Deploy are phase forms. Mentrix Delivery is the gated
-            run path (approve → PR). Developer Workspace is the IDE for editing files.
+          <p className="text-[11px] leading-snug text-slate-500" data-testid="agent-workspace-spine-hint">
+            <strong className="font-semibold text-slate-700">Ship here:</strong> Mentrix Delivery.{" "}
+            <strong className="font-semibold text-slate-700">Prep:</strong> Ask / Plan / Build forms.{" "}
+            <strong className="font-semibold text-slate-700">Edit:</strong>{" "}
+            <Link to="/workspace" className="text-teal-700 underline">
+              Developer Workspace
+            </Link>
+            . One goal → one Mentrix run — do not run classic Build in parallel.
           </p>
         </div>
         <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1">

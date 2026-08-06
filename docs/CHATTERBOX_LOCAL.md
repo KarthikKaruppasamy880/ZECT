@@ -38,3 +38,21 @@ A successful response means Present can narrate with your clone.
 Check engine status in Voice / Present UI (`GET /api/mentrix/voice/engine-status`), or when speak returns **503** with a start-local-engine message.
 
 Sample saved in ZECT DB ≠ Chatterbox online. See also [`RUNBOOK_LOCAL.md`](RUNBOOK_LOCAL.md) and Companion Voice notes in [`ZECT_OPERATOR_WORKFLOW_GUIDE.md`](ZECT_OPERATOR_WORKFLOW_GUIDE.md).
+
+## Electron managed launch (optional)
+
+ZECT does **not** ship a Chatterbox binary. Electron can optionally **start/stop a local process** you configure:
+
+```env
+CHATTERBOX_BASE_URL=http://localhost:17493
+CHATTERBOX_START_CMD=python -m your_chatterbox_server
+# or any shell command that listens on CHATTERBOX_BASE_URL
+```
+
+From the desktop app (preload):
+
+- `window.zectDesktop.mentrix.chatterboxStatus()`
+- `window.zectDesktop.mentrix.chatterboxStart()`
+- `window.zectDesktop.mentrix.chatterboxStop()`
+
+Present / Clone Voice still use `GET /api/mentrix/voice/engine-status` for health. True binary bundling is a separate later stage after managed-process is stable.

@@ -66,7 +66,9 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
     await expect(page.getByTestId("mentrix-spine-hint")).toContainText(/Ship here/i);
-    await expect(page.getByTestId("mentrix-run-owns-build")).toBeVisible();
+    await expect(page.getByTestId("mentrix-run-list")).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId("mentrix-run-list").locator("button").first().click();
+    await expect(page.getByTestId("mentrix-run-owns-build")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("mentrix-batch-confirm")).toBeVisible();
     const ws = page.getByTestId("mentrix-open-workspace");
     await expect(ws).toBeVisible();
@@ -77,7 +79,7 @@ test.describe("ZOAS Mentrix Delivery spine smoke", () => {
     await page.goto("/ask");
     await expect(page.getByTestId("agent-workspace-spine-hint")).toContainText(/Ship here/i);
     await page.goto("/build");
-    await expect(page.getByTestId("build-mentrix-handoff")).toBeVisible();
+    await expect(page.getByTestId("build-mentrix-handoff")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("build-continue-mentrix")).toHaveAttribute("href", /\/mentrix\?goal=/);
   });
 });

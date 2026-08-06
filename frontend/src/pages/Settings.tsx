@@ -18,8 +18,11 @@ import {
 } from "lucide-react";
 import {
   agentModeEnvLocked as isAgentModeEnvLocked,
+  demoModeEnvLocked as isDemoModeEnvLocked,
   isAgentModeEnabled,
+  isDemoModeEnabled,
   setAgentModeEnabled,
+  setDemoModeEnabled,
 } from "@/lib/featureFlags";
 
 export default function Settings() {
@@ -27,6 +30,8 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [agentModeEnabled, setAgentModeEnabledState] = useState(() => isAgentModeEnabled());
   const agentModeLocked = isAgentModeEnvLocked();
+  const [demoModeEnabled, setDemoModeEnabledState] = useState(() => isDemoModeEnabled());
+  const demoModeLocked = isDemoModeEnvLocked();
 
   // API Key Modal
   const [showApiModal, setShowApiModal] = useState(false);
@@ -297,6 +302,38 @@ export default function Settings() {
         <div className="flex items-center gap-2 mb-5">
           <SettingsIcon className="h-5 w-5 text-slate-400" />
           <h2 className="text-sm font-semibold text-slate-700">Advanced</h2>
+        </div>
+        <div className="flex items-center justify-between py-2 border-t border-slate-100 mt-3 pt-3">
+          <div>
+            <p className="text-sm font-medium text-slate-900">Demo Mode</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Slim sidebar for team demos: Project → Developer Workspace → Lattice/Blueprint/Index →
+              Mentrix. Hides Labs/Enterprise/Quality extras. See docs/DEMO.md.
+              {demoModeLocked && (
+                <span className="block mt-1 text-amber-700">
+                  Locked by VITE_DEMO_MODE in the environment.
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="settings-demo-mode-toggle"
+            disabled={demoModeLocked}
+            onClick={() => {
+              const next = !demoModeEnabled;
+              setDemoModeEnabled(next);
+              setDemoModeEnabledState(next);
+            }}
+            className="shrink-0 ml-4 disabled:opacity-40"
+            aria-label="Toggle Demo Mode"
+          >
+            {demoModeEnabled ? (
+              <ToggleRight className="h-7 w-7 text-teal-600" />
+            ) : (
+              <ToggleLeft className="h-7 w-7 text-slate-300" />
+            )}
+          </button>
         </div>
         <div className="flex items-center justify-between py-2">
           <div>

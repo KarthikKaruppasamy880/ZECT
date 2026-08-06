@@ -22,6 +22,7 @@ import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/Works
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
+  fileList,
   fileRead,
   fileTree,
   fileWrite,
@@ -39,7 +40,52 @@ type TreeNode = {
   path: string;
   is_dir: boolean;
   children?: TreeNode[];
+  /** True after we attempted a list fetch (even if empty). */
+  childrenLoaded?: boolean;
 };
+
+function normalizeTreeNodes(nodes: unknown[]): TreeNode[] {
+  if (!Array.isArray(nodes)) return [];
+  return nodes.map((raw) => {
+    const n = raw as Record<string, unknown>;
+    const path = normalizePath(String(n.path || ""));
+    const isDir = Boolean(n.is_dir);
+    const childrenRaw = n.children;
+    const children = Array.isArray(childrenRaw) ? normalizeTreeNodes(childrenRaw) : undefined;
+    return {
+      name: String(n.name || path.split("/").pop() || path),
+      path,
+      is_dir: isDir,
+      children,
+      childrenLoaded: isDir ? Array.isArray(childrenRaw) : undefined,
+    };
+  });
+}
+
+function upsertChildren(nodes: TreeNode[], dirPath: string, children: TreeNode[]): TreeNode[] {
+  const target = normalizePath(dirPath);
+  return nodes.map((node) => {
+    if (normalizePath(node.path) === target) {
+      return { ...node, children, childrenLoaded: true };
+    }
+    if (node.children?.length) {
+      return { ...node, children: upsertChildren(node.children, target, children) };
+    }
+    return node;
+  });
+}
+
+function findNode(nodes: TreeNode[], path: string): TreeNode | null {
+  const target = normalizePath(path);
+  for (const node of nodes) {
+    if (normalizePath(node.path) === target) return node;
+    if (node.children?.length) {
+      const hit = findNode(node.children, target);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
 
 function countGitChanges(st: Record<string, unknown> | null | undefined): number {
   if (!st) return 0;
@@ -72,6 +118,8 @@ export default function DeveloperWorkspace() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
+  const [browsingDir, setBrowsingDir] = useState<string>("");
+  const [loadingDir, setLoadingDir] = useState(false);
   const [content, setContent] = useState("");
   const [baseline, setBaseline] = useState("");
   const [loadingTree, setLoadingTree] = useState(false);
@@ -94,6 +142,9 @@ export default function DeveloperWorkspace() {
   const sideOpen = showDiff || showInline;
   const currentWorktree = worktrees.find((w) => w.is_current) || worktrees[0];
   const isLinkedWorktree = worktrees.length > 1;
+  const rootNorm = rootPath ? normalizePath(rootPath) : "";
+  const browsingNode = browsingDir ? findNode(tree, browsingDir) : null;
+  const browsingChildren = browsingNode?.children || [];
 
   const refreshGit = useCallback(async (root: string) => {
     if (!root) return;
@@ -133,9 +184,14 @@ export default function DeveloperWorkspace() {
     setLoadingTree(true);
     setError("");
     try {
-      const nodes = await fileTree(rootPath, 4);
-      setTree(Array.isArray(nodes) ? nodes : []);
-      setExpanded(new Set([rootPath.replace(/\\/g, "/")]));
+      const nodes = await fileTree(rootPath, 5);
+      const normalized = normalizeTreeNodes(Array.isArray(nodes) ? nodes : []);
+      setTree(normalized);
+      setExpanded(new Set([normalizePath(rootPath)]));
+      setBrowsingDir("");
+      setSelectedPath("");
+      setContent("");
+      setBaseline("");
       await Promise.all([refreshGit(rootPath), refreshAgentMarkers()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load tree");
@@ -149,17 +205,39 @@ export default function DeveloperWorkspace() {
     void loadTree();
   }, [loadTree]);
 
+  const loadDirChildren = useCallback(async (dirPath: string): Promise<TreeNode[]> => {
+    const norm = normalizePath(dirPath);
+    setLoadingDir(true);
+    setError("");
+    try {
+      const listed = await fileList(dirPath);
+      const children = normalizeTreeNodes(Array.isArray(listed) ? listed : []).map((c) =>
+        c.is_dir ? { ...c, children: [], childrenLoaded: false } : { ...c, childrenLoaded: undefined },
+      );
+      setTree((prev) => upsertChildren(prev, norm, children));
+      return children;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to list directory");
+      setTree((prev) => upsertChildren(prev, norm, []));
+      return [];
+    } finally {
+      setLoadingDir(false);
+    }
+  }, []);
+
   const openFile = async (path: string, line?: number) => {
-    if (!rootPath || !isPathInsideRoot(path, rootPath)) {
+    const norm = normalizePath(path);
+    if (!rootPath || !isPathInsideRoot(norm, rootPath)) {
       setError("File is outside the active workspace root");
       return;
     }
+    setBrowsingDir("");
     setLoadingFile(true);
     setError("");
     try {
       const file = await fileRead(path);
       const text = typeof file?.content === "string" ? file.content : "";
-      setSelectedPath(path);
+      setSelectedPath(norm);
       setContent(text);
       setBaseline(text);
       setSelection(null);
@@ -169,6 +247,17 @@ export default function DeveloperWorkspace() {
     } finally {
       setLoadingFile(false);
     }
+  };
+
+  const openDirectory = async (path: string) => {
+    const norm = normalizePath(path);
+    setSelectedPath("");
+    setContent("");
+    setBaseline("");
+    setRevealLine(null);
+    setBrowsingDir(norm);
+    setExpanded((prev) => new Set(prev).add(norm));
+    await loadDirChildren(path);
   };
 
   const jumpToSymbol = (target: SymbolJumpTarget) => {
@@ -229,38 +318,76 @@ export default function DeveloperWorkspace() {
   };
 
   const toggleDir = (path: string) => {
+    const norm = normalizePath(path);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      if (next.has(norm)) {
+        next.delete(norm);
+        return next;
+      }
+      next.add(norm);
       return next;
     });
+    // Always refresh children when expanding — depth-limited tree often has empty children.
+    void loadDirChildren(path);
+  };
+
+  const onDirClick = (path: string) => {
+    void openDirectory(path);
   };
 
   const renderTree = (nodes: TreeNode[], depth = 0): ReactNode =>
     nodes.map((node) => {
-      const path = node.path;
+      const path = normalizePath(node.path);
       const isOpen = expanded.has(path);
       if (node.is_dir) {
+        const childCount = node.children?.length;
         return (
           <div key={path}>
             <button
               type="button"
-              className="w-full flex items-center gap-1 px-2 py-1 text-left text-xs text-slate-700 hover:bg-slate-100"
+              className={`w-full flex items-center gap-1 px-2 py-1 text-left text-xs hover:bg-slate-100 ${
+                browsingDir === path ? "bg-sky-50 text-sky-900 font-medium" : "text-slate-700"
+              }`}
               style={{ paddingLeft: 8 + depth * 12 }}
-              onClick={() => toggleDir(path)}
+              onClick={() => onDirClick(node.path)}
+              onDoubleClick={() => toggleDir(node.path)}
               data-testid={`workspace-dir-${node.name}`}
+              title="Click to browse · double-click to expand/collapse"
             >
-              {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              <Folder className="h-3.5 w-3.5 text-amber-600" />
+              <span
+                className="shrink-0 p-0.5"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleDir(node.path);
+                }}
+              >
+                {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              </span>
+              <Folder className="h-3.5 w-3.5 text-amber-600 shrink-0" />
               <span className="truncate">{node.name}</span>
+              {typeof childCount === "number" && node.childrenLoaded ? (
+                <span className="ml-auto text-[10px] text-slate-400">{childCount}</span>
+              ) : null}
             </button>
-            {isOpen && node.children?.length ? renderTree(node.children, depth + 1) : null}
+            {isOpen ? (
+              node.children && node.children.length > 0 ? (
+                renderTree(node.children, depth + 1)
+              ) : node.childrenLoaded ? (
+                <p className="px-2 py-1 text-[10px] text-slate-400" style={{ paddingLeft: 20 + depth * 12 }}>
+                  Empty folder
+                </p>
+              ) : loadingDir && browsingDir === path ? (
+                <p className="px-2 py-1 text-[10px] text-slate-400" style={{ paddingLeft: 20 + depth * 12 }}>
+                  Loading…
+                </p>
+              ) : null
+            ) : null}
           </div>
         );
       }
-      const isGit = pathMatchesMarker(path, rootPath, gitChanged);
-      const isAgent = pathMatchesMarker(path, rootPath, agentFiles);
+      const isGit = pathMatchesMarker(path, rootNorm || rootPath, gitChanged);
+      const isAgent = pathMatchesMarker(path, rootNorm || rootPath, agentFiles);
       return (
         <button
           key={path}
@@ -269,7 +396,7 @@ export default function DeveloperWorkspace() {
             selectedPath === path ? "bg-teal-50 text-teal-900 font-medium" : "text-slate-700"
           }`}
           style={{ paddingLeft: 8 + depth * 12 }}
-          onClick={() => void openFile(path)}
+          onClick={() => void openFile(node.path)}
           data-testid={`workspace-file-${node.name}`}
           title={[isAgent ? "agent-written" : "", isGit ? "git-changed" : ""].filter(Boolean).join(" · ") || undefined}
         >
@@ -455,9 +582,9 @@ export default function DeveloperWorkspace() {
               </div>
               <div className={`flex-1 min-h-0 ${sideOpen ? "grid grid-cols-1 xl:grid-cols-2 gap-2" : ""}`}>
                 <div className="min-h-[200px] h-full">
-                  {loadingFile ? (
+                  {loadingFile || (loadingDir && browsingDir && !selectedPath) ? (
                     <div className="h-full flex items-center justify-center text-sm text-slate-500 gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Opening…
+                      <Loader2 className="h-4 w-4 animate-spin" /> {loadingFile ? "Opening…" : "Listing folder…"}
                     </div>
                   ) : selectedPath ? (
                     <MonacoCodeEditor
@@ -468,9 +595,49 @@ export default function DeveloperWorkspace() {
                       onChange={setContent}
                       onSelectionChange={setSelection}
                     />
+                  ) : browsingDir ? (
+                    <div
+                      className="h-full rounded-lg border border-slate-200 bg-white overflow-auto p-4"
+                      data-testid="workspace-dir-pane"
+                    >
+                      <p className="text-sm font-semibold text-slate-900 mb-1">Folder</p>
+                      <p className="font-mono text-xs text-slate-500 mb-3 break-all">{browsingDir}</p>
+                      <p className="text-xs text-slate-600 mb-3">
+                        {browsingChildren.length} item{browsingChildren.length === 1 ? "" : "s"} — click a file to
+                        open in the editor.
+                      </p>
+                      <ul className="space-y-1">
+                        {browsingChildren.map((child) => (
+                          <li key={normalizePath(child.path)}>
+                            <button
+                              type="button"
+                              className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-800 hover:bg-slate-50"
+                              onClick={() =>
+                                child.is_dir ? void openDirectory(child.path) : void openFile(child.path)
+                              }
+                              data-testid={
+                                child.is_dir
+                                  ? `workspace-dir-pane-dir-${child.name}`
+                                  : `workspace-dir-pane-file-${child.name}`
+                              }
+                            >
+                              {child.is_dir ? (
+                                <Folder className="h-4 w-4 text-amber-600" />
+                              ) : (
+                                <File className="h-4 w-4 text-slate-500" />
+                              )}
+                              <span className="truncate">{child.name}</span>
+                            </button>
+                          </li>
+                        ))}
+                        {!browsingChildren.length && !loadingDir ? (
+                          <li className="text-xs text-slate-500">Empty folder</li>
+                        ) : null}
+                      </ul>
+                    </div>
                   ) : (
                     <div className="h-full rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center text-sm text-slate-500">
-                      Open a file from the tree to edit in Monaco.
+                      Open a folder or file from the tree to browse or edit.
                     </div>
                   )}
                 </div>

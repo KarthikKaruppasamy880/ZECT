@@ -41,20 +41,22 @@ import {
   HardDrive,
   PanelLeft,
   Bot,
+  Rocket,
   Network,
   FlaskConical,
   Box,
   AlertTriangle,
   StickyNote,
 } from "lucide-react";
-import { isAgentModeEnabled } from "@/lib/featureFlags";
+import { isAgentModeEnabled, isDemoModeEnabled } from "@/lib/featureFlags";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 const workflowItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
   { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: AlertTriangle },
-  { href: "/mentrix", label: "Agent Workspace", icon: Bot },
+  { href: "/ask", label: "Agent Workspace", icon: Bot },
+  { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
 ];
 
 const workspaceItems: NavItem[] = [
@@ -72,6 +74,26 @@ const understandItems: NavItem[] = [
   { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
   { href: "/code-index", label: "Code Index", icon: Code2 },
   { href: "/docs", label: "Docs Center", icon: FileText },
+];
+
+/** Slim Understand set for Demo Mode team presentations. */
+const understandItemsDemo: NavItem[] = [
+  { href: "/lattice", label: "Lattice Graph", icon: Network },
+  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
+  { href: "/code-index", label: "Code Index", icon: Code2 },
+];
+
+const workspaceItemsDemo: NavItem[] = [
+  { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/workspace", label: "Developer Workspace", icon: PanelLeft },
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
+];
+
+const workflowItemsDemo: NavItem[] = [
+  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
+  { href: "/ask", label: "Agent Workspace", icon: Bot },
+  { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
 ];
 
 /** Ask/Plan/Build/Review/Deploy live in the Agent Workspace rail — not duplicated here. */
@@ -146,13 +168,17 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
+  const [demoModeOn, setDemoModeOn] = useState(() => isDemoModeEnabled());
 
   useEffect(() => {
     onMobileClose();
   }, [location.pathname]);
 
   useEffect(() => {
-    const sync = () => setAgentModeOn(isAgentModeEnabled());
+    const sync = () => {
+      setAgentModeOn(isAgentModeEnabled());
+      setDemoModeOn(isDemoModeEnabled());
+    };
     window.addEventListener("zect-feature-flags", sync);
     window.addEventListener("storage", sync);
     return () => {
@@ -161,7 +187,7 @@ export default function Sidebar({
     };
   }, []);
 
-  const navSections = sections.map((section) =>
+  const fullSections = sections.map((section) =>
     section.title === "Deliver"
       ? {
           ...section,
@@ -169,6 +195,14 @@ export default function Sidebar({
         }
       : section,
   );
+
+  const demoSections: { title: string; items: NavItem[] }[] = [
+    { title: "Workflow", items: workflowItemsDemo },
+    { title: "Workspace", items: workspaceItemsDemo },
+    { title: "Understand", items: understandItemsDemo },
+  ];
+
+  const navSections = demoModeOn ? demoSections : fullSections;
 
   const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
     <div key={title}>
@@ -261,6 +295,11 @@ export default function Sidebar({
       <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>
         {!collapsed && (
           <>
+            {demoModeOn && (
+              <p className="mb-2 rounded bg-teal-900/40 px-2 py-1 text-[10px] font-medium text-teal-300" data-testid="sidebar-demo-mode">
+                Demo Mode — slim nav (Settings to exit)
+              </p>
+            )}
             <p className="text-xs text-slate-500">Say “Hey Mentrix”</p>
             <p className="text-xs text-slate-600">Desktop wake phrase</p>
           </>

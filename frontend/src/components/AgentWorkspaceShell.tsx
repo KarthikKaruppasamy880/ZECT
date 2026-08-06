@@ -67,9 +67,9 @@ export default function AgentWorkspaceShell() {
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Agent Workspace
           </p>
-          <p className="mt-1 text-[11px] leading-snug text-slate-500">
-            Shared Agent Workspace — Ask, Plan, Build, Review, and Deploy are modes of this shell;
-            Mentrix Delivery is the primary run path.
+          <p className="text-[11px] leading-snug text-slate-500">
+            Ask / Plan / Build / Review / Deploy are phase forms. Mentrix Delivery is the gated
+            run path (approve → PR). Developer Workspace is the IDE for editing files.
           </p>
         </div>
         <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1">

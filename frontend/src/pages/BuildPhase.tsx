@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   Wrench,
   ArrowUpRight,
+  FolderGit2,
 } from "lucide-react";
 
 export default function BuildPhase() {

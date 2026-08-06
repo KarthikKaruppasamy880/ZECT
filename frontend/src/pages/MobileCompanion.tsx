@@ -1,4 +1,4 @@
-"""Thin mobile Companion client — chat + desktop command enqueue."""
+/** Thin mobile Companion client — chat + desktop command enqueue. */
 
 import { useEffect, useState } from "react";
 import {

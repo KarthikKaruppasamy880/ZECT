@@ -27,7 +27,43 @@ let lastStatus = {
 };
 
 function baseUrl() {
-  return (process.env.CHATTERBOX_BASE_URL || "http://127.0.0.1:17493").replace(/\/$/, "");
+  let u = (process.env.CHATTERBOX_BASE_URL || "http://127.0.0.1:17493").replace(/\/$/, "");
+  // Windows: localhost → ::1 often misses engines bound to 127.0.0.1 only.
+  u = u.replace(/:\/\/localhost(?=:|\/|$)/i, "://127.0.0.1");
+  return u;
+}
+
+function zectVoiceboxDir() {
+  // electron/ → repo root → services/zect-voicebox
+  return path.join(__dirname, "..", "services", "zect-voicebox");
+}
+
+function defaultZectVoiceboxCmd() {
+  const dir = zectVoiceboxDir();
+  if (!fs.existsSync(path.join(dir, "app", "main.py"))) return null;
+  return {
+    mode: "cmd",
+    path: "python -m uvicorn app.main:app --host 127.0.0.1 --port 17493",
+    cwd: dir,
+    bundled: false,
+    zectVoicebox: true,
+  };
+}
+
+function resolveLaunch() {
+  const explicit = (process.env.CHATTERBOX_BIN || "").trim();
+  if (explicit && fs.existsSync(explicit)) {
+    return { mode: "bin", path: explicit, bundled: false };
+  }
+  const bundled = findBundledBinary();
+  if (bundled) {
+    return { mode: "bin", path: bundled.path, bundled: true };
+  }
+  const cmd = (process.env.CHATTERBOX_START_CMD || "").trim();
+  if (cmd) {
+    return { mode: "cmd", path: cmd, cwd: process.env.CHATTERBOX_START_CWD || "", bundled: false };
+  }
+  return defaultZectVoiceboxCmd();
 }
 
 function chatterboxRootCandidates() {
@@ -93,22 +129,6 @@ function findBundledBinary() {
   return null;
 }
 
-function resolveLaunch() {
-  const explicit = (process.env.CHATTERBOX_BIN || "").trim();
-  if (explicit && fs.existsSync(explicit)) {
-    return { mode: "bin", path: explicit, bundled: false };
-  }
-  const bundled = findBundledBinary();
-  if (bundled) {
-    return { mode: "bin", path: bundled.path, bundled: true };
-  }
-  const cmd = (process.env.CHATTERBOX_START_CMD || "").trim();
-  if (cmd) {
-    return { mode: "cmd", path: cmd, bundled: false };
-  }
-  return null;
-}
-
 function healthCheck() {
   const url = `${baseUrl()}/profiles`;
   return new Promise((resolve) => {
@@ -145,10 +165,14 @@ async function status() {
     hint: health.online
       ? bundled
         ? "Bundled Chatterbox answering /profiles"
-        : "Chatterbox answering /profiles"
+        : launch && launch.zectVoicebox
+          ? "ZECT Voicebox answering /profiles"
+          : "Chatterbox answering /profiles"
       : bundled
         ? "Bundled binary found — click Start (or enable CHATTERBOX_AUTO_START)"
-        : "Offline — drop binary in resources/chatterbox/bin, set CHATTERBOX_BIN, or CHATTERBOX_START_CMD",
+        : launch && launch.zectVoicebox
+          ? "Offline — click Start to launch ZECT Voicebox (uvicorn on 127.0.0.1:17493)"
+          : "Offline — drop binary in resources/chatterbox/bin, set CHATTERBOX_BIN, or CHATTERBOX_START_CMD",
   };
 }
 
@@ -187,7 +211,7 @@ function start() {
       pid: null,
       baseUrl: baseUrl(),
       error:
-        "No Chatterbox binary — place engine in resources/chatterbox/bin, or set CHATTERBOX_BIN / CHATTERBOX_START_CMD",
+        "No Chatterbox launch path — place engine in resources/chatterbox/bin, set CHATTERBOX_BIN / CHATTERBOX_START_CMD, or keep services/zect-voicebox in the repo",
       bundled: false,
       binaryPath: "",
     };
@@ -201,28 +225,34 @@ function start() {
       baseUrl: baseUrl(),
       bundled: launch.bundled,
       binaryPath: launch.mode === "bin" ? launch.path : "",
+      zectVoicebox: Boolean(launch.zectVoicebox),
     };
   }
   try {
+    const childEnv = {
+      ...process.env,
+      CHATTERBOX_BASE_URL: baseUrl(),
+      PORT: "17493",
+      ZECT_VOICEBOX_UPSTREAM_URL:
+        process.env.ZECT_VOICEBOX_UPSTREAM_URL || "http://127.0.0.1:17494",
+      ZECT_VOICEBOX_BACKEND: process.env.ZECT_VOICEBOX_BACKEND || "upstream",
+    };
     if (launch.mode === "bin") {
       child = spawn(launch.path, [], {
         cwd: path.dirname(launch.path),
         detached: process.platform !== "win32",
         stdio: "ignore",
         windowsHide: true,
-        env: {
-          ...process.env,
-          CHATTERBOX_BASE_URL: baseUrl(),
-          PORT: "17493",
-        },
+        env: childEnv,
       });
     } else {
       child = spawn(launch.path, {
         shell: true,
+        cwd: launch.cwd || undefined,
         detached: process.platform !== "win32",
         stdio: "ignore",
         windowsHide: true,
-        env: { ...process.env, CHATTERBOX_BASE_URL: baseUrl() },
+        env: childEnv,
       });
     }
     child.unref?.();
@@ -236,8 +266,9 @@ function start() {
       pid: child.pid,
       baseUrl: baseUrl(),
       error: "",
-      bundled: launch.bundled,
+      bundled: Boolean(launch.bundled),
       binaryPath: launch.mode === "bin" ? launch.path : "",
+      zectVoicebox: Boolean(launch.zectVoicebox),
     };
     return { ok: true, ...lastStatus };
   } catch (err) {
@@ -246,7 +277,7 @@ function start() {
       pid: null,
       baseUrl: baseUrl(),
       error: String(err && err.message ? err.message : err),
-      bundled: launch.bundled,
+      bundled: Boolean(launch.bundled),
       binaryPath: launch.mode === "bin" ? launch.path : "",
     };
     return { ok: false, ...lastStatus };

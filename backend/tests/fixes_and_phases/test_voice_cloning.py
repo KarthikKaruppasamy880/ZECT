@@ -571,14 +571,12 @@ class TestVoiceCloneEndpoints:
         monkeypatch.setattr(
             "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
         )
-        monkeypatch.setattr(
-            "app.adapters.llm.chatterbox_client.CHATTERBOX_BASE_URL",
-            "http://localhost:17493",
-        )
+        # localhost must normalize to 127.0.0.1 (Windows IPv6 localhost trap).
+        monkeypatch.setenv("CHATTERBOX_BASE_URL", "http://localhost:17493")
 
         out = engine_status(current_user=USER, db=db)
         assert out["online"] is True
-        assert out["base_url"] == "http://localhost:17493"
+        assert out["base_url"] == "http://127.0.0.1:17493"
         assert out["default_voice"]["name"] == "Me"
         assert "online" in out["hint"].lower() or "Present" in out["hint"]
 

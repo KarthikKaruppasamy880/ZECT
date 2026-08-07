@@ -81,7 +81,7 @@ export default function CloneVoicePanel({
           if (!cancelled) {
             setEngineStatus({
               online: false,
-              base_url: "http://localhost:17493",
+              base_url: "http://127.0.0.1:17493",
               default_voice: null,
               hint: "Could not reach ZECT API for engine status.",
             });
@@ -392,7 +392,7 @@ export default function CloneVoicePanel({
       {typeof window !== "undefined" &&
         (window as unknown as { zectDesktop?: { mentrix?: { chatterboxStart?: () => Promise<unknown> } } })
           .zectDesktop?.mentrix?.chatterboxStart && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           <button
             type="button"
             data-testid="clone-voice-chatterbox-start"
@@ -400,17 +400,60 @@ export default function CloneVoicePanel({
               dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
             }`}
             onClick={async () => {
+              setError("");
+              setStatus("Starting ZECT Voicebox / Chatterbox…");
               try {
-                await (
+                const raw = await (
                   window as unknown as {
-                    zectDesktop: { mentrix: { chatterboxStart: () => Promise<unknown> } };
+                    zectDesktop: {
+                      mentrix: {
+                        chatterboxStart: () => Promise<{
+                          ok?: boolean;
+                          error?: string;
+                          already?: boolean;
+                          zectVoicebox?: boolean;
+                        }>;
+                      };
+                    };
                   }
                 ).zectDesktop.mentrix.chatterboxStart();
-                await new Promise((r) => setTimeout(r, 1500));
-                const st = await mentrixVoiceEngineStatus();
-                setEngineStatus(st);
-              } catch {
-                /* ignore */
+                if (raw && raw.ok === false) {
+                  setError(
+                    raw.error ||
+                      "Start failed — no binary and ZECT Voicebox could not launch. See docs/ZECT_VOICEBOX.md",
+                  );
+                  setStatus("");
+                  return;
+                }
+                if (raw?.already) {
+                  setStatus("Engine process already running — checking health…");
+                } else if (raw?.zectVoicebox) {
+                  setStatus("Started ZECT Voicebox — waiting for /profiles…");
+                } else {
+                  setStatus("Engine start requested — waiting for /profiles…");
+                }
+                let online = false;
+                for (let i = 0; i < 10; i++) {
+                  await new Promise((r) => setTimeout(r, 800));
+                  const st = await mentrixVoiceEngineStatus();
+                  setEngineStatus(st);
+                  if (st.online) {
+                    online = true;
+                    break;
+                  }
+                }
+                if (online) {
+                  setStatus("Chatterbox online — Test speak unlocked.");
+                  setError("");
+                } else {
+                  setError(
+                    "Engine started but Mentrix still sees offline. Confirm CHATTERBOX_BASE_URL=http://127.0.0.1:17493 and restart the ZECT API.",
+                  );
+                  setStatus("");
+                }
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Start Chatterbox failed");
+                setStatus("");
               }
             }}
           >
@@ -423,6 +466,7 @@ export default function CloneVoicePanel({
               dark ? "border-slate-600 text-slate-200" : "border-slate-300 text-slate-700"
             }`}
             onClick={async () => {
+              setError("");
               try {
                 await (
                   window as unknown as {
@@ -431,8 +475,9 @@ export default function CloneVoicePanel({
                 ).zectDesktop.mentrix.chatterboxStop();
                 const st = await mentrixVoiceEngineStatus();
                 setEngineStatus(st);
-              } catch {
-                /* ignore */
+                setStatus(st.online ? "Stop requested (engine still answering)." : "Engine stopped.");
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Stop failed");
               }
             }}
           >

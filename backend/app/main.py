@@ -7,8 +7,9 @@ from dotenv import load_dotenv
 import traceback
 
 # Load backend/.env regardless of process cwd (fixes auth/env when uvicorn cwd differs).
+# override=True so CHATTERBOX_BASE_URL from .env wins over stale shell localhost values.
 _backend_root = Path(__file__).resolve().parents[1]
-load_dotenv(_backend_root / ".env")
+load_dotenv(_backend_root / ".env", override=True)
 
 # Initialize encryption vault (must be before other imports that use secrets)
 from app.security.vault import vault

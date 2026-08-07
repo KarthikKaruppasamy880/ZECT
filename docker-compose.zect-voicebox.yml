@@ -5,11 +5,16 @@
 # Prereq: clone upstream once:
 #   powershell -File services/zect-voicebox/scripts/clone-upstream.ps1
 #
-# Then:
-#   docker compose -f docker-compose.zect-voicebox.yml up -d --build
+# Mentrix online only (no heavy upstream ML build):
+#   docker compose -f docker-compose.zect-voicebox.yml up -d --build zect-voicebox
+#
+# Full stack:
+#   docker compose -f docker-compose.zect-voicebox.yml --profile full up -d --build
+#   (set ZECT_VOICEBOX_UPSTREAM_URL=http://voicebox-upstream:17493 — up.ps1 does this)
 
 services:
   voicebox-upstream:
+    profiles: ["full"]
     build:
       context: ./third_party/voicebox
     container_name: zect-voicebox-upstream
@@ -32,12 +37,12 @@ services:
     environment:
       - ZECT_VOICEBOX_PORT=17493
       - ZECT_VOICEBOX_BACKEND=upstream
-      - ZECT_VOICEBOX_UPSTREAM_URL=http://voicebox-upstream:17493
+      - ZECT_VOICEBOX_UPSTREAM_URL=${ZECT_VOICEBOX_UPSTREAM_URL:-http://host.docker.internal:17494}
       - ZECT_VOICEBOX_DATA_DIR=/data
     volumes:
       - zect-voicebox-data:/data
-    depends_on:
-      - voicebox-upstream
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   voicebox-upstream-data:

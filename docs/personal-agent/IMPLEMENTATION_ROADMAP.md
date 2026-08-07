@@ -12,9 +12,10 @@ Branch pattern: `feature/personal-agent-pa-N-short-name`.
 
 ---
 
-## PA-1 — Shared command and policy foundation (next)
+## PA-1 — Shared command and policy foundation
 
-**Goal:** Unify typed + spoken companion tools behind one orchestration and policy path. **No new desktop automation features.**
+**Goal:** Unify typed + spoken companion tools behind one orchestration and policy path. **No new desktop automation features.**  
+**Status:** implemented (`feature/personal-agent-pa-1-coding-desktop-spine`). Flag `MENTRIX_PA1_ORCHESTRATOR` (default on).
 
 ### Scope
 

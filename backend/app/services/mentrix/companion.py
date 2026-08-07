@@ -681,7 +681,14 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
 
 
 def _exec_tool(
-    db: Session, name: str, args: dict, project_key: str = "", created_by: str = "", user_id: int | None = None
+    db: Session,
+    name: str,
+    args: dict,
+    project_key: str = "",
+    created_by: str = "",
+    user_id: int | None = None,
+    project_id: int | None = None,
+    correlation_id: str = "",
 ) -> dict[str, Any]:
     if name == "navigate":
         return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
@@ -1320,26 +1327,66 @@ def _exec_tool(
             "board": {"type": "note", "title": "Note saved", "body": note.get("text") or "", "data": note},
         }
     if name == "start_delivery":
-        from app.services.forge_loop.orchestrator import MODE_PIPELINE, run_mentrix
+        # Same path as POST /api/mentrix/runs — background worker + coding-engine slice
+        import threading
+
+        from app.services.forge_loop.orchestrator import MODE_PIPELINE
+        from app.workers.mentrix_worker import run_mentrix_in_background
 
         goal = (args.get("goal") or "Mentrix Delivery").strip()
         mode = args.get("mode") or "upgrade"
         if mode not in MODE_PIPELINE:
             mode = "upgrade" if "upgrade" in MODE_PIPELINE else "chat"
-        run = run_mentrix(
-            db,
-            goal=goal,
+        pk = project_key or args.get("project_key") or ""
+        workspace = args.get("workspace") or ""
+        run = MentrixRun(
+            project_id=project_id,
             mode=mode,
-            project_key=project_key or args.get("project_key") or "",
+            goal=goal,
+            status="running",
+            current_agent="orchestrator",
+            events_json="[]",
+            gates_json="{}",
+            result_json=json.dumps(
+                {
+                    "context": {
+                        "project_key": pk,
+                        "workspace": workspace,
+                        "source": "companion",
+                        "correlation_id": correlation_id or "",
+                    }
+                }
+            ),
+            next_step="",
             created_by=created_by or "mentrix-companion",
-            workspace=args.get("workspace") or "",
         )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        threading.Thread(
+            target=run_mentrix_in_background,
+            kwargs={
+                "run_id": run.id,
+                "goal": goal,
+                "mode": mode,
+                "project_key": pk,
+                "project_id": project_id,
+                "created_by": created_by or "mentrix-companion",
+                "workspace": workspace,
+                "source_lang": args.get("source_lang") or "",
+                "target_lang": args.get("target_lang") or "",
+                "repo_id": args.get("repo_id"),
+            },
+            daemon=True,
+            name=f"mentrix-companion-run-{run.id}",
+        ).start()
         gates = json.loads(run.gates_json or "{}")
         return {
             "ok": True,
             "run_id": run.id,
             "status": run.status,
             "navigate": "/mentrix",
+            "via": "coding_engine_bridge",
             "board": {
                 "type": "mermaid",
                 "title": f"Delivery workflow #{run.id}",
@@ -1348,7 +1395,7 @@ def _exec_tool(
             "board_progress": {
                 "type": "progress",
                 "title": f"Run #{run.id}",
-                "data": {"status": run.status, "next_step": run.next_step or "", "percent": 35},
+                "data": {"status": run.status, "next_step": run.next_step or "", "percent": 10},
             },
         }
     if name in ("approve_delivery", "create_pr"):
@@ -1425,11 +1472,9 @@ def _exec_tool(
             return {"ok": False, "error": "path_blocked_default_deny", "path": path}
         return {"ok": True, "path": path, "desktop": "desktop_read"}
     if name in ("desktop_delete", "delete_file"):
-        return {
-            "ok": False,
-            "error": "delete_never_allowed",
-            "note": "Mentrix never deletes files. Create/read only.",
-        }
+        from app.services.mentrix.no_delete_policy import refuse_delete
+
+        return refuse_delete(intent=name)
     if name == "desktop_write_note":
         content = str(args.get("content") or "")
         if not content.strip():
@@ -1573,44 +1618,102 @@ def iter_companion_events(
     navigations: list[str] = []
     run_id: int | None = None
 
+    from app.services.mentrix.orchestrator import MentrixOrchestrator, pa1_orchestrator_enabled
+
+    orch = MentrixOrchestrator() if pa1_orchestrator_enabled() else None
+
     for intent in intents[:_MAX_TOOLS]:
         name = intent["name"]
         args = intent.get("args") or {}
         yield {"event": "tool_start", "turn_id": tid, "data": {"tool": name, "args": {k: v for k, v in args.items() if "password" not in k.lower() and "token" not in k.lower()}}}
 
-        perm = check_tool_permission(
-            db,
-            name,
-            user_id=user_id,
-            project_id=project_id,
-            user_confirmed=name in confirmed,
-        )
-        if perm["result"] == "denied":
-            tool_results.append({"tool": name, "denied": True, "permission": perm})
-            log_mentrix_tool(db, name, args=args, result="denied", user_id=user_id)
-            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "denied"}}
-            continue
-        if perm.get("needs_confirm") or (perm["result"] == "pending_approval" and name not in confirmed):
-            pending.append(
-                {
-                    "tool": name,
-                    "args": args,
-                    "audit_id": perm.get("audit_id"),
-                    "reason": f"Mentrix needs your permission to run `{name}`",
-                    "always_ask": name in ALWAYS_CONFIRM_TOOLS,
-                }
+        if orch is not None:
+            outcome = orch.execute_tool(
+                db,
+                name,
+                args,
+                user_id=user_id,
+                project_id=project_id,
+                project_key=project_key,
+                created_by=created_by,
+                user_confirmed=name in confirmed,
+                correlation_id=tid,
+                exec_tool=_exec_tool,
             )
-            yield {
-                "event": "pending_confirm",
-                "turn_id": tid,
-                "data": {"tool": name, "args": args, "reason": f"Allow Mentrix to run {name}?"},
-            }
-            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
-            continue
+            perm = outcome.permission
+            if outcome.status == "denied" or outcome.status == "blocked":
+                tool_results.append({"tool": name, "denied": True, "permission": perm, "result": outcome.result})
+                yield {
+                    "event": "tool_end",
+                    "turn_id": tid,
+                    "data": {
+                        "tool": name,
+                        "ok": False,
+                        "error": (outcome.result or {}).get("error") or "denied",
+                    },
+                }
+                continue
+            if outcome.status == "pending_confirm":
+                pending.append(outcome.pending or {"tool": name, "args": args})
+                yield {
+                    "event": "pending_confirm",
+                    "turn_id": tid,
+                    "data": {
+                        "tool": name,
+                        "args": args,
+                        "reason": f"Allow Mentrix to run {name}?",
+                        "correlation_id": tid,
+                    },
+                }
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
+                continue
+            result = outcome.result
+            tool_results.append({"tool": name, "result": result, "permission": perm})
+        else:
+            # Legacy path (MENTRIX_PA1_ORCHESTRATOR=0)
+            perm = check_tool_permission(
+                db,
+                name,
+                user_id=user_id,
+                project_id=project_id,
+                user_confirmed=name in confirmed,
+            )
+            if perm["result"] == "denied":
+                tool_results.append({"tool": name, "denied": True, "permission": perm})
+                log_mentrix_tool(db, name, args=args, result="denied", user_id=user_id)
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "denied"}}
+                continue
+            if perm.get("needs_confirm") or (perm["result"] == "pending_approval" and name not in confirmed):
+                pending.append(
+                    {
+                        "tool": name,
+                        "args": args,
+                        "audit_id": perm.get("audit_id"),
+                        "reason": f"Mentrix needs your permission to run `{name}`",
+                        "always_ask": name in ALWAYS_CONFIRM_TOOLS,
+                    }
+                )
+                yield {
+                    "event": "pending_confirm",
+                    "turn_id": tid,
+                    "data": {"tool": name, "args": args, "reason": f"Allow Mentrix to run {name}?"},
+                }
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
+                continue
 
-        result = _exec_tool(db, name, args, project_key=project_key, created_by=created_by, user_id=user_id)
-        tool_results.append({"tool": name, "result": result, "permission": perm})
-        log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
+            result = _exec_tool(
+                db,
+                name,
+                args,
+                project_key=project_key,
+                created_by=created_by,
+                user_id=user_id,
+                project_id=project_id,
+                correlation_id=tid,
+            )
+            tool_results.append({"tool": name, "result": result, "permission": perm})
+            log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
+
         if result.get("board"):
             board_items.append(result["board"])
             yield {"event": "artifact", "turn_id": tid, "data": result["board"]}

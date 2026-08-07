@@ -1,0 +1,36 @@
+# ZECT Coding Engine — remote Agent Server (optional)
+#
+# Public ZECT provider name is always "remote" (never brand third-party products
+# in UI/routes/DB). This compose starts the independently running Agent Server
+# that RemoteCodingEngine / AgentServerCodingEngine talk to over HTTP.
+#
+# Usage (Rancher Desktop / Docker):
+#   docker compose -f docker-compose.zect-coding-engine.yml up -d
+# Then in backend/.env:
+#   ZECT_CODING_ENGINE=remote
+#   ZECT_CODING_ENGINE_URL=http://127.0.0.1:3010
+#   ZECT_CODING_ENGINE_API_KEY=<same as SESSION_API_KEY below>
+#
+# Pin a released image tag — do not deploy from an unpinned main branch.
+
+services:
+  zect-coding-engine:
+    image: ${ZECT_CODING_ENGINE_IMAGE:-ghcr.io/all-hands-ai/openhands:0.32}
+    container_name: zect-coding-engine
+    ports:
+      - "${ZECT_CODING_ENGINE_HOST_PORT:-3010}:3000"
+    environment:
+      # Session key must match ZECT_CODING_ENGINE_API_KEY on the API host
+      SESSION_API_KEY: ${ZECT_CODING_ENGINE_API_KEY:-zect-dev-coding-engine-key}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    volumes:
+      # Mount only assigned workspaces — never the full host home
+      - ${ZECT_ENGINE_WORKSPACE_ROOT:-./.zect-engine-workspaces}:/workspace
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/alive"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s

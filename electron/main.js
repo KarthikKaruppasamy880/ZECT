@@ -543,6 +543,12 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     ok: Boolean(result && result.ok),
     error: result && result.error ? result.error : undefined,
     app: a.app || a.appName || lastOpenedApp || undefined,
+    correlation_id: a.correlation_id || a.correlationId || undefined,
+    verification: {
+      kind: "desktop",
+      note: "Prefer active-window / a11y read-back; screenshot is fallback only",
+      path: a.path || a.file || undefined,
+    },
   });
   return result;
 });

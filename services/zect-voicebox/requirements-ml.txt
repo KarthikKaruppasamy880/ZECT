@@ -1,0 +1,9 @@
+# Optional ML stack for real zero-shot clone TTS (large download).
+# pip install -r requirements-ml.txt
+# Then: set ZECT_VOICEBOX_SYNTH=chatterbox  (or auto)
+#
+# CPU torch wheel example (adjust CUDA index if you have a GPU):
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2.0
+torchaudio>=2.2.0
+chatterbox-tts>=0.1.0

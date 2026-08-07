@@ -1,10 +1,6 @@
-# Bring up ZECT Voicebox (:17493) + upstream Voicebox (:17494).
-# Mentrix: CHATTERBOX_BASE_URL=http://127.0.0.1:17493
+# Bring up ZECT Voicebox on :17493 (native Mentrix Chatterbox engine).
 # Requires Rancher Desktop (dockerd/moby) or Docker Desktop.
-param(
-  [switch]$SkipUpstreamBuild,
-  [switch]$ZectOnly
-)
+param()
 
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
@@ -33,43 +29,29 @@ Rancher Desktop:
   3. If docker still points at Docker Desktop, run:  docker context use default
   4. Re-run this script
 
-Docker Desktop: start the app and wait until the whale icon is idle.
-
-Meanwhile you can run ZECT Voicebox alone (upstream offline = empty profiles,
-Mentrix still sees engine online on :17493):
+Meanwhile you can run ZECT Voicebox without Docker:
 
   cd services\zect-voicebox
-  `$env:ZECT_VOICEBOX_UPSTREAM_URL='http://127.0.0.1:17494'
+  pip install -r requirements.txt
+  # Optional real clone ML: pip install -r requirements-ml.txt
+  `$env:ZECT_VOICEBOX_ALLOW_STUB='1'
   python -m uvicorn app.main:app --host 127.0.0.1 --port 17493
-
-For real clone TTS you need upstream Voicebox answering on :17494.
 "@
   exit 1
 }
-
-& (Join-Path $PSScriptRoot "clone-upstream.ps1")
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $compose = Join-Path $root "docker-compose.zect-voicebox.yml"
 if (-not (Test-Path $compose)) {
   throw "Missing $compose"
 }
 
-# Prefer ZectOnly / SkipUpstreamBuild when full upstream image build is too heavy.
-$useZectOnly = $ZectOnly -or $SkipUpstreamBuild
-if ($useZectOnly) {
-  Write-Host "Starting zect-voicebox only (no upstream ML build; Mentrix can go online on :17493)..."
-  $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://host.docker.internal:17494"
-  docker compose -f $compose up -d --build --no-deps zect-voicebox
-} else {
-  Write-Host "Building and starting voicebox-upstream + zect-voicebox (Rancher/Docker, profile full)..."
-  $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://voicebox-upstream:17493"
-  docker compose -f $compose --profile full up -d --build
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "Full compose failed - falling back to zect-voicebox only..."
-    $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://host.docker.internal:17494"
-    docker compose -f $compose up -d --build --no-deps zect-voicebox
-  }
+Write-Host "Building and starting zect-voicebox on 127.0.0.1:17493..."
+$env:ZECT_VOICEBOX_SYNTH = if ($env:ZECT_VOICEBOX_SYNTH) { $env:ZECT_VOICEBOX_SYNTH } else { "auto" }
+$env:ZECT_VOICEBOX_ALLOW_STUB = if ($env:ZECT_VOICEBOX_ALLOW_STUB) { $env:ZECT_VOICEBOX_ALLOW_STUB } else { "1" }
+docker compose -f $compose up -d --build
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Compose failed."
+  exit $LASTEXITCODE
 }
 
 $deadline = (Get-Date).AddMinutes(5)
@@ -84,12 +66,12 @@ while ((Get-Date) -lt $deadline) {
         $h = Invoke-WebRequest -Uri "http://127.0.0.1:17493/health" -UseBasicParsing -TimeoutSec 3
         $healthJson = $h.Content
       } catch {
-        # ignore health probe failure
+        # ignore
       }
       break
     }
   } catch {
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 2
   }
   Start-Sleep -Seconds 2
 }
@@ -99,22 +81,17 @@ if (-not $ok) {
   exit 2
 }
 
-$upstreamNote = "upstream_online unknown - open /health"
-if ($healthJson) {
-  $upstreamNote = $healthJson
-}
-
 Write-Host @"
 
 ZECT Voicebox is up: http://127.0.0.1:17493/profiles
 Root:                http://127.0.0.1:17493/
 Health:              http://127.0.0.1:17493/health
-$upstreamNote
+$healthJson
 
 Set in backend/.env (do not commit):
   CHATTERBOX_BASE_URL=http://127.0.0.1:17493
+  CHATTERBOX_SPEAK_TIMEOUT=120
 
-Restart the ZECT API, then Companion -> Voice -> Test speak with your clone.
-Upstream Voicebox (models) may still be downloading - first generate can be slow.
-Use -ZectOnly if upstream build is too heavy; Mentrix can still go online.
+Restart the ZECT API, then Companion -> Voice -> Test speak.
+Stub synth works without ML; for real clone quality install requirements-ml.txt / set ZECT_VOICEBOX_SYNTH=chatterbox.
 "@

@@ -579,12 +579,12 @@ def speak(
         if require_clone:
             raise HTTPException(
                 status_code=502,
-                detail=f"Chatterbox speak failed — {_chatterbox_offline_detail()} ({e})",
+                detail=f"ZECT Voicebox generate failed (models not ready / synthesis error): {e}",
             ) from e
         if not openai_tts_available():
             raise HTTPException(
                 status_code=502,
-                detail=f"Chatterbox speak failed and no OPENAI_API_KEY fallback ({e})",
+                detail=f"ZECT Voicebox generate failed and no OPENAI_API_KEY fallback ({e})",
             ) from e
         try:
             audio = synthesize_openai_speech(text)

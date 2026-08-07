@@ -1,6 +1,6 @@
 """ZECT native clone TTS synthesizer.
 
-Primary path: ResembleAI Chatterbox Multilingual (optional ML deps).
+Primary path: ResembleAI Chatterbox (optional ML deps).
 Patterns adapted from open MIT Voicebox server backends; ZECT-owned packaging.
 Stub path: short WAV for tests / when ZECT_VOICEBOX_ALLOW_STUB=1 and ML missing.
 """
@@ -18,6 +18,7 @@ from typing import Any
 from app import config
 
 logger = logging.getLogger("zect-voicebox.engine")
+logging.basicConfig(level=logging.INFO)
 
 _lock = threading.Lock()
 _model: Any = None
@@ -33,7 +34,6 @@ def models_ready() -> bool:
     if _model is not None:
         return True
     if mode == "auto" and config.allow_stub() and not _chatterbox_importable():
-        # Stub stands in until ML is installed — Mentrix can still Test speak.
         return True
     return _model is not None
 
@@ -53,8 +53,10 @@ def status_detail() -> str:
         return f"synth={backend_name()}"
     if _load_error:
         return _load_error
+    if _chatterbox_importable():
+        return "Chatterbox package present — model weights loading or not yet downloaded (HF cache)."
     return (
-        "Models not ready — pip install -r services/zect-voicebox/requirements-ml.txt "
+        "Models not ready — install ML in Docker/image (requirements-ml.txt) "
         "or set ZECT_VOICEBOX_ALLOW_STUB=1 for stub WAV."
     )
 
@@ -65,7 +67,12 @@ def _chatterbox_importable() -> bool:
 
         return True
     except Exception:
-        return False
+        try:
+            import chatterbox.tts  # noqa: F401
+
+            return True
+        except Exception:
+            return False
 
 
 def ensure_loaded() -> None:
@@ -89,30 +96,38 @@ def ensure_loaded() -> None:
         try:
             _load_chatterbox()
             _load_error = ""
-            _backend_name = "chatterbox"
         except Exception as exc:  # noqa: BLE001
             _load_error = str(exc)[:400]
             logger.exception("Failed to load Chatterbox TTS")
-            if config.allow_stub() and mode == "auto":
+            if config.allow_stub() and mode in ("auto", "stub"):
                 _backend_name = "stub"
             else:
                 raise
 
 
 def _load_chatterbox() -> None:
-    global _model, _device
+    global _model, _device, _backend_name
     import os
 
     os.environ.setdefault("HF_HOME", str(config.model_dir() / "huggingface"))
     import torch
-    from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
     if torch.cuda.is_available():
         device = "cuda"
     else:
         device = "cpu"
     _device = device
-    logger.info("Loading ZECT Chatterbox Multilingual on %s …", device)
+
+    try:
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS as _Cls
+
+        kind = "chatterbox-mtl"
+    except Exception:
+        from chatterbox.tts import ChatterboxTTS as _Cls
+
+        kind = "chatterbox-en"
+
+    logger.info("Loading ZECT %s on %s …", kind, device)
 
     if device == "cpu":
         _orig = torch.load
@@ -123,20 +138,20 @@ def _load_chatterbox() -> None:
 
         torch.load = _patched  # type: ignore[assignment]
         try:
-            _model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+            _model = _Cls.from_pretrained(device=device)
         finally:
             torch.load = _orig  # type: ignore[assignment]
     else:
-        _model = ChatterboxMultilingualTTS.from_pretrained(device=device)
+        _model = _Cls.from_pretrained(device=device)
 
-    # Stability: eager attention when available
     try:
         t3_tfmr = _model.t3.tfmr
         if hasattr(t3_tfmr, "config") and hasattr(t3_tfmr.config, "_attn_implementation"):
             t3_tfmr.config._attn_implementation = "eager"
     except Exception:
         pass
-    logger.info("ZECT Chatterbox Multilingual loaded")
+    _backend_name = kind
+    logger.info("ZECT %s loaded", kind)
 
 
 def synthesize(
@@ -160,15 +175,19 @@ def synthesize(
         import numpy as np
         import torch
 
-        wav = _model.generate(
-            text,
-            language_id=lang,
-            audio_prompt_path=ref,
-            exaggeration=0.5,
-            cfg_weight=0.5,
-            temperature=0.8,
-            repetition_penalty=2.0,
-        )
+        if backend_name() == "chatterbox-mtl":
+            wav = _model.generate(
+                text,
+                language_id=lang,
+                audio_prompt_path=ref,
+                exaggeration=0.5,
+                cfg_weight=0.5,
+                temperature=0.8,
+                repetition_penalty=2.0,
+            )
+        else:
+            wav = _model.generate(text, audio_prompt_path=ref)
+
         if isinstance(wav, torch.Tensor):
             audio = wav.squeeze().cpu().numpy().astype(np.float32)
         else:
@@ -200,14 +219,12 @@ def _stub_wav(*, text: str, sample_path: str) -> bytes:
     sample_rate = 22050
     duration = min(2.5, 0.35 + 0.04 * max(1, len(text.split())))
     n = int(sample_rate * duration)
-    # Prefer sample length cue if present
     freq = 220.0
     if sample_path and Path(sample_path).is_file():
         freq = 196.0 + (Path(sample_path).stat().st_size % 200)
     frames = bytearray()
     for i in range(n):
         t = i / sample_rate
-        # Soft envelope
         env = min(1.0, t * 8) * min(1.0, (duration - t) * 8)
         sample = int(12000 * env * math.sin(2 * math.pi * freq * t))
         frames += struct.pack("<h", max(-32767, min(32767, sample)))

@@ -15,11 +15,15 @@ from typing import Any
 import httpx
 
 def _base_url() -> str:
-    return (
+    raw = (
         os.getenv("CHATTERBOX_BASE_URL")
         or os.getenv("VOICEBOX_BASE_URL")
         or "http://127.0.0.1:17493"
     ).strip().rstrip("/")
+    # Windows: localhost often resolves to ::1 while engines bind 127.0.0.1 only.
+    if "://localhost" in raw.lower() or "://localhost:" in raw.lower():
+        raw = raw.replace("://localhost", "://127.0.0.1").replace("://Localhost", "://127.0.0.1")
+    return raw
 
 
 # Back-compat for imports that read the module constant (prefer _base_url() at call sites).

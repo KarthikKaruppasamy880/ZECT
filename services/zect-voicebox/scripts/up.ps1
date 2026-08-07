@@ -1,5 +1,6 @@
 # Bring up ZECT Voicebox (:17493) + upstream Voicebox (:17494).
 # Mentrix: CHATTERBOX_BASE_URL=http://127.0.0.1:17493
+# Requires Rancher Desktop (dockerd/moby) or Docker Desktop.
 param(
   [switch]$SkipUpstreamBuild,
   [switch]$ZectOnly
@@ -10,20 +11,31 @@ $root = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
 Set-Location $root
 
 function Test-Docker {
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   try {
-    docker info 1>$null 2>$null
+    $null = docker info 2>&1
     return ($LASTEXITCODE -eq 0)
   } catch {
     return $false
+  } finally {
+    $ErrorActionPreference = $prev
   }
 }
 
 if (-not (Test-Docker)) {
   Write-Host @"
-Docker is not running.
+Docker daemon is not reachable (docker info failed).
 
-Start Docker Desktop or Rancher Desktop (dockerd), then re-run this script.
-Meanwhile you can run ZECT Voicebox alone (upstream offline → empty profiles,
+Rancher Desktop:
+  1. Open Rancher Desktop and wait until the VM is Running
+  2. Preferences -> Container Engine -> use dockerd (moby), not containerd-only
+  3. If docker still points at Docker Desktop, run:  docker context use default
+  4. Re-run this script
+
+Docker Desktop: start the app and wait until the whale icon is idle.
+
+Meanwhile you can run ZECT Voicebox alone (upstream offline = empty profiles,
 Mentrix still sees engine online on :17493):
 
   cd services\zect-voicebox
@@ -43,21 +55,37 @@ if (-not (Test-Path $compose)) {
   throw "Missing $compose"
 }
 
-if ($ZectOnly) {
-  Write-Host "Starting zect-voicebox only…"
-  docker compose -f $compose up -d --build zect-voicebox
+# Prefer ZectOnly / SkipUpstreamBuild when full upstream image build is too heavy.
+$useZectOnly = $ZectOnly -or $SkipUpstreamBuild
+if ($useZectOnly) {
+  Write-Host "Starting zect-voicebox only (no upstream ML build; Mentrix can go online on :17493)..."
+  $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://host.docker.internal:17494"
+  docker compose -f $compose up -d --build --no-deps zect-voicebox
 } else {
-  Write-Host "Building and starting voicebox-upstream + zect-voicebox…"
-  docker compose -f $compose up -d --build
+  Write-Host "Building and starting voicebox-upstream + zect-voicebox (Rancher/Docker, profile full)..."
+  $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://voicebox-upstream:17493"
+  docker compose -f $compose --profile full up -d --build
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Full compose failed - falling back to zect-voicebox only..."
+    $env:ZECT_VOICEBOX_UPSTREAM_URL = "http://host.docker.internal:17494"
+    docker compose -f $compose up -d --build --no-deps zect-voicebox
+  }
 }
 
 $deadline = (Get-Date).AddMinutes(5)
 $ok = $false
+$healthJson = $null
 while ((Get-Date) -lt $deadline) {
   try {
     $r = Invoke-WebRequest -Uri "http://127.0.0.1:17493/profiles" -UseBasicParsing -TimeoutSec 3
     if ($r.StatusCode -lt 500) {
       $ok = $true
+      try {
+        $h = Invoke-WebRequest -Uri "http://127.0.0.1:17493/health" -UseBasicParsing -TimeoutSec 3
+        $healthJson = $h.Content
+      } catch {
+        # ignore health probe failure
+      }
       break
     }
   } catch {
@@ -71,14 +99,22 @@ if (-not $ok) {
   exit 2
 }
 
+$upstreamNote = "upstream_online unknown - open /health"
+if ($healthJson) {
+  $upstreamNote = $healthJson
+}
+
 Write-Host @"
 
 ZECT Voicebox is up: http://127.0.0.1:17493/profiles
+Root:                http://127.0.0.1:17493/
 Health:              http://127.0.0.1:17493/health
+$upstreamNote
 
 Set in backend/.env (do not commit):
   CHATTERBOX_BASE_URL=http://127.0.0.1:17493
 
-Restart the ZECT API, then Companion → Voice → Test speak with your clone.
-Upstream Voicebox (models) may still be downloading — first generate can be slow.
+Restart the ZECT API, then Companion -> Voice -> Test speak with your clone.
+Upstream Voicebox (models) may still be downloading - first generate can be slow.
+Use -ZectOnly if upstream build is too heavy; Mentrix can still go online.
 "@

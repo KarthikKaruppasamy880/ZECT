@@ -41,6 +41,15 @@ def test_health_reports_brand(client, monkeypatch):
     assert data["upstream_online"] is True
 
 
+def test_root_index(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["brand"] == "zect-voicebox"
+    assert data["health"] == "/health"
+    assert data["profiles"] == "/profiles"
+
+
 def test_profiles_empty_when_upstream_down(client, monkeypatch):
     from app.upstream import UpstreamError
 
@@ -142,3 +151,22 @@ def test_create_profile_proxies(client, monkeypatch):
     assert called["method"] == "POST"
     assert called["path"] == "/profiles"
     assert called["json"]["name"] == "Me"
+
+
+def test_live_health_smoke_when_engine_running():
+    """Optional live smoke against 127.0.0.1:17493 (Rancher/uvicorn). Skips if down."""
+    import httpx
+
+    try:
+        root = httpx.get("http://127.0.0.1:17493/", timeout=2.0)
+        health = httpx.get("http://127.0.0.1:17493/health", timeout=2.0)
+        profiles = httpx.get("http://127.0.0.1:17493/profiles", timeout=2.0)
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"ZECT Voicebox not reachable on :17493 ({exc})")
+
+    assert root.status_code == 200
+    assert root.json()["brand"] == "zect-voicebox"
+    assert root.json()["health"] == "/health"
+    assert health.status_code == 200
+    assert health.json()["ok"] is True
+    assert profiles.status_code < 500

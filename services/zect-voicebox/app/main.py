@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -44,11 +45,27 @@ def _safe_name(name: str) -> str:
     return base
 
 
+@app.get("/")
+async def root() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "brand": config.BRAND,
+        "product": config.PRODUCT,
+        "health": "/health",
+        "docs": "/docs",
+        "profiles": "/profiles",
+        "hint": "Mentrix uses GET /profiles for online checks. Prefer http://127.0.0.1:17493 (not localhost).",
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     online = False
     if config.backend() == "upstream":
-        online = await upstream_online()
+        try:
+            online = await asyncio.wait_for(upstream_online(), timeout=0.6)
+        except asyncio.TimeoutError:
+            online = False
     return {
         "ok": True,
         "brand": config.BRAND,
@@ -64,10 +81,12 @@ async def list_profiles() -> Any:
     if config.backend() != "upstream":
         raise HTTPException(status_code=501, detail="Only upstream backend is implemented in this release")
     try:
-        # Mentrix health uses a ~2s timeout — keep upstream probe short.
-        res = await proxy_request("GET", "/profiles", timeout=2.0)
+        # Hard cap so Mentrix's 2s health never hangs on Windows SYN retries to :17494.
+        res = await asyncio.wait_for(proxy_request("GET", "/profiles", timeout=0.5), timeout=0.6)
         raise_if_bad(res)
         return Response(content=res.content, media_type=res.headers.get("content-type", "application/json"))
+    except asyncio.TimeoutError:
+        return []
     except UpstreamError as exc:
         # Mentrix treats <500 on /profiles as "online". When upstream is down,
         # still answer with an empty list so ZECT Voicebox itself is reachable,

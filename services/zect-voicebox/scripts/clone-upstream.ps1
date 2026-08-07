@@ -16,9 +16,9 @@ if (Test-Path (Join-Path $Dest ".git")) {
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path $Dest) | Out-Null
-Write-Host "Cloning $RepoUrl -> $Dest (shallow)…"
+Write-Host "Cloning $RepoUrl -> $Dest (shallow)..."
 git clone --depth 1 $RepoUrl $Dest
 if ($LASTEXITCODE -ne 0) {
-  throw "git clone failed — check network / git install"
+  throw "git clone failed - check network / git install"
 }
 Write-Host "Done. Next: docker compose -f docker-compose.zect-voicebox.yml up -d --build"

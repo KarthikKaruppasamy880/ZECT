@@ -68,4 +68,39 @@ describe("chatterbox resolveLaunch", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("defaults to ZECT Voicebox uvicorn when no binary", () => {
+    const prevBin = process.env.CHATTERBOX_BIN;
+    const prevCmd = process.env.CHATTERBOX_START_CMD;
+    const prevBundle = process.env.CHATTERBOX_BUNDLE_DIR;
+    try {
+      delete process.env.CHATTERBOX_BIN;
+      delete process.env.CHATTERBOX_START_CMD;
+      delete process.env.CHATTERBOX_BUNDLE_DIR;
+      const launch = chatterbox.resolveLaunch();
+      assert.ok(launch);
+      assert.equal(launch.mode, "cmd");
+      assert.equal(launch.zectVoicebox, true);
+      assert.match(launch.path, /uvicorn/);
+      assert.ok(launch.cwd && launch.cwd.includes("zect-voicebox"));
+    } finally {
+      if (prevBin === undefined) delete process.env.CHATTERBOX_BIN;
+      else process.env.CHATTERBOX_BIN = prevBin;
+      if (prevCmd === undefined) delete process.env.CHATTERBOX_START_CMD;
+      else process.env.CHATTERBOX_START_CMD = prevCmd;
+      if (prevBundle === undefined) delete process.env.CHATTERBOX_BUNDLE_DIR;
+      else process.env.CHATTERBOX_BUNDLE_DIR = prevBundle;
+    }
+  });
+
+  it("normalizes localhost to 127.0.0.1 in baseUrl", () => {
+    const prev = process.env.CHATTERBOX_BASE_URL;
+    try {
+      process.env.CHATTERBOX_BASE_URL = "http://localhost:17493";
+      assert.equal(chatterbox.baseUrl(), "http://127.0.0.1:17493");
+    } finally {
+      if (prev === undefined) delete process.env.CHATTERBOX_BASE_URL;
+      else process.env.CHATTERBOX_BASE_URL = prev;
+    }
+  });
 });

@@ -6,16 +6,28 @@ Mentrix talks only to **ZECT Voicebox** on `:17493`. For real clone quality toda
 
 ## Quick start (Docker / Rancher)
 
+**Rancher Desktop:** Preferences → Container Engine → **dockerd (moby)**. Wait until the VM is Running. If `docker info` fails while Rancher is up, try `docker context use default`.
+
 ```powershell
 # Docker Desktop or Rancher Desktop must be running
 powershell -File services/zect-voicebox/scripts/up.ps1
 ```
+
+If the full upstream Voicebox image build is too slow, bring Mentrix online first (skips upstream ML build):
+
+```powershell
+powershell -File services/zect-voicebox/scripts/up.ps1 -ZectOnly
+```
+
+Full stack uses compose profile `full` (upstream + ZECT). `-ZectOnly` builds only `zect-voicebox`.
 
 Then in `backend/.env`:
 
 ```env
 CHATTERBOX_BASE_URL=http://127.0.0.1:17493
 ```
+
+Use **`127.0.0.1`**, not `localhost` (Windows IPv6 often breaks health checks).
 
 Restart the ZECT API. Companion → **Voice** should show Chatterbox **online**; **Test speak** unlocks for your clone.
 
@@ -26,7 +38,9 @@ Restart the ZECT API. Companion → **Voice** should show Chatterbox **online**;
 | `zect-voicebox` | 17493 | Mentrix target (branded proxy) |
 | `voicebox-upstream` | 17494 | Upstream Voicebox (build from `third_party/voicebox`) |
 
-Rancher Desktop: import/run [`docker-compose.zect-voicebox.yml`](../docker-compose.zect-voicebox.yml) the same way.
+Rancher Desktop: same compose file. Mentrix-only: `docker compose -f docker-compose.zect-voicebox.yml up -d --build zect-voicebox`. Full: `docker compose -f docker-compose.zect-voicebox.yml --profile full up -d --build`.
+
+Browser check: open http://127.0.0.1:17493/ (JSON index) or `/health` / `/profiles` — root `/` is not a UI app.
 
 ## Without Docker (API shell only)
 

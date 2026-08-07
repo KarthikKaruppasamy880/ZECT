@@ -48,7 +48,9 @@ async def proxy_request(
         raise UpstreamError(503, "ZECT_VOICEBOX_UPSTREAM_URL not set")
     url = f"{base}{path}"
     # Fast connect so Mentrix 2s /profiles health check is not blocked.
-    timeout_cfg = httpx.Timeout(timeout, connect=min(1.5, timeout))
+    # Pool timeout also capped — Windows can otherwise stall on a dead :17494.
+    connect = min(0.5, timeout) if timeout <= 2.0 else min(1.5, timeout)
+    timeout_cfg = httpx.Timeout(timeout, connect=connect, pool=connect)
     async with httpx.AsyncClient(timeout=timeout_cfg) as client:
         try:
             res = await client.request(method, url, json=json, data=data, files=files)
@@ -56,6 +58,8 @@ async def proxy_request(
             raise UpstreamError(503, f"Cannot reach upstream at {base}: {exc}") from exc
         except httpx.TimeoutException as exc:
             raise UpstreamError(504, f"Upstream timeout at {base}: {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise UpstreamError(503, f"Upstream HTTP error at {base}: {exc}") from exc
         return res
 
 

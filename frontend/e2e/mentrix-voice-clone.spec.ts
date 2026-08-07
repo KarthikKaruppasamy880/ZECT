@@ -74,6 +74,29 @@ test.describe("Mentrix Chatterbox voice", () => {
     });
   });
 
+  test("Engine online unlocks Test speak (127.0.0.1 Voicebox)", async ({ page }) => {
+    await page.route("**/api/mentrix/voice/engine-status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          online: true,
+          base_url: "http://127.0.0.1:17493",
+          default_voice: null,
+          hint: "Chatterbox online — Test speak unlocked.",
+        }),
+      });
+    });
+
+    await page.goto("/mentrix-home?voice=1");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("clone-voice-engine-status")).toContainText(/online/i, {
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("clone-voice-engine-status")).toContainText("127.0.0.1:17493");
+    await expect(page.getByTestId("clone-voice-test-speak")).toBeEnabled({ timeout: 5_000 });
+  });
+
   test("Successful clone lists voice and ready note", async ({ page }) => {
     await page.route("**/api/mentrix/voice/clone", async (route) => {
       await route.fulfill({

@@ -233,9 +233,9 @@ function start() {
       ...process.env,
       CHATTERBOX_BASE_URL: baseUrl(),
       PORT: "17493",
-      ZECT_VOICEBOX_UPSTREAM_URL:
-        process.env.ZECT_VOICEBOX_UPSTREAM_URL || "http://127.0.0.1:17494",
-      ZECT_VOICEBOX_BACKEND: process.env.ZECT_VOICEBOX_BACKEND || "upstream",
+      ZECT_VOICEBOX_BACKEND: process.env.ZECT_VOICEBOX_BACKEND || "native",
+      ZECT_VOICEBOX_SYNTH: process.env.ZECT_VOICEBOX_SYNTH || "auto",
+      ZECT_VOICEBOX_ALLOW_STUB: process.env.ZECT_VOICEBOX_ALLOW_STUB || "1",
     };
     if (launch.mode === "bin") {
       child = spawn(launch.path, [], {

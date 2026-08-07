@@ -25,14 +25,18 @@ User (Mentrix.tsx)
 ```text
 User (MentrixCompanion)
   → POST /api/mentrix/companion/turn or /stream
-  → companion.run_companion_turn(_v2) / iter_companion_events
+  → companion.iter_companion_events
   → intent parse (regex + LLM planner)
-  → permission_broker.check_tool_permission
-  → if always-confirm: return confirmation card → user confirm → re-enter
-  → _exec_tool (navigate, slack_*, email_*, browser_*, computer_*, jira_*, …)
-  → optional log_mentrix_tool / audit
+  → MentrixOrchestrator (PA-1; MENTRIX_PA1_ORCHESTRATOR=0 → legacy)
+       → PermissionService / ApprovalService
+       → no_delete_policy + emergency_stop for mutating tools
+       → _exec_tool (…)
+       → structured verification stub + AuditService
   → assistant text (+ optional TTS via speak.ts / voice_clone)
 ```
+
+Companion `start_delivery` creates a MentrixRun and enqueues `run_mentrix_in_background`
+(same coding-engine slice path as POST `/api/mentrix/runs`).
 
 ---
 
@@ -111,8 +115,9 @@ Missing vs DesktopControl: SHA-256, durable manifest, Undo UX, collision policy 
 
 | Target step | Today |
 |-------------|--------|
-| Shared MentrixOrchestrator | Split Delivery vs Companion |
-| Capability-policy decision object | permission_broker booleans + rules |
-| Structured verification | Mostly absent for desktop/browser |
-| Calendar | Missing |
-| Audit one stream | Split API audit vs Electron ring buffer |
+| Shared MentrixOrchestrator | **PA-1** companion path (Delivery ForgeLoop unchanged) |
+| Capability-policy decision object | MentrixCommand + permission_broker |
+| Structured verification | Stub on orchestrator results; desktop/browser deepen in PA-4/5 |
+| Calendar | Missing (PA-2) |
+| Audit one stream | API audit + Electron ring buffer (still split) |
+| Browser allowlist | Curated default (not `*`); opt-in `*` |

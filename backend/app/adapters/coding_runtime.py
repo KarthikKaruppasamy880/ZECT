@@ -179,10 +179,15 @@ def get_coding_runtime() -> CodingAgentRuntime:
     if mode == "mock":
         rt: CodingAgentRuntime = MockCodingRuntime()
     elif mode == "remote":
-        from app.adapters.coding_engine_remote import CodingEngineConfigError, RemoteCodingEngine
+        # Agent Server HTTP client (internal module may specialize protocol paths).
+        # Public provider name stays "remote" — never brand third-party products in API/UI.
+        from app.adapters.coding_engine_openhands import (
+            CodingEngineConfigError,
+            build_agent_server_engine,
+        )
 
         try:
-            rt = RemoteCodingEngine.from_env()
+            rt = build_agent_server_engine()
         except CodingEngineConfigError:
             raise
     else:
@@ -199,10 +204,13 @@ def coding_engine_health() -> dict[str, Any]:
     if mode == "mock":
         return MockCodingRuntime().health()
     if mode == "remote":
-        from app.adapters.coding_engine_remote import CodingEngineConfigError, RemoteCodingEngine
+        from app.adapters.coding_engine_openhands import (
+            CodingEngineConfigError,
+            build_agent_server_engine,
+        )
 
         try:
-            engine = RemoteCodingEngine.from_env()
+            engine = build_agent_server_engine()
         except CodingEngineConfigError as exc:
             return {
                 "provider": "remote",

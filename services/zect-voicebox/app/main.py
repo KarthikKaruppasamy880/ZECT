@@ -46,13 +46,18 @@ def _safe_name(name: str) -> str:
 
 @app.on_event("startup")
 def _warmup() -> None:
-    # Best-effort preload so first Test speak is faster; never block process exit.
-    try:
-        from app.engine import ensure_loaded
+    # Non-blocking preload so /profiles and /health stay reachable during HF download.
+    import threading
 
-        ensure_loaded()
-    except Exception:
-        pass
+    def _bg() -> None:
+        try:
+            from app.engine import ensure_loaded
+
+            ensure_loaded()
+        except Exception:
+            pass
+
+    threading.Thread(target=_bg, name="zect-voicebox-warmup", daemon=True).start()
 
 
 @app.get("/")

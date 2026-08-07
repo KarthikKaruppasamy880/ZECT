@@ -1,9 +1,10 @@
-# Optional ML stack for real zero-shot clone TTS (large download).
-# pip install -r requirements-ml.txt
-# Then: set ZECT_VOICEBOX_SYNTH=chatterbox  (or auto)
+# Optional ML for real zero-shot clone (large download into HF cache).
+# Install AFTER CPU/GPU torch — do not list torch here (avoids CUDA wheel pull in Docker).
 #
-# CPU torch wheel example (adjust CUDA index if you have a GPU):
+# Docker (recommended on Windows):
+#   docker compose -f docker-compose.zect-voicebox.yml up -d --build
+#
+# Python 3.11/3.12 venv (3.14 + Windows often fails building spacy-pkuseg):
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-torch>=2.2.0
-torchaudio>=2.2.0
+#   pip install -r requirements-ml.txt
 chatterbox-tts>=0.1.0

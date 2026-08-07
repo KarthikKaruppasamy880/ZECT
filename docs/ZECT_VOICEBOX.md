@@ -52,8 +52,8 @@ Mentrix may send `engine: "qwen"`; ZECT maps generate to the native synthesizer 
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `ZECT_VOICEBOX_SYNTH` | `auto` | `auto` / `chatterbox` / `stub` |
-| `ZECT_VOICEBOX_ALLOW_STUB` | `1` | Allow stub WAV when ML missing |
+| `ZECT_VOICEBOX_SYNTH` | `chatterbox` (compose) | `auto` / `chatterbox` / `stub` |
+| `ZECT_VOICEBOX_ALLOW_STUB` | `0` (compose) | Allow stub WAV when ML missing |
 | `ZECT_VOICEBOX_DATA_DIR` | `./data` | Profiles + audio |
 | `ZECT_VOICEBOX_MODEL_DIR` | `./data/models` | HF / model cache |
 
@@ -66,7 +66,8 @@ pytest tests/test_api.py -q
 
 ## Honest limits
 
-- Stub synth proves the Mentrix pipeline; install `requirements-ml.txt` for real zero-shot clone timbre.
-- First ML download is large and needs disk/RAM (GPU optional, CPU slower).
+- Default Docker image targets **Chatterbox ML**. First run downloads model weights into the `zect-voicebox-models` volume (large; not in git).
+- Host Python **3.14 on Windows** often fails installing `chatterbox-tts` (MSVC / `spacy-pkuseg`) — use Docker or a 3.11/3.12 venv.
+- Stub synth (`ZECT_VOICEBOX_ALLOW_STUB=1`, `ZECT_VOICEBOX_SYNTH=stub`) still available for pipeline tests without ML.
 - LiveKit Agents is a different stack — not used here.
 - See `NOTICE` for MIT attribution of adapted open server patterns.

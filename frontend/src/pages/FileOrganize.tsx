@@ -1,22 +1,10 @@
-"""PA-6 File Organize UI — durable plans with SHA-256 preview / approve / undo."""
+/** PA-6 File Organize UI — durable plans with SHA-256 preview / approve / undo. */
 
 import { useState } from "react";
 import { FolderInput, Play, RotateCcw, Shield } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 
 type Plan = {
-  plan_id: str;
-  source_dir: string;
-  dest_dir: string;
-  status: string;
-  moves: { from: string; to: string; sha256: string; bytes: number; collision?: string }[];
-  errors?: { file: string; error: string }[];
-  rollback?: { from: string; to: string }[];
-  durable?: boolean;
-};
-
-// Fix TypeScript - use string not str
-type PlanFix = {
   plan_id: string;
   source_dir: string;
   dest_dir: string;
@@ -31,7 +19,7 @@ export default function FileOrganize() {
   const [sourceDir, setSourceDir] = useState("");
   const [destDir, setDestDir] = useState("");
   const [patterns, setPatterns] = useState("*");
-  const [plan, setPlan] = useState<PlanFix | null>(null);
+  const [plan, setPlan] = useState<Plan | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 

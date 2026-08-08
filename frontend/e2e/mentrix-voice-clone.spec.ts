@@ -1,21 +1,21 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Mentrix Chatterbox voice", () => {
-  test("Voice tab opens clone panel on Companion", async ({ page }) => {
+  test("Settings hosts clone panel; Companion Voice tab has speak controls", async ({ page }) => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-companion-modes")).toBeVisible();
     await page.getByTestId("mentrix-mode-voice").click();
     await expect(page).toHaveURL(/voice=1/);
     await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+
+    await page.goto("/settings");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("Deep link ?voice=1 expands Chatterbox form", async ({ page }) => {
-    await page.goto("/mentrix-home?voice=1");
-    await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+  test("Settings Voice section expands Chatterbox form", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("clone-voice-record")).toBeVisible();
   });
 
@@ -49,9 +49,8 @@ test.describe("Mentrix Chatterbox voice", () => {
       });
     });
 
-    await page.goto("/mentrix-home?voice=1");
-    await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await page.goto("/settings");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
 
     const del = page.getByTestId("clone-voice-reset").first();
     if (await del.isVisible().catch(() => false)) {
@@ -88,8 +87,8 @@ test.describe("Mentrix Chatterbox voice", () => {
       });
     });
 
-    await page.goto("/mentrix-home?voice=1");
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await page.goto("/settings");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("clone-voice-engine-status")).toContainText(/online/i, {
       timeout: 10_000,
     });
@@ -129,8 +128,8 @@ test.describe("Mentrix Chatterbox voice", () => {
       });
     });
 
-    await page.goto("/mentrix-home?voice=1");
-    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 10_000 });
+    await page.goto("/settings");
+    await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
     await page.getByTestId("clone-voice-name").fill("Test Voice");
     await page.getByTestId("clone-voice-transcript").fill("Hello this is a test sample for cloning.");
     await page.setInputFiles("input[data-testid='clone-voice-file']", {

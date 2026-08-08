@@ -516,6 +516,7 @@ export default function MentrixCompanion() {
                   "What's the weather in Austin?",
                   "Slack digest",
                   "Check my email",
+                  "Show connector architecture",
                   "Open Lattice",
                   "Open Sandbox",
                   "Research latest on AI marketing",

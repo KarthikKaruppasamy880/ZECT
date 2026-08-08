@@ -236,7 +236,7 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
             parts.append((result.get("summary") or f"Research on {result.get('topic')}")[:400])
         elif name == "start_delivery":
             parts.append(f"Mentrix Delivery run #{result.get('run_id')} started." if result.get("run_id") else "Delivery queued.")
-        elif name in ("content_brief", "ads_copy", "report_draft", "docs_draft", "diagnose_fix"):
+        elif name in ("content_brief", "ads_copy", "report_draft", "docs_draft", "diagnose_fix", "connector_architecture"):
             parts.append(f"Artifact ready: {(result.get('board') or {}).get('title') or name}.")
         elif name == "note_add":
             parts.append("Note saved to Mentrix Notes.")
@@ -287,6 +287,9 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "lattice_query",
                 "start_delivery",
                 "diagnose_fix",
+                "connector_architecture",
+                "calendar_upcoming",
+                "meeting_brief",
                 "media_generate",
                 "media_list",
                 "media_edit",
@@ -294,6 +297,7 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "jira_search_incidents",
                 "datadog_query_logs",
                 "jira_comment_pr",
+                "computer_open_app",
             }
         )
         prompt = (
@@ -499,10 +503,28 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         r"\blaunch slack\b", m
     ):
         tools.append({"name": "computer_open_app", "args": {"app": "Slack.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(outlook)\b", m) or "open outlook" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "outlook.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(teams|ms teams|microsoft teams)\b", m) or "open teams" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "ms-teams.exe"}})
     elif re.search(r"\b(open|launch|start)\b.*\b(browser|chrome)\b", m) or "open browser" in m:
         tools.append({"name": "computer_open_app", "args": {"app": "chrome.exe"}})
     elif re.search(r"\b(open|launch|start)\b.*\bedge\b", m):
         tools.append({"name": "computer_open_app", "args": {"app": "msedge.exe"}})
+
+    if any(
+        p in m
+        for p in (
+            "connector architecture",
+            "show connectors",
+            "show connector architecture",
+            "mentrix architecture",
+            "how do connectors work",
+            "architecture diagram",
+            "flowchart of connectors",
+        )
+    ):
+        tools.append({"name": "connector_architecture", "args": {}})
 
     if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel", "what's on", "whats on")):
         tools.append({"name": "slack_digest", "args": {}})
@@ -1752,6 +1774,41 @@ def _exec_tool(
             "ok": True,
             "board": {"type": "markdown", "title": "Diagnose & fix", "body": md},
             "board_extra": {"type": "mermaid", "title": "Fix workflow", "body": mermaid},
+        }
+    if name == "connector_architecture":
+        mermaid = (
+            "flowchart LR\n"
+            "  Chat[Companion_typed_or_voice] --> Orch[MentrixOrchestrator]\n"
+            "  Orch --> Perm[permission_broker]\n"
+            "  Perm --> Exec[_exec_tool]\n"
+            "  Exec --> Email[EmailProvider]\n"
+            "  Exec --> Slack[SlackProvider]\n"
+            "  Exec --> Notes[local_notes]\n"
+            "  Exec --> Cal[CalendarProvider]\n"
+            "  Exec --> Desk[desktop_payload]\n"
+            "  Desk --> Bridge[desktopBridge]\n"
+            "  Bridge --> Electron[computer_js_allowlist]\n"
+        )
+        md = (
+            "# Mentrix connector architecture\n\n"
+            "Typed and spoken commands share **MentrixOrchestrator** + permission broker.\n\n"
+            "| Connector | How |\n|---|---|\n"
+            "| **Email** | IMAP digest (`MENTRIX_IMAP_*`); draft/send needs Allow |\n"
+            "| **Slack** | `SLACK_BOT_TOKEN`; digest + draft/send; desktop `Slack.exe` |\n"
+            "| **Notes** | Local Mentrix notes (not Notion) |\n"
+            "| **Calendar** | ICS/demo provider; meeting brief |\n"
+            "| **Desktop** | Computer Mode + allowlisted apps only (never delete) |\n\n"
+            "Sends always require Allow. Notion live API and open-any-app remain deferred."
+        )
+        return {
+            "ok": True,
+            "spoken_summary": "Posted Mentrix connector architecture flowchart to Artifacts.",
+            "board": {"type": "markdown", "title": "Connector architecture", "body": md},
+            "board_extra": {
+                "type": "mermaid",
+                "title": "Connector flowchart",
+                "body": mermaid,
+            },
         }
     return {"ok": False, "error": f"Unknown tool {name}"}
 

@@ -20,6 +20,9 @@ const WIN_APPS = [
   "slack.exe",
   "powerpnt.exe",
   "zoom.exe",
+  "outlook.exe",
+  "ms-teams.exe",
+  "teams.exe",
 ];
 const MAC_APPS = [
   "TextEdit",
@@ -30,6 +33,9 @@ const MAC_APPS = [
   "Calculator",
   "Microsoft PowerPoint",
   "zoom.us",
+  "Microsoft Outlook",
+  "Microsoft Teams",
+  "Slack",
 ];
 
 function allowlisted(appName) {

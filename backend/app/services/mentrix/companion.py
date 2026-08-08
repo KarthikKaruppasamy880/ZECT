@@ -664,7 +664,9 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         elif "scroll" in m:
             tools.append({"name": "computer_scroll", "args": {"direction": "down"}})
         elif "click" in m:
-            tools.append({"name": "computer_click", "args": {"x": 100, "y": 100}})
+            tools.append({"name": "computer_ui_inspect", "args": {}})
+            # Prefer inspect over blind coordinates; only allow unverified as explicit fallback
+            tools.append({"name": "computer_click", "args": {"x": 100, "y": 100, "allow_unverified": True}})
         elif "type" in m:
             tools.append({"name": "computer_type", "args": {"text": message[:200]}})
         elif "open notepad" in m:

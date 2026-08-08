@@ -136,7 +136,10 @@ def _clear_defaults(db: Session, user_id: int) -> None:
 
 
 def _row_out(row: ClonedVoice) -> "ClonedVoiceOut":
+    from app.adapters.llm.chatterbox_client import profile_exists
+
     sample_ok = bool(row.sample_path) and Path(row.sample_path).is_file()
+    ready = bool(row.external_voice_id) and profile_exists(row.external_voice_id or "")
     return ClonedVoiceOut(
         id=row.id,
         voice_id=row.voice_id,
@@ -144,7 +147,7 @@ def _row_out(row: ClonedVoice) -> "ClonedVoiceOut":
         provider=row.provider or "chatterbox",
         is_default=bool(row.is_default),
         has_sample=sample_ok,
-        engine_ready=bool(row.external_voice_id),
+        engine_ready=ready,
         sample_missing=bool(row.sample_path) and not sample_ok,
     )
 
@@ -158,31 +161,44 @@ _REPROVISION_COOLDOWN_S = 60.0
 _reprovision_blocked_until: dict[str, float] = {}
 
 
-def _ensure_engine_profile(row: ClonedVoice) -> str:
-    """Return engine profile id, re-provisioning from stored sample if needed."""
+def _ensure_engine_profile(row: ClonedVoice, *, force_reprovision: bool = False) -> str:
+    """Return a live Voicebox profile id, re-provisioning from stored sample if needed.
+
+    ZECT `voice_id` and Voicebox `external_voice_id` are different UUIDs. Never trust
+    a stale external id after Voicebox data wipe / bad migration backfill.
+    """
     from app.adapters.llm.chatterbox_client import (
         REPROVISION_TIMEOUT,
         chatterbox_available,
         clone_voice,
+        profile_exists,
     )
 
-    if row.external_voice_id:
-        return row.external_voice_id
+    if row.external_voice_id and not force_reprovision:
+        if profile_exists(row.external_voice_id):
+            return row.external_voice_id
+        logger.warning(
+            "Voicebox profile missing for external_voice_id=%s (zect voice_id=%s) — will re-provision",
+            (row.external_voice_id or "")[:16],
+            (row.voice_id or "")[:16],
+        )
+        row.external_voice_id = None
+
     if not row.sample_path or not Path(row.sample_path).is_file():
         raise HTTPException(
             status_code=404,
-            detail="Voice sample missing — clone again to restore Present/session audio",
+            detail="Voice sample missing — clone again in Settings → Voice to restore Present/session audio",
         )
     if not chatterbox_available():
         raise HTTPException(
             status_code=503,
-            detail="Chatterbox engine offline — start the local synthesis service to speak.",
+            detail="ZECT Voicebox offline — start the local synthesis service to speak.",
         )
     blocked_until = _reprovision_blocked_until.get(row.voice_id, 0.0)
     if time() < blocked_until:
         raise HTTPException(
             status_code=503,
-            detail="Chatterbox re-provisioning failed recently — retrying shortly, using fallback voice for now.",
+            detail="Voicebox re-provisioning failed recently — retrying shortly, using fallback voice for now.",
         )
     audio_bytes = Path(row.sample_path).read_bytes()
     filename = Path(row.sample_path).name
@@ -193,19 +209,17 @@ def _ensure_engine_profile(row: ClonedVoice) -> str:
             filename,
             "application/octet-stream",
             reference_text=(row.reference_text or "").strip() or "Hello, this is my voice sample.",
-            timeout=REPROVISION_TIMEOUT,
+            timeout=45.0 if force_reprovision else REPROVISION_TIMEOUT,
         )
     except Exception as exc:
         _reprovision_blocked_until[row.voice_id] = time() + _REPROVISION_COOLDOWN_S
-        # Chatterbox is local/no-API-key — safe to log the message, still
-        # truncated in case the engine ever echoes request content back.
         logger.warning(
-            "Chatterbox re-provision failed for voice_id=%s: %s — falling back for %ss",
+            "Voicebox re-provision failed for voice_id=%s: %s — falling back for %ss",
             row.voice_id,
             str(exc)[:300],
             _REPROVISION_COOLDOWN_S,
         )
-        raise HTTPException(status_code=502, detail="Chatterbox re-provisioning failed") from exc
+        raise HTTPException(status_code=502, detail="Voicebox re-provisioning failed") from exc
     _reprovision_blocked_until.pop(row.voice_id, None)
     return result["voice_id"]
 
@@ -539,7 +553,7 @@ def speak(
     if not row:
         raise HTTPException(
             status_code=404,
-            detail="No cloned voice configured — clone a voice in Companion → Voice, or pick an OpenAI stock voice",
+            detail="No cloned voice configured — clone a voice in Settings → Voice, or pick an OpenAI stock voice",
         )
 
     if not chatterbox_available():
@@ -563,7 +577,21 @@ def speak(
         if engine_id != row.external_voice_id:
             row.external_voice_id = engine_id
             db.commit()
-        audio = synthesize_speech(text, engine_id)
+        try:
+            audio = synthesize_speech(text, engine_id)
+        except Exception as syn_exc:
+            from app.adapters.llm.chatterbox_client import ProfileNotFoundError
+
+            if isinstance(syn_exc, ProfileNotFoundError) or "404" in str(syn_exc):
+                # Stale id — clear, re-provision once, retry generate
+                row.external_voice_id = None
+                db.commit()
+                engine_id = _ensure_engine_profile(row, force_reprovision=True)
+                row.external_voice_id = engine_id
+                db.commit()
+                audio = synthesize_speech(text, engine_id)
+            else:
+                raise
         engine_used = "chatterbox"
     except HTTPException:
         if require_clone:

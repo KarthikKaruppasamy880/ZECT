@@ -58,6 +58,27 @@ def chatterbox_available() -> bool:
 
 
 
+def profile_exists(profile_id: str) -> bool:
+    """True when the local Voicebox still has this profile id."""
+    pid = (profile_id or "").strip()
+    if not pid:
+        return False
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            # Prefer list (always available) — some engines lack GET /profiles/{id}
+            resp = client.get(f"{_base_url()}/profiles")
+        if resp.status_code >= 400:
+            return False
+        data = resp.json()
+        items = data if isinstance(data, list) else (data.get("profiles") or data.get("items") or [])
+        for it in items:
+            if isinstance(it, dict) and str(it.get("id") or "") == pid:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def clone_voice(
     name: str,
     audio_bytes: bytes,
@@ -113,6 +134,10 @@ def _resolve_audio_url(audio_path: str) -> str:
     return f"{_base_url()}{CHATTERBOX_AUDIO_PATH_TEMPLATE.format(filename=filename)}"
 
 
+class ProfileNotFoundError(RuntimeError):
+    """Voicebox profile id missing — caller should clear external_voice_id and re-provision."""
+
+
 def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine: str | None = None) -> bytes:
     """Synthesize text in the given cloned voice profile. Returns raw audio bytes."""
     with httpx.Client(timeout=SPEAK_TIMEOUT) as client:
@@ -125,6 +150,10 @@ def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine:
                 "engine": engine or DEFAULT_CHATTERBOX_ENGINE,
             },
         )
+        if gen_resp.status_code == 404:
+            raise ProfileNotFoundError(
+                f"Chatterbox generation failed (404): {gen_resp.text[:300]}"
+            )
         if gen_resp.status_code >= 400:
             raise RuntimeError(
                 f"Chatterbox generation failed ({gen_resp.status_code}): {gen_resp.text[:300]}"

@@ -78,7 +78,9 @@ export const ORB: Record<AvatarState, string> = {
 };
 
 function speak(text: string, enabled: boolean, onFail?: (err: string) => void) {
-  void speakMentrix(text, enabled).then((r) => {
+  // Companion chat: prefer clone, but fall back to OpenAI/browser if Voicebox profile is stale.
+  // Present / Test speak keep requireClone: true (strict).
+  void speakMentrix(text, enabled, { requireClone: false }).then((r) => {
     if (!r.ok) {
       console.warn("[mentrix TTS]", r.error);
       onFail?.(r.error);

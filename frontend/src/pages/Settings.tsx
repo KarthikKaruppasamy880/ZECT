@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus, mentrixPreferredName, mentrixSetPreferredName } from "@/lib/api";
 import type { Setting, ApiKeyStatus, TokenUsage, LLMKeyStatus } from "@/types";
 import { Link } from "react-router-dom";
+import CloneVoicePanel from "@/components/CloneVoicePanel";
 import {
   Settings as SettingsIcon,
   ToggleLeft,
@@ -296,6 +297,21 @@ export default function Settings() {
             {preferredSaving ? "Saving…" : "Save"}
           </button>
         </div>
+      </div>
+
+      {/* Voice clone — ZECT Voicebox (native local TTS) */}
+      <div
+        id="voice"
+        className="bg-white rounded-xl border border-slate-200 p-5 mb-6 scroll-mt-20"
+        data-testid="settings-voice-section"
+      >
+        <h3 className="text-sm font-semibold text-slate-900 mb-1">Voice (ZECT Voicebox)</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          Record and save your clone here. Mentrix Companion Speak replies and Present narration use this
+          default voice. Engine is ZECT-owned Voicebox on{" "}
+          <code className="text-[11px]">127.0.0.1:17493</code> (not a third-party UI).
+        </p>
+        <CloneVoicePanel defaultExpanded />
       </div>
 
       {/* Telemetry consent — Phase 11 */}

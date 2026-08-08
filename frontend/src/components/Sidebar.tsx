@@ -60,7 +60,6 @@ const workspaceItems: NavItem[] = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
   { href: "/workspace", label: "Developer Workspace", icon: PanelLeft },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 const understandItems: NavItem[] = [
@@ -289,18 +288,45 @@ export default function Sidebar({
         {navSections.map((section, idx) => renderSection(section.title, section.items, idx === 0))}
       </nav>
 
-      <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>
+      <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-3"} py-3 mt-auto`}>
         {!collapsed && (
-          <>
-            <p className="text-xs text-slate-500">Say “Hey Mentrix”</p>
-            <p className="text-xs text-slate-600">Desktop wake phrase</p>
-          </>
+          <p className="mb-2 text-[10px] text-slate-600 px-1">Hey Mentrix · desktop wake</p>
         )}
+        <Link
+          to="/settings"
+          title={collapsed ? "Settings" : undefined}
+          data-testid="sidebar-user-settings"
+          className={`flex items-center ${
+            collapsed ? "justify-center" : "gap-2.5"
+          } rounded-lg px-2 py-2 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors ${
+            location.pathname === "/settings" ? "bg-slate-800 text-white" : ""
+          }`}
+        >
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-teal-800/80 text-[11px] font-semibold text-teal-100">
+            {(typeof localStorage !== "undefined"
+              ? (localStorage.getItem("zect_username") || "U").trim().charAt(0)
+              : "U"
+            ).toUpperCase()}
+          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-slate-100">
+                {typeof localStorage !== "undefined"
+                  ? localStorage.getItem("zect_username") || "Account"
+                  : "Account"}
+              </p>
+              <p className="truncate text-[10px] text-slate-500">Settings · Voice · Keys</p>
+            </div>
+          )}
+          {!collapsed && <Settings className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />}
+        </Link>
         {onLogout && (
           <button
             onClick={onLogout}
             title={collapsed ? "Sign Out" : undefined}
-            className={`mt-2 flex items-center ${collapsed ? "justify-center w-full" : ""} gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors`}
+            className={`mt-1 flex w-full items-center ${
+              collapsed ? "justify-center" : "gap-2 px-2"
+            } rounded-md py-1.5 text-xs text-slate-500 hover:text-red-400 transition-colors`}
           >
             <LogOut className="h-3.5 w-3.5" />
             {!collapsed && "Sign Out"}

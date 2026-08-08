@@ -1,26 +1,59 @@
-"""Mobile Companion → linked Electron desktop command bridge (in-memory)."""
+"""Mobile Companion → linked Electron desktop command bridge.
+
+In-memory with durable JSON spill so queues survive brief API restarts (PA gap-close).
+"""
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
 _lock = Lock()
-# session_key (user email or agent id) → list of commands
 _QUEUES: dict[str, list[dict[str, Any]]] = {}
-_AGENTS: dict[str, dict[str, Any]] = {}  # session_key → last heartbeat
+_AGENTS: dict[str, dict[str, Any]] = {}
+
+_STORE = Path(__file__).resolve().parents[3] / "data" / "desktop_bridge_queue.json"
 
 
 def _key(user_email: str = "", agent_id: str = "") -> str:
     return (agent_id or user_email or "default").strip().lower() or "default"
 
 
+def _persist() -> None:
+    try:
+        _STORE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"queues": _QUEUES, "agents": _AGENTS, "ts": time.time()}
+        _STORE.write_text(json.dumps(payload, default=str)[:500_000], encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load() -> None:
+    global _QUEUES, _AGENTS
+    if not _STORE.is_file():
+        return
+    try:
+        data = json.loads(_STORE.read_text(encoding="utf-8"))
+        if isinstance(data.get("queues"), dict):
+            _QUEUES = data["queues"]
+        if isinstance(data.get("agents"), dict):
+            _AGENTS = data["agents"]
+    except Exception:
+        pass
+
+
+_load()
+
+
 def register_agent(user_email: str, agent_id: str = "electron") -> dict[str, Any]:
     k = _key(user_email, agent_id)
     with _lock:
         _AGENTS[k] = {"ts": time.time(), "agent_id": agent_id or "electron", "online": True}
+        _persist()
     return {"ok": True, "session_key": k, "agent_id": agent_id or "electron"}
 
 
@@ -65,7 +98,8 @@ def enqueue(user_email: str, command: dict[str, Any], agent_id: str = "electron"
         q.append(item)
         if len(q) > 100:
             del q[0 : len(q) - 100]
-    return {"ok": True, "id": item["id"], "queued": True}
+        _persist()
+    return {"ok": True, "id": item["id"], "queued": True, "durable": True}
 
 
 def poll(user_email: str, agent_id: str = "electron") -> dict[str, Any]:
@@ -73,7 +107,7 @@ def poll(user_email: str, agent_id: str = "electron") -> dict[str, Any]:
     k = _key(user_email, agent_id)
     with _lock:
         q = [x for x in _QUEUES.get(k, []) if x.get("status") == "queued"]
-    return {"items": q[:20], "online": True}
+    return {"items": q[:20], "online": True, "durable": True}
 
 
 def ack(user_email: str, cmd_id: str, agent_id: str = "electron", result: dict | None = None) -> dict[str, Any]:
@@ -83,5 +117,6 @@ def ack(user_email: str, cmd_id: str, agent_id: str = "electron", result: dict |
             if item.get("id") == cmd_id:
                 item["status"] = "acked"
                 item["result"] = result or {}
+                _persist()
                 return {"ok": True}
     return {"ok": False, "error": "not_found"}

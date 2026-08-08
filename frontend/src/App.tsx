@@ -37,6 +37,7 @@ import SecurityIncidents from "@/pages/SecurityIncidents";
 import ToolComparison from "@/pages/ToolComparison";
 import TransferOnboarding from "@/pages/TransferOnboarding";
 import SkillsEngine from "@/pages/SkillsEngine";
+import FileOrganize from "@/pages/FileOrganize";
 import KnowledgeBase from "@/pages/KnowledgeBase";
 import Playbooks from "@/pages/Playbooks";
 import ScheduledTasks from "@/pages/ScheduledTasks";
@@ -174,6 +175,7 @@ export default function App() {
           <Route path="/tool-comparison" element={<ToolComparison />} />
           <Route path="/transfer" element={<TransferOnboarding />} />
           <Route path="/skills-engine" element={<SkillsEngine />} />
+          <Route path="/file-organize" element={<FileOrganize />} />
           <Route path="/knowledge-base" element={<KnowledgeBase />} />
           <Route path="/playbooks" element={<Playbooks />} />
           <Route path="/scheduled-tasks" element={<ScheduledTasks />} />

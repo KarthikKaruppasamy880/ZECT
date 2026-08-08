@@ -36,6 +36,8 @@ TOOL_ACTIONS: dict[str, str] = {
     "calendar_upcoming": "companion_calendar_read",
     "meeting_brief": "companion_meeting_brief",
     "meeting_followup_draft": "companion_meeting_draft",
+    "file_organize_plan": "companion_file_organize",
+    "file_organize_approve": "companion_file_organize",
     "image_avatar": "companion_image_gen",
     "media_generate": "companion_image_gen",
     "media_edit": "companion_image_gen",
@@ -92,6 +94,7 @@ ALWAYS_CONFIRM_TOOLS = {
     "browser_snapshot",
     "browser_fill",
     "meeting_followup_draft",
+    "file_organize_approve",
 }
 
 

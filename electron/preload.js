@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld("zectDesktop", {
     computerAudit: () => ipcRenderer.invoke("mentrix-computer-audit"),
     confirmAction: (payload) => ipcRenderer.invoke("mentrix-confirm-action", payload),
     computer: (action, args) => ipcRenderer.invoke("mentrix-computer", action, args || {}),
+    setEmergencyStop: (active) => ipcRenderer.invoke("mentrix-emergency-stop", active),
     chatterboxStatus: () => ipcRenderer.invoke("mentrix-chatterbox-status"),
     chatterboxStart: () => ipcRenderer.invoke("mentrix-chatterbox-start"),
     chatterboxStop: () => ipcRenderer.invoke("mentrix-chatterbox-stop"),

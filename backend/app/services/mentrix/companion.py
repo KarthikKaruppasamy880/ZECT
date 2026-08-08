@@ -1653,8 +1653,84 @@ def _exec_tool(
             "desktop": "open_presentation",
             "note": "Open presentation; user shares PowerPoint in Zoom",
         }
-    if name in ("computer_click", "computer_type", "computer_scroll", "computer_ui_inspect"):
+    if name == "computer_click":
+        # PA-5: refuse blind hardcoded clicks unless explicitly allow_unverified
+        if args.get("allow_unverified") not in (True, "1", "true", 1):
+            x, y = args.get("x"), args.get("y")
+            if x is not None and y is not None and not args.get("selector") and not args.get("target"):
+                return {
+                    "ok": False,
+                    "error": "unverified_coordinate_click",
+                    "note": "Run computer_ui_inspect first or pass allow_unverified=true only as fallback",
+                    "args": args,
+                }
+        return {"ok": True, "desktop": name, "args": args, "fallback": "coordinate"}
+    if name in ("computer_type", "computer_scroll", "computer_ui_inspect"):
         return {"ok": True, "desktop": name, "args": args}
+    if name == "file_organize_plan":
+        from app.domains.personal_agent import file_organize as fo
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+        from pathlib import Path as P
+
+        try:
+            src = P(path_under_allowed_roots(str(args.get("source_dir") or "")))
+            dest = P(path_under_allowed_roots(str(args.get("dest_dir") or "")))
+        except Exception as exc:
+            return {"ok": False, "error": f"path_not_allowlisted:{exc}"}
+        patterns = args.get("patterns") or ["*"]
+        if isinstance(patterns, str):
+            patterns = [p.strip() for p in patterns.split(",") if p.strip()]
+        moves = []
+        for p in sorted(src.iterdir()) if src.is_dir() else []:
+            if not p.is_file():
+                continue
+            from fnmatch import fnmatch
+
+            if not any(fnmatch(p.name, pat) for pat in patterns):
+                continue
+            target = dest / p.name
+            moves.append(
+                {
+                    "from": str(p),
+                    "to": str(target),
+                    "sha256": fo._sha256(p),
+                    "bytes": p.stat().st_size,
+                    "collision": "skip" if target.exists() else "ok",
+                }
+            )
+        import uuid as _uuid
+
+        plan_id = _uuid.uuid4().hex[:12]
+        plan = {
+            "plan_id": plan_id,
+            "source_dir": str(src),
+            "dest_dir": str(dest),
+            "dry_run": True,
+            "moves": moves,
+            "status": "planned",
+            "rollback": [],
+            "durable": True,
+            "policy": {"delete": "never"},
+        }
+        fo._persist(db, plan, user_id=user_id)
+        return {
+            "ok": True,
+            "plan": plan,
+            "navigate": "/file-organize",
+            "spoken_summary": f"File organize plan {plan_id} with {len(moves)} move(s). Approve in File Organize.",
+            "board": {
+                "type": "markdown",
+                "title": f"File plan {plan_id}",
+                "body": f"**{len(moves)} moves** (SHA-256 dry-run). Never deletes.\n\nOpen /file-organize to approve.",
+            },
+        }
+    if name == "file_organize_approve":
+        return {
+            "ok": True,
+            "navigate": "/file-organize",
+            "note": "Approve moves in the File Organize UI — companion does not auto-execute FS moves",
+            "spoken_summary": "Open File Organize to approve the plan.",
+        }
     if name == "diagnose_fix":
         issue = args.get("issue") or ""
         runs = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(3).all()

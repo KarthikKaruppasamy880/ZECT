@@ -29,11 +29,19 @@ clears stale ids, and re-provisions from the stored sample.
 |---------|----------|
 | Companion Speak replies | Prefer clone; **OpenAI / browser fallback** if Voicebox fails (`require_clone=false`); health probe is TTL-cached (fail-fast when offline) |
 | Connect Voice | If Voicebox **online** → clone via `/speak`; if **offline** → OpenAI Realtime **PCM stock voice** (low latency) |
-| Present / Test speak | **Strict clone** — fail loudly if Voicebox cannot synthesize |
+| Present / Test speak | **Strict clone** — fail loudly if Voicebox cannot synthesize; Present caps ~500 chars/slide and prefetches next-slide audio while current plays |
 
 UI branding is **ZECT Voicebox**. Internal synth may still report Chatterbox ML (`synth=chatterbox-mtl`). Successful clone speak sets `X-Mentrix-TTS-Engine: zect_voicebox` (legacy `chatterbox` still accepted).
+
+## Latency tips (Present + Connect Voice)
+
+1. Wait for warm engine: `curl.exe -s http://127.0.0.1:17493/health` → `"models_ready":true` before demos.
+2. Short speaker notes (Present caps ~500 chars/slide).
+3. GPU for Chatterbox container when possible — CPU sync `/generate` is often tens of seconds per sentence.
+4. Connect Voice: Voicebox **online** → clone path (higher latency, expected); **offline** → Realtime PCM stock (fast).
+5. Streaming Voicebox `/generate` is **out of scope** — synthesis remains full-clip.
 
 ## Where to manage voice
 
 **Settings → Voice** (sidebar bottom account chip), not collapsed into Companion Chat.
-Companion Voice tab keeps Present deck + link to Settings.
+Companion Voice tab keeps Present deck + link to Settings (scrollable panel).

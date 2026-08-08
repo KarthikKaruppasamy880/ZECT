@@ -71,6 +71,7 @@ DEFAULT_DESKTOP_POLICY = {
     "max_tier": 4,
     "allowlisted_apps_windows": [
         "notepad.exe",
+        "notepad++.exe",
         "code.exe",
         "explorer.exe",
         "msedge.exe",
@@ -79,6 +80,9 @@ DEFAULT_DESKTOP_POLICY = {
         "Slack.exe",
         "POWERPNT.EXE",
         "Zoom.exe",
+        "outlook.exe",
+        "ms-teams.exe",
+        "teams.exe",
     ],
     "allowlisted_apps_macos": [
         "TextEdit",
@@ -89,9 +93,11 @@ DEFAULT_DESKTOP_POLICY = {
         "Calculator",
         "Microsoft PowerPoint",
         "zoom.us",
+        "Notepad++",
     ],
     "allowlisted_apps": [
         "notepad.exe",
+        "notepad++.exe",
         "code.exe",
         "explorer.exe",
         "msedge.exe",
@@ -99,6 +105,8 @@ DEFAULT_DESKTOP_POLICY = {
         "Slack.exe",
         "POWERPNT.EXE",
         "Zoom.exe",
+        "outlook.exe",
+        "ms-teams.exe",
     ],
     "allowlisted_folders": [],
     "deny_globs": ["**/.env", "**/.env.*", "**/id_rsa", "**/*.pem", "**/credentials*"],

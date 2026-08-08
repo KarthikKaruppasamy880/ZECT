@@ -60,6 +60,8 @@ TOOL_ACTIONS: dict[str, str] = {
     "computer_ui_inspect": "companion_computer_inspect",
     "diagnose_fix": "companion_diagnose",
     "connector_architecture": "companion_diagnose",
+    "capability_refuse": "companion_diagnose",
+    "coding_engine_status": "companion_diagnose",
     "note_add": "companion_notes_write",
     "note_list": "companion_notes_read",
     "jira_get_issue": "companion_jira_read",

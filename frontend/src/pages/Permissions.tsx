@@ -233,6 +233,11 @@ export default function Permissions() {
       }
       const body = await res.json();
       setEmergencyStop(!!body.active);
+      try {
+        await window.zectDesktop?.mentrix?.setEmergencyStop?.(!!body.active);
+      } catch {
+        /* Electron optional */
+      }
       showToast(next ? "error" : "success", next ? "Emergency stop ENGAGED" : "Emergency stop cleared");
     } catch {
       showToast("error", "Failed to update emergency stop");

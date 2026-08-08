@@ -44,7 +44,31 @@ function allowlisted(appName) {
     return MAC_APPS.some((a) => a.toLowerCase() === raw.toLowerCase() || raw.toLowerCase().includes(a.toLowerCase()));
   }
   const base = raw.split(/[/\\]/).pop().toLowerCase();
-  return WIN_APPS.includes(base);
+  if (!base) return false;
+  if (WIN_APPS.includes(base)) return true;
+  const stem = base.replace(/\.exe$/, "");
+  return WIN_APPS.some((a) => {
+    const aStem = a.replace(/\.exe$/, "");
+    return a === base || aStem === stem || aStem === base || a === stem + ".exe";
+  });
+}
+
+/** True when foreground inspect matches an intended allowlisted app (best-effort). */
+function processMatchesIntended(inspect, intendedApp) {
+  if (!inspect || !inspect.ok) return false;
+  if (inspect.allowlisted !== true) return false;
+  const intended = String(intendedApp || "").trim();
+  if (!intended) return true;
+  const want = intended.split(/[/\\]/).pop().toLowerCase().replace(/\.exe$/, "");
+  const summary = inspect.summary || {};
+  const candidates = [
+    summary.process_name,
+    summary.frontmost,
+    summary.foreground_title,
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).toLowerCase().replace(/\.exe$/, ""));
+  return candidates.some((c) => c === want || c.includes(want) || want.includes(c));
 }
 
 function resolveZoomExe() {
@@ -661,6 +685,7 @@ module.exports = {
   WIN_APPS,
   MAC_APPS,
   allowlisted,
+  processMatchesIntended,
   openApp,
   openZoom,
   openPresentation,

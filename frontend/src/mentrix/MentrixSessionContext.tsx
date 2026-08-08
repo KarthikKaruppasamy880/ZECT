@@ -17,6 +17,7 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  apiFetch,
   getSkills,
   mentrixCompanionIntegrations,
   mentrixCompanionStream,
@@ -282,7 +283,15 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       } else if (res.error === "not_desktop_app") {
         pushLog("Desktop tools require the ZECT Electron app");
       } else if (!res.ok) {
-        pushLog(`Desktop tool failed: ${res.error || "unknown"}`);
+        pushLog(
+          `Desktop tool failed: ${res.error || "unknown"}${res.hint ? ` (${res.hint})` : ""}${
+            res.verified === false ? " · unverified" : ""
+          }`,
+        );
+      } else if (res.verified === false) {
+        pushLog("Desktop action ran but verification did not confirm target window");
+      } else {
+        pushLog("Desktop action OK");
       }
     },
     [pushLog],
@@ -836,6 +845,18 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     // Electron agent: heartbeat + poll mobile desktop-bridge queue
     let bridgeTimer: ReturnType<typeof setInterval> | null = null;
     if (desktop) {
+      // Sync API emergency stop → Electron so Computer Mode honors it
+      void (async () => {
+        try {
+          const res = await apiFetch("/api/permissions/emergency-stop");
+          if (res.ok) {
+            const body = await res.json();
+            await desktop.setEmergencyStop?.(!!body.active);
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
       const tickBridge = async () => {
         try {
           const { mentrixDesktopBridgeHeartbeat, mentrixDesktopBridgePoll, mentrixDesktopBridgeAck } =

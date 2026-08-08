@@ -20,7 +20,9 @@ ZECT Mentrix personal-agent spine is **implemented** for typed + spoken Companio
 | Companion + orchestrator | `services/mentrix/companion.py`, `orchestrator.py`, `permission_broker.py` |
 | Clone TTS + ZECT Voicebox | `domains/voice/voice_clone.py`, `adapters/llm/chatterbox_client.py`, `services/zect-voicebox/` |
 | OpenAI Realtime voice | `services/mentrix/realtime.py` (includes calendar/meeting + connector_architecture tools) |
-| Electron Computer Mode | `electron/main.js`, `computer.js` (Outlook/Teams/Slack/… allowlist); never-delete |
+| Electron Computer Mode | `electron/main.js`, `computer.js` (Outlook/Teams/Slack/… allowlist); click/type refuse when foreground not allowlisted / mismatched; never-delete |
+| Active desktop target | Companion HUD `computer-active-target` chip (ui_inspect poll) |
+| Desktop audit | Electron ring + `POST /api/audit/desktop` |
 | Permissions / grants / emergency stop | `domains/permissions/*`; Electron honors stop |
 | Slack / email | Providers + `outbound_drafts.py`; env: `SLACK_BOT_TOKEN`, `MENTRIX_IMAP_*` |
 | Calendar read/draft | `/api/calendar/*` + ICS/demo provider; companion + Realtime tools |

@@ -299,24 +299,24 @@ async function uiInspect() {
         allowlisted: allowlisted(frontmost),
       };
     }
-    const ps = `
-Add-Type @"
-using System; using System.Text; using System.Runtime.InteropServices;
-public class W {
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
-}
-"@
-$h = [W]::GetForegroundWindow()
-$sb = New-Object System.Text.StringBuilder 512
-[void][W]::GetWindowText($h, $sb, $sb.Capacity)
-$pidOut = 0
-[void][W]::GetWindowThreadProcessId($h, [ref]$pidOut)
-$procName = ""
-try { $procName = (Get-Process -Id $pidOut -ErrorAction Stop).ProcessName } catch {}
-Write-Output (($sb.ToString()) + "`n" + $procName + "`n" + $pidOut)
-`;
+    const ps = [
+      'Add-Type @"',
+      "using System; using System.Text; using System.Runtime.InteropServices;",
+      "public class W {",
+      "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();",
+      "  [DllImport(\"user32.dll\", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);",
+      "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);",
+      "}",
+      '"@',
+      "$h = [W]::GetForegroundWindow()",
+      "$sb = New-Object System.Text.StringBuilder 512",
+      "[void][W]::GetWindowText($h, $sb, $sb.Capacity)",
+      "$pidOut = 0",
+      "[void][W]::GetWindowThreadProcessId($h, [ref]$pidOut)",
+      '$procName = ""',
+      "try { $procName = (Get-Process -Id $pidOut -ErrorAction Stop).ProcessName } catch {}",
+      'Write-Output (($sb.ToString()) + "`n" + $procName + "`n" + $pidOut)',
+    ].join("\n");
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], {
       windowsHide: true,
     });

@@ -369,10 +369,9 @@ def _cloned_voice_for_user(db: Any, user_id: int | None) -> dict[str, Any] | Non
 def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[str, Any]:
     """Mint short-lived OpenAI Realtime client secret. Never returns the long-lived API key.
 
-    When the caller has a cloned voice configured, the response flags it so
-    the frontend can switch the session to text-only output (output_modalities:
-    ["text"]) and synthesize the response via /api/mentrix/voice/speak instead
-    of playing OpenAI's own stock-voice audio.
+    When the caller has a cloned voice AND ZECT Voicebox is online, the response
+    flags clone TTS so the frontend uses text-only output + /voice/speak.
+    When Voicebox is offline, mint stock PCM audio so Connect Voice stays low-latency.
     """
     if not realtime_enabled():
         return {
@@ -384,6 +383,10 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
     key = _ensure_openai_env()
     voice = os.getenv("MENTRIX_REALTIME_VOICE", "alloy")
     cloned_voice = _cloned_voice_for_user(db, user_id)
+    from app.adapters.llm.chatterbox_client import chatterbox_available
+
+    voicebox_online = bool(chatterbox_available())
+    use_clone_tts = bool(cloned_voice) and voicebox_online
     last_error: dict[str, Any] | None = None
     try:
         with httpx.Client(timeout=20.0) as client:
@@ -401,9 +404,8 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
                         },
                     },
                 }
-                # Cloned/Chatterbox voice: omit audio.output so mint stays text-capable;
-                # client session.update locks output_modalities to ["text"].
-                if not cloned_voice:
+                # Clone + Voicebox online: omit audio.output for text-only client path.
+                if not use_clone_tts:
                     audio_cfg["output"] = {"voice": voice}
                 body = {
                     "session": {
@@ -414,7 +416,7 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
                         "audio": audio_cfg,
                         **(
                             {"output_modalities": ["text"]}
-                            if cloned_voice
+                            if use_clone_tts
                             else {}
                         ),
                     }
@@ -464,6 +466,7 @@ def mint_realtime_session(db: Any = None, user_id: int | None = None) -> dict[st
                     "voice": voice,
                     "api": "client_secrets",
                     "cloned_voice": cloned_voice,
+                    "voicebox_online": voicebox_online,
                 }
         err = last_error or {
             "ok": False,

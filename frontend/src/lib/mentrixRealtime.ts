@@ -42,6 +42,8 @@ export type RealtimePreflight = {
   openai_ws_url?: string;
   voice?: string;
   cloned_voice?: ClonedVoiceInfo | null;
+  /** ZECT Voicebox online at mint — when false, use Realtime PCM even if a clone exists */
+  voicebox_online?: boolean;
 };
 
 export type RealtimeSessionHandle = {
@@ -133,6 +135,7 @@ export async function probeMentrixRealtimePreflight(): Promise<RealtimePreflight
     openai_ws_url: session.openai_ws_url,
     voice: session.voice,
     cloned_voice: session.cloned_voice || null,
+    voicebox_online: Boolean(session.voicebox_online),
     api: session.api ? String(session.api) : "client_secrets",
   };
 }
@@ -280,6 +283,7 @@ export async function startMentrixRealtime(
       openai_ws_url: opts.preflight.openai_ws_url,
       voice: opts.preflight.voice,
       cloned_voice: opts.preflight.cloned_voice || null,
+      voicebox_online: opts.preflight.voicebox_online,
     };
   } else {
     const sessionRes = await apiFetch("/api/mentrix/companion/realtime/session", { method: "POST" });
@@ -300,10 +304,19 @@ export async function startMentrixRealtime(
   }
 
   const clonedVoice = (session.cloned_voice as ClonedVoiceInfo | null) || null;
-  const clonedVoiceActive = Boolean(clonedVoice);
+  const voiceboxOnline = Boolean(session.voicebox_online);
+  // Clone TTS only when Voicebox is online — otherwise Realtime PCM stock voice (low latency).
+  const clonedVoiceActive = Boolean(clonedVoice) && voiceboxOnline;
+  if (clonedVoice && !voiceboxOnline) {
+    handlers.onLog?.(
+      "ZECT Voicebox offline — using Realtime stock voice for low latency (reconnect after Voicebox is up for your clone)",
+    );
+  }
 
   handlers.onLog?.(
-    clonedVoiceActive ? `Connect Voice — OpenAI Realtime (cloned voice: ${clonedVoice!.name})` : "Connect Voice — OpenAI Realtime",
+    clonedVoiceActive
+      ? `Connect Voice — OpenAI Realtime (cloned voice: ${clonedVoice!.name})`
+      : "Connect Voice — OpenAI Realtime",
   );
   handlers.onOrb?.("listening");
 
@@ -817,7 +830,9 @@ export async function startMentrixRealtime(
         if (pendingSpeakCount === 0 && !stopped) {
           if (turnEnginesUsed.size) {
             const label = [...turnEnginesUsed].join(" + ");
-            const isClone = turnEnginesUsed.size === 1 && turnEnginesUsed.has("chatterbox");
+            const isClone =
+              turnEnginesUsed.size === 1 &&
+              (turnEnginesUsed.has("zect_voicebox") || turnEnginesUsed.has("chatterbox"));
             handlers.onLog?.(isClone ? "Spoke via your cloned voice" : `Spoke via: ${label} (not your cloned voice)`);
             turnEnginesUsed.clear();
           }

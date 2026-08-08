@@ -6,7 +6,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { mentrixSpeakClonedDetailed } from "@/lib/api";
-import { cancelMentrixSpeech, requireCloneSpeech, speakMentrixStreamedAwait } from "./speak";
+import { cancelMentrixSpeech, requireCloneSpeech, speakMentrixAwait, speakMentrixStreamedAwait } from "./speak";
 
 class FakeAudio extends EventTarget {
   ended = false;
@@ -132,8 +132,17 @@ describe("speakMentrixStreamedAwait", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: "Expected your clone (chatterbox), got openai_tts_fallback — start local Chatterbox",
+      error: "Expected your clone (ZECT Voicebox), got openai_tts_fallback — start local ZECT Voicebox",
     });
+  });
+
+  it("accepts zect_voicebox engine id as clone success", async () => {
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockResolvedValue({
+      url: "blob:ok",
+      engine: "zect_voicebox",
+    });
+    const result = await speakMentrixAwait("Hello there.", true);
+    expect(result).toEqual({ ok: true, engine: "zect_voicebox" });
   });
 
   it("allows mixed engines when requireClone is false", async () => {

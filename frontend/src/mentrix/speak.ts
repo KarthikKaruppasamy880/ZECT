@@ -1,4 +1,4 @@
-/** Mentrix speech — cloned Chatterbox / OpenAI stock TTS / optional browser fallback. */
+/** Mentrix speech — cloned ZECT Voicebox / OpenAI stock TTS / optional browser fallback. */
 import { getMyClonedVoice, mentrixSpeakClonedDetailed, type SpeakVoiceOptions } from "@/lib/api";
 import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
 
@@ -9,12 +9,18 @@ let awaitGeneration = 0;
 
 export type SpeakResult = { ok: true; engine: string } | { ok: false; error: string };
 
+/** Local clone synth header ids (legacy chatterbox + zect_voicebox). */
+export function isCloneTtsEngine(engine: string | undefined | null): boolean {
+  const e = (engine || "").toLowerCase();
+  return e === "zect_voicebox" || e === "chatterbox";
+}
+
 /** Clone path unless an explicit OpenAI stock voice is selected. */
 export function usesClonePath(voiceOpts?: SpeakVoiceOptions): boolean {
   return !(voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== "");
 }
 
-/** Present / Test speak: require Chatterbox — no browser/OpenAI silent swap. */
+/** Present / Test speak: require ZECT Voicebox — no browser/OpenAI silent swap. */
 export function requireCloneSpeech(voiceOpts?: SpeakVoiceOptions): boolean {
   if (!usesClonePath(voiceOpts)) return false;
   return voiceOpts?.requireClone !== false;
@@ -129,7 +135,7 @@ export function speakBrowser(text: string, enabled: boolean) {
 }
 
 /**
- * Prefer Mentrix /voice/speak (Chatterbox clone or explicit OpenAI stock).
+ * Prefer Mentrix /voice/speak (ZECT Voicebox clone or explicit OpenAI stock).
  * Browser speechSynthesis only when require_clone is off (legacy / Companion).
  */
 export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
@@ -141,10 +147,10 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
   let apiError = "";
   try {
     const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
-    if (mustClone && engine !== "chatterbox") {
+    if (mustClone && !isCloneTtsEngine(engine)) {
       return {
         ok: false,
-        error: `Expected your clone (chatterbox), got ${engine} — start local Chatterbox to narrate in your voice`,
+        error: `Expected your clone (ZECT Voicebox), got ${engine} — start local ZECT Voicebox to narrate in your voice`,
       };
     }
     if (url && typeof Audio !== "undefined") {
@@ -171,7 +177,7 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
   if (mustClone) {
     return {
       ok: false,
-      error: apiError || "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+      error: apiError || "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
     };
   }
 
@@ -203,7 +209,7 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
     /* ignore */
   }
 
-  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and Chatterbox/OpenAI" };
+  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and ZECT Voicebox/OpenAI" };
 }
 
 /**
@@ -220,10 +226,10 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
   let apiError = "";
   try {
     const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
-    if (mustClone && engine !== "chatterbox") {
+    if (mustClone && !isCloneTtsEngine(engine)) {
       return {
         ok: false,
-        error: `Expected your clone (chatterbox), got ${engine} — start local Chatterbox to narrate in your voice`,
+        error: `Expected your clone (ZECT Voicebox), got ${engine} — start local ZECT Voicebox to narrate in your voice`,
       };
     }
     if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
@@ -259,7 +265,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
   if (mustClone) {
     return {
       ok: false,
-      error: apiError || "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+      error: apiError || "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
     };
   }
 
@@ -290,7 +296,7 @@ export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpt
     /* ignore */
   }
 
-  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and Chatterbox/OpenAI" };
+  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and ZECT Voicebox/OpenAI" };
 }
 
 /**
@@ -346,11 +352,11 @@ export async function speakMentrixStreamedAwait(
 
     let played = false;
     if (url && typeof Audio !== "undefined") {
-      if (mustClone && current && current.engine !== "chatterbox") {
+      if (mustClone && current && !isCloneTtsEngine(current.engine)) {
         URL.revokeObjectURL(url);
         return {
           ok: false,
-          error: `Expected your clone (chatterbox), got ${current.engine} — start local Chatterbox`,
+          error: `Expected your clone (ZECT Voicebox), got ${current.engine} — start local ZECT Voicebox`,
         };
       }
       const audio = new Audio(url);
@@ -385,11 +391,11 @@ export async function speakMentrixStreamedAwait(
           ok: false,
           error: lastFetchError
             ? `Selected voice failed: ${lastFetchError}`
-            : "Clone TTS failed — start local Chatterbox (see docs/CHATTERBOX_LOCAL.md)",
+            : "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
         };
       }
       if (typeof window === "undefined" || !window.speechSynthesis) {
-        return { ok: false, error: "No audio output for this chunk — check TTS backend/Chatterbox/OpenAI" };
+        return { ok: false, error: "No audio output for this chunk — check TTS backend/ZECT Voicebox/OpenAI" };
       }
       usedBrowserFallback = true;
       const result = await speakBrowserAwait(chunks[i]);

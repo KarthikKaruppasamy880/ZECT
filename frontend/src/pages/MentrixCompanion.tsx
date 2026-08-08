@@ -448,7 +448,7 @@ export default function MentrixCompanion() {
                   data-testid="mentrix-present-hint"
                   className="mt-1.5 text-[11px] text-slate-500"
                 >
-                  Uses Mentrix Board artifacts + your default Chatterbox voice (not PowerPoint files).
+                  Uses Mentrix Board artifacts + your default ZECT Voicebox voice (not PowerPoint files).
                   For a prepared deck, open the Voice tab → Present Deck.
                 </p>
                 <p className="mt-3 text-[11px] text-slate-500">
@@ -460,7 +460,7 @@ export default function MentrixCompanion() {
                   <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>
                     Voice
                   </button>{" "}
-                  for Chatterbox clone + Present Deck.
+                  for ZECT Voicebox clone + Present Deck.
                 </p>
                 {s.displayMode && (
                   <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>

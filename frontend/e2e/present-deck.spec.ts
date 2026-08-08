@@ -20,11 +20,11 @@ test.describe("Present Deck (PPTX + Zoom)", () => {
     });
   });
 
-  test("Present / Narrate hint mentions Board artifacts + Chatterbox", async ({ page }) => {
+  test("Present / Narrate hint mentions Board artifacts + Voicebox", async ({ page }) => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-present-narrate")).toBeVisible();
-    await expect(page.getByTestId("mentrix-present-hint")).toContainText(/Board artifacts|Chatterbox/i);
+    await expect(page.getByTestId("mentrix-present-hint")).toContainText(/Board artifacts|Voicebox|voice/i);
   });
 
   test("Mocked Electron bridge records open_presentation action", async ({ page }) => {

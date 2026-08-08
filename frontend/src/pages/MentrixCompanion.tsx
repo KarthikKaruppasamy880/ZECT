@@ -21,7 +21,6 @@ import {
 import MentrixConfirmModal from "@/components/MentrixConfirmModal";
 import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
-import CloneVoicePanel from "@/components/CloneVoicePanel";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
@@ -155,13 +154,27 @@ export default function MentrixCompanion() {
               <div
                 id="mentrix-voice-cloning"
                 data-testid="mentrix-voice-section"
-                className="rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+                className="space-y-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
               >
-                <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
-                  Chatterbox — Present & sessions
-                </p>
-                <CloneVoicePanel defaultExpanded variant="dark" />
-                <div className="mt-3">
+                <div className="rounded-lg border border-teal-800/50 bg-slate-900/80 p-3">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-teal-400">Voice &amp; Present</p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    Clone setup lives in <strong className="text-teal-200">Settings → Voice</strong> (sidebar
+                    bottom). Companion uses your default clone for Speak replies, with OpenAI fallback if
+                    Voicebox is down.
+                  </p>
+                  <a
+                    href="/settings#voice"
+                    className="mt-2 inline-flex text-xs font-medium text-teal-300 underline hover:text-teal-200"
+                    data-testid="voice-open-settings"
+                  >
+                    Open Voice settings
+                  </a>
+                </div>
+                <div>
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
+                    Present deck — PPTX + Zoom
+                  </p>
                   <PresentDeckPanel variant="dark" />
                 </div>
               </div>

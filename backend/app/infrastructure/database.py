@@ -94,10 +94,13 @@ def _migrate_cloned_voices():
     try:
         with engine.begin() as conn:
             if "external_voice_id" in cols:
+                # Clear bad backfill: ZECT voice_id was incorrectly copied into
+                # external_voice_id. Voicebox assigns its own UUID — equal ids are stale.
                 conn.execute(
                     text(
-                        "UPDATE cloned_voices SET external_voice_id = voice_id "
-                        "WHERE external_voice_id IS NULL AND voice_id IS NOT NULL"
+                        "UPDATE cloned_voices SET external_voice_id = NULL "
+                        "WHERE external_voice_id IS NOT NULL AND voice_id IS NOT NULL "
+                        "AND external_voice_id = voice_id"
                     )
                 )
             if "is_default" in cols:

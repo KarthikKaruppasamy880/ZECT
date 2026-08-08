@@ -528,6 +528,23 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if "send email" in m or "email send" in m:
         tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
 
+    if any(
+        p in m
+        for p in (
+            "calendar",
+            "what's on my calendar",
+            "whats on my calendar",
+            "upcoming meetings",
+            "my meetings",
+            "schedule today",
+        )
+    ):
+        tools.append({"name": "calendar_upcoming", "args": {}})
+    if any(p in m for p in ("meeting brief", "pre-meeting", "brief me for", "meeting prep")):
+        tools.append({"name": "meeting_brief", "args": {}})
+    if "follow-up" in m or "follow up" in m or "meeting followup" in m:
+        tools.append({"name": "meeting_followup_draft", "args": {"channel": "email"}})
+
     # BrowserRuntime intents (allowlisted hosts via MENTRIX_BROWSER_ALLOWLIST)
     url_m = re.search(r"https?://[^\s]+", message)
     if url_m and any(w in m for w in ("open", "browse", "navigate", "go to", "visit", "load")):
@@ -1123,8 +1140,11 @@ def _exec_tool(
                 create_outbound_draft,
                 get_draft,
                 mark_sent,
+                public_payload,
                 serialize_draft,
+                verify_approval,
             )
+            from app.services.mentrix.providers import get_slack_provider
 
             channel = args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "general")
             text = args.get("text") or ""
@@ -1133,7 +1153,25 @@ def _exec_tool(
                 draft = get_draft(db, int(draft_id))
                 if not draft or draft.channel != "slack":
                     return {"ok": False, "error": "draft_not_found", "spoken_summary": "Slack draft not found."}
-                payload = draft.payload_json or {}
+                ok_appr, reason = verify_approval(
+                    draft, expected_hash=args.get("preview_hash")
+                )
+                if not ok_appr:
+                    return {
+                        "ok": False,
+                        "error": reason,
+                        "spoken_summary": f"Cannot send Slack draft: {reason}.",
+                        "draft": serialize_draft(draft),
+                    }
+                if draft.status == "sent":
+                    return {
+                        "ok": True,
+                        "already_sent": True,
+                        "provider_message_id": draft.provider_message_id,
+                        "spoken_summary": "Already sent — not duplicating.",
+                        "draft": serialize_draft(draft),
+                    }
+                payload = public_payload(draft)
                 sent = execute_tool(
                     db,
                     server_id="slack",
@@ -1147,23 +1185,33 @@ def _exec_tool(
                 return {
                     "ok": True,
                     "sent": sent,
+                    "verification": {"kind": "provider_id", "id": draft.provider_message_id or sent.get("ts")},
                     "draft": serialize_draft(draft),
-                    "spoken_summary": f"Slack message sent to {channel}." if not sent.get("dry_run") else "Slack send queued (token missing).",
+                    "spoken_summary": "Slack message sent.",
                 }
+            drafted = get_slack_provider().draft_message(channel=str(channel), text=text)
+            if not drafted.get("ok"):
+                return drafted
             draft = create_outbound_draft(
                 db,
                 channel="slack",
-                payload={"channel": str(channel).lstrip("#"), "text": text},
+                payload={"channel": drafted["channel"], "text": drafted["text"]},
+                user_id=user_id,
+                citations=drafted.get("citations") or [],
+                correlation_id=correlation_id or "",
             )
+            ser = serialize_draft(draft)
             return {
                 "ok": True,
-                "draft": serialize_draft(draft),
+                "draft": ser,
                 "needs_send_approval": True,
+                "preview_hash": ser.get("preview_hash"),
+                "expires_at": ser.get("expires_at"),
                 "spoken_summary": f"Slack draft #{draft.id} ready for {channel}. Approve send to deliver.",
                 "board": {
                     "type": "markdown",
                     "title": f"Slack draft #{draft.id}",
-                    "body": f"**Channel:** #{channel}\n\n{text[:2000]}",
+                    "body": f"**Channel:** #{channel}\n**Hash:** `{ser.get('preview_hash', '')[:16]}…`\n\n{text[:2000]}",
                 },
             }
         except Exception as exc:  # noqa: BLE001
@@ -1174,9 +1222,9 @@ def _exec_tool(
                 "spoken_summary": f"Could not send Slack message: {type(exc).__name__}.",
             }
     if name == "email_digest":
-        from app.services.mentrix.email_inbox import fetch_inbox_digest
+        from app.services.mentrix.providers import get_email_provider
 
-        return fetch_inbox_digest(limit=8)
+        return get_email_provider().digest(limit=8)
     if name == "email_send":
         try:
             from app.services.mcp.hub import execute_tool
@@ -1184,15 +1232,34 @@ def _exec_tool(
                 create_outbound_draft,
                 get_draft,
                 mark_sent,
+                public_payload,
                 serialize_draft,
+                verify_approval,
             )
+            from app.services.mentrix.providers import get_email_provider
 
             draft_id = args.get("draft_id")
             if draft_id:
                 draft = get_draft(db, int(draft_id))
                 if not draft or draft.channel != "email":
                     return {"ok": False, "error": "draft_not_found", "spoken_summary": "Email draft not found."}
-                payload = draft.payload_json or {}
+                ok_appr, reason = verify_approval(draft, expected_hash=args.get("preview_hash"))
+                if not ok_appr:
+                    return {
+                        "ok": False,
+                        "error": reason,
+                        "spoken_summary": f"Cannot send email draft: {reason}.",
+                        "draft": serialize_draft(draft),
+                    }
+                if draft.status == "sent":
+                    return {
+                        "ok": True,
+                        "already_sent": True,
+                        "provider_message_id": draft.provider_message_id,
+                        "spoken_summary": "Already sent — not duplicating.",
+                        "draft": serialize_draft(draft),
+                    }
+                payload = public_payload(draft)
                 sent = execute_tool(
                     db,
                     server_id="email",
@@ -1207,27 +1274,48 @@ def _exec_tool(
                 return {
                     "ok": True,
                     "sent": sent,
+                    "verification": {"kind": "provider_id", "id": draft.provider_message_id or sent.get("id")},
                     "draft": serialize_draft(draft),
-                    "spoken_summary": "Email sent." if not sent.get("dry_run") else "Email not sent — configure SMTP_HOST.",
+                    "spoken_summary": "Email sent.",
                 }
+            drafted = get_email_provider().draft_reply(
+                to=str(args.get("to") or ""),
+                subject=str(args.get("subject") or "Mentrix"),
+                body=str(args.get("body") or ""),
+                dictation=str(args.get("dictation") or ""),
+            )
+            if not drafted.get("ok"):
+                return drafted
             draft = create_outbound_draft(
                 db,
                 channel="email",
                 payload={
-                    "to": args.get("to") or "",
-                    "subject": args.get("subject") or "Mentrix",
-                    "body": args.get("body") or "",
+                    "to": drafted.get("to") or "",
+                    "subject": drafted.get("subject") or "Mentrix",
+                    "body": drafted.get("body") or "",
                 },
+                user_id=user_id,
+                citations=drafted.get("citations") or [],
+                dictation=str(args.get("dictation") or ""),
+                correlation_id=correlation_id or "",
             )
+            ser = serialize_draft(draft)
             return {
                 "ok": True,
-                "draft": serialize_draft(draft),
+                "draft": ser,
                 "needs_send_approval": True,
+                "preview_hash": ser.get("preview_hash"),
+                "expires_at": ser.get("expires_at"),
                 "spoken_summary": f"Email draft #{draft.id} ready. Approve send to deliver.",
                 "board": {
                     "type": "markdown",
                     "title": f"Email draft #{draft.id}",
-                    "body": f"**To:** {args.get('to') or '(unset)'}\n**Subject:** {args.get('subject') or 'Mentrix'}\n\n{(args.get('body') or '')[:2000]}",
+                    "body": (
+                        f"**To:** {drafted.get('to') or '(unset)'}\n"
+                        f"**Subject:** {drafted.get('subject') or 'Mentrix'}\n"
+                        f"**Hash:** `{ser.get('preview_hash', '')[:16]}…`\n\n"
+                        f"{(drafted.get('body') or '')[:2000]}"
+                    ),
                 },
             }
         except Exception as exc:  # noqa: BLE001
@@ -1237,6 +1325,39 @@ def _exec_tool(
                 "note": f"Email send: {exc}",
                 "spoken_summary": f"Email send failed: {type(exc).__name__}.",
             }
+    if name == "calendar_upcoming":
+        from app.services.mentrix.providers import get_calendar_provider
+
+        items = get_calendar_provider().upcoming(limit=int(args.get("limit") or 10))
+        rows = [
+            {"id": i.id, "title": i.title, "when": i.when, "body": i.body, "source": i.source}
+            for i in items
+        ]
+        md = "\n".join(f"- **{r['title']}** — {r['when'] or 'TBD'}" for r in rows) or "_No events_"
+        return {
+            "ok": True,
+            "meetings": rows,
+            "spoken_summary": f"{len(rows)} upcoming meeting(s)." if rows else "No upcoming meetings.",
+            "board": {"type": "markdown", "title": "Calendar", "body": f"# Upcoming\n\n{md}"},
+        }
+    if name == "meeting_brief":
+        from app.services.mentrix.meeting_assistant import build_meeting_brief
+
+        return build_meeting_brief(db, user_id=user_id)
+    if name == "meeting_followup_draft":
+        from app.services.mentrix.meeting_assistant import (
+            build_meeting_brief,
+            draft_followups_from_brief,
+        )
+
+        brief = build_meeting_brief(db, user_id=user_id)
+        return draft_followups_from_brief(
+            db,
+            brief,
+            channel=str(args.get("channel") or "email"),
+            to=str(args.get("to") or ""),
+            user_id=user_id,
+        )
     if name == "image_avatar":
         from app.services.mentrix.media_board import generate_media
 

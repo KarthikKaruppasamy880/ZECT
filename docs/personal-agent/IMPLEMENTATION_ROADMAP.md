@@ -51,33 +51,49 @@ Feature flag `MENTRIX_PA1_ORCHESTRATOR=0` to use legacy companion path.
 
 ## PA-2 — Email / Slack / Calendar read+draft
 
+**Status:** implemented (providers + Calendar greenfield + allowlists + citations).
+
 Provider interfaces; allowlists; drafts with citations; **no send**. CalendarProvider greenfield.
 
 ## PA-3 — Approved send/write
+
+**Status:** implemented (preview hash, expiry, anti-dupe on outbound drafts).
 
 Immutable preview, hash match, provider IDs, anti-dupe, audit.
 
 ## PA-4 — Browser automation
 
+**Status:** implemented (DOM verify, password refuse, context isolation per call).
+
 DOM-first verify; kill default `*`; session isolation; no password scrape.
 
 ## PA-5 — Native desktop
+
+**Status:** implemented (foreground process/title verify + allowlist check; a11y deepen continues).
 
 A11y-first; allowlists; verify; emergency stop; keyboard/mouse fallback only.
 
 ## PA-6 — Safe file organization
 
+**Status:** implemented (durable `FileOrganizePlan` table + SHA-256 / collision / rollback).
+
 Durable proposals, SHA-256, Undo, no delete, collision handling.
 
 ## PA-7 — Voice stabilization
+
+**Status:** implemented (Realtime tools route through MentrixOrchestrator).
 
 Latency, barge-in, cancel; bind STT intents to PA-1 orchestrator.
 
 ## PA-8 — Meeting assistant
 
+**Status:** implemented (`meeting_brief` / `calendar_upcoming` / follow-up drafts).
+
 Calendar + email + Slack context; briefs; no auto-send; consent for recording.
 
 ## PA-9 — Skills and automations
+
+**Status:** implemented (manifest governance + schedule-scoped grants).
 
 Governed skill manifests; schedules with **separate** limited grants.
 

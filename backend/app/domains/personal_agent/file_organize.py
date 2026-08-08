@@ -1,17 +1,12 @@
-"""Phase 7 Stage A — file organize dry-run / approve / SHA-256 move / rollback.
-
-Operates only under path-allowlisted roots. No auto-delete.
-"""
+"""PA-6 file organize — durable proposals, SHA-256 move, rollback, no delete."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -21,9 +16,11 @@ from app.infrastructure.allowed_paths import path_under_allowed_roots
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.auth.rbac import require_authentication, log_audit
 from app.infrastructure.database import get_db
+from app.models import FileOrganizePlan
 
 router = APIRouter(prefix="/api/file-organize", tags=["file-organize"])
 
+# In-memory cache mirrors DB for fast get; DB is source of truth across restarts
 _PLANS: dict[str, dict] = {}
 
 
@@ -53,6 +50,31 @@ def _match(name: str, patterns: list[str]) -> bool:
     return any(fnmatch(name, p) for p in patterns)
 
 
+def _persist(db: Session, plan: dict, *, user_id: int | None = None) -> None:
+    plan_id = plan["plan_id"]
+    _PLANS[plan_id] = plan
+    row = db.query(FileOrganizePlan).filter(FileOrganizePlan.plan_id == plan_id).first()
+    if not row:
+        row = FileOrganizePlan(plan_id=plan_id, user_id=user_id, status=plan.get("status") or "planned")
+        db.add(row)
+    row.status = plan.get("status") or row.status
+    row.plan_json = plan
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+def _load(db: Session, plan_id: str) -> dict | None:
+    if plan_id in _PLANS:
+        return _PLANS[plan_id]
+    row = db.query(FileOrganizePlan).filter(FileOrganizePlan.plan_id == plan_id).first()
+    if not row:
+        return None
+    plan = dict(row.plan_json or {})
+    plan.setdefault("plan_id", plan_id)
+    _PLANS[plan_id] = plan
+    return plan
+
+
 @router.post("/plan")
 @require_authentication
 def create_plan(
@@ -75,12 +97,14 @@ def create_plan(
         if not _match(p.name, req.patterns or ["*"]):
             continue
         target = dest / p.name
+        collision = "skip" if target.exists() else "ok"
         moves.append(
             {
                 "from": str(p),
                 "to": str(target),
                 "sha256": _sha256(p),
                 "bytes": p.stat().st_size,
+                "collision": collision,
             }
         )
 
@@ -94,11 +118,14 @@ def create_plan(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "planned",
         "rollback": [],
+        "durable": True,
+        "policy": {"delete": "never", "empty_trash": "never"},
     }
-    _PLANS[plan_id] = plan
+    uid = getattr(current_user, "id", None) or getattr(current_user, "user_id", None)
+    _persist(db, plan, user_id=uid if isinstance(uid, int) else None)
     log_audit(
         db=db,
-        user_id=getattr(current_user, "user_id", None) or 0,
+        user_id=uid if isinstance(uid, int) else 0,
         action="file_organize_plan",
         resource_type="file_organize",
         details={"plan_id": plan_id, "count": len(moves)},
@@ -113,11 +140,12 @@ def approve_plan(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    plan = _PLANS.get(req.plan_id)
+    plan = _load(db, req.plan_id)
     if not plan:
         raise HTTPException(404, "Plan not found")
     if not req.execute:
-        plan["status"] = "rejected"
+        plan["status"] = "cancelled"
+        _persist(db, plan)
         return plan
 
     dest = Path(plan["dest_dir"])
@@ -147,9 +175,11 @@ def approve_plan(
     plan["rollback"] = rollback
     plan["errors"] = errors
     plan["executed_at"] = datetime.now(timezone.utc).isoformat()
+    uid = getattr(current_user, "id", None) or getattr(current_user, "user_id", None)
+    _persist(db, plan, user_id=uid if isinstance(uid, int) else None)
     log_audit(
         db=db,
-        user_id=getattr(current_user, "user_id", None) or 0,
+        user_id=uid if isinstance(uid, int) else 0,
         action="file_organize_execute",
         resource_type="file_organize",
         details={"plan_id": req.plan_id, "moved": len(rollback), "errors": len(errors)},
@@ -164,7 +194,7 @@ def rollback_plan(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    plan = _PLANS.get(plan_id)
+    plan = _load(db, plan_id)
     if not plan:
         raise HTTPException(404, "Plan not found")
     restored = []
@@ -179,9 +209,11 @@ def rollback_plan(
             continue
     plan["status"] = "rolled_back"
     plan["restored"] = restored
+    uid = getattr(current_user, "id", None) or getattr(current_user, "user_id", None)
+    _persist(db, plan, user_id=uid if isinstance(uid, int) else None)
     log_audit(
         db=db,
-        user_id=getattr(current_user, "user_id", None) or 0,
+        user_id=uid if isinstance(uid, int) else 0,
         action="file_organize_rollback",
         resource_type="file_organize",
         details={"plan_id": plan_id, "restored": len(restored)},
@@ -191,8 +223,12 @@ def rollback_plan(
 
 @router.get("/{plan_id}")
 @require_authentication
-def get_plan(plan_id: str, current_user: CurrentUser = Depends(get_current_user)):
-    plan = _PLANS.get(plan_id)
+def get_plan(
+    plan_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    plan = _load(db, plan_id)
     if not plan:
         raise HTTPException(404, "Plan not found")
     return plan

@@ -284,11 +284,19 @@ async function uiInspect() {
         "-e",
         'tell application "System Events" to get name of first application process whose frontmost is true',
       ]);
+      const frontmost = String(stdout).trim();
       return {
         ok: true,
         desktop: "computer_ui_inspect",
-        summary: { frontmost: String(stdout).trim() },
+        summary: { frontmost },
         platform: "darwin",
+        verified: Boolean(frontmost),
+        verification: {
+          kind: "a11y_frontmost",
+          note: "Keyboard/mouse only as fallback after identity check",
+          frontmost,
+        },
+        allowlisted: allowlisted(frontmost),
       };
     }
     const ps = `
@@ -297,26 +305,44 @@ using System; using System.Text; using System.Runtime.InteropServices;
 public class W {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 }
 "@
 $h = [W]::GetForegroundWindow()
 $sb = New-Object System.Text.StringBuilder 512
 [void][W]::GetWindowText($h, $sb, $sb.Capacity)
-$sb.ToString()
+$pidOut = 0
+[void][W]::GetWindowThreadProcessId($h, [ref]$pidOut)
+$procName = ""
+try { $procName = (Get-Process -Id $pidOut -ErrorAction Stop).ProcessName } catch {}
+Write-Output (($sb.ToString()) + "`n" + $procName + "`n" + $pidOut)
 `;
     const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", ps], {
       windowsHide: true,
     });
+    const parts = String(stdout).trim().split(/\r?\n/);
+    const foreground_title = (parts[0] || "").trim();
+    const process_name = (parts[1] || "").trim();
+    const pid = (parts[2] || "").trim();
     return {
       ok: true,
       desktop: "computer_ui_inspect",
-      summary: { foreground_title: String(stdout).trim() },
+      summary: { foreground_title, process_name, pid },
       platform: "win32",
+      verified: Boolean(foreground_title || process_name),
+      verification: {
+        kind: "a11y_foreground",
+        note: "Prefer process/window identity before click/type fallback",
+        foreground_title,
+        process_name,
+      },
+      allowlisted: allowlisted(process_name) || allowlisted(foreground_title),
     };
   } catch (err) {
-    return { ok: false, error: String(err) };
+    return { ok: false, error: String(err), verified: false };
   }
 }
+
 
 function refuseDelete(action, detail) {
   console.warn("[computer] refuse delete", action, detail || "");

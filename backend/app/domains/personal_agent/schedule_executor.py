@@ -70,6 +70,33 @@ def execute_schedule(db: Session, schedule: Schedule, *, trigger_type: str = "ma
     except Exception:
         pass
 
+    # PA-9: schedule-scoped limited grants (task_config.grants)
+    try:
+        from app.services.mentrix.skill_governance import (
+            schedule_grants_from_config,
+            schedule_tool_permitted,
+        )
+
+        grants = schedule_grants_from_config(schedule.task_config if isinstance(schedule.task_config, dict) else {})
+        tool_hint = str((schedule.task_config or {}).get("tool") or schedule.task_type or "")
+        ok_grant, grant_reason = schedule_tool_permitted(grants, tool_hint)
+        if not ok_grant:
+            run = ScheduleRun(
+                schedule_id=schedule.id,
+                trigger_type=trigger_type,
+                status="failed",
+                error_message=grant_reason,
+                output_summary=f"Schedule grant denied: {grant_reason}",
+                completed_at=datetime.now(timezone.utc),
+            )
+            db.add(run)
+            schedule.failure_count = (schedule.failure_count or 0) + 1
+            db.commit()
+            db.refresh(run)
+            return run
+    except Exception:
+        pass
+
     key = _idempotency_key(schedule, trigger_type)
     existing = (
         db.query(ScheduleRun)

@@ -1051,12 +1051,26 @@ class OutboundDraft(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
-    channel = Column(String, nullable=False)  # slack | email | jira
+    channel = Column(String, nullable=False)  # slack | email | jira | calendar
     status = Column(String, default="draft")  # draft | sent | cancelled
     payload_json = Column(JSON, default=dict)
     provider_message_id = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     sent_at = Column(DateTime, nullable=True)
+
+
+class FileOrganizePlan(Base):
+    """PA-6 durable file-organization proposals (SHA-256 moves; no delete)."""
+    __tablename__ = "file_organize_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String, unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String, default="planned")  # planned | executed | rolled_back | cancelled
+    plan_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
 
 
 # ---------------------------------------------------------------------------

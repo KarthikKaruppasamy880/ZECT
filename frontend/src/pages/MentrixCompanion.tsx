@@ -3,6 +3,7 @@
  * Deep links: ?incident=1 / ?voice=1.
  */
 import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -27,6 +28,55 @@ import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
 type CompanionMode = "chat" | "incident" | "voice";
+
+function ComputerTargetChip() {
+  const [label, setLabel] = useState("Inspecting…");
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const computer = window.zectDesktop?.mentrix?.computer;
+        if (!computer) {
+          if (!cancelled) setLabel("Browser only — use Electron");
+          return;
+        }
+        const res = (await computer("ui_inspect", {})) as {
+          ok?: boolean;
+          allowlisted?: boolean;
+          summary?: { process_name?: string; foreground_title?: string; frontmost?: string };
+        };
+        if (cancelled) return;
+        if (!res?.ok) {
+          setLabel("No foreground window");
+          return;
+        }
+        const name =
+          res.summary?.process_name ||
+          res.summary?.frontmost ||
+          res.summary?.foreground_title ||
+          "unknown";
+        setLabel(`${name}${res.allowlisted ? " · allowlisted" : " · not allowlisted"}`);
+      } catch {
+        if (!cancelled) setLabel("Inspect failed");
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
+  return (
+    <p
+      className="text-[10px] text-teal-300/90 max-w-[240px] truncate"
+      data-testid="computer-active-target"
+      title={label}
+    >
+      Active: {label}
+    </p>
+  );
+}
 
 export default function MentrixCompanion() {
   const s = useMentrixSession();
@@ -349,6 +399,9 @@ export default function MentrixCompanion() {
                       <Monitor className="h-3.5 w-3.5" />
                       Computer Mode
                     </label>
+                    {s.computerMode ? (
+                      <ComputerTargetChip />
+                    ) : null}
                     <p className="text-[10px] text-slate-500 max-w-[220px]" data-testid="computer-mode-hint">
                       Desktop actions require Electron + Computer Mode on (allowlisted apps / notes /
                       Present Deck only — never delete).

@@ -192,3 +192,38 @@ def audit_stats(
         resource_types=resource_counts,
         recent_24h=recent,
     )
+
+
+class DesktopAuditBody(BaseModel):
+    action: str | None = None
+    ok: bool | None = None
+    error: str | None = None
+    verified: bool | None = None
+    verification: dict | list | str | None = None
+    app: str | None = None
+    hint: str | None = None
+
+
+@router.post("/desktop")
+@require_authentication
+def log_desktop_audit(
+    body: DesktopAuditBody,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Ingest Electron Computer Mode audit events into the server audit trail."""
+    entry = log_audit(
+        db,
+        action=str(body.action or "desktop_action")[:120],
+        resource_type="desktop_computer",
+        resource_name=str(body.app or "")[:200],
+        details={
+            "ok": body.ok,
+            "error": body.error,
+            "verified": body.verified,
+            "verification": body.verification,
+            "hint": body.hint,
+        },
+        user_id=current_user.user_id,
+    )
+    return {"ok": True, "id": getattr(entry, "id", None)}

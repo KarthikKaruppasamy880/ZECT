@@ -404,6 +404,8 @@ ipcMain.handle("mentrix-get-policy", () => ({
   blockedPathFragments: BLOCKED_PATH_FRAGMENTS,
   idleMs: COMPUTER_MODE_IDLE_MS,
   platform: process.platform,
+  lastOpenedApp,
+  emergencyStop: Boolean(globalThis.__zectEmergencyStop),
   note: "Desktop actions require Electron + Computer Mode on.",
 }));
 ipcMain.handle("mentrix-computer-audit", () => ({
@@ -540,30 +542,82 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   } else if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
     result = await computer.writeNoteFile(a);
   } else if (action === "click" || action === "computer_click") {
+    const intended = a.app || a.appName || lastOpenedApp;
     const before = await computer.uiInspect();
-    result = await computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);
-    const after = await computer.uiInspect();
-    if (result && typeof result === "object") {
-      result.verification = {
-        kind: "a11y_before_after",
-        before: before?.summary || before,
-        after: after?.summary || after,
-        note: "Coordinate click is fallback only — prefer UI inspect target match",
+    if (!before?.ok || before.allowlisted !== true) {
+      result = {
+        ok: false,
+        error: "foreground_not_allowlisted",
+        verified: false,
+        verification: { kind: "a11y_before", before: before?.summary || before },
+        hint: "Focus an allowlisted app window before click",
       };
-      result.verified = Boolean(after?.ok);
+    } else if (intended && !computer.processMatchesIntended(before, intended)) {
+      result = {
+        ok: false,
+        error: "foreground_mismatch",
+        verified: false,
+        intended,
+        verification: { kind: "a11y_before", before: before?.summary || before },
+        hint: `Foreground does not match intended app ${intended}`,
+      };
+    } else {
+      result = await computer.clickAt(a.x, a.y, intended);
+      const after = await computer.uiInspect();
+      const matched = computer.processMatchesIntended(after, intended);
+      if (result && typeof result === "object") {
+        result.verification = {
+          kind: "a11y_before_after",
+          before: before?.summary || before,
+          after: after?.summary || after,
+          matched,
+          note: "Coordinate click is fallback only — prefer UI inspect target match",
+        };
+        result.verified = Boolean(result.ok) && matched;
+        if (result.ok && !matched) {
+          result.ok = false;
+          result.error = "post_click_verify_failed";
+        }
+      }
     }
   } else if (action === "type" || action === "computer_type") {
+    const intended = a.app || a.appName || lastOpenedApp;
     const before = await computer.uiInspect();
-    result = await computer.typeText(a.text, a.app || a.appName || lastOpenedApp);
-    const after = await computer.uiInspect();
-    if (result && typeof result === "object") {
-      result.verification = {
-        kind: "a11y_before_after",
-        before: before?.summary || before,
-        after: after?.summary || after,
-        allowlisted: after?.allowlisted,
+    if (!before?.ok || before.allowlisted !== true) {
+      result = {
+        ok: false,
+        error: "foreground_not_allowlisted",
+        verified: false,
+        verification: { kind: "a11y_before", before: before?.summary || before },
+        hint: "Focus an allowlisted app window before type",
       };
-      result.verified = Boolean(after?.ok);
+    } else if (intended && !computer.processMatchesIntended(before, intended)) {
+      result = {
+        ok: false,
+        error: "foreground_mismatch",
+        verified: false,
+        intended,
+        verification: { kind: "a11y_before", before: before?.summary || before },
+        hint: `Foreground does not match intended app ${intended}`,
+      };
+    } else {
+      result = await computer.typeText(a.text, intended);
+      const after = await computer.uiInspect();
+      const matched = computer.processMatchesIntended(after, intended);
+      if (result && typeof result === "object") {
+        result.verification = {
+          kind: "a11y_before_after",
+          before: before?.summary || before,
+          after: after?.summary || after,
+          allowlisted: after?.allowlisted,
+          matched,
+        };
+        result.verified = Boolean(result.ok) && matched;
+        if (result.ok && !matched) {
+          result.ok = false;
+          result.error = "post_type_verify_failed";
+        }
+      }
     }
   } else if (action === "scroll" || action === "computer_scroll") {
     result = await computer.scroll(a.direction || "down");

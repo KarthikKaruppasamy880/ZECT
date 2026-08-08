@@ -69,9 +69,9 @@ DOM-first verify; kill default `*`; session isolation; no password scrape.
 
 ## PA-5 — Native desktop
 
-**Status:** implemented (foreground process/title verify + allowlist check; a11y deepen continues).
+**Status:** implemented (foreground process/title verify + allowlist check on open/click/type; emergency-stop Electron sync; Computer Mode active-target chip; desktop audit → `/api/audit/desktop`).
 
-A11y-first; allowlists; verify; emergency stop; keyboard/mouse fallback only.
+A11y-first; allowlists; verify; emergency stop; keyboard/mouse fallback only after identity match. Full UIA tree remains deferred.
 
 ## PA-6 — Safe file organization
 

@@ -470,9 +470,91 @@ def run_realtime_tool(
     created_by: str = "",
     user_confirmed: bool = False,
 ) -> dict[str, Any]:
-    """Execute a Realtime function call through the Mentrix permission broker."""
+    """Execute a Realtime function call through MentrixOrchestrator (PA-7 = PA-1 path)."""
+    from app.services.mentrix.orchestrator import MentrixOrchestrator, pa1_orchestrator_enabled
+
     name = (tool_name or "").strip()
     args = args or {}
+
+    if pa1_orchestrator_enabled():
+        orch = MentrixOrchestrator()
+        outcome = orch.execute_tool(
+            db,
+            name,
+            args,
+            user_id=user_id,
+            project_id=project_id,
+            project_key=project_key,
+            created_by=created_by,
+            user_confirmed=user_confirmed,
+            exec_tool=_exec_tool,
+        )
+        if outcome.status in ("denied", "blocked"):
+            return {
+                "ok": False,
+                "denied": True,
+                "tool": name,
+                "error": (outcome.result or {}).get("error") or "Permission denied",
+                "events": [{"event": "tool_end", "data": {"tool": name, "ok": False, "error": "denied"}}],
+            }
+        if outcome.status == "pending_confirm":
+            return {
+                "ok": False,
+                "pending": True,
+                "tool": name,
+                "args": args,
+                "pending_confirmations": [
+                    {
+                        "tool": name,
+                        "action": (outcome.permission or {}).get("action"),
+                        "args": args,
+                        "args_redacted": {
+                            k: ("…" if k in ("text", "body", "path") else v) for k, v in args.items()
+                        },
+                        "reason": "Always-ask Allow required",
+                        "correlation_id": outcome.command.correlation_id,
+                        "preview_hash": (args.get("preview_hash") if isinstance(args, dict) else None),
+                    }
+                ],
+                "events": [
+                    {"event": "tool_start", "data": {"tool": name, "args": args}},
+                    {"event": "pending_confirm", "data": {"tool": name}},
+                ],
+            }
+        result = outcome.result
+        events: list[dict[str, Any]] = [
+            {"event": "tool_start", "data": {"tool": name, "args": args}},
+            {
+                "event": "tool_end",
+                "data": {"tool": name, "ok": bool(result.get("ok")), "error": result.get("error")},
+            },
+        ]
+        if result.get("board"):
+            events.append({"event": "artifact", "data": result["board"]})
+        if result.get("board_extra"):
+            events.append({"event": "artifact", "data": result["board_extra"]})
+        if result.get("board_progress"):
+            events.append({"event": "artifact", "data": result["board_progress"]})
+        if result.get("navigate"):
+            events.append({"event": "navigate", "data": {"path": result["navigate"]}})
+        spoken = result.get("spoken_summary")
+        if spoken:
+            out_payload = {"ok": result.get("ok", True), "spoken_summary": spoken, "tool": name}
+            if result.get("note"):
+                out_payload["note"] = result["note"]
+            output = json.dumps(out_payload)[:4000]
+        else:
+            output = json.dumps(result)[:4000]
+        return {
+            "ok": bool(result.get("ok", True)),
+            "tool": name,
+            "result": result,
+            "events": events,
+            "output": output,
+            "via": "MentrixOrchestrator",
+        }
+
+    # Legacy path when MENTRIX_PA1_ORCHESTRATOR=0
     perm = check_tool_permission(
         db,
         name,
@@ -511,7 +593,7 @@ def run_realtime_tool(
             ],
         }
 
-    events: list[dict[str, Any]] = [{"event": "tool_start", "data": {"tool": name, "args": args}}]
+    events = [{"event": "tool_start", "data": {"tool": name, "args": args}}]
     result = _exec_tool(db, name, args, project_key=project_key, created_by=created_by)
     events.append({"event": "tool_end", "data": {"tool": name, "ok": bool(result.get("ok")), "error": result.get("error")}})
     if result.get("board"):
@@ -522,7 +604,6 @@ def run_realtime_tool(
         events.append({"event": "artifact", "data": result["board_progress"]})
     if result.get("navigate"):
         events.append({"event": "navigate", "data": {"path": result["navigate"]}})
-    # Prefer short spoken_summary for Realtime vocalization
     spoken = result.get("spoken_summary")
     if spoken:
         out_payload = {"ok": result.get("ok", True), "spoken_summary": spoken, "tool": name}
@@ -537,4 +618,6 @@ def run_realtime_tool(
         "result": result,
         "events": events,
         "output": output,
+    }
+
     }

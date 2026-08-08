@@ -33,6 +33,9 @@ TOOL_ACTIONS: dict[str, str] = {
     "slack_send": "companion_slack_send",
     "email_digest": "companion_email_read",
     "email_send": "companion_email_send",
+    "calendar_upcoming": "companion_calendar_read",
+    "meeting_brief": "companion_meeting_brief",
+    "meeting_followup_draft": "companion_meeting_draft",
     "image_avatar": "companion_image_gen",
     "media_generate": "companion_image_gen",
     "media_edit": "companion_image_gen",
@@ -88,6 +91,7 @@ ALWAYS_CONFIRM_TOOLS = {
     "browser_navigate",
     "browser_snapshot",
     "browser_fill",
+    "meeting_followup_draft",
 }
 
 

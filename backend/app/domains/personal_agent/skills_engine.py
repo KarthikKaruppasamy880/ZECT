@@ -505,14 +505,37 @@ def log_execution(skill_id: int, body: SkillExecLog, db: Session = Depends(get_d
             detail="Skill requires explicit approval before execution logging",
         )
 
-    allowed = list(getattr(skill, "allowed_tools", None) or [])
-    if allowed and body.requested_tools:
-        disallowed = [t for t in body.requested_tools if t not in allowed]
-        if disallowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Tools not allowed for this skill: {disallowed}",
-            )
+    from app.services.mentrix.skill_governance import (
+        normalize_manifest,
+        tool_allowed,
+        validate_manifest,
+    )
+
+    governed = normalize_manifest(skill.manifest if isinstance(skill.manifest, dict) else {}, skill_row=skill)
+    manifest_errors = validate_manifest(governed)
+    if manifest_errors and (os.getenv("MENTRIX_SKILL_MANIFEST_STRICT") or "1").strip() not in (
+        "0",
+        "false",
+        "off",
+    ):
+        # Soft-enforce: require prohibited_ops at minimum; missing keys get filled by normalize
+        hard = [e for e in manifest_errors if e.startswith("must_prohibit:")]
+        if hard:
+            raise HTTPException(status_code=403, detail=f"Skill manifest policy: {hard}")
+
+    allowed = list(getattr(skill, "allowed_tools", None) or []) or list(governed.get("allowed_tools") or [])
+    if body.requested_tools:
+        for t in body.requested_tools:
+            ok_t, reason = tool_allowed(governed, t)
+            if not ok_t:
+                raise HTTPException(status_code=403, detail=f"Tool '{t}' blocked: {reason}")
+        if allowed:
+            disallowed = [t for t in body.requested_tools if t not in allowed and "*" not in allowed]
+            if disallowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Tools not allowed for this skill: {disallowed}",
+                )
 
     timeout = int(getattr(skill, "timeout_seconds", None) or 300)
     if body.duration_seconds and body.duration_seconds > timeout:

@@ -1,14 +1,15 @@
-"""ZECT Chatterbox — local voice-clone TTS engine client.
+"""ZECT Voicebox client — local clone TTS HTTP engine.
 
-Talks to a locally-running synthesis engine (pluggable HTTP service).
+Talks to ZECT Voicebox (pluggable HTTP service on :17493).
 Env: CHATTERBOX_BASE_URL (preferred) or legacy VOICEBOX_BASE_URL.
-No API key; synthesis stays on the user's machine. Product branding is
-Chatterbox — ZECT owns clone persistence in DB + sample files.
+No API key; synthesis stays on the user's machine. Product UI brand is
+ZECT Voicebox — ZECT owns clone persistence in DB + sample files.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,30 +33,46 @@ CHATTERBOX_AUDIO_PATH_TEMPLATE = os.getenv(
     "CHATTERBOX_AUDIO_PATH_TEMPLATE",
     os.getenv("VOICEBOX_AUDIO_PATH_TEMPLATE", "/audio/{filename}"),
 )
-# "qwen" was hardcoded with no way to try a faster engine your local server
-# might offer without a code change — synthesis is a fully synchronous HTTP
-# call (POST /generate blocks until the whole clip is done, no streaming),
-# so the engine's own speed is the dominant factor in perceived TTS latency.
 DEFAULT_CHATTERBOX_ENGINE = os.getenv("CHATTERBOX_ENGINE", "qwen")
-# Per-chunk synthesis is short text (~220 chars) — 30s let a hung/slow engine
-# stall every sentence of a live conversation. Configurable since a real
-# heavy model on modest hardware may legitimately need longer.
 SPEAK_TIMEOUT = float(os.getenv("CHATTERBOX_SPEAK_TIMEOUT", "15.0"))
-# Lazy re-provisioning (voice cloning) at speak time is heavier than plain
-# synthesis and only ever a fallback path — keep it short so a broken/missing
-# engine-side profile fails fast to OpenAI instead of stalling every sentence.
 REPROVISION_TIMEOUT = float(os.getenv("CHATTERBOX_REPROVISION_TIMEOUT", "6.0"))
 
+# Fail-fast health probe — avoid burning ~2s on every /speak when offline.
+HEALTH_PROBE_TIMEOUT = float(os.getenv("CHATTERBOX_HEALTH_TIMEOUT", "0.4"))
+HEALTH_POSITIVE_TTL_S = float(os.getenv("CHATTERBOX_HEALTH_POSITIVE_TTL", "30"))
+HEALTH_NEGATIVE_TTL_S = float(os.getenv("CHATTERBOX_HEALTH_NEGATIVE_TTL", "4"))
 
-def chatterbox_available() -> bool:
-    """Engine is available when the local server answers."""
+_health_cache: dict[str, Any] = {"ok": None, "checked_at": 0.0}
+
+
+def invalidate_health_cache() -> None:
+    """Clear cached availability (e.g. after Start engine from Desktop)."""
+    _health_cache["ok"] = None
+    _health_cache["checked_at"] = 0.0
+
+
+def _probe_profiles() -> bool:
     try:
-        with httpx.Client(timeout=2.0) as client:
+        with httpx.Client(timeout=HEALTH_PROBE_TIMEOUT) as client:
             resp = client.get(f"{_base_url()}/profiles")
         return resp.status_code < 500
     except Exception:
         return False
 
+
+def chatterbox_available(*, force_refresh: bool = False) -> bool:
+    """Engine available when ZECT Voicebox answers /profiles (TTL-cached)."""
+    now = time.monotonic()
+    cached = _health_cache.get("ok")
+    checked_at = float(_health_cache.get("checked_at") or 0.0)
+    if not force_refresh and cached is not None:
+        ttl = HEALTH_POSITIVE_TTL_S if cached else HEALTH_NEGATIVE_TTL_S
+        if (now - checked_at) < ttl:
+            return bool(cached)
+    ok = _probe_profiles()
+    _health_cache["ok"] = ok
+    _health_cache["checked_at"] = now
+    return ok
 
 
 def profile_exists(profile_id: str) -> bool:
@@ -64,8 +81,7 @@ def profile_exists(profile_id: str) -> bool:
     if not pid:
         return False
     try:
-        with httpx.Client(timeout=2.0) as client:
-            # Prefer list (always available) — some engines lack GET /profiles/{id}
+        with httpx.Client(timeout=HEALTH_PROBE_TIMEOUT) as client:
             resp = client.get(f"{_base_url()}/profiles")
         if resp.status_code >= 400:
             return False
@@ -89,15 +105,7 @@ def clone_voice(
     language: str = "en",
     timeout: float = 60.0,
 ) -> dict[str, Any]:
-    """Create a voice profile on the local engine, then attach the sample.
-
-    timeout defaults to 60s for the deliberate /clone flow (one-time action,
-    user is watching a progress spinner). Speak-time lazy re-provisioning
-    (_ensure_engine_profile) passes a much shorter timeout — voice cloning is
-    a heavier operation than plain synthesis, and letting it run for a full
-    60s on every /speak call when a profile is missing turns one bad clone
-    into a many-second stall on every single sentence of a live conversation.
-    """
+    """Create a voice profile on the local engine, then attach the sample."""
     if not reference_text.strip():
         raise ValueError("reference_text is required — it must match what the audio sample says")
 
@@ -108,11 +116,11 @@ def clone_voice(
         )
         if profile_resp.status_code >= 400:
             raise RuntimeError(
-                f"Chatterbox profile creation failed ({profile_resp.status_code}): {profile_resp.text[:300]}"
+                f"ZECT Voicebox profile creation failed ({profile_resp.status_code}): {profile_resp.text[:300]}"
             )
         profile_id = profile_resp.json().get("id")
         if not profile_id:
-            raise RuntimeError(f"Chatterbox profile response missing id: {profile_resp.text[:300]}")
+            raise RuntimeError(f"ZECT Voicebox profile response missing id: {profile_resp.text[:300]}")
 
         sample_resp = client.post(
             f"{_base_url()}/profiles/{profile_id}/samples",
@@ -121,9 +129,10 @@ def clone_voice(
         )
         if sample_resp.status_code >= 400:
             raise RuntimeError(
-                f"Chatterbox sample upload failed ({sample_resp.status_code}): {sample_resp.text[:300]}"
+                f"ZECT Voicebox sample upload failed ({sample_resp.status_code}): {sample_resp.text[:300]}"
             )
 
+    invalidate_health_cache()
     return {"voice_id": profile_id, "name": name}
 
 
@@ -152,26 +161,26 @@ def synthesize_speech(text: str, voice_id: str, *, language: str = "en", engine:
         )
         if gen_resp.status_code == 404:
             raise ProfileNotFoundError(
-                f"Chatterbox generation failed (404): {gen_resp.text[:300]}"
+                f"ZECT Voicebox generation failed (404): {gen_resp.text[:300]}"
             )
         if gen_resp.status_code >= 400:
             raise RuntimeError(
-                f"Chatterbox generation failed ({gen_resp.status_code}): {gen_resp.text[:300]}"
+                f"ZECT Voicebox generation failed ({gen_resp.status_code}): {gen_resp.text[:300]}"
             )
         data = gen_resp.json()
         if data.get("status") == "error" or data.get("error"):
-            raise RuntimeError(f"Chatterbox generation error: {data.get('error')}")
+            raise RuntimeError(f"ZECT Voicebox generation error: {data.get('error')}")
         audio_path = data.get("audio_path")
         if not audio_path:
             raise RuntimeError(
-                f"Chatterbox generation response missing audio_path: {gen_resp.text[:300]}"
+                f"ZECT Voicebox generation response missing audio_path: {gen_resp.text[:300]}"
             )
 
         audio_url = _resolve_audio_url(audio_path)
         audio_resp = client.get(audio_url)
         if audio_resp.status_code >= 400:
             raise RuntimeError(
-                f"Chatterbox audio download failed ({audio_resp.status_code}) for {audio_path} — "
+                f"ZECT Voicebox audio download failed ({audio_resp.status_code}) for {audio_path} — "
                 "check the local engine /docs for the download route and set "
                 "CHATTERBOX_AUDIO_PATH_TEMPLATE if it differs."
             )

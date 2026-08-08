@@ -27,8 +27,11 @@ clears stale ids, and re-provisions from the stored sample.
 
 | Surface | Behavior |
 |---------|----------|
-| Companion Speak replies | Prefer clone; **OpenAI / browser fallback** if Voicebox fails (`require_clone=false`) |
+| Companion Speak replies | Prefer clone; **OpenAI / browser fallback** if Voicebox fails (`require_clone=false`); health probe is TTL-cached (fail-fast when offline) |
+| Connect Voice | If Voicebox **online** → clone via `/speak`; if **offline** → OpenAI Realtime **PCM stock voice** (low latency) |
 | Present / Test speak | **Strict clone** — fail loudly if Voicebox cannot synthesize |
+
+UI branding is **ZECT Voicebox**. Internal synth may still report Chatterbox ML (`synth=chatterbox-mtl`). Successful clone speak sets `X-Mentrix-TTS-Engine: zect_voicebox` (legacy `chatterbox` still accepted).
 
 ## Where to manage voice
 

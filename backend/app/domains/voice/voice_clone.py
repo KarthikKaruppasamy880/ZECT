@@ -255,21 +255,22 @@ def _chatterbox_offline_detail() -> str:
 
     base = _base_url()
     return (
-        f"Chatterbox offline at {base} — start ZECT Voicebox "
-        "(see docs/ZECT_VOICEBOX.md / docs/CHATTERBOX_LOCAL.md) to use your clone."
+        f"ZECT Voicebox offline at {base} — start the local engine "
+        "(see docs/ZECT_VOICEBOX.md) to use your clone."
     )
 
 
 @router.get("/engine-status")
 def engine_status(
+    force_refresh: bool = False,
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Non-secret Chatterbox health for Present / Voice UI."""
+    """Non-secret ZECT Voicebox health for Present / Voice UI."""
     from app.adapters.llm.chatterbox_client import _base_url, chatterbox_available
 
     base = _base_url()
-    online = bool(chatterbox_available())
+    online = bool(chatterbox_available(force_refresh=bool(force_refresh)))
     row = _default_voice(db, current_user.user_id)
     default_voice = None
     if row:
@@ -283,7 +284,7 @@ def engine_status(
             "is_default": out.is_default,
         }
     hint = (
-        "Chatterbox online — Present can narrate with your clone."
+        "ZECT Voicebox online — Present can narrate with your clone."
         if online
         else (
             f"Start ZECT Voicebox so GET {base}/profiles succeeds "
@@ -592,7 +593,7 @@ def speak(
                 audio = synthesize_speech(text, engine_id)
             else:
                 raise
-        engine_used = "chatterbox"
+        engine_used = "zect_voicebox"
     except HTTPException:
         if require_clone:
             raise

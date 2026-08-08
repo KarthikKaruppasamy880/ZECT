@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-test.describe("Mentrix Chatterbox voice", () => {
+test.describe("Mentrix ZECT Voicebox voice", () => {
   test("Settings hosts clone panel; Companion Voice tab has speak controls", async ({ page }) => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
@@ -13,10 +13,11 @@ test.describe("Mentrix Chatterbox voice", () => {
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("Settings Voice section expands Chatterbox form", async ({ page }) => {
+  test("Settings Voice section expands ZECT Voicebox form", async ({ page }) => {
     await page.goto("/settings");
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId("clone-voice-record")).toBeVisible();
+    await expect(page.getByTestId("clone-voice-engine-status")).toContainText(/ZECT Voicebox|Voicebox|online|offline/i);
   });
 
   test("Labs no longer lists Voice Cloning; Incident shortcut remains", async ({ page }) => {
@@ -68,7 +69,7 @@ test.describe("Mentrix Chatterbox voice", () => {
     });
 
     await page.getByTestId("clone-voice-submit").click();
-    await expect(page.getByTestId("clone-voice-error")).toContainText(/Chatterbox|502|failed/i, {
+    await expect(page.getByTestId("clone-voice-error")).toContainText(/Voicebox|Chatterbox|502|failed/i, {
       timeout: 10_000,
     });
   });
@@ -82,7 +83,7 @@ test.describe("Mentrix Chatterbox voice", () => {
           online: true,
           base_url: "http://127.0.0.1:17493",
           default_voice: null,
-          hint: "Chatterbox online — Test speak unlocked.",
+          hint: "ZECT Voicebox online — Test speak unlocked.",
         }),
       });
     });

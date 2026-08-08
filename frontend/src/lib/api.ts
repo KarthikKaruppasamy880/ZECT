@@ -732,8 +732,10 @@ export type VoiceEngineStatus = {
 };
 
 /** Chatterbox local engine health (non-secret) for Present / Voice UI. */
-export const mentrixVoiceEngineStatus = () =>
-  request<VoiceEngineStatus>("/api/mentrix/voice/engine-status");
+export const mentrixVoiceEngineStatus = (opts?: { forceRefresh?: boolean }) =>
+  request<VoiceEngineStatus>(
+    `/api/mentrix/voice/engine-status${opts?.forceRefresh ? "?force_refresh=true" : ""}`,
+  );
 
 export async function mentrixSpeakClonedDetailed(
   text: string,

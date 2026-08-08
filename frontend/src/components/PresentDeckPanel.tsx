@@ -1,5 +1,5 @@
 /**
- * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (Chatterbox).
+ * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (ZECT Voicebox).
  * Electron: parse notes → F5 → speak await → Right Arrow.
  * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
  */
@@ -16,7 +16,7 @@ import {
   type PresentonTemplate,
   type VoiceEngineStatus,
 } from "@/lib/api";
-import { cancelMentrixSpeech, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
+import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -188,8 +188,8 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         ? `Narrating with OpenAI stock voice (${result.engine.replace("openai_stock:", "")}).`
         : `Narrating via ${result.engine}.`;
     }
-    if (result.engine !== "chatterbox") {
-      return `Expected clone TTS (chatterbox), got ${result.engine} — start local Chatterbox.`;
+    if (!isCloneTtsEngine(result.engine)) {
+      return `Expected clone TTS (ZECT Voicebox), got ${result.engine} — start local ZECT Voicebox.`;
     }
     return fallbackOk;
   };
@@ -385,7 +385,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     try {
       if (cloneNarrateBlocked) {
         setStatus(
-          `Chatterbox offline at ${engineStatus?.base_url || "local engine"} — start local engine to narrate in your voice.`,
+          `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to narrate in your voice.`,
         );
         return;
       }
@@ -394,7 +394,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       }
       const text =
         notes.trim() ||
-        "Mentrix Present Deck. Paste talking points, then Narrate again with your default Chatterbox voice.";
+        "Mentrix Present Deck. Paste talking points, then Narrate again with your default ZECT Voicebox voice.";
       const result = await speakMentrix(text.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
       setStatus(
         formatSpeakStatus(
@@ -461,7 +461,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     try {
       if (cloneNarrateBlocked) {
         setStatus(
-          `Chatterbox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
+          `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
         );
         return;
       }
@@ -534,17 +534,17 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       return `Voice “${defaultVoice.name}” is in DB but sample file is missing — clone again.`;
     }
     if (defaultVoice.has_sample && !defaultVoice.engine_ready) {
-      return `Voice “${defaultVoice.name}” saved (sample OK). Chatterbox will provision on first speak.`;
+      return `Voice “${defaultVoice.name}” saved (sample OK). ZECT Voicebox will provision on first speak.`;
     }
     return `Voice saved: “${defaultVoice.name}”${defaultVoice.engine_ready ? " (engine ready)" : ""}.`;
   })();
 
   const engineBannerText = (() => {
-    if (!engineStatus) return "Checking Chatterbox engine…";
+    if (!engineStatus) return "Checking ZECT Voicebox…";
     if (engineStatus.online) {
-      return `Chatterbox online (${engineStatus.base_url}). Present can narrate with your clone.`;
+      return `ZECT Voicebox online (${engineStatus.base_url}). Present can narrate with your clone.`;
     }
-    return `Chatterbox offline (${engineStatus.base_url}). Start local engine to narrate in your voice — sample in ZECT ≠ engine online.`;
+    return `ZECT Voicebox offline (${engineStatus.base_url}). Start local engine to narrate in your voice — sample in ZECT ≠ engine online.`;
   })();
 
   return (
@@ -686,7 +686,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       </button>
       <p className={`text-[11px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
         Pick template + slides, then Generate. Open presentation / Open Zoom need Electron. Clone narrate needs
-        Chatterbox online (or pick an OpenAI stock voice).
+        ZECT Voicebox online (or pick an OpenAI stock voice).
       </p>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Presentation path (.pptx){isDesktop ? "" : " — optional in browser; prefer upload below"}
@@ -810,7 +810,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-40"
           title={
             cloneNarrateBlocked
-              ? "Start local Chatterbox to narrate with your clone (or pick a stock voice)"
+              ? "Start local ZECT Voicebox to narrate with your clone (or pick a stock voice)"
               : "Speaks the Manual script text above — does not read your .pptx file"
           }
         >
@@ -825,7 +825,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-900/40 px-2.5 py-1.5 text-xs text-amber-50 hover:bg-amber-900 disabled:opacity-40"
           title={
             cloneNarrateBlocked
-              ? "Start local Chatterbox to Present with your clone (or pick a stock voice)"
+              ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice)"
               : isDesktop
                 ? "Reads slide text + speaker notes, opens PowerPoint, F5, narrates, advances with Right Arrow"
                 : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"

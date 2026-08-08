@@ -455,6 +455,19 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     pushComputerAudit({ kind: "refuse", action, error: "computer_mode_off" });
     return { ok: false, error: "computer_mode_off", hint: "Desktop actions require Electron + Computer Mode on." };
   }
+  // PA-5: honor global emergency stop (env or cached flag from renderer)
+  const emergency =
+    process.env.MENTRIX_EMERGENCY_STOP === "1" ||
+    process.env.ZECT_EMERGENCY_STOP === "1" ||
+    globalThis.__zectEmergencyStop === true;
+  if (emergency) {
+    pushComputerAudit({ kind: "refuse", action, error: "emergency_stop_active" });
+    return {
+      ok: false,
+      error: "emergency_stop_active",
+      hint: "Global emergency stop is active — desktop automation blocked",
+    };
+  }
   armComputerModeIdle();
   const a = args || {};
   if (DELETE_ACTIONS.has(String(action || "").toLowerCase())) {
@@ -527,9 +540,31 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
   } else if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
     result = await computer.writeNoteFile(a);
   } else if (action === "click" || action === "computer_click") {
+    const before = await computer.uiInspect();
     result = await computer.clickAt(a.x, a.y, a.app || a.appName || lastOpenedApp);
+    const after = await computer.uiInspect();
+    if (result && typeof result === "object") {
+      result.verification = {
+        kind: "a11y_before_after",
+        before: before?.summary || before,
+        after: after?.summary || after,
+        note: "Coordinate click is fallback only — prefer UI inspect target match",
+      };
+      result.verified = Boolean(after?.ok);
+    }
   } else if (action === "type" || action === "computer_type") {
+    const before = await computer.uiInspect();
     result = await computer.typeText(a.text, a.app || a.appName || lastOpenedApp);
+    const after = await computer.uiInspect();
+    if (result && typeof result === "object") {
+      result.verification = {
+        kind: "a11y_before_after",
+        before: before?.summary || before,
+        after: after?.summary || after,
+        allowlisted: after?.allowlisted,
+      };
+      result.verified = Boolean(after?.ok);
+    }
   } else if (action === "scroll" || action === "computer_scroll") {
     result = await computer.scroll(a.direction || "down");
   } else if (action === "ui_inspect" || action === "computer_ui_inspect") {
@@ -544,13 +579,19 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     error: result && result.error ? result.error : undefined,
     app: a.app || a.appName || lastOpenedApp || undefined,
     correlation_id: a.correlation_id || a.correlationId || undefined,
-    verification: {
+    verification: (result && result.verification) || {
       kind: "desktop",
       note: "Prefer active-window / a11y read-back; screenshot is fallback only",
       path: a.path || a.file || undefined,
     },
   });
   return result;
+});
+
+ipcMain.handle("mentrix-emergency-stop", (_e, active) => {
+  globalThis.__zectEmergencyStop = Boolean(active);
+  pushComputerAudit({ kind: "emergency_stop", active: Boolean(active) });
+  return { ok: true, active: Boolean(active) };
 });
 
 const menuTemplate = [

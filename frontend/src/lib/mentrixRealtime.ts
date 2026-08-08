@@ -662,7 +662,7 @@ export async function startMentrixRealtime(
     try {
       const res = await apiFetch("/api/mentrix/voice/speak", {
         method: "POST",
-        body: JSON.stringify({ text: text.slice(0, 4000) }),
+        body: JSON.stringify({ text: text.slice(0, 4000), require_clone: false }),
         signal: controller.signal,
       });
       if (gen !== turnGeneration) return null;

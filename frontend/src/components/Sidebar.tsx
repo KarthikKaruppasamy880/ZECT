@@ -102,6 +102,7 @@ const labsItems: NavItem[] = [
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
+  { href: "/file-organize", label: "File Organize", icon: HardDrive },
   { href: "/memory", label: "Memory System", icon: Brain },
   { href: "/permissions", label: "Permissions", icon: ShieldAlert },
 ];

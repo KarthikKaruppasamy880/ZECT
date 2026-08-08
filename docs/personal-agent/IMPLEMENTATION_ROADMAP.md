@@ -104,6 +104,12 @@ Governed skill manifests; schedules with **separate** limited grants.
 - Security monitoring / incident IR productization (DesktopControl)  
 - LiveKit Agents  
 - Seven TTS engines / Voicebox Tauri UI  
+- Full UIA accessibility tree (Windows UI Automation deep tree) — foreground verify shipped  
+- Google Calendar OAuth write API — ICS/demo + draft-with-approval shipped  
+
+## Gap-close (post PA-9)
+
+Additional hardening landed: Calendar API, File Organize UI, Gmail list, desktop emergency stop + a11y before/after, durable desktop bridge, Realtime TTS fallback, blind click refuse. See `CAPABILITY_MATRIX.md`.
 
 ---
 

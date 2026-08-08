@@ -6,8 +6,10 @@ import os
 from typing import Any
 
 # Module-level browser reuse for a single process (optional).
+# PA-4: each call still gets an isolated BrowserContext; contexts keyed by session.
 _browser = None
 _playwright = None
+_session_contexts: dict[str, Any] = {}
 
 
 def _pw_available() -> tuple[bool, str]:
@@ -22,7 +24,10 @@ def _pw_available() -> tuple[bool, str]:
         )
 
 
-def _get_page():
+def _get_page(session_id: str = ""):
+    """Return (context, page). Always a fresh context when session_id empty;
+    reuse only within the same session_id for multi-step fills, then close.
+    """
     global _browser, _playwright
     from playwright.sync_api import sync_playwright
 
@@ -30,7 +35,24 @@ def _get_page():
         _playwright = sync_playwright().start()
         headless = os.getenv("MENTRIX_PLAYWRIGHT_HEADLESS", "1") != "0"
         _browser = _playwright.chromium.launch(headless=headless)
-    context = _browser.new_context()
+    sid = (session_id or "").strip()
+    if sid and sid in _session_contexts:
+        ctx = _session_contexts[sid]
+        return ctx, ctx.new_page()
+    context = _browser.new_context(
+        accept_downloads=False,
+        java_script_enabled=True,
+        bypass_csp=False,
+    )
+    if sid:
+        _session_contexts[sid] = context
+        # Cap session map
+        if len(_session_contexts) > 8:
+            old = next(iter(_session_contexts))
+            try:
+                _session_contexts.pop(old).close()
+            except Exception:
+                _session_contexts.pop(old, None)
     return context, context.new_page()
 
 
@@ -67,7 +89,8 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
         }
 
     try:
-        context, page = _get_page()
+        session_id = str(arguments.get("session_id") or config.get("session_id") or "")
+        context, page = _get_page(session_id)
         try:
             if tool_name == "navigate":
                 url = arguments.get("url") or arguments.get("path") or ""
@@ -183,8 +206,23 @@ def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> 
                 return {"status": "error", "message": str(last_err), "tool": tool_name}
             return {"status": "unknown_tool", "tool": tool_name}
         finally:
-            # PA-4 session isolation: close context after each call
-            context.close()
+            # Close page always; close context unless held for a named session
+            try:
+                page.close()
+            except Exception:
+                pass
+            sid = str(arguments.get("session_id") or config.get("session_id") or "").strip()
+            if not sid:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+            elif arguments.get("end_session"):
+                try:
+                    context.close()
+                except Exception:
+                    pass
+                _session_contexts.pop(sid, None)
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "message": str(exc), "tool": tool_name}
 

@@ -582,6 +582,9 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     }
   } else if (action === "type" || action === "computer_type") {
     const intended = a.app || a.appName || lastOpenedApp;
+    if (intended) {
+      await computer.waitForAllowlistedForeground(intended, { attempts: 6, delayMs: 200 });
+    }
     const before = await computer.uiInspect();
     if (!before?.ok || before.allowlisted !== true) {
       result = {
@@ -589,7 +592,7 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
         error: "foreground_not_allowlisted",
         verified: false,
         verification: { kind: "a11y_before", before: before?.summary || before },
-        hint: "Focus an allowlisted app window before type",
+        hint: "Focus an allowlisted app window (Notepad / Notepad++ / Zoom / …) before type — Mentrix may still be in front",
       };
     } else if (intended && !computer.processMatchesIntended(before, intended)) {
       result = {

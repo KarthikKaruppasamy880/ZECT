@@ -50,9 +50,13 @@ def mentrix_instructions() -> str:
         "NEVER delete, unlink, or rmdir any file or folder — delete is forbidden. Create and read only. "
         "When the user asks to write notes or docs on the desktop, prefer desktop_write_note "
         "(allowlisted Desktop/Documents .md/.txt) over fragile Notepad click/type. "
+        "computer_type is short keystrokes only (~500 chars max); never claim typing succeeded if tools failed. "
+        "Notepad++ is allowlisted (notepad++.exe / npp). "
         "Notepad (computer_open_app + computer_type) is secondary; if type fails, fall back to desktop_write_note. "
         "Launch Slack desktop app with computer_open_app Slack.exe; use slack_digest for channel summaries (API). "
         "Open browser with computer_open_app chrome.exe or msedge.exe. "
+        "Compose email with email_send draft + Allow — do not type into Outlook. "
+        "I cannot schedule Zoom meetings — only open Zoom or a join URL (capability_refuse zoom_schedule). "
         "For prepared PPTX in Zoom: desktop_open_presentation with a Desktop/Documents/Downloads .pptx path, "
         "computer_open_app Zoom.exe (or POWERPNT.EXE), then the user shares the PowerPoint window in Zoom; "
         "never auto-join Zoom or delete files. Narrate talking points with the cloned voice. "
@@ -279,14 +283,34 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
             "name": "computer_open_app",
             "description": (
                 "Open allowlisted app (Computer Mode + Allow). "
-                "Windows: notepad, code, explorer, msedge, chrome, calc, slack, powerpnt, zoom, outlook, ms-teams/Teams. "
-                "Never deletes."
+                "Windows: notepad, notepad++/npp, code, explorer, msedge, chrome, calc, slack, "
+                "powerpnt, zoom, outlook, ms-teams/Teams. "
+                "Never deletes. Optional path opens a file in the editor."
             ),
             "parameters": {
                 "type": "object",
-                "properties": {"app": {"type": "string"}},
+                "properties": {
+                    "app": {"type": "string"},
+                    "path": {"type": "string", "description": "Optional file to open in the editor"},
+                },
                 "required": ["app"],
             },
+        },
+        {
+            "type": "function",
+            "name": "capability_refuse",
+            "description": "Honest refusal for unwired capabilities (e.g. topic=zoom_schedule)",
+            "parameters": {
+                "type": "object",
+                "properties": {"topic": {"type": "string"}},
+                "required": ["topic"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "coding_engine_status",
+            "description": "Explain Mentrix Delivery vs mock/remote coding engine readiness",
+            "parameters": {"type": "object", "properties": {}},
         },
         {
             "type": "function",

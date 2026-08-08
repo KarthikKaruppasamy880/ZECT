@@ -412,3 +412,107 @@ export async function speakMentrixStreamedAwait(
       : `mixed(${engines.join("+")})`;
   return { ok: true, engine };
 }
+
+export type PrefetchedSpeakChunk = { url: string; engine: string };
+
+/**
+ * Fetch TTS for all sentence chunks without stopping current playback.
+ * Used by Present to prep slide N+1 while slide N plays.
+ */
+export async function prefetchMentrixSpeakChunks(
+  text: string,
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<PrefetchedSpeakChunk[] | null> {
+  const chunks = chunkSpeakText(text);
+  if (!chunks.length) return null;
+  const mustClone = requireCloneSpeech(voiceOpts);
+  const out: PrefetchedSpeakChunk[] = [];
+  try {
+    for (const chunk of chunks) {
+      const { url, engine } = await mentrixSpeakClonedDetailed(chunk, voiceOpts);
+      if (mustClone && !isCloneTtsEngine(engine)) {
+        for (const c of out) URL.revokeObjectURL(c.url);
+        return null;
+      }
+      out.push({ url, engine });
+    }
+    return out;
+  } catch {
+    for (const c of out) URL.revokeObjectURL(c.url);
+    return null;
+  }
+}
+
+/** Play chunks from prefetchMentrixSpeakChunks (revokes blob URLs). */
+export async function playMentrixPrefetch(
+  items: PrefetchedSpeakChunk[],
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<SpeakResult> {
+  if (!items.length) return { ok: false, error: "Nothing to speak" };
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
+  const engines = new Set<string>();
+  for (const item of items) {
+    if (gen !== awaitGeneration) {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return { ok: false, error: "cancelled" };
+    }
+    if (mustClone && !isCloneTtsEngine(item.engine)) {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return {
+        ok: false,
+        error: `Expected your clone (ZECT Voicebox), got ${item.engine} — start local ZECT Voicebox`,
+      };
+    }
+    if (typeof Audio === "undefined") {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return { ok: false, error: "Audio unavailable" };
+    }
+    const audio = new Audio(item.url);
+    lastAudio = audio;
+    try {
+      await audio.play();
+      if (gen !== awaitGeneration) {
+        cancelBrowserSpeech();
+        URL.revokeObjectURL(item.url);
+        return { ok: false, error: "cancelled" };
+      }
+      await waitForAudioEnded(audio, gen);
+      URL.revokeObjectURL(item.url);
+      if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+      engines.add(item.engine);
+    } catch (playErr) {
+      URL.revokeObjectURL(item.url);
+      const msg = playErr instanceof Error ? playErr.message : String(playErr);
+      if (/NotAllowedError|user interaction/i.test(msg)) {
+        for (const c of items) {
+          try {
+            URL.revokeObjectURL(c.url);
+          } catch {
+            /* ignore */
+          }
+        }
+        return {
+          ok: false,
+          error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+        };
+      }
+      return { ok: false, error: msg || "audio.play failed" };
+    }
+  }
+  const list = [...engines];
+  return {
+    ok: true,
+    engine: list.length === 1 ? list[0] : `mixed(${list.join("+")})`,
+  };
+}
+
+/** Present Deck: keep slide scripts short so clone /generate stays usable. */
+export const PRESENT_SLIDE_SCRIPT_CAP = 500;
+
+export function capPresentSlideScript(text: string, cap = PRESENT_SLIDE_SCRIPT_CAP): string {
+  const t = String(text || "").trim();
+  if (t.length <= cap) return t;
+  return `${t.slice(0, Math.max(0, cap - 1)).trim()}…`;
+}

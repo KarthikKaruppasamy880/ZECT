@@ -10,12 +10,30 @@ describe("allowlisted", () => {
     assert.equal(computer.allowlisted("notepad"), true);
     assert.equal(computer.allowlisted("notepad.exe"), true);
   });
+  it("matches Notepad++", () => {
+    assert.equal(computer.allowlisted("notepad++.exe"), true);
+    assert.equal(computer.allowlisted("notepad++"), true);
+  });
   it("matches Teams variants", () => {
     assert.equal(computer.allowlisted("ms-teams"), true);
     assert.equal(computer.allowlisted("Teams.exe"), true);
   });
   it("rejects unknown apps", () => {
     assert.equal(computer.allowlisted("malware.exe"), false);
+  });
+});
+
+describe("isNotepadPlusPlusName", () => {
+  it("recognizes npp aliases", () => {
+    assert.equal(computer.isNotepadPlusPlusName("npp"), true);
+    assert.equal(computer.isNotepadPlusPlusName("Notepad++"), true);
+    assert.equal(computer.isNotepadPlusPlusName("notepad.exe"), false);
+  });
+});
+
+describe("TYPE_MAX_CHARS", () => {
+  it("is raised for short keystrokes but still bounded", () => {
+    assert.equal(computer.TYPE_MAX_CHARS, 500);
   });
 });
 
@@ -34,6 +52,15 @@ describe("processMatchesIntended", () => {
       computer.processMatchesIntended(
         { ok: true, allowlisted: true, summary: { process_name: "notepad" } },
         "notepad.exe",
+      ),
+      true,
+    );
+  });
+  it("matches notepad++", () => {
+    assert.equal(
+      computer.processMatchesIntended(
+        { ok: true, allowlisted: true, summary: { process_name: "notepad++" } },
+        "notepad++.exe",
       ),
       true,
     );

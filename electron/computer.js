@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 
 const WIN_APPS = [
   "notepad.exe",
+  "notepad++.exe",
   "code.exe",
   "explorer.exe",
   "msedge.exe",
@@ -36,7 +37,11 @@ const MAC_APPS = [
   "Microsoft Outlook",
   "Microsoft Teams",
   "Slack",
+  "Notepad++",
 ];
+
+/** Max chars for SendKeys typing — longer content must use desktop_write_note. */
+const TYPE_MAX_CHARS = 500;
 
 function allowlisted(appName) {
   const raw = String(appName || "");
@@ -88,6 +93,66 @@ function resolveZoomExe() {
   return null;
 }
 
+function resolveNotepadPlusPlusExe() {
+  if (process.env.NOTEPADPP_DESKTOP_PATH && fs.existsSync(process.env.NOTEPADPP_DESKTOP_PATH)) {
+    return process.env.NOTEPADPP_DESKTOP_PATH;
+  }
+  const home = os.homedir();
+  const candidates = [
+    path.join(process.env.PROGRAMFILES || "C:\\Program Files", "Notepad++", "notepad++.exe"),
+    path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Notepad++", "notepad++.exe"),
+    path.join(home, "AppData", "Local", "Programs", "Notepad++", "notepad++.exe"),
+    path.join(home, "AppData", "Local", "Notepad++", "notepad++.exe"),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function isNotepadPlusPlusName(appName) {
+  const raw = String(appName || "").toLowerCase();
+  const base = raw.split(/[/\\]/).pop() || "";
+  return (
+    base === "notepad++.exe" ||
+    base === "notepad++" ||
+    base === "npp" ||
+    base === "npp.exe" ||
+    /notepad\+\+/.test(raw)
+  );
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * After open_app: focus target and wait until foreground is allowlisted / matches.
+ */
+async function waitForAllowlistedForeground(intendedApp, opts) {
+  const o = opts || {};
+  const attempts = Math.max(1, Number(o.attempts) || 8);
+  const delayMs = Math.max(50, Number(o.delayMs) || 250);
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    if (intendedApp) await focusApp(intendedApp);
+    last = await uiInspect();
+    if (last?.ok && last.allowlisted === true) {
+      if (!intendedApp || processMatchesIntended(last, intendedApp)) {
+        return { ok: true, inspect: last, attempts: i + 1 };
+      }
+    }
+    await sleep(delayMs);
+  }
+  return {
+    ok: false,
+    error: "foreground_not_allowlisted",
+    hint: "Focus an allowlisted app window (e.g. Notepad++) before type — Mentrix may still be in front",
+    inspect: last,
+    attempts,
+  };
+}
+
 async function openApp(appName, args) {
   const a = args || {};
   const raw = String(appName || "");
@@ -96,18 +161,56 @@ async function openApp(appName, args) {
   if (isZoom) {
     return openZoom(a);
   }
-  if (!allowlisted(appName)) {
+  if (!allowlisted(appName) && !isNotepadPlusPlusName(appName)) {
+    return { ok: false, error: "app_not_allowlisted", app: appName };
+  }
+  // Normalize npp aliases to allowlisted exe name
+  const normalized = isNotepadPlusPlusName(appName) ? "notepad++.exe" : appName;
+  if (!allowlisted(normalized)) {
     return { ok: false, error: "app_not_allowlisted", app: appName };
   }
   try {
     if (process.platform === "darwin") {
-      await execFileAsync("open", ["-a", String(appName)]);
-      return { ok: true, opened: appName, platform: "darwin", audited: true };
+      const macName = isNotepadPlusPlusName(appName) ? "Notepad++" : String(appName);
+      await execFileAsync("open", ["-a", macName]);
+      const wait = await waitForAllowlistedForeground(macName, { attempts: 6, delayMs: 200 });
+      return {
+        ok: true,
+        opened: macName,
+        platform: "darwin",
+        audited: true,
+        focus_ready: wait.ok,
+        focus_error: wait.ok ? undefined : wait.error,
+        hint: wait.ok ? undefined : wait.hint,
+      };
     }
-    const base = String(appName).split(/[/\\]/).pop();
-    const child = spawn(base, [], { detached: true, stdio: "ignore", shell: true });
+    let launchPath = String(normalized).split(/[/\\]/).pop();
+    if (isNotepadPlusPlusName(normalized)) {
+      const resolved = resolveNotepadPlusPlusExe();
+      if (resolved) launchPath = resolved;
+    }
+    const fileArg = String(a.path || a.file || "").trim();
+    const spawnArgs = fileArg && fs.existsSync(fileArg) ? [fileArg] : [];
+    const child = spawn(launchPath, spawnArgs, {
+      detached: true,
+      stdio: "ignore",
+      shell: !path.isAbsolute(launchPath),
+    });
     child.unref();
-    return { ok: true, opened: base, platform: "win32", audited: true };
+    const wait = await waitForAllowlistedForeground(
+      isNotepadPlusPlusName(normalized) ? "notepad++" : launchPath,
+      { attempts: 8, delayMs: 250 },
+    );
+    return {
+      ok: true,
+      opened: launchPath,
+      platform: "win32",
+      audited: true,
+      opened_file: spawnArgs[0] || undefined,
+      focus_ready: wait.ok,
+      focus_error: wait.ok ? undefined : wait.error,
+      hint: wait.ok ? undefined : wait.hint,
+    };
   } catch (err) {
     return { ok: false, error: String(err) };
   }
@@ -262,9 +365,29 @@ public class M {
 }
 
 async function typeText(text, appName) {
-  const raw = String(text || "").slice(0, 200);
-  if (!raw) return { ok: false, error: "empty_text" };
-  if (appName) await focusApp(appName);
+  const full = String(text || "");
+  if (!full) return { ok: false, error: "empty_text" };
+  if (full.length > TYPE_MAX_CHARS) {
+    return {
+      ok: false,
+      error: "text_too_long_for_type",
+      chars: full.length,
+      max: TYPE_MAX_CHARS,
+      hint: "Use desktop_write_note for long content — computer_type is for short keystrokes only",
+    };
+  }
+  const raw = full.slice(0, TYPE_MAX_CHARS);
+  if (appName) {
+    const ready = await waitForAllowlistedForeground(appName, { attempts: 6, delayMs: 200 });
+    if (!ready.ok) {
+      return {
+        ok: false,
+        error: "foreground_not_allowlisted",
+        hint: ready.hint || "Focus an allowlisted app window before type",
+        verification: { kind: "a11y_before", before: ready.inspect?.summary || ready.inspect },
+      };
+    }
+  }
   try {
     if (process.platform === "darwin") {
       const escaped = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -684,8 +807,12 @@ function writeNoteFile(args) {
 module.exports = {
   WIN_APPS,
   MAC_APPS,
+  TYPE_MAX_CHARS,
   allowlisted,
   processMatchesIntended,
+  resolveNotepadPlusPlusExe,
+  isNotepadPlusPlusName,
+  waitForAllowlistedForeground,
   openApp,
   openZoom,
   openPresentation,

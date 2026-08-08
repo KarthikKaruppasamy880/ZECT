@@ -35,12 +35,19 @@ def _system_prompt(preferred_name: str = "") -> str:
         + address
         + " Never claim you sent messages or controlled the desktop without confirmation."
         + " Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing."
+        + " computer_type is for short keystrokes only (max ~500 chars); long text must use desktop_write_note."
+        + " If type fails with foreground_not_allowlisted, tell the user to focus Notepad/Notepad++ — do not invent that typing succeeded."
+        + " For Zoom: open Zoom or a join URL only — Mentrix cannot schedule Zoom meetings (no Zoom schedule API)."
+        + " For email compose: use email_send draft + Allow (SMTP), not Outlook typing."
         + " For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
         + " Desktop actions require Electron + Computer Mode on."
     )
 
 # In-memory resume store for Allow overlay (turn_id → state)
 _TURN_STORE: dict[str, dict[str, Any]] = {}
+# Last desktop note draft for continue/finish (avoid re-LLM inventing text)
+_LAST_NOTE_DRAFT: dict[str, Any] = {}
+_TYPE_MAX_CHARS = 500
 
 NAV_MAP = {
     "lattice": "/lattice",
@@ -238,6 +245,23 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
             parts.append(f"Mentrix Delivery run #{result.get('run_id')} started." if result.get("run_id") else "Delivery queued.")
         elif name in ("content_brief", "ads_copy", "report_draft", "docs_draft", "diagnose_fix", "connector_architecture"):
             parts.append(f"Artifact ready: {(result.get('board') or {}).get('title') or name}.")
+        elif name == "capability_refuse":
+            parts.append((result.get("spoken_summary") or result.get("note") or "That capability is not wired.")[:400])
+        elif name == "coding_engine_status":
+            parts.append((result.get("spoken_summary") or "Coding engine status posted.")[:400])
+        elif name == "desktop_write_note":
+            parts.append(
+                (result.get("spoken_summary") or result.get("note") or f"Wrote note to {result.get('path') or 'Desktop/Documents'}.")[:400]
+            )
+        elif name == "computer_open_app":
+            parts.append(f"Opening {result.get('app') or 'allowlisted app'} (Allow if prompted).")
+        elif name == "computer_type":
+            if result.get("ok") is False:
+                parts.append(
+                    (result.get("hint") or result.get("error") or "Typing failed — focus an allowlisted editor.")[:400]
+                )
+            else:
+                parts.append("Short type queued for the focused allowlisted app.")
         elif name == "note_add":
             parts.append("Note saved to Mentrix Notes.")
         elif name == "note_list":
@@ -248,6 +272,8 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
             parts.append((result.get("spoken_summary") or result.get("note") or "Slack digest ready.")[:400])
         elif name == "email_digest":
             parts.append((result.get("spoken_summary") or result.get("note") or "Email digest ready.")[:400])
+        elif name == "email_send":
+            parts.append((result.get("spoken_summary") or "Email draft ready — Allow to send.")[:400])
         elif name == "lattice_query":
             hits = result.get("hits") or []
             parts.append(f"Lattice: {len(hits)} hit(s)." if hits else (result.get("error") or "No hits."))
@@ -298,12 +324,17 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "datadog_query_logs",
                 "jira_comment_pr",
                 "computer_open_app",
+                "desktop_write_note",
+                "capability_refuse",
+                "coding_engine_status",
             }
         )
         prompt = (
             "You are Mentrix planner. Return ONLY a JSON array of tools to run, max 5. "
             f"Allowed names: {tool_names}. "
             'Each item: {"name":"...","args":{}}. '
+            "Prefer desktop_write_note over computer_type for long text. "
+            "Use capability_refuse for Zoom schedule. Use email_send for compose email (not Outlook type). "
             "For navigate use args.path like /lattice. Empty array if just chatting.\n"
             f"User: {message[:800]}"
         )
@@ -547,8 +578,15 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         )
     ) or re.search(r"\b(e-?mail|inbox|gmail)\b", m) or ("email" in m and "digest" in m):
         tools.append({"name": "email_digest", "args": {}})
-    if "send email" in m or "email send" in m:
-        tools.append({"name": "email_send", "args": {"subject": "Mentrix draft", "body": message[:800]}})
+    if "send email" in m or "email send" in m or re.search(
+        r"\b(write|compose|draft)\b.{0,40}\b(e-?mail|mail)\b", m
+    ) or re.search(r"\b(e-?mail|mail)\b.{0,40}\b(write|compose|draft|send)\b", m):
+        tools.append(
+            {
+                "name": "email_send",
+                "args": {"subject": "Mentrix draft", "body": message[:800]},
+            }
+        )
 
     if any(
         p in m
@@ -566,6 +604,26 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         tools.append({"name": "meeting_brief", "args": {}})
     if "follow-up" in m or "follow up" in m or "meeting followup" in m:
         tools.append({"name": "meeting_followup_draft", "args": {"channel": "email"}})
+
+    # Zoom: open/join only — refuse schedule/book/create meeting
+    if re.search(r"\b(schedule|book|create|set up|setup)\b.{0,40}\bzoom\b", m) or re.search(
+        r"\bzoom\b.{0,40}\b(schedule|book|create)\b.{0,20}\bmeeting\b", m
+    ):
+        tools.append({"name": "capability_refuse", "args": {"topic": "zoom_schedule"}})
+    elif re.search(r"\b(open|launch|start)\b.{0,20}\bzoom\b", m) or m.strip() in ("open zoom", "launch zoom"):
+        tools.append({"name": "computer_open_app", "args": {"app": "Zoom.exe"}})
+
+    if any(
+        p in m
+        for p in (
+            "coding engine",
+            "is the coding engine",
+            "forge loop ready",
+            "coding agent ready",
+            "is mentrix delivery built",
+        )
+    ):
+        tools.append({"name": "coding_engine_status", "args": {}})
 
     # BrowserRuntime intents (allowlisted hosts via MENTRIX_BROWSER_ALLOWLIST)
     url_m = re.search(r"https?://[^\s]+", message)
@@ -638,23 +696,78 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         tools.append({"name": "note_add", "args": {"text": message[:800]}})
 
     # Prefer writing an allowlisted Desktop/Documents file over Notepad for docs/notes.
-    if re.search(
-        r"\b(write|create|save)\b.{0,40}\b(note|notes|doc|docs|document|markdown|txt)\b",
-        m,
-    ) or re.search(r"\b(on (my )?desktop|to (my )?desktop|in documents)\b", m) and re.search(
-        r"\b(write|create|save|note)\b", m
-    ):
+    write_note_intent = bool(
+        re.search(
+            r"\b(write|create|save)\b.{0,40}\b(note|notes|doc|docs|document|markdown|txt)\b",
+            m,
+        )
+        or (
+            re.search(r"\b(on (my )?desktop|to (my )?desktop|in documents)\b", m)
+            and re.search(r"\b(write|create|save|note)\b", m)
+        )
+        or re.search(
+            r"\b(write|type|put|paste|finish|continue|complete)\b.{0,60}\b(notepad\+*|notepad|npp|editor)\b",
+            m,
+        )
+        or re.search(
+            r"\b(notepad\+*|notepad|npp)\b.{0,40}\b(write|type|details|architecture|connector)\b",
+            m,
+        )
+    )
+    finish_draft = bool(
+        re.search(r"\b(finish|continue|complete|rest of|keep going|finish it)\b", m)
+        and (_LAST_NOTE_DRAFT.get("content") or write_note_intent)
+    )
+    if finish_draft and _LAST_NOTE_DRAFT.get("content"):
+        prev = str(_LAST_NOTE_DRAFT.get("content") or "")
+        extra = message.strip()
+        # Prefer re-writing the prior full draft rather than inventing a new body
+        content = prev if len(prev) >= len(extra) else f"{prev}\n\n{extra}"[:50_000]
+        folder = str(_LAST_NOTE_DRAFT.get("folder") or "Desktop")
+        filename = str(_LAST_NOTE_DRAFT.get("filename") or "mentrix-note.md")
+        tools.append(
+            {
+                "name": "desktop_write_note",
+                "args": {"content": content, "folder": folder, "filename": filename},
+            }
+        )
+        app = str(_LAST_NOTE_DRAFT.get("app") or "notepad++.exe")
+        tools.append(
+            {
+                "name": "computer_open_app",
+                "args": {
+                    "app": app,
+                    "path": str(_LAST_NOTE_DRAFT.get("path") or ""),
+                },
+            }
+        )
+    elif write_note_intent:
         folder = "Documents" if "document" in m else "Desktop"
+        # Prefer body after a colon / "that" / quoted text; else full message
+        body = message
+        for sep in (":", " — ", " - ", "that "):
+            if sep in message:
+                cand = message.split(sep, 1)[-1].strip()
+                if len(cand) > 20:
+                    body = cand
+                    break
+        q = re.search(r"[\"'](.{40,})[\"']", message, re.S)
+        if q:
+            body = q.group(1).strip()
+        want_npp = bool(re.search(r"notepad\+\+|npp\b", m))
+        app = "notepad++.exe" if want_npp else ("notepad.exe" if "notepad" in m else "notepad++.exe")
+        filename = "mentrix-connector-architecture.md" if "architecture" in m or "connector" in m else "mentrix-note.md"
         tools.append(
             {
                 "name": "desktop_write_note",
                 "args": {
-                    "content": message[:4000],
+                    "content": body[:50_000],
                     "folder": folder,
-                    "filename": "mentrix-note.md",
+                    "filename": filename,
                 },
             }
         )
+        tools.append({"name": "computer_open_app", "args": {"app": app}})
 
     if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find", "wiki", "doc", "markdown")):
         tools.append({"name": "lattice_query", "args": {"q": message[:120], "project_key": ""}})
@@ -678,7 +791,14 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         if any(w in m for w in ("powerpoint", "pptx", "deck", "presentation")) and not path_m:
             tools.append({"name": "computer_open_app", "args": {"app": "POWERPNT.EXE"}})
 
-    if "computer mode" in m or "open notepad" in m or "screenshot" in m or "ui inspect" in m:
+    if (
+        "computer mode" in m
+        or "open notepad" in m
+        or "notepad++" in m
+        or re.search(r"\bopen npp\b", m)
+        or "screenshot" in m
+        or "ui inspect" in m
+    ):
         if "screenshot" in m:
             tools.append({"name": "desktop_screenshot", "args": {}})
         elif "inspect" in m:
@@ -688,8 +808,23 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         elif "click" in m:
             # Inspect only — never enqueue blind coordinate clicks from planner intents
             tools.append({"name": "computer_ui_inspect", "args": {}})
-        elif "type" in m:
-            tools.append({"name": "computer_type", "args": {"text": message[:200]}})
+        elif "type" in m and not write_note_intent:
+            text = message[:_TYPE_MAX_CHARS]
+            if len(message) > _TYPE_MAX_CHARS:
+                tools.append(
+                    {
+                        "name": "desktop_write_note",
+                        "args": {
+                            "content": message[:50_000],
+                            "folder": "Desktop",
+                            "filename": "mentrix-note.md",
+                        },
+                    }
+                )
+            else:
+                tools.append({"name": "computer_type", "args": {"text": text}})
+        elif "notepad++" in m or re.search(r"\bopen npp\b", m) or "open notepad++" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "notepad++.exe"}})
         elif "open notepad" in m:
             tools.append({"name": "computer_open_app", "args": {"app": "notepad.exe"}})
         elif "open explorer" in m or "file explorer" in m:
@@ -1640,16 +1775,42 @@ def _exec_tool(
         try:
             base.mkdir(parents=True, exist_ok=True)
             target.write_text(content[:50_000], encoding="utf-8")
+            _LAST_NOTE_DRAFT.clear()
+            _LAST_NOTE_DRAFT.update(
+                {
+                    "content": content[:50_000],
+                    "path": str(target),
+                    "filename": safe,
+                    "folder": folder_name,
+                    "app": "notepad++.exe",
+                }
+            )
             return {
                 "ok": True,
                 "desktop": "desktop_write_note",
                 "path": str(target),
                 "bytes": len(content.encode("utf-8")),
-                "note": "Wrote allowlisted note file (prefer over Notepad)",
+                "note": "Wrote allowlisted note file (prefer over Notepad typing)",
+                "spoken_summary": f"Wrote full note to {target.name} under {folder_name}. Opening the editor next if Allow is confirmed.",
                 "electron_action": "write_note",
                 "electron_args": {"path": str(target), "content": content[:50_000]},
+                "board": {
+                    "type": "markdown",
+                    "title": f"Note draft — {safe}",
+                    "body": content[:4000] + ("…" if len(content) > 4000 else ""),
+                },
             }
         except OSError as exc:
+            _LAST_NOTE_DRAFT.clear()
+            _LAST_NOTE_DRAFT.update(
+                {
+                    "content": content[:50_000],
+                    "path": str(target),
+                    "filename": safe,
+                    "folder": folder_name,
+                    "app": "notepad++.exe",
+                }
+            )
             return {
                 "ok": True,
                 "desktop": "desktop_write_note",
@@ -1657,6 +1818,7 @@ def _exec_tool(
                 "path": str(target),
                 "error_local": str(exc)[:200],
                 "note": "Confirm Allow — Electron will write under Desktop/Documents",
+                "spoken_summary": "Note write queued for Electron Allow.",
                 "electron_action": "write_note",
                 "electron_args": {
                     "folder": folder_name,
@@ -1665,7 +1827,20 @@ def _exec_tool(
                 },
             }
     if name == "computer_open_app":
-        return {"ok": True, "app": args.get("app") or "notepad.exe", "desktop": "open_app"}
+        app = args.get("app") or "notepad.exe"
+        path = str(args.get("path") or "").strip()
+        app_l = str(app).lower()
+        if not path and _LAST_NOTE_DRAFT.get("path") and any(
+            x in app_l for x in ("notepad", "npp", "code")
+        ):
+            path = str(_LAST_NOTE_DRAFT.get("path") or "")
+        out: dict[str, Any] = {"ok": True, "app": app, "desktop": "open_app"}
+        if path:
+            out["path"] = path
+            out["electron_args"] = {"app": app, "path": path}
+            _LAST_NOTE_DRAFT["app"] = str(app)
+            _LAST_NOTE_DRAFT["path"] = path
+        return out
     if name == "desktop_open_presentation":
         path = str(args.get("path") or "").strip()
         if not path:
@@ -1688,8 +1863,78 @@ def _exec_tool(
                     "args": args,
                 }
         return {"ok": True, "desktop": name, "args": args, "fallback": "coordinate"}
-    if name in ("computer_type", "computer_scroll", "computer_ui_inspect"):
+    if name == "computer_type":
+        text = str(args.get("text") or "")
+        if len(text) > _TYPE_MAX_CHARS:
+            return {
+                "ok": False,
+                "error": "text_too_long_for_type",
+                "chars": len(text),
+                "max": _TYPE_MAX_CHARS,
+                "hint": "Use desktop_write_note for long content — computer_type is for short keystrokes only",
+                "spoken_summary": "That text is too long to type. Ask me to write a Desktop note file instead.",
+            }
+        return {"ok": True, "desktop": name, "args": {"text": text, "app": args.get("app")}}
+    if name in ("computer_scroll", "computer_ui_inspect"):
         return {"ok": True, "desktop": name, "args": args}
+    if name == "capability_refuse":
+        topic = str(args.get("topic") or "").strip().lower()
+        if topic == "zoom_schedule":
+            msg = (
+                "I can open Zoom or a zoom.us join link, but Mentrix cannot schedule Zoom meetings "
+                "(no Zoom schedule API). Open Zoom and create the meeting there, or paste a join URL."
+            )
+            return {
+                "ok": True,
+                "refused": True,
+                "topic": topic,
+                "spoken_summary": msg,
+                "note": msg,
+                "board": {
+                    "type": "markdown",
+                    "title": "Zoom scheduling — not wired",
+                    "body": msg + "\n\n**Deferred:** Zoom Meeting API / auto-join / auto screen-share.",
+                },
+            }
+        if topic == "open_any_app":
+            msg = (
+                "Computer Mode only opens allowlisted apps "
+                "(Notepad, Notepad++, Zoom, Outlook, …) — not arbitrary installed programs."
+            )
+            return {"ok": True, "refused": True, "topic": topic, "spoken_summary": msg, "note": msg}
+        msg = f"That capability ({topic or 'unknown'}) is not available in Mentrix yet."
+        return {"ok": True, "refused": True, "topic": topic, "spoken_summary": msg, "note": msg}
+    if name == "coding_engine_status":
+        engine = (os.getenv("ZECT_CODING_ENGINE") or "mock").strip().lower()
+        md = (
+            "# Mentrix coding readiness\n\n"
+            "| Layer | Status |\n|---|---|\n"
+            "| **Mentrix Delivery FSM** | Working — upgrade / bugfix / deliver → gates → approve/PR |\n"
+            "| **ForgeLoop orchestrator** | Working (in-process ship path) |\n"
+            f"| **Coding engine mode** | `{engine}` "
+            + (
+                "(default **mock** — placeholder artifacts, not a remote coding agent)\n"
+                if engine == "mock"
+                else "(remote Agent Server when configured)\n"
+            )
+            + "| **Companion “build an app”** | Routes through Delivery/tools — not a Cursor-class agent |\n\n"
+            "Set `ZECT_CODING_ENGINE=remote` and run the Agent Server only when you need the optional remote coding runtime.\n"
+        )
+        spoken = (
+            f"Mentrix Delivery and ForgeLoop are built and working. "
+            f"Coding engine is currently '{engine}'"
+            + (
+                " — mock placeholders by default, not a full autonomous coding agent."
+                if engine == "mock"
+                else " — remote mode when the Agent Server is up."
+            )
+        )
+        return {
+            "ok": True,
+            "engine": engine,
+            "spoken_summary": spoken,
+            "board": {"type": "markdown", "title": "Coding engine readiness", "body": md},
+        }
     if name == "file_organize_plan":
         from app.domains.personal_agent import file_organize as fo
         from app.infrastructure.allowed_paths import path_under_allowed_roots
@@ -1776,28 +2021,52 @@ def _exec_tool(
         }
     if name == "connector_architecture":
         mermaid = (
-            "flowchart LR\n"
-            "  Chat[Companion_typed_or_voice] --> Orch[MentrixOrchestrator]\n"
-            "  Orch --> Perm[permission_broker]\n"
-            "  Perm --> Exec[_exec_tool]\n"
-            "  Exec --> Email[EmailProvider]\n"
-            "  Exec --> Slack[SlackProvider]\n"
-            "  Exec --> Notes[local_notes]\n"
-            "  Exec --> Cal[CalendarProvider]\n"
-            "  Exec --> Desk[desktop_payload]\n"
-            "  Desk --> Bridge[desktopBridge]\n"
-            "  Bridge --> Electron[computer_js_allowlist]\n"
+            "flowchart TB\n"
+            "  subgraph input [User_input]\n"
+            "    Chat[Typed_chat]\n"
+            "    Voice[Realtime_voice]\n"
+            "  end\n"
+            "  subgraph core [Mentrix_core]\n"
+            "    Orch[MentrixOrchestrator]\n"
+            "    Perm[permission_broker]\n"
+            "    Exec[_exec_tool]\n"
+            "  end\n"
+            "  subgraph providers [Connectors]\n"
+            "    Email[Email_IMAP_SMTP]\n"
+            "    Slack[Slack_API]\n"
+            "    Notes[local_notes]\n"
+            "    Cal[Calendar_ICS]\n"
+            "  end\n"
+            "  subgraph desktop [Desktop_Computer_Mode]\n"
+            "    Desk[desktop_payload]\n"
+            "    Bridge[desktopBridge]\n"
+            "    Electron[allowlisted_apps]\n"
+            "  end\n"
+            "  Chat --> Orch\n"
+            "  Voice --> Orch\n"
+            "  Orch --> Perm\n"
+            "  Perm -->|Allow| Exec\n"
+            "  Exec --> Email\n"
+            "  Exec --> Slack\n"
+            "  Exec --> Notes\n"
+            "  Exec --> Cal\n"
+            "  Exec --> Desk\n"
+            "  Desk --> Bridge\n"
+            "  Bridge --> Electron\n"
         )
         md = (
             "# Mentrix connector architecture\n\n"
             "Typed and spoken commands share **MentrixOrchestrator** + permission broker.\n\n"
             "| Connector | How |\n|---|---|\n"
-            "| **Email** | IMAP digest (`MENTRIX_IMAP_*`); draft/send needs Allow |\n"
+            "| **Email** | IMAP digest (`MENTRIX_IMAP_*`); draft/send needs Allow (SMTP) — not Outlook UI typing |\n"
             "| **Slack** | `SLACK_BOT_TOKEN`; digest + draft/send; desktop `Slack.exe` |\n"
-            "| **Notes** | Local Mentrix notes (not Notion) |\n"
+            "| **Notes** | Local Mentrix notes + `desktop_write_note` (prefer over Notepad type) |\n"
             "| **Calendar** | ICS/demo provider; meeting brief |\n"
-            "| **Desktop** | Computer Mode + allowlisted apps only (never delete) |\n\n"
-            "Sends always require Allow. Notion live API and open-any-app remain deferred."
+            "| **Desktop** | Computer Mode + allowlisted apps (Notepad, Notepad++, Zoom, Outlook, …); never delete |\n\n"
+            "## Deferred (honest)\n\n"
+            "- Notion live API\n"
+            "- Zoom **schedule** meeting API / auto-join / auto screen-share\n"
+            "- Open **any** installed desktop app (hard allowlist only)\n"
         )
         return {
             "ok": True,

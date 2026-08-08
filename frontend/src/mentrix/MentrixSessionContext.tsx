@@ -283,11 +283,20 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       } else if (res.error === "not_desktop_app") {
         pushLog("Desktop tools require the ZECT Electron app");
       } else if (!res.ok) {
+        const err = res.error || "unknown";
         pushLog(
-          `Desktop tool failed: ${res.error || "unknown"}${res.hint ? ` (${res.hint})` : ""}${
+          `Desktop tool failed: ${err}${res.hint ? ` (${res.hint})` : ""}${
             res.verified === false ? " · unverified" : ""
           }`,
         );
+        if (err === "foreground_not_allowlisted" || err === "foreground_mismatch") {
+          setStatusLine(
+            res.hint ||
+              "Focus Notepad / Notepad++ (or another allowlisted app), then Allow again — Mentrix may still be in front",
+          );
+        } else if (err === "text_too_long_for_type") {
+          setStatusLine("Text too long to type — ask Mentrix to write a Desktop note file instead");
+        }
       } else if (res.verified === false) {
         pushLog("Desktop action ran but verification did not confirm target window");
       } else {
@@ -534,7 +543,20 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       setVoiceConnected(true);
-      setStatusLine("Realtime voice connected — speak naturally");
+      const cloneOnline = Boolean(preflight.voicebox_online) && Boolean(preflight.cloned_voice);
+      if (cloneOnline) {
+        const name =
+          typeof preflight.cloned_voice === "object" && preflight.cloned_voice && "name" in preflight.cloned_voice
+            ? String((preflight.cloned_voice as { name?: string }).name || "clone")
+            : "clone";
+        setStatusLine(`Realtime + clone TTS (${name}) — expect higher latency than stock voice`);
+        pushLog("Connect Voice — clone path (ZECT Voicebox online)");
+      } else if (preflight.cloned_voice && !preflight.voicebox_online) {
+        setStatusLine("Realtime stock voice (Voicebox offline) — low latency; reconnect for clone");
+        pushLog("Connect Voice — PCM stock path (Voicebox offline)");
+      } else {
+        setStatusLine("Realtime voice connected — speak naturally");
+      }
     } catch (e) {
       pushLog(`Connect Voice failed: ${e instanceof Error ? e.message : "error"}`);
       stopVoice();

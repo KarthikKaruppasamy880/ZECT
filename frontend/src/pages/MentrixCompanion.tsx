@@ -184,13 +184,13 @@ export default function MentrixCompanion() {
         </header>
 
         <div
-          className={`grid flex-1 gap-3 ${
+          className={`grid min-h-0 flex-1 gap-3 ${
             mode === "chat" && s.showArtifacts && !s.displayMode
               ? "lg:grid-cols-[1fr_380px]"
               : "grid-cols-1"
           }`}
         >
-          <section className="flex flex-col rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
             {!s.displayMode && mode === "incident" && (
               <div
                 id="mentrix-incident-runbook"
@@ -204,7 +204,7 @@ export default function MentrixCompanion() {
               <div
                 id="mentrix-voice-cloning"
                 data-testid="mentrix-voice-section"
-                className="space-y-3 rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+                className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
               >
                 <div className="rounded-lg border border-teal-800/50 bg-slate-900/80 p-3">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-teal-400">Voice &amp; Present</p>
@@ -546,7 +546,7 @@ export default function MentrixCompanion() {
           </section>
 
           {mode === "chat" && s.showArtifacts && !s.displayMode && (
-            <aside className="space-y-3 rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
+            <aside className="flex max-h-[calc(100vh-8rem)] min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold text-teal-200">
                   <Sparkles className="h-4 w-4" />
@@ -570,6 +570,7 @@ export default function MentrixCompanion() {
                   "Slack digest",
                   "Check my email",
                   "Show connector architecture",
+                  "Is the coding engine ready?",
                   "Open Lattice",
                   "Open Sandbox",
                   "Research latest on AI marketing",

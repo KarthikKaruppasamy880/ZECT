@@ -16,7 +16,7 @@ import {
   type PresentonTemplate,
   type VoiceEngineStatus,
 } from "@/lib/api";
-import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, type SpeakVoiceOptions } from "@/mentrix/speak";
+import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -420,16 +420,45 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   };
 
   const narrateSlideList = async (slides: SlideParsed[], modeLabel: string) => {
+    const n = slides.length;
+    const scriptFor = (idx: number) => {
+      const slide = slides[idx];
+      const raw = (slide.notes || slide.text || "").trim() || `Slide ${idx + 1} of ${n}.`;
+      return capPresentSlideScript(raw);
+    };
+    const opts = voiceOptsFromChoice(voiceChoice);
+    let pendingPrefetch: Promise<PrefetchedSpeakChunk[] | null> | null = null;
+
     for (let i = 0; i < slides.length; i++) {
       if (abortRef.current) {
         setStatus("Stopped presenting.");
         return;
       }
-      const slide = slides[i];
-      const n = slides.length;
-      const script = (slide.notes || slide.text || "").trim() || `Slide ${i + 1} of ${n}.`;
-      setStatus(`${modeLabel}: slide ${i + 1} / ${n}`);
-      const spoken = await speakMentrixStreamedAwait(script.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
+      const script = scriptFor(i);
+      setStatus(
+        `${modeLabel}: slide ${i + 1} / ${n}` +
+          (script.endsWith("…") ? " (script capped ~500 chars for clone speed)" : ""),
+      );
+
+      // Kick off slide N+1 synthesis while current slide audio plays
+      const upcoming =
+        i + 1 < n && !abortRef.current
+          ? prefetchMentrixSpeakChunks(scriptFor(i + 1), opts)
+          : null;
+
+      let spoken;
+      if (pendingPrefetch) {
+        const chunks = await pendingPrefetch;
+        pendingPrefetch = null;
+        spoken =
+          chunks && chunks.length
+            ? await playMentrixPrefetch(chunks, opts)
+            : await speakMentrixStreamedAwait(script, true, opts);
+      } else {
+        spoken = await speakMentrixStreamedAwait(script, true, opts);
+      }
+      pendingPrefetch = upcoming;
+
       if (abortRef.current) {
         setStatus("Stopped presenting.");
         return;
@@ -449,7 +478,11 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         await sleep(350);
       }
     }
-    setStatus(`Finished presenting ${slides.length} slides${isDesktop ? "" : " (audio only — advance slides manually in PowerPoint)"}.`);
+    setStatus(
+      `Finished presenting ${slides.length} slides${
+        isDesktop ? "" : " (audio only — advance slides manually in PowerPoint)"
+      }.`,
+    );
   };
 
   const presentAllSlides = async () => {
@@ -780,6 +813,10 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           ))}
         </select>
       </label>
+      <p className={`text-[10px] ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-slide-cap-hint">
+        Present uses your clone and caps each slide script (~500 chars). Next-slide audio prefetches while the
+        current slide plays. Warm Voicebox (`models_ready: true`) before demos.
+      </p>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"

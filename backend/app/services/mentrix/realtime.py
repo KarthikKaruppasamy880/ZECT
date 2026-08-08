@@ -163,6 +163,27 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "calendar_upcoming",
+            "description": "List upcoming calendar meetings (ICS/demo provider). Never invent events.",
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer"}},
+            },
+        },
+        {
+            "type": "function",
+            "name": "meeting_brief",
+            "description": "Build a pre-meeting brief from calendar + email + Slack context",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        {
+            "type": "function",
+            "name": "connector_architecture",
+            "description": "Post Mermaid flowchart of Mentrix connectors (Email, Slack, Notes, Calendar, Desktop)",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        {
+            "type": "function",
             "name": "content_brief",
             "description": "Draft a Mentrix content brief",
             "parameters": {
@@ -256,7 +277,11 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "computer_open_app",
-            "description": "Open allowlisted app (Computer Mode + Allow). Includes POWERPNT.EXE and Zoom.exe.",
+            "description": (
+                "Open allowlisted app (Computer Mode + Allow). "
+                "Windows: notepad, code, explorer, msedge, chrome, calc, slack, powerpnt, zoom, outlook, ms-teams/Teams. "
+                "Never deletes."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {"app": {"type": "string"}},
@@ -618,6 +643,4 @@ def run_realtime_tool(
         "result": result,
         "events": events,
         "output": output,
-    }
-
     }

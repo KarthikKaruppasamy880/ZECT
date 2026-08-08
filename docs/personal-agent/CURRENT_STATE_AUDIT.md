@@ -1,15 +1,14 @@
-# Personal Agent — Current State Audit (PA-0)
+# Personal Agent — Current State Audit
 
-**Date:** 2026-08-07  
-**Branch:** `feature/personal-agent-pa-0-audit`  
-**Source brief:** [`docs/screenshots/DesktopControl.md`](../screenshots/DesktopControl.md)  
-**Scope:** Read-only audit of Mentrix personal-agent surfaces. **No product behavior changes.**
+**Updated:** 2026-08-07 (post PA-1…PA-9 + gap-close + realtime/connectors fix)  
+**Authoritative status:** Prefer [`CAPABILITY_MATRIX.md`](./CAPABILITY_MATRIX.md) and [`IMPLEMENTATION_ROADMAP.md`](./IMPLEMENTATION_ROADMAP.md) over historical PA-0 snapshots.  
+**Source brief:** [`docs/screenshots/DesktopControl.md`](../screenshots/DesktopControl.md)
 
 ---
 
 ## Executive summary
 
-ZECT already has a substantial Mentrix personal-agent spine: Delivery (ForgeLoop), Companion (tools + realtime), Electron Computer Mode, browser/MCP integrations, permissions/audit/secrets, skills, and schedules. Gaps against the DesktopControl product goal are mainly **unification** (typed/spoken/desktop do not share one command+policy schema), **calendar (missing)**, **verification after desktop/browser actions**, **browser allowlist default `*`**, and **file-organization depth** (in-memory plans, no SHA/Undo productization).
+ZECT Mentrix personal-agent spine is **implemented** for typed + spoken Companion, MentrixOrchestrator + permission broker, Email/Slack draft-before-send, local Notes, Calendar read/demo, durable file organize, Electron Computer Mode (allowlisted apps), and desktop bridge. Remaining gaps are mostly **deferred product depth** (Notion live, LiveKit, full UIA, Calendar OAuth write), not missing spine.
 
 ---
 
@@ -17,91 +16,66 @@ ZECT already has a substantial Mentrix personal-agent spine: Delivery (ForgeLoop
 
 | Area | Evidence |
 |------|----------|
-| Mentrix Delivery runs | `backend/app/domains/agent_run/mentrix.py`, `services/forge_loop/orchestrator.py`, `workers/mentrix_worker.py` |
-| Companion turns / stream / tools | `services/mentrix/companion.py`, `permission_broker.py`; UI `MentrixCompanion.tsx` |
+| Mentrix Delivery runs | `domains/agent_run/mentrix.py`, `forge_loop/orchestrator.py` |
+| Companion + orchestrator | `services/mentrix/companion.py`, `orchestrator.py`, `permission_broker.py` |
 | Clone TTS + ZECT Voicebox | `domains/voice/voice_clone.py`, `adapters/llm/chatterbox_client.py`, `services/zect-voicebox/` |
-| OpenAI Realtime voice | `services/mentrix/realtime.py`, `frontend/src/lib/mentrixRealtime.ts` |
-| Electron Computer Mode | `electron/main.js`, `computer.js`, `preload.js`; bridge `desktopBridge.ts` |
-| Hard no-delete (desktop) | Companion `delete_never_allowed`; Electron `DELETE_ACTIONS` refuse |
-| Permissions / grants / emergency stop | `domains/permissions/*` |
-| Secrets manager | `domains/permissions/secrets_manager.py` |
-| Audit trail API | `domains/audit/audit_trail.py` |
-| Slack / email / Jira integrations | `domains/integration/*`, adapters; companion draft-before-send via `outbound_drafts.py` |
-| Skills Engine + schedules | `domains/personal_agent/skills_engine.py`, `scheduler.py`, `schedule_executor.py` |
-| MCP hub | `services/mcp/hub.py`, `domains/integration/mcp.py` |
+| OpenAI Realtime voice | `services/mentrix/realtime.py` (includes calendar/meeting + connector_architecture tools) |
+| Electron Computer Mode | `electron/main.js`, `computer.js` (Outlook/Teams/Slack/… allowlist); never-delete |
+| Permissions / grants / emergency stop | `domains/permissions/*`; Electron honors stop |
+| Slack / email | Providers + `outbound_drafts.py`; env: `SLACK_BOT_TOKEN`, `MENTRIX_IMAP_*` |
+| Calendar read/draft | `/api/calendar/*` + ICS/demo provider; companion + Realtime tools |
+| File organize | Durable SHA plans + UI `/file-organize` |
+| Skills / schedules | `skills_engine.py`, `scheduler.py`, schedule grants |
+| Connector architecture Mermaid | Companion tool `connector_architecture` → Artifacts |
 
 ---
 
-## Partial
+## Partial / improved
 
-| Area | Gap |
-|------|-----|
-| Companion planner | Regex + LLM planner — not a single MentrixOrchestrator command schema |
-| Desktop automation | Click/type often coordinates / SendKeys-style; weak verification |
-| Mobile ↔ desktop bridge | In-memory queues (`desktop_bridge.py`) |
-| BrowserRuntime | Playwright works when installed; ReasoningBrowserStub is placeholder |
-| File organize | `file_organize.py` plan/approve/rollback exists but plans are in-memory; not full SHA/Undo product |
-| IMAP / Gmail | Env-gated digest; Gmail MCP often thin/SMTP |
-| Electron computer audit | Ring buffer in main process — not unified with `/api/audit` |
-| Skills / schedules ops | UI+API present; FEATURE_INVENTORY notes uneven verification |
-| Notion MCP | Placeholder adapter |
+| Area | Notes |
+|------|-------|
+| Desktop automation | Allowlisted apps + a11y before/after verify; clicks still best-effort |
+| Mobile ↔ desktop bridge | Durable JSON spill (`desktop_bridge.py`) |
+| BrowserRuntime | Session isolation + DOM verify; ReasoningBrowser stub remains |
+| Gmail list | OAuth list when configured; IMAP fallback |
+| Electron computer audit | Local ring buffer — not fully unified with `/api/audit` |
+| Dual Slack/email paths | Companion + MCP + integration routers (prefer providers + outbound_drafts) |
 
 ---
 
-## Placeholders / dead / missing
+## Deferred / placeholder
 
 | Item | Status |
 |------|--------|
-| Calendar provider / OAuth | **Missing** (ROADMAP: deferred; DesktopControl requires it later) |
-| LiveKit Agents | Not used for Mentrix clone TTS |
-| Shared `MentrixOrchestrator` + `ApprovalService` personal-agent APIs | **Missing** as named PA-1 interfaces (pieces exist as broker/permissions) |
-| DesktopControl PA-1+ product flows | Not started |
+| LiveKit Agents | Missing / deferred |
+| Notion live API | Placeholder adapter |
+| Full Windows UIA tree | Foreground verify only |
+| Google Calendar OAuth write | ICS/demo + draft-with-approval shipped |
+| Open arbitrary desktop apps | Hard allowlist only (by design) |
 
 ---
 
-## Unsafe / risk findings (priority)
+## Connector env checklist (spoken/typed honesty)
 
-1. **Browser allowlist default `*`** — `services/browser/allowlist.py` / `MENTRIX_BROWSER_ALLOWLIST=*` can allow unrestricted hosts.
-2. **Brittle desktop clicks** — companion can emit fixed coordinates (`computer_click` at hardcoded points) without accessibility verification.
-3. **Success without verification** — desktop/browser tools often report success after sending OS/DOM action without read-back.
-4. **Secrets in renderer** — Electron preload exposes bridges; confirm no secret values cross into renderer (policy: secrets stay in main/backend vault). Audit did not find deliberate secret export; keep as ongoing risk.
-5. **Frontend-only checks** — UI may hide actions, but server-side `permission_broker` + Electron refuse paths are the real gates; continue enforcing server/trusted-process only.
-6. **Duplicate provider call paths** — Companion tools vs MCP adapters vs integration routers can reach Slack/email/Jira through multiple stacks (needs PA-1 normalization).
-
----
-
-## Duplicate / direct provider call notes
-
-- Slack: integration router + MCP slack adapter + companion `_exec_tool`.
-- Email: SMTP integration + IMAP digest service + Gmail MCP thin path.
-- Jira: integration domain + MCP jira adapter + companion tools.
-- Browser: BrowserRuntime PlaywrightProvider vs MCP playwright adapter.
-
-Recommended PA-1 action: single capability → one trusted executor behind Permission/Approval services.
+| Connector | Required env / gate |
+|-----------|---------------------|
+| Slack digest/send | `SLACK_BOT_TOKEN` (+ optional `SLACK_DEFAULT_CHANNEL`) |
+| Email digest | `MENTRIX_IMAP_HOST`, `MENTRIX_IMAP_USER`, `MENTRIX_IMAP_PASSWORD` |
+| Email send | SMTP integration + Allow on draft |
+| Calendar | `MENTRIX_CALENDAR_ICS_URL` or `MENTRIX_CALENDAR_DEMO=1` |
+| Desktop | Electron **Computer Mode** ON; app must be allowlisted |
+| Realtime voice | `OPENAI_API_KEY`; clone TTS optional via Voicebox `:17493` |
 
 ---
 
-## Tests observed (PA-0 — do not fix unrelated failures)
+## Safety policy (unchanged)
 
-Run selectively during this phase (docs-only). Known suites:
-
-- `backend/tests/fixes_and_phases/` — voice, permissions-related coverage
-- `services/zect-voicebox/tests/` — Voicebox native API
-- `frontend/e2e/mentrix-*.spec.ts` — Companion/voice e2e
-- Electron: `electron/chatterbox.test.js`
-
-Full CI green is **not** a PA-0 gate. Record failures when running local checks in the PR description; do not change product code to fix them in this phase.
+See [`SAFETY_POLICY.md`](./SAFETY_POLICY.md): draft-before-send, never-delete, spoken = typed permissions, API → MCP → browser → a11y → keys last.
 
 ---
 
-## Recommended sequencing after approval
+## Tests
 
-1. **PA-1** — Shared command + policy foundation (see `IMPLEMENTATION_ROADMAP.md`).
-2. Harden browser allowlist default (can land with PA-1 safety or early PA-4 prep).
-3. Do **not** expand desktop automation until PA-1 + PA-5.
-
----
-
-## Rollback
-
-Docs-only PR: revert commit / close PR. No migrations, no runtime flags.
+- `backend/tests/fixes_and_phases/test_realtime_import.py` — Realtime module import smoke
+- `frontend/e2e/mentrix-*.spec.ts` — Companion / voice / smoke
+- Voice / permissions suites under `backend/tests/fixes_and_phases/`

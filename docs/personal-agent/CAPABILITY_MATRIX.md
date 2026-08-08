@@ -6,9 +6,9 @@ Status: `working` | `partial` | `placeholder` | `missing` | `unsafe`
 |---|---|---|
 | Mentrix Delivery | working | ForgeLoop unchanged |
 | Companion typed + orchestrator | working | PA-1 MentrixOrchestrator |
-| Companion spoken / Realtime | working | Orchestrator + TTS `require_clone=false` fallback |
+| Companion spoken / Realtime | working | Orchestrator + TTS `require_clone=false` fallback; calendar/meeting + connector_architecture tools |
 | Clone TTS / Voicebox | working | Native ZECT Voicebox; profile re-provision |
-| Electron Computer Mode | partial→improved | a11y before/after verify; emergency stop gate |
+| Electron Computer Mode | partial→improved | a11y before/after verify; emergency stop; Outlook/Teams/Slack allowlist |
 | Desktop delete | working | Hard refuse |
 | Mobile desktop bridge | partial→improved | Durable JSON spill |
 | Browser automation | partial→improved | Password refuse; session contexts; DOM verify |

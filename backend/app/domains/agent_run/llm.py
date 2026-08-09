@@ -9,6 +9,12 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from openai import OpenAI, APIError
 
+from app.adapters.llm.openai_compat import (
+    get_openai_compat_client,
+    mentrix_llm_chat_model,
+    mentrix_local_llm_configured,
+    openai_compat_available,
+)
 from app.infrastructure.auth.deps import CurrentUser
 from app.infrastructure.budget import enforce_token_budget
 from app.infrastructure.database import get_db
@@ -19,13 +25,25 @@ router = APIRouter(prefix="/api/llm", tags=["llm"])
 
 
 def _get_client() -> OpenAI:
-    key = os.getenv("OPENAI_API_KEY", "")
-    if not key:
+    if not openai_compat_available():
         raise HTTPException(
             status_code=503,
-            detail="OpenAI API key not configured. Go to Settings and add your OPENAI_API_KEY.",
+            detail=(
+                "No Mentrix Local LLM gateway (ZECT_LLM_BASE_URL) and OPENAI_API_KEY is not set. "
+                "Configure Mentrix Local LLM or add OPENAI_API_KEY in Settings."
+            ),
         )
-    return OpenAI(api_key=key)
+    try:
+        return get_openai_compat_client()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _resolve_chat_model(requested: str | None) -> str:
+    model = (requested or "").strip()
+    if model:
+        return model
+    return mentrix_llm_chat_model()
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +55,7 @@ class AskRequest(BaseModel):
     repo_context: str | None = None  # optional repo analysis context
     repo_id: int | None = None  # auto-inject context from cloned repo
     project_id: int | None = None  # Knowledge Base / Memory inject
+    model: str | None = None  # Mentrix Local or cloud model id
 
 
 class AskResponse(BaseModel):
@@ -51,6 +70,7 @@ class PlanRequest(BaseModel):
     repo_id: int | None = None  # auto-inject context from cloned repo
     constraints: str | None = None
     project_id: int | None = None
+    model: str | None = None
 
 
 class PlanResponse(BaseModel):
@@ -63,6 +83,7 @@ class PlanResponse(BaseModel):
 class EnhanceBlueprintRequest(BaseModel):
     raw_blueprint: str
     instructions: str | None = None
+    model: str | None = None
 
 
 class EnhanceBlueprintResponse(BaseModel):
@@ -78,6 +99,7 @@ class LLMKeyConfig(BaseModel):
 class LLMKeyStatus(BaseModel):
     configured: bool
     model: str
+    mentrix_local: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -195,10 +217,11 @@ def ask_question(
         })
 
     messages.append({"role": "user", "content": req.question})
+    model = _resolve_chat_model(req.model)
 
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=messages,
             max_tokens=2000,
             temperature=0.3,
@@ -210,15 +233,15 @@ def ask_question(
         log_tokens(
             action="ask_question",
             feature="ask_mode",
-            model="gpt-4o-mini",
+            model=model,
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
             user_id=current_user.user_id,
         )
-        return AskResponse(answer=answer, model="gpt-4o-mini", tokens_used=tokens)
+        return AskResponse(answer=answer, model=model, tokens_used=tokens)
     except APIError as e:
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
+        raise HTTPException(status_code=502, detail=f"LLM API error: {e.message}")
 
 
 @router.post("/plan", response_model=PlanResponse)
@@ -269,9 +292,11 @@ def generate_plan(
     if req.constraints:
         user_content += f"\n\nConstraints:\n{req.constraints}"
 
+    model = _resolve_chat_model(req.model)
+
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -297,15 +322,15 @@ def generate_plan(
         log_tokens(
             action="generate_plan",
             feature="plan_mode",
-            model="gpt-4o-mini",
+            model=model,
             prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
             user_id=current_user.user_id,
         )
-        return PlanResponse(plan=plan_text, phases=phases, model="gpt-4o-mini", tokens_used=tokens)
+        return PlanResponse(plan=plan_text, phases=phases, model=model, tokens_used=tokens)
     except APIError as e:
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
+        raise HTTPException(status_code=502, detail=f"LLM API error: {e.message}")
 
 
 @router.post("/enhance-blueprint", response_model=EnhanceBlueprintResponse)
@@ -329,9 +354,11 @@ def enhance_blueprint(
     if req.instructions:
         user_content += f"\n\nAdditional Instructions:\n{req.instructions}"
 
+    model = _resolve_chat_model(req.model)
+
     try:
         resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
@@ -344,17 +371,17 @@ def enhance_blueprint(
         log_tokens(
             action="enhance_blueprint",
             feature="blueprint",
-            model="gpt-4o-mini",
+            model=model,
             prompt_tokens=resp.usage.prompt_tokens if resp.usage else 0,
             completion_tokens=resp.usage.completion_tokens if resp.usage else 0,
             total_tokens=tokens,
             user_id=current_user.user_id,
         )
         return EnhanceBlueprintResponse(
-            enhanced_prompt=enhanced, model="gpt-4o-mini", tokens_used=tokens
+            enhanced_prompt=enhanced, model=model, tokens_used=tokens
         )
     except APIError as e:
-        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e.message}")
+        raise HTTPException(status_code=502, detail=f"LLM API error: {e.message}")
 
 
 @router.post("/configure-key", response_model=LLMKeyStatus)
@@ -374,11 +401,18 @@ def configure_llm_key(config: LLMKeyConfig):
         raise HTTPException(status_code=400, detail="Invalid OpenAI API key. Please check and try again.")
 
     os.environ["OPENAI_API_KEY"] = key
-    return LLMKeyStatus(configured=True, model="gpt-4o-mini")
+    return LLMKeyStatus(
+        configured=True,
+        model=mentrix_llm_chat_model(),
+        mentrix_local=mentrix_local_llm_configured(),
+    )
 
 
 @router.get("/status", response_model=LLMKeyStatus)
-def get_llm_status():
-    """Check if LLM API key is configured."""
-    key = os.getenv("OPENAI_API_KEY", "")
-    return LLMKeyStatus(configured=bool(key), model="gpt-4o-mini" if key else "")
+def llm_status():
+    """Check whether Mentrix Local LLM or cloud OpenAI is configured."""
+    return LLMKeyStatus(
+        configured=openai_compat_available(),
+        model=mentrix_llm_chat_model(),
+        mentrix_local=mentrix_local_llm_configured(),
+    )

@@ -32,16 +32,20 @@ export default function SecurityIncidents() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [malwareStatus, setMalwareStatus] = useState<Record<string, unknown> | null>(null);
+  const [scanPath, setScanPath] = useState("");
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [fRes, iRes] = await Promise.all([
+      const [fRes, iRes, mRes] = await Promise.all([
         apiFetch("/api/security/findings"),
         apiFetch("/api/security/incidents"),
+        apiFetch("/api/security/malware/status"),
       ]);
       if (fRes.ok) setFindings(await fRes.json());
       if (iRes.ok) setIncidents(await iRes.json());
+      if (mRes.ok) setMalwareStatus(await mRes.json());
     } catch {
       showToast("error", "Failed to load security data");
     } finally {
@@ -128,10 +132,10 @@ export default function SecurityIncidents() {
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <ShieldAlert className="h-6 w-6 text-red-600" /> Security Incidents
+            <ShieldAlert className="h-6 w-6 text-red-600" /> ZECT Security Agent
           </h1>
           <p className="text-slate-500 text-sm">
-            Detection findings and IR drafts — Mentrix coordinates; automatic containment stays off.
+            Audit findings, IR drafts, and malware scan — Mentrix coordinates; automatic process kill stays off.
           </p>
         </div>
         <div className="flex gap-2">
@@ -144,6 +148,59 @@ export default function SecurityIncidents() {
           </button>
           <button onClick={refresh} className="p-2 rounded hover:bg-slate-100" title="Refresh">
             <RefreshCw className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
+      </div>
+
+      <div
+        className="mb-6 rounded-xl border border-slate-200 bg-white p-5"
+        data-testid="security-malware-panel"
+      >
+        <h2 className="text-sm font-semibold text-slate-800 mb-2">Malware Scan</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Engine:{" "}
+          <span data-testid="security-malware-status">
+            {malwareStatus
+              ? `${malwareStatus.label || "ZECT Security Agent"} — ${malwareStatus.status || "unknown"}`
+              : "loading…"}
+          </span>
+        </p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            value={scanPath}
+            onChange={(e) => setScanPath(e.target.value)}
+            placeholder="Allowlisted file path to scan"
+            className="flex-1 min-w-[12rem] rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+          />
+          <button
+            type="button"
+            disabled={busy || !scanPath.trim()}
+            className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-sm disabled:opacity-60"
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const res = await apiFetch("/api/security/malware/scan", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ path: scanPath.trim(), quarantine: true }),
+                });
+                const body = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  showToast("error", body.detail?.error || body.error || `Scan failed (${res.status})`);
+                } else if (body.infected) {
+                  showToast("success", `Threat found — quarantined if requested`);
+                  await refresh();
+                } else {
+                  showToast("success", "Clean");
+                }
+              } catch {
+                showToast("error", "Malware scan failed");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Scan file
           </button>
         </div>
       </div>

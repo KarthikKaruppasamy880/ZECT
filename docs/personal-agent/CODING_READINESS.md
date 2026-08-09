@@ -1,16 +1,16 @@
 # Mentrix coding readiness
 
-**Short answer:** Mentrix **Delivery / ForgeLoop** (upgrade → bugfix → deliver → gates → approve/PR) is **built and working**. A full autonomous **coding agent** is **not** the default.
+**Short answer:** Mentrix **Delivery / ForgeLoop** is built. **Mentrix Coding Agent** is the in-process tool loop (read/search/edit/run/git). **Product default** is `ZECT_CODING_ENGINE=mentrix_native`. CI may set `mock` explicitly for placeholders.
 
 | Layer | Status |
 |-------|--------|
-| Mentrix Delivery FSM + UI | Working (`/mentrix`, `domains/agent_run/mentrix.py`) |
-| ForgeLoop orchestrator | Working (`services/forge_loop/orchestrator.py`) |
-| Worker kickoff | Working (`workers/mentrix_worker.py`) |
-| `ZECT_CODING_ENGINE=mock` (default) | Placeholder artifacts — **not** real remote coding |
-| `ZECT_CODING_ENGINE=remote` + Agent Server | Optional closer-to-coding runtime |
-| Companion “build me an app” | Routes through Delivery/tools — not Cursor-class agent |
+| Mentrix Delivery FSM + UI | Working (`/mentrix`) |
+| ForgeLoop orchestrator | Working |
+| Mentrix Coding Agent (`mentrix_native`) | Real workspace tool loop — Developer Workspace panel + `/api/coding-agent` |
+| `ZECT_CODING_ENGINE=mock` (CI only) | Placeholder artifacts when env set |
+| `ZECT_CODING_ENGINE=remote` | Optional external Agent Server |
+| Companion | `coding_agent_start` → `/workspace?session=…`; `coding_engine_status` honesty |
 
-Ask Mentrix: **“Is the coding engine ready?”** (tool `coding_engine_status`) for a live Artifacts summary.
+Ask Mentrix: **“Is the coding engine ready?”** or **“Start coding agent: add a README”**.
 
-See also [`CAPABILITY_MATRIX.md`](./CAPABILITY_MATRIX.md) and [`docs/ZECT_CODING_ENGINE.md`](../ZECT_CODING_ENGINE.md).
+See also [`docs/ZECT_CODING_ENGINE.md`](../ZECT_CODING_ENGINE.md).

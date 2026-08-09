@@ -145,6 +145,45 @@ export default function Settings() {
         <p className="text-slate-500 text-sm">Configure ZECT behavior and integrations</p>
       </div>
 
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5" data-testid="settings-governance">
+        <h2 className="text-sm font-semibold text-slate-900 mb-1">Governance &amp; memory</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Permissions, memory, secrets, and related surfaces live here (not Labs).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { href: "/permissions", label: "Permissions" },
+            { href: "/memory", label: "Memory" },
+            { href: "/secrets", label: "Secrets" },
+            { href: "/token-controls", label: "Token Controls" },
+            { href: "/security-incidents", label: "Security Agent" },
+            { href: "/transfer", label: "Transfer" },
+            { href: "/conversations", label: "Conversations" },
+            { href: "/mentrix-notes", label: "Notes" },
+          ].map((l) => (
+            <Link
+              key={l.href}
+              to={l.href}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {l.label}
+              <ArrowRight className="h-3 w-3 text-slate-400" />
+            </Link>
+          ))}
+        </div>
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <p className="text-xs font-medium text-slate-700 mb-1">Security scan engine</p>
+          <p className="text-xs text-slate-500 mb-2">
+            ZECT Security Agent malware scan — start{" "}
+            <code className="text-[10px] bg-slate-100 px-1 rounded">services/zect-security-scan</code>. Status on
+            Security Agent page.
+          </p>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <span>Scan on write (server env <code className="bg-slate-100 px-1 rounded">ZECT_MALWARE_SCAN_WRITES</code>)</span>
+          </label>
+        </div>
+      </div>
+
       {/* API Key Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {/* API Key Card */}

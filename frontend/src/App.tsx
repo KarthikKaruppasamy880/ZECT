@@ -34,6 +34,7 @@ import DataLayer from "@/pages/DataLayer";
 import DataFlywheel from "@/pages/DataFlywheel";
 import Permissions from "@/pages/Permissions";
 import SecurityIncidents from "@/pages/SecurityIncidents";
+import MentrixFabric from "@/pages/MentrixFabric";
 import ToolComparison from "@/pages/ToolComparison";
 import TransferOnboarding from "@/pages/TransferOnboarding";
 import SkillsEngine from "@/pages/SkillsEngine";
@@ -172,6 +173,7 @@ export default function App() {
           <Route path="/data-flywheel" element={<DataFlywheel />} />
           <Route path="/permissions" element={<Permissions />} />
           <Route path="/security-incidents" element={<SecurityIncidents />} />
+          <Route path="/fabric" element={<MentrixFabric />} />
           <Route path="/tool-comparison" element={<ToolComparison />} />
           <Route path="/transfer" element={<TransferOnboarding />} />
           <Route path="/skills-engine" element={<SkillsEngine />} />

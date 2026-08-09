@@ -1,0 +1,26 @@
+# Mentrix Local LLM — OpenAI-compatible gateway on 127.0.0.1:11434
+#
+# Product name: Mentrix Local LLM / Mentrix LLM gateway.
+# Runtime image is an MIT-licensed local model server (see THIRD_PARTY_NOTICES.md).
+# Do not brand this service with third-party product names in UI or Mentrix docs.
+
+services:
+  mentrix-llm:
+    image: ollama/ollama:latest
+    container_name: mentrix-llm
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - mentrix_llm_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  mentrix_llm_models:

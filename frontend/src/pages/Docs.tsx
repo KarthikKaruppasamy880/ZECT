@@ -27,42 +27,23 @@ interface DocSection {
 
 const resources: DocSection[] = [
   {
-    title: "MSTF — Multi-Surface Transaction Fabric",
-    description: "Demo brief for MinionBot / Code Red: NGC vs CDS/Tango surfaces, Blueprint+KG+Playbooks (not Lattice), PRs #118/#96 quality spine, AI-agnostic Jira→repo flow. Full markdown: docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md",
+    title: "Mentrix Coding & Security Agent",
+    description:
+      "Product spine: Mentrix Coding Agent (default), Lattice + Blueprint context, schedule ticker, ZECT Security Agent malware scan. Operator guide: docs/guides/ZECT_SECURITY_AND_CODING_OPERATOR.md",
     icon: Network,
-    color: "bg-violet-100 text-violet-700",
+    color: "bg-teal-100 text-teal-700",
     content: [
       {
-        heading: "Demo talk track (5–7 min)",
-        body: "1. Problem — MinionBot works for NGC/BPM exemplar-like tickets (e.g. Authorized Signatory). CDS/Tango still force manual. Old POC ~50% accuracy.\n2. Already fixed — PR #118 (truncation) + PR #96 (codegen gates) are REAL CODE, not docs-only.\n3. Do NOT add ZECT Lattice into MinionBot — use Blueprint + Neo4j KG + KnowledgeDocs + Playbook bundles.\n4. MSTF — Jira → classify surfaces (ngc/bpm/cds/tango) → index+playbooks → MultiSurfaceRecipe → generate → hard gates → scorecard.\n5. AI-agnostic — models pluggable; truth in recipes/KB/gates.\n6. Repo selection — capability-scoped, not “LLM picks any repo.”\n7. Ship in MinionBot — ZECT Mentrix may later call MinionBot APIs.\n8. Ask — merge PRs → CDS/Tango repo glossary → refresh/index → one pilot → golden suite “100%”.",
+        heading: "Coding",
+        body: "ZECT_CODING_ENGINE=mentrix_native (product default). CI may set mock. Developer Workspace + Companion coding_agent_start. Skills/memory/Lattice/Blueprint inject into agent context.",
       },
       {
-        heading: "NGC vs CDS vs Tango",
-        body: "NGC — rules/config near an exemplar; bot-ready (proven).\nBPM PI — controllers/services/BPMN via TransactionRecipe; ready for template-like.\nCDS — cross-system data/API/contracts; gap until surface registry + index + recipe.\nTango — platform/service beyond NGC; same gap.\n\nExact repo lists come from domain owners (Lasya/Anubhav/Siddartha).",
+        heading: "Security Agent",
+        body: "Audit IR + malware file scan. Start services/zect-security-scan. Status GET /api/security/malware/status (provider zect_security_agent). UI: Security Agent page. License notices only in THIRD_PARTY_NOTICES.md.",
       },
       {
-        heading: "Architecture (MSTF)",
-        body: "Intake: Jira → RFC → Scope classifier → surfaces_required[].\nKnowledge fabric (existing): Blueprint, Neo4j KG/HLD, KnowledgeDocs, agent-index Playbooks.\nControl plane (new): Surface registry, MultiSurfaceRecipe, cross-repo plan, Refuse path.\nExecution: per-surface generators → #118 truncation → #96 quality gates → PRs → scorecard.\n\nRefuse > hallucinate: if CDS/Tango required but not registered/indexed → hard stop with checklist.",
-      },
-      {
-        heading: "Quality spine — PR #118 + #96",
-        body: "https://github.com/zinnia/minionbot-common/pull/118 — generate_with_status / finish_reason.\nhttps://github.com/zinnia/minionbot-code-generator/pull/96 — truncation continuation, AC verifier, coverage tracer, invented-API xref, missing-LLD block, manifest refs.\n\nThese raise accuracy on the CURRENT path. They do NOT alone add CDS/Tango domain coverage.",
-      },
-      {
-        heading: "What “100%” means",
-        body: "Not “LLM never errs.” Closed loop on a golden suite:\n• Completeness — no truncated/missing critical files\n• Grounding — no blocking invented APIs/contracts\n• Satisfaction — AC + requirement coverage thresholds\n• Scope honesty — missing surface → refuse\n• Human rework under agreed ceiling\n\nSeeds: Authorized Signatory, pure NGC, one CDS+Tango pilot, one must-refuse ticket.",
-      },
-      {
-        heading: "Phases P0–P5",
-        body: "P0 — Merge #118/#96; NGC goldens green.\nP1 — Classifier + refuse for CDS/Tango.\nP2 — Index CDS+Tango repos; ship KnowledgeDocs/Playbooks in-repo.\nP3 — MultiSurfaceRecipe v1 for one real Code Red ticket.\nP4 — Extend #96 gates to those surfaces.\nP5 — Adoption playbook + metrics for leadership.\n\nP0 alone ≠ Anubhav gap closed. P1–P4 close CDS/Tango.",
-      },
-      {
-        heading: "ZECT vs MinionBot",
-        body: "Build MSTF in MinionBot — YES (system of record for Code Red codegen).\nBuild MSTF in ZECT — NO for this gap.\nMinionBot has Lattice? NO.\nMinionBot has Blueprint + Neo4j graph + KB + Playbooks? YES.\nFull brief on disk: docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md (also copied under minionbot-code-generator/docs/).\n\nOperator reminder: ZECT Mentrix Delivery/Semgrep/plan-confirm are the ZECT quality spine; MSTF multi-surface fabric stays MinionBot-only.",
-      },
-      {
-        heading: "Meeting close / asks",
-        body: "1. Confirm merge path for #118 and #96.\n2. One-page repo list per surface (NGC, CDS, Tango).\n3. Refresh + index those repos.\n4. Pick one paused CDS+Tango Code Red ticket as P3 pilot.\n5. Agree scorecard wording: leverage MinionBot now on NGC-like; CDS/Tango via MSTF phases.",
+        heading: "Schedules",
+        body: "In-process ticker (ZECT_SCHEDULE_TICK_SECONDS). Cron advances next_run_at. Unknown task types fail closed — no fake completed runs.",
       },
     ],
   },
@@ -199,7 +180,7 @@ const resources: DocSection[] = [
 ];
 
 export default function Docs() {
-  const [expanded, setExpanded] = useState<string | null>("MSTF — Multi-Surface Transaction Fabric");
+  const [expanded, setExpanded] = useState<string | null>("Mentrix Coding & Security Agent");
   const toggle = (title: string) => setExpanded(expanded === title ? null : title);
 
   return (

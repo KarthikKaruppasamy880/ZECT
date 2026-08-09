@@ -1007,6 +1007,7 @@ class CompanionTurnRequest(BaseModel):
     history: list[dict] = []
     agent_context: str = ""
     skill_id: int | None = None
+    model: str | None = None
 
 
 class OrgPolicyImportRequest(BaseModel):
@@ -1116,6 +1117,7 @@ def companion_turn(
         history=req.history or [],
         agent_context=req.agent_context or "",
         skill_id=req.skill_id,
+        model=req.model,
     )
 
 
@@ -1133,6 +1135,7 @@ def companion_stream(
     confirmed_tools: str = "",
     agent_context: str = "",
     skill_id: int | None = None,
+    model: str | None = None,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -1156,6 +1159,7 @@ def companion_stream(
                 confirmed_tools=confirmed,
                 agent_context=agent_context or "",
                 skill_id=skill_id,
+                model=model,
             ):
                 yield sse_pack(ev)
         except Exception as exc:  # noqa: BLE001
@@ -1355,6 +1359,13 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         and (os.getenv("JIRA_API_TOKEN") or "").strip()
     )
     openai = bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    from app.adapters.llm.openai_compat import mentrix_local_llm_configured, probe_mentrix_local_llm
+
+    local_probe = probe_mentrix_local_llm() if mentrix_local_llm_configured() else {
+        "configured": False,
+        "online": False,
+        "label": "Mentrix Local LLM not configured",
+    }
     datadog = bool(
         (os.getenv("DATADOG_API_KEY") or "").strip() and (os.getenv("DATADOG_APP_KEY") or "").strip()
     )
@@ -1367,6 +1378,9 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         "slack": slack,
         "jira": jira,
         "openai": openai,
+        "mentrix_local": bool(local_probe.get("online")),
+        "mentrix_local_configured": bool(local_probe.get("configured")),
+        "mentrix_local_label": local_probe.get("label") or "",
         "datadog": datadog,
         "github": github,
         "browser": bool(browser.get("online")),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
@@ -15,6 +16,11 @@ from urllib.request import urlopen
 
 from sqlalchemy.orm import Session
 
+from app.adapters.llm.openai_compat import (
+    get_openai_compat_client,
+    mentrix_llm_chat_model,
+    openai_compat_available,
+)
 from app.models import Lesson, MentrixRun, SkillDefinition, TypedMemoryRecord
 from app.services.lattice.indexer import get_graph, query_graph
 from app.services.mentrix.permission_broker import (
@@ -26,7 +32,9 @@ from app.services.mentrix.permission_broker import (
 _LLM_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_LLM_TIMEOUT", "6"))
 _RESEARCH_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_RESEARCH_TIMEOUT", "2.5"))
 _MAX_TOOLS = 5
-
+_companion_model_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mentrix_companion_model", default=None
+)
 
 def _system_prompt(preferred_name: str = "") -> str:
     address = f" Address the user as {preferred_name}." if preferred_name else ""
@@ -109,6 +117,8 @@ def build_agent_context(
 ) -> str:
     """Compose skill + Knowledge + typed memory + Dream lessons for Mentrix turns.
 
+    Progressive skills: always inject name/short description; full template body
+    only when the user query matches manifest triggers (or no triggers declared).
     Prefer Knowledge/Memory snippets (token-capped) so callers can avoid dumping
     large repo slices. Silent empty string when nothing is configured.
     """
@@ -120,13 +130,27 @@ def build_agent_context(
         if skill_id is not None:
             skill = db.query(SkillDefinition).filter(SkillDefinition.id == int(skill_id)).first()
             if skill:
-                template = (skill.manifest or {}).get("template", "")
-                body = (template or skill.description or "").strip()
-                bits.append(
-                    f"Active skill ({skill.name}): {body[:1200]}"
-                    if body
-                    else f"Active skill: {skill.name}"
+                manifest = skill.manifest if isinstance(skill.manifest, dict) else {}
+                template = (manifest.get("template") or "").strip()
+                desc = (skill.description or "").strip()
+                triggers = manifest.get("triggers") or manifest.get("trigger_keywords") or []
+                if not isinstance(triggers, list):
+                    triggers = []
+                query_l = (query or raw or "").lower()
+                triggered = (not triggers) or any(
+                    str(t).lower() in query_l for t in triggers if str(t).strip()
                 )
+                if triggered:
+                    body = (template or desc).strip()
+                    bits.append(
+                        f"Active skill ({skill.name}): {body[:1200]}"
+                        if body
+                        else f"Active skill: {skill.name}"
+                    )
+                else:
+                    # Progressive: manifest tip only until trigger matches
+                    tip = desc[:200] if desc else "full body loads when you mention its triggers"
+                    bits.append(f"Skill available ({skill.name}): {tip}")
     except Exception:  # noqa: BLE001
         pass
     try:
@@ -184,10 +208,10 @@ def build_agent_context(
     return "\n\n".join(bits).strip()[:4000]
 
 
-def _ensure_openai_env() -> str:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if key:
-        return key
+def _ensure_llm_ready() -> bool:
+    """True when Mentrix Local LLM gateway or cloud OpenAI key is available."""
+    if openai_compat_available():
+        return True
     try:
         from dotenv import load_dotenv
 
@@ -196,7 +220,14 @@ def _ensure_openai_env() -> str:
             load_dotenv(env_path, override=False)
     except Exception:  # noqa: BLE001
         pass
-    return os.getenv("OPENAI_API_KEY", "").strip()
+    return openai_compat_available()
+
+
+def _resolve_companion_model() -> str:
+    override = (_companion_model_ctx.get() or "").strip()
+    if override:
+        return override
+    return mentrix_llm_chat_model()
 
 
 def _gates_mermaid(gates: dict | None, run_id: int | None = None) -> str:
@@ -249,6 +280,10 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
             parts.append((result.get("spoken_summary") or result.get("note") or "That capability is not wired.")[:400])
         elif name == "coding_engine_status":
             parts.append((result.get("spoken_summary") or "Coding engine status posted.")[:400])
+        elif name == "coding_agent_start":
+            parts.append((result.get("spoken_summary") or "Mentrix Coding Agent started.")[:400])
+        elif name == "coding_agent_status":
+            parts.append((result.get("spoken_summary") or "Mentrix Coding Agent status.")[:400])
         elif name == "desktop_write_note":
             parts.append(
                 (result.get("spoken_summary") or result.get("note") or f"Wrote note to {result.get('path') or 'Desktop/Documents'}.")[:400]
@@ -286,14 +321,11 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
 
 def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
     """Ask LLM for up to N tool calls as JSON; empty on failure."""
-    key = _ensure_openai_env()
-    if not key:
+    if not _ensure_llm_ready():
         return []
 
     def _call() -> list[dict[str, Any]]:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
+        client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
         tool_names = sorted(
             {
                 "navigate",
@@ -327,6 +359,17 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "desktop_write_note",
                 "capability_refuse",
                 "coding_engine_status",
+                "coding_agent_status",
+                "coding_agent_start",
+                "malware_status",
+                "malware_scan_path",
+                "fabric_classify",
+                "fabric_run",
+                "process_status",
+                "process_deploy",
+                "process_start",
+                "process_incidents",
+                "process_open_cockpit",
             }
         )
         prompt = (
@@ -339,7 +382,7 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
             f"User: {message[:800]}"
         )
         resp = client.chat.completions.create(
-            model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
+            model=_resolve_companion_model(),
             messages=[{"role": "user", "content": prompt}],
             max_tokens=400,
             temperature=0.1,
@@ -363,8 +406,7 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
 
 
 def _llm_answer(question: str, context: str = "", preferred_name: str = "") -> str:
-    key = _ensure_openai_env()
-    if not key:
+    if not _ensure_llm_ready():
         greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
         return (
             f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
@@ -373,9 +415,7 @@ def _llm_answer(question: str, context: str = "", preferred_name: str = "") -> s
         )
 
     def _call() -> str:
-        from openai import OpenAI
-
-        client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
+        client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
         messages = [
             {
                 "role": "system",
@@ -386,7 +426,7 @@ def _llm_answer(question: str, context: str = "", preferred_name: str = "") -> s
             messages.append({"role": "user", "content": f"Tool results:\n{context[:3500]}"})
         messages.append({"role": "user", "content": question})
         resp = client.chat.completions.create(
-            model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
+            model=_resolve_companion_model(),
             messages=messages,
             max_tokens=280,
             temperature=0.3,
@@ -411,8 +451,7 @@ def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "
     model actually generates them instead of computing the full reply first —
     the "token" SSE events this feeds reflect real progress instead of a
     fake post-hoc chunking of an already-complete string."""
-    key = _ensure_openai_env()
-    if not key:
+    if not _ensure_llm_ready():
         greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
         yield (
             f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
@@ -421,9 +460,7 @@ def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "
         )
         return
 
-    from openai import OpenAI
-
-    client = OpenAI(api_key=key, timeout=_LLM_TIMEOUT_S)
+    client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
     messages = [
         {
             "role": "system",
@@ -438,7 +475,7 @@ def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "
     got_any = False
     try:
         stream = client.chat.completions.create(
-            model=os.getenv("MENTRIX_COMPANION_MODEL", "gpt-4o-mini"),
+            model=_resolve_companion_model(),
             messages=messages,
             max_tokens=280,
             temperature=0.3,
@@ -460,7 +497,6 @@ def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "
                 + (f"\n\n{context[:700]}" if context else f"\n\nYou asked: {question[:200]}")
                 + f"\n\n({type(exc).__name__})"
             )
-
 
 def _parse_intents(message: str) -> list[dict[str, Any]]:
     m = message.lower().strip()
@@ -621,9 +657,49 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             "forge loop ready",
             "coding agent ready",
             "is mentrix delivery built",
+            "mentrix coding agent",
         )
     ):
         tools.append({"name": "coding_engine_status", "args": {}})
+
+    if any(k in m for k in ("malware", "virus", "security agent", "scan file", "quarantine")):
+        tools.append({"name": "malware_status", "args": {}})
+    if "malware" in m or "virus" in m or "scan file" in m:
+        import re as _re
+
+        pm = _re.search(r'["\']([^"\']+)["\']', message)
+        tools.append(
+            {
+                "name": "malware_scan_path",
+                "args": {"path": pm.group(1) if pm else "", "quarantine": "quarantine" in m},
+            }
+        )
+
+    if any(k in m for k in ("fabric", "multi-surface", "classify surfaces", "surface refuse")):
+        tools.append({"name": "fabric_classify", "args": {"text": message[:800]}})
+    if any(k in m for k in ("run fabric", "fabric run", "multi-surface run")):
+        tools.append({"name": "fabric_run", "args": {"text": message[:800]}})
+    if any(k in m for k in ("camunda", "process engine", "process incidents", "bpmn deploy", "mentrix process")):
+        tools.append({"name": "process_status", "args": {}})
+    if "process incident" in m or "list incidents" in m:
+        tools.append({"name": "process_incidents", "args": {}})
+    if "open cockpit" in m or "process cockpit" in m:
+        tools.append({"name": "process_open_cockpit", "args": {}})
+
+    if any(
+        p in m
+        for p in (
+            "start coding agent",
+            "open coding agent",
+            "code this in the repo",
+            "fix this in the workspace",
+            "build this in the workspace",
+            "mentrix coding agent:",
+        )
+    ) or re.search(r"\b(code|fix|implement|refactor)\b.{0,40}\b(repo|workspace|project)\b", m):
+        # Prefer dedicated coding agent over Delivery for workspace edits
+        if "delivery" not in m and "pr" not in m:
+            tools.append({"name": "coding_agent_start", "args": {"goal": message[:800]}})
 
     # BrowserRuntime intents (allowlisted hosts via MENTRIX_BROWSER_ALLOWLIST)
     url_m = re.search(r"https?://[^\s]+", message)
@@ -1905,36 +1981,308 @@ def _exec_tool(
         msg = f"That capability ({topic or 'unknown'}) is not available in Mentrix yet."
         return {"ok": True, "refused": True, "topic": topic, "spoken_summary": msg, "note": msg}
     if name == "coding_engine_status":
-        engine = (os.getenv("ZECT_CODING_ENGINE") or "mock").strip().lower()
+        engine = (os.getenv("ZECT_CODING_ENGINE") or "mentrix_native").strip().lower()
+        from app.adapters.coding_runtime import coding_engine_health
+
+        health = coding_engine_health()
         md = (
             "# Mentrix coding readiness\n\n"
             "| Layer | Status |\n|---|---|\n"
             "| **Mentrix Delivery FSM** | Working — upgrade / bugfix / deliver → gates → approve/PR |\n"
             "| **ForgeLoop orchestrator** | Working (in-process ship path) |\n"
-            f"| **Coding engine mode** | `{engine}` "
+            "| **Mentrix Coding Agent** | "
             + (
-                "(default **mock** — placeholder artifacts, not a remote coding agent)\n"
-                if engine == "mock"
-                else "(remote Agent Server when configured)\n"
+                "Native tool loop (read/search/edit/run) — use Workspace or `coding_agent_start`\n"
+                if engine in ("mentrix_native", "native")
+                else f"`{engine}` "
+                + (
+                    "(CI placeholders only — set `ZECT_CODING_ENGINE=mentrix_native` for real agent)\n"
+                    if engine == "mock"
+                    else "(remote Agent Server when configured)\n"
+                )
             )
-            + "| **Companion “build an app”** | Routes through Delivery/tools — not a Cursor-class agent |\n\n"
-            "Set `ZECT_CODING_ENGINE=remote` and run the Agent Server only when you need the optional remote coding runtime.\n"
+            + f"| **Health** | provider=`{health.get('provider')}` ready=`{health.get('ready')}` |\n"
+            + "| **Companion “build an app”** | `coding_agent_start` → `/workspace?session=…` |\n\n"
+            "Open Developer Workspace for the Mentrix Coding Agent panel.\n"
         )
         spoken = (
-            f"Mentrix Delivery and ForgeLoop are built and working. "
-            f"Coding engine is currently '{engine}'"
+            "Mentrix Delivery and ForgeLoop are built. "
             + (
-                " — mock placeholders by default, not a full autonomous coding agent."
-                if engine == "mock"
-                else " — remote mode when the Agent Server is up."
+                "Mentrix Coding Agent native mode is active — real repo edits via tools."
+                if engine in ("mentrix_native", "native")
+                else "Coding engine is not in native mode — set Mentrix Coding Agent for real edits."
             )
+        )
+        detail = {"engine": engine, "health": health}
+        return {
+            "ok": True,
+            "spoken_summary": spoken,
+            "board": {"type": "markdown", "title": "Mentrix Coding Agent", "body": md},
+            **detail,
+        }
+
+    if name == "malware_status":
+        from app.adapters.detection_malware import malware_engine_status
+
+        st = malware_engine_status()
+        ready = bool(st.get("ready"))
+        spoken = (
+            "ZECT Security Agent malware engine is ready."
+            if ready
+            else "ZECT Security Agent malware engine is degraded — start services/zect-security-scan."
         )
         return {
             "ok": True,
-            "engine": engine,
             "spoken_summary": spoken,
-            "board": {"type": "markdown", "title": "Coding engine readiness", "body": md},
+            "board": {
+                "type": "markdown",
+                "title": "ZECT Security Agent",
+                "body": f"```json\n{json.dumps(st, indent=2)[:2000]}\n```",
+            },
+            **st,
         }
+
+    if name == "malware_scan_path":
+        from app.adapters.detection_malware import quarantine_file, scan_file
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+        raw_path = str(args.get("path") or "").strip()
+        if not raw_path:
+            return {
+                "ok": False,
+                "error": "path_required",
+                "spoken_summary": "Provide a file path for ZECT Security Agent to scan.",
+            }
+        try:
+            target = path_under_allowed_roots(raw_path)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"path_not_allowlisted:{exc}", "spoken_summary": "That path is not allowlisted."}
+        result = scan_file(target)
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                **result,
+                "spoken_summary": "ZECT Security Agent could not scan — engine unavailable or path invalid.",
+            }
+        if result.get("infected"):
+            q = None
+            if args.get("quarantine"):
+                q = quarantine_file(target, workspace=args.get("workspace"))
+            return {
+                "ok": True,
+                "infected": True,
+                "spoken_summary": f"Threat detected by ZECT Security Agent: {result.get('signature') or 'malware'}.",
+                "quarantine": q,
+                **result,
+            }
+        return {
+            "ok": True,
+            "infected": False,
+            "spoken_summary": "ZECT Security Agent reports the file is clean.",
+            **result,
+        }
+
+    if name == "fabric_classify":
+        from app.domains.fabric.router import classify_text
+        from app.infrastructure.database import SessionLocal
+
+        text = str(args.get("text") or args.get("goal") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text_required", "spoken_summary": "Provide text to classify for Mentrix Fabric."}
+        db = SessionLocal()
+        try:
+            out = classify_text(db, text, require_active=bool(args.get("require_active", True)))
+        finally:
+            db.close()
+        refuse = bool(out.get("refuse"))
+        spoken = (
+            f"Mentrix Fabric refuse: {', '.join(out.get('checklist') or [])}"
+            if refuse
+            else f"Mentrix Fabric surfaces: {', '.join(out.get('surfaces_required') or [])}"
+        )
+        return {"ok": True, "spoken_summary": spoken, **out}
+
+    if name == "fabric_run":
+        from app.domains.fabric.router import classify_text
+        from app.infrastructure.database import SessionLocal
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+        from urllib.parse import quote
+
+        text = str(args.get("text") or args.get("goal") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text_required", "spoken_summary": "Provide a goal for Mentrix Fabric run."}
+        db = SessionLocal()
+        try:
+            classified = classify_text(db, text, require_active=bool(args.get("require_active", True)))
+            if classified.get("refuse"):
+                return {
+                    "ok": False,
+                    "error": "fabric_refuse",
+                    "spoken_summary": "Mentrix Fabric refused — " + "; ".join(classified.get("checklist") or []),
+                    **classified,
+                }
+            # Reuse HTTP run path logic via import of surfaces
+            from app.models import FabricSurface
+
+            rt = get_mentrix_native_runtime()
+            default_ws = (
+                str(args.get("workspace") or "").strip()
+                or (os.getenv("MENTRIX_WORKSPACE") or "").strip()
+                or (os.getenv("ZECT_WORKSPACE_ROOT") or "").strip()
+            )
+            sessions = []
+            for sid in classified["surfaces_required"]:
+                surf = db.query(FabricSurface).filter(FabricSurface.surface_id == sid).first()
+                ws = (surf.workspace if surf and surf.workspace else default_ws).strip()
+                if not ws:
+                    return {"ok": False, "error": "workspace_required", "spoken_summary": f"Set workspace for surface {sid}."}
+                goal = f"[Mentrix Fabric surface={sid}] {text}"
+                run_id = rt.start_run(goal, workspace=ws, auto_approve_edits=bool(args.get("auto_approve_edits", True)))
+                nav = f"/workspace?session={quote(run_id)}"
+                sessions.append({"surface_id": sid, "session_id": run_id, "navigate": nav})
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": f"Fabric run failed: {exc}"}
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "sessions": sessions,
+            "navigate": sessions[0]["navigate"] if sessions else "/fabric",
+            "spoken_summary": f"Started {len(sessions)} Mentrix Coding Agent session(s) via Fabric.",
+        }
+
+    if name == "process_status":
+        from app.adapters.camunda_client import process_engine_status
+
+        st = process_engine_status()
+        spoken = (
+            "Mentrix Process engine is ready."
+            if st.get("ready")
+            else "Mentrix Process is degraded — set ZECT_CAMUNDA_BASE_URL."
+        )
+        return {"ok": True, "spoken_summary": spoken, **st}
+
+    if name == "process_incidents":
+        from app.adapters.camunda_client import list_incidents
+
+        out = list_incidents(max_results=int(args.get("max_results") or 50))
+        n = len(out.get("items") or [])
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": f"Mentrix Process reports {n} incident(s)." if out.get("ok") else "Could not list process incidents.",
+            **out,
+        }
+
+    if name == "process_deploy":
+        from app.adapters.camunda_client import deploy_bpmn
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "path_required", "spoken_summary": "Provide a BPMN path to deploy."}
+        try:
+            target = str(path_under_allowed_roots(path))
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": "Path not allowlisted."}
+        out = deploy_bpmn(file_path=target)
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": "Deployed via Mentrix Process." if out.get("ok") else f"Deploy failed: {out.get('error')}",
+            **out,
+        }
+
+    if name == "process_start":
+        from app.adapters.camunda_client import start_process
+
+        key = str(args.get("process_key") or args.get("key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "process_key_required", "spoken_summary": "Provide a process key."}
+        out = start_process(key, args.get("variables") if isinstance(args.get("variables"), dict) else None)
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": "Process started." if out.get("ok") else f"Start failed: {out.get('error')}",
+            **out,
+        }
+
+    if name == "process_open_cockpit":
+        import os as _os
+
+        url = (_os.getenv("ZECT_CAMUNDA_COCKPIT_URL") or "").strip()
+        if not url:
+            return {"ok": False, "error": "cockpit_url_unset", "spoken_summary": "Set ZECT_CAMUNDA_COCKPIT_URL."}
+        return {
+            "ok": True,
+            "url": url,
+            "spoken_summary": "Opening Mentrix Process Cockpit.",
+            "tools_followup": [{"name": "browser_navigate", "args": {"url": url}}],
+            "navigate_external": url,
+        }
+
+    if name == "coding_agent_status":
+        from app.adapters.coding_runtime import coding_engine_health, get_mentrix_native_runtime
+
+        health = coding_engine_health()
+        sid = str(args.get("session_id") or "").strip()
+        detail: dict = {"health": health}
+        if sid:
+            try:
+                detail["session"] = get_mentrix_native_runtime().get_run(sid)
+            except KeyError:
+                detail["session"] = {"error": "session_not_found"}
+        return {
+            "ok": True,
+            "spoken_summary": f"Mentrix Coding Agent provider {health.get('provider')} ready={health.get('ready')}",
+            "board": {
+                "type": "markdown",
+                "title": "Mentrix Coding Agent",
+                "body": f"```json\n{json.dumps(detail, indent=2, default=str)[:3500]}\n```",
+            },
+            **detail,
+        }
+
+    if name == "coding_agent_start":
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+        from urllib.parse import quote
+
+        goal = str(args.get("goal") or "").strip() or "Improve the workspace"
+        ws = (
+            str(args.get("workspace") or "").strip()
+            or (os.getenv("MENTRIX_WORKSPACE") or "").strip()
+            or (os.getenv("ZECT_WORKSPACE_ROOT") or "").strip()
+        )
+        if not ws:
+            return {
+                "ok": False,
+                "error": "workspace_required",
+                "spoken_summary": "Set Mentrix workspace or pass workspace path to start Mentrix Coding Agent.",
+            }
+        rt = get_mentrix_native_runtime()
+        try:
+            sid = rt.start_run(
+                goal,
+                workspace=ws,
+                auto_approve_edits=bool(args.get("auto_approve_edits", True)),
+                model=args.get("model"),
+                project_id=args.get("project_id"),
+                skill_id=args.get("skill_id"),
+                project_key=args.get("project_key"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": f"Could not start Mentrix Coding Agent: {exc}"}
+        nav = f"/workspace?session={quote(sid)}&goal={quote(goal[:200])}"
+        return {
+            "ok": True,
+            "session_id": sid,
+            "workspace": ws,
+            "navigate": nav,
+            "spoken_summary": "Starting Mentrix Coding Agent — opening Developer Workspace.",
+            "board": {
+                "type": "markdown",
+                "title": "Mentrix Coding Agent",
+                "body": f"Session `{sid}`\n\nGoal: {goal[:500]}\n\nOpen [Developer Workspace]({nav}).",
+            },
+        }
+
     if name == "file_organize_plan":
         from app.domains.personal_agent import file_organize as fo
         from app.infrastructure.allowed_paths import path_under_allowed_roots
@@ -2119,6 +2467,44 @@ def iter_companion_events(
     resume_pending: list[dict] | None = None,
     agent_context: str = "",
     skill_id: int | None = None,
+    model: str | None = None,
+) -> Generator[dict[str, Any], None, dict[str, Any]]:
+    """Yield SSE-shaped events; return final turn summary."""
+    token = _companion_model_ctx.set((model or "").strip() or None)
+    try:
+        result = yield from _iter_companion_events_inner(
+            db,
+            message,
+            project_key=project_key,
+            project_id=project_id,
+            user_id=user_id,
+            created_by=created_by,
+            confirmed_tools=confirmed_tools,
+            history=history,
+            turn_id=turn_id,
+            resume_pending=resume_pending,
+            agent_context=agent_context,
+            skill_id=skill_id,
+        )
+        return result
+    finally:
+        _companion_model_ctx.reset(token)
+
+
+def _iter_companion_events_inner(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+    turn_id: str | None = None,
+    resume_pending: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
 ) -> Generator[dict[str, Any], None, dict[str, Any]]:
     """Yield SSE-shaped events; return final turn summary."""
     t0 = time.time()
@@ -2135,6 +2521,7 @@ def iter_companion_events(
         skill_id=skill_id,
         project_id=project_id,
         agent_context=agent_context,
+        query=message,
     )
     tool_results: list[dict] = []
     pending: list[dict] = []
@@ -2371,6 +2758,7 @@ def run_companion_turn_v2(
     history: list[dict] | None = None,
     agent_context: str = "",
     skill_id: int | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Non-streaming turn that executes once and returns full payload."""
     events: list[dict] = []
@@ -2385,6 +2773,7 @@ def run_companion_turn_v2(
         history=history,
         agent_context=agent_context,
         skill_id=skill_id,
+        model=model,
     )
     final: dict[str, Any] | None = None
     try:
@@ -2438,6 +2827,7 @@ def run_companion_turn(
     history: list[dict] | None = None,
     agent_context: str = "",
     skill_id: int | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     return run_companion_turn_v2(
         db,
@@ -2450,6 +2840,7 @@ def run_companion_turn(
         history=history,
         agent_context=agent_context,
         skill_id=skill_id,
+        model=model,
     )
 
 

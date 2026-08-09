@@ -21,6 +21,7 @@ import WorkspaceInlinePanel, { replaceSelectionInContent } from "@/components/Wo
 import WorkspaceMentrixTimeline from "@/components/WorkspaceMentrixTimeline";
 import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/WorkspaceSymbolsPanel";
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
+import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   fileList,
@@ -116,6 +117,8 @@ export default function DeveloperWorkspace() {
   const [searchParams] = useSearchParams();
   const deepRunId = searchParams.get("run");
   const deepPath = searchParams.get("path") || "";
+  const deepSession = searchParams.get("session") || "";
+  const deepGoal = searchParams.get("goal") || "";
   const { activeLocalPath, activeRepo, activeRepoId } = useActiveProject();
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
@@ -142,6 +145,7 @@ export default function DeveloperWorkspace() {
   const [selection, setSelection] = useState<EditorSelection | null>(null);
   const [revealLine, setRevealLine] = useState<number | null>(null);
   const [worktrees, setWorktrees] = useState<{ path?: string; branch?: string; is_current?: boolean }[]>([]);
+  const [agentModel, setAgentModel] = useState("gpt-4o-mini");
 
   const dirty = content !== baseline && Boolean(selectedPath);
   const sideOpen = showDiff || showInline;
@@ -261,6 +265,19 @@ export default function DeveloperWorkspace() {
     } finally {
       setLoadingFile(false);
     }
+  };
+
+  const openAgentPath = (relOrAbs: string) => {
+    if (!rootPath) return;
+    const abs =
+      isPathInsideRoot(normalizePath(relOrAbs), rootPath) &&
+      (normalizePath(relOrAbs).startsWith(normalizePath(rootPath)) ||
+        /^[a-zA-Z]:[\\/]/.test(relOrAbs) ||
+        relOrAbs.startsWith("/"))
+        ? normalizePath(relOrAbs)
+        : normalizePath(`${rootPath.replace(/[/\\]+$/, "")}/${relOrAbs.replace(/^[/\\]+/, "")}`);
+    void openFile(abs);
+    setAgentFiles((prev) => (prev.includes(relOrAbs) ? prev : [...prev, relOrAbs]));
   };
 
   useEffect(() => {
@@ -447,8 +464,7 @@ export default function DeveloperWorkspace() {
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
           <p className="text-xs text-slate-500" data-testid="workspace-spine-hint">
-            IDE for inspect/edit — Mentrix Delivery owns ship (plan → batches → Approve → PR). Prep forms live in Agent
-            Workspace.
+            Mentrix Coding Agent edits here — Delivery owns ship (plan → batches → Approve → PR).
           </p>
         </div>
         <button
@@ -698,7 +714,22 @@ export default function DeveloperWorkspace() {
             </section>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-52 shrink-0" data-testid="workspace-stage-b-panels">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 h-64 shrink-0" data-testid="workspace-stage-b-panels">
+            <div className="lg:col-span-1 min-h-0">
+              <MentrixCodingAgentPanel
+                workspaceRoot={rootPath}
+                model={agentModel}
+                onModelChange={setAgentModel}
+                onOpenPath={openAgentPath}
+                onFilesChanged={(paths) => {
+                  setAgentFiles((prev) => Array.from(new Set([...prev, ...paths])));
+                  void loadTree();
+                  void refreshGit(rootPath);
+                }}
+                initialGoal={deepGoal}
+                initialSessionId={deepSession || null}
+              />
+            </div>
             <WorkspaceTerminal workspaceRoot={rootPath} />
             <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
           </div>

@@ -1,6 +1,8 @@
-"""Zinnia Memory System — 4-layer memory API (working, episodic, semantic, personal)."""
+"""Zinnia Memory System — 4-layer Mentrix memory API (working, episodic, semantic, personal)."""
 
+import json
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -757,6 +759,83 @@ def export_typed_memory(
         "count": len(rows),
         "records": [_serialize_typed(r) for r in rows],
     }
+
+
+@router.post("/brain-export")
+def export_mentrix_brain(
+    project_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    write_file: bool = True,
+    db: Session = Depends(get_db),
+):
+    """Export Mentrix brain snapshot (skills manifests + memory layers summary).
+
+    Writes JSON under backend/data/mentrix-brain/ when write_file=true.
+    Product surface uses Mentrix names only.
+    """
+    from app.models import SkillDefinition
+
+    skills = db.query(SkillDefinition).order_by(SkillDefinition.id.asc()).limit(200).all()
+    skill_rows = []
+    for s in skills:
+        manifest = s.manifest if isinstance(s.manifest, dict) else {}
+        skill_rows.append(
+            {
+                "id": s.id,
+                "name": s.name,
+                "description": (s.description or "")[:500],
+                "triggers": manifest.get("triggers") or manifest.get("trigger_keywords") or [],
+                "manifest": {
+                    k: manifest.get(k)
+                    for k in (
+                        "triggers",
+                        "trigger_keywords",
+                        "allowed_tools",
+                        "prohibited_ops",
+                        "template",
+                    )
+                    if k in manifest
+                },
+            }
+        )
+
+    typed_q = db.query(TypedMemoryRecord)
+    if project_id is not None:
+        typed_q = typed_q.filter(TypedMemoryRecord.project_id == project_id)
+    if user_id is not None:
+        typed_q = typed_q.filter(TypedMemoryRecord.user_id == user_id)
+    typed_rows = typed_q.order_by(TypedMemoryRecord.created_at.asc()).limit(500).all()
+
+    payload = {
+        "format": "mentrix-brain-v1",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "project_id": project_id,
+        "user_id": user_id,
+        "layers": {
+            "working": "Active tasks and scratch for the current session",
+            "episodic": "Recent interaction episodes",
+            "semantic": "Accepted lessons / durable knowledge",
+            "personal": "User preferences and personal facts",
+        },
+        "skills": skill_rows,
+        "typed_memory": [_serialize_typed(r) for r in typed_rows],
+        "counts": {
+            "skills": len(skill_rows),
+            "typed_memory": len(typed_rows),
+        },
+    }
+
+    out_path = None
+    if write_file:
+        root = Path(__file__).resolve().parents[3] / "data" / "mentrix-brain"
+        root.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = f"p{project_id}" if project_id is not None else "global"
+        out_path = root / f"brain-{suffix}-{stamp}.json"
+        out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        payload["path"] = str(out_path)
+
+    return payload
 
 
 @router.get("/retention")

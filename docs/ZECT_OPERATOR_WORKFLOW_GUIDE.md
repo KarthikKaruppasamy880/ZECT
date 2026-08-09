@@ -241,9 +241,9 @@ Set `OPENAI_API_KEY` / Anthropic keys in `backend/.env`. Prefer a **ZECT service
 
 ---
 
-## 12. MSTF / Code Red (MinionBot only)
+## 12. Mentrix Multi-Surface Fabric
 
-ZECT does **not** implement Multi-Surface Transaction Fabric (MSTF) / Code Red multi-surface codegen. That ships in **MinionBot**. See `docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` and Docs Center → MSTF. Mentrix may call MinionBot APIs later; do not add Lattice into MinionBot for this gap.
+ZECT Mentrix implements **Multi-Surface Fabric** (classify → refuse → Coding Agent slices). See `docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` and UI route `/fabric`. Deeper per-surface gates/scorecard are a follow-on ticket.
 
 ---
 
@@ -265,4 +265,4 @@ ZECT does **not** implement Multi-Surface Transaction Fabric (MSTF) / Code Red m
 | My voice | Mentrix Companion → Voice (Chatterbox) |
 | Symbol search | Code Index |
 | Graph + Explain | Lattice (click node → inspector) |
-| MSTF / Code Red | MinionBot (docs/MSTF_…) — not ZECT |
+| Mentrix Fabric | /fabric |

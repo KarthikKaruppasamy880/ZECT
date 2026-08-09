@@ -175,7 +175,7 @@ def render_mstf_architecture_diagram(png_path: str) -> str:
     ax.text(
         9,
         12.15,
-        "MinionBot Code Red  |  Accurate Existing vs Proposed  |  Do not add ZECT Lattice",
+        "Mentrix Code Red  |  Accurate Existing vs Proposed  |  Do not add ZECT Lattice",
         ha="center",
         fontsize=11,
         color="#475569",
@@ -452,7 +452,7 @@ def render_mstf_architecture_diagram(png_path: str) -> str:
     ax.text(
         9.0,
         0.4,
-        "Teal = EXISTING  |  Purple = PROPOSED  |  Amber = land PR #118/#96  |  Implementation home = MinionBot (not ZECT)",
+        "Teal = EXISTING  |  Purple = PROPOSED  |  Amber = land PR #118/#96  |  Implementation home = Mentrix (not ZECT)",
         ha="center",
         fontsize=9,
         color="#334155",
@@ -544,7 +544,7 @@ def main() -> tuple[str, str]:
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     os.makedirs(desktop, exist_ok=True)
     out_path = os.path.join(
-        desktop, "MSTF_Multi_Surface_Transaction_Fabric_MinionBot.docx"
+        desktop, "MSTF_Multi_Surface_Transaction_Fabric_Mentrix.docx"
     )
     assets_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "assets")
     os.makedirs(assets_dir, exist_ok=True)
@@ -621,27 +621,27 @@ def main() -> tuple[str, str]:
 
     sub = doc.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = sub.add_run("Forward Architecture & Implementation Plan for MinionBot")
+    r = sub.add_run("Forward Architecture & Implementation Plan for Mentrix")
     set_run_font(r, size=14, bold=True, color=(47, 84, 150))
 
     meta = doc.add_paragraph()
     meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = meta.add_run(
         "Accurate Existing vs Proposed diagrams included\n"
-        "Date: July 2026  |  Implementation home: MinionBot (not ZECT Lattice)"
+        "Date: July 2026  |  Implementation home: Mentrix (not ZECT Lattice)"
     )
     set_run_font(r, size=10, color=(89, 89, 89))
 
     add_para(
         "One-liner: MSTF makes Code Red multi-system — classify Jira into NGC/BPM/CDS/Tango "
         "surfaces, generate from indexed Blueprint + Knowledge + Playbooks, fail closed with "
-        "quality gates (PRs #118/#96), measure “100%” on a golden suite — all inside MinionBot.",
+        "quality gates (PRs #118/#96), measure “100%” on a golden suite — all inside Mentrix.",
         bold=True,
     )
 
     add_heading_custom("1. Problem Statement", 1)
     add_para(
-        "MinionBot already succeeds when a Jira maps to an exemplar-similar transaction and "
+        "Mentrix already succeeds when a Jira maps to an exemplar-similar transaction and "
         "changes stay on the NGC / BPM PI recipe path (e.g. Authorized Signatory). It fails or "
         "is bypassed when the same ticket also needs CDS and/or Tango work. Historical POC "
         "accuracy was ~50%. PRs #118/#96 harden quality; they do not alone add CDS/Tango coverage."
@@ -657,7 +657,7 @@ def main() -> tuple[str, str]:
 
     add_heading_custom("2. Design Principles", 1)
     for t in [
-        "No Lattice in MinionBot — reuse Blueprint, Neo4j KG, KnowledgeDocs, Playbook KG, TransactionRecipe.",
+        "No Lattice in Mentrix — reuse Blueprint, Neo4j KG, KnowledgeDocs, Playbook KG, TransactionRecipe.",
         "Refuse > hallucinate — missing surface → hard-stop with checklist.",
         "AI-agnostic control plane — models pluggable; truth in KB/playbook/recipe/gates.",
         "Capability-scoped repo selection — not unconstrained “LLM picks any repo.”",
@@ -685,7 +685,7 @@ def main() -> tuple[str, str]:
             ["Refuse path (honest stop)", "PROPOSED", "no fake codegen when surface missing"],
             ["NGC / BPM PI generators (template-like)", "EXISTING (partial)", "Authorized Signatory proven"],
             ["CDS / Tango per-surface generators", "PROPOSED", "needs index + recipe + skills"],
-            ["Truncation PR #118 (minionbot-common)", "LAND / IN FLIGHT", "generate_with_status"],
+            ["Truncation PR #118 (Mentrix-common)", "LAND / IN FLIGHT", "generate_with_status"],
             ["Quality gates PR #96 (code-generator)", "LAND / IN FLIGHT", "AC, grounding, missing-LLD, etc."],
             ["PRs per repo path", "EXISTING", "promote/create PR machinery"],
             ["Acceptance scorecard / golden suite 100%", "PROPOSED", "closed-loop metric"],
@@ -734,16 +734,16 @@ def main() -> tuple[str, str]:
     add_table(
         ["PR", "Repo", "Role"],
         [
-            ["#118", "minionbot-common", "Truncation detection (generate_with_status / finish_reason)"],
+            ["#118", "Mentrix-common", "Truncation detection (generate_with_status / finish_reason)"],
             [
                 "#96",
-                "minionbot-code-generator",
+                "Mentrix-code-generator",
                 "Continuation, AC verifier, coverage, invented-API xref, missing-LLD, manifest refs",
             ],
         ],
     )
-    add_bullet("https://github.com/zinnia/minionbot-common/pull/118")
-    add_bullet("https://github.com/zinnia/minionbot-code-generator/pull/96")
+    add_bullet("https://github.com/zinnia/Mentrix-common/pull/118")
+    add_bullet("https://github.com/zinnia/Mentrix-code-generator/pull/96")
 
     add_heading_custom("6. Implementation phases", 1)
     add_table(
@@ -763,13 +763,13 @@ def main() -> tuple[str, str]:
     add_table(
         ["Concern", "Home", "Status"],
         [
-            ["Jira + RFC", "minionbot-orchestrator", "EXISTING"],
+            ["Jira + RFC", "Mentrix-orchestrator", "EXISTING"],
             ["Classifier + refuse", "orchestrator + common", "PROPOSED"],
             ["Surface registry", "common / Mongo", "PROPOSED"],
             ["Blueprint / KG / Knowledge ingest", "blueprint-generator + indexer", "EXISTING"],
-            ["Plan", "minionbot-planner", "EXISTING + extend"],
+            ["Plan", "Mentrix-planner", "EXISTING + extend"],
             ["MultiSurfaceRecipe + codegen", "code-generator + common", "PROPOSED extend"],
-            ["Truncation #118", "minionbot-common", "LAND"],
+            ["Truncation #118", "Mentrix-common", "LAND"],
             ["Quality gates #96", "code-generator", "LAND"],
         ],
     )
@@ -778,10 +778,10 @@ def main() -> tuple[str, str]:
     add_table(
         ["Question", "Decision"],
         [
-            ["Build MSTF in MinionBot?", "YES"],
+            ["Build MSTF in Mentrix?", "YES"],
             ["Build MSTF in ZECT?", "NO for Code Red gap"],
-            ["Add Lattice to MinionBot?", "NO — use Blueprint + Neo4j + KB + Playbooks"],
-            ["Later Mentrix calls MinionBot?", "Optional integration only"],
+            ["Add Lattice to Mentrix?", "NO — use Blueprint + Neo4j + KB + Playbooks"],
+            ["Later Mentrix calls Mentrix?", "Optional integration only"],
         ],
     )
 
@@ -790,7 +790,7 @@ def main() -> tuple[str, str]:
     add_bullet("Lasya / Anubhav: one-page repo list per surface (NGC, CDS, Tango).")
     add_bullet("Siddartha: refresh + index those repos.")
     add_bullet("Pick one paused CDS+Tango Code Red ticket as P3 pilot.")
-    add_bullet("Agree scorecard wording: leverage MinionBot now on NGC-like; CDS/Tango via MSTF phases.")
+    add_bullet("Agree scorecard wording: leverage Mentrix now on NGC-like; CDS/Tango via MSTF phases.")
 
     add_heading_custom("10. Demo talk track (5–7 min)", 1)
     add_table(
@@ -799,7 +799,7 @@ def main() -> tuple[str, str]:
             ["1", "Works for NGC/BPM exemplar-like; CDS/Tango still manual; old POC ~50%."],
             ["2", "Teal boxes already exist; purple boxes are what we propose to build."],
             ["3", "Amber boxes = land PRs #118/#96 (real code quality, not docs)."],
-            ["4", "Will not add ZECT Lattice into MinionBot."],
+            ["4", "Will not add ZECT Lattice into Mentrix."],
             ["5", "Refuse when surface missing — never fake CDS/Tango success."],
             ["6", "Ask: merge PRs → glossary → index → one pilot → golden suite."],
         ],
@@ -807,7 +807,7 @@ def main() -> tuple[str, str]:
 
     foot = doc.add_paragraph()
     r = foot.add_run(
-        "Document owner: MinionBot / platform engineering. Diagrams match Existing vs Proposed Mermaid. "
+        "Document owner: Mentrix / platform engineering. Diagrams match Existing vs Proposed Mermaid. "
         "Update surface registry as CDS/Tango repos are confirmed."
     )
     set_run_font(r, size=9, color=(89, 89, 89))

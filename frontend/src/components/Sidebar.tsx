@@ -41,7 +41,6 @@ import {
   Network,
   FlaskConical,
   Box,
-  AlertTriangle,
   StickyNote,
 } from "lucide-react";
 import { isAgentModeEnabled } from "@/lib/featureFlags";
@@ -50,9 +49,10 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 const workflowItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
-  { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: AlertTriangle },
   { href: "/ask", label: "Agent Workspace", icon: Bot },
   { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
+  { href: "/fabric", label: "Mentrix Fabric", icon: Network },
+  { href: "/security-incidents", label: "Security Agent", icon: ShieldAlert },
 ];
 
 const workspaceItems: NavItem[] = [
@@ -64,10 +64,7 @@ const workspaceItems: NavItem[] = [
 
 const understandItems: NavItem[] = [
   { href: "/lattice", label: "Lattice Graph", icon: Network },
-  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
   { href: "/blueprint", label: "Blueprint", icon: Sparkles },
-  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
-  { href: "/code-index", label: "Code Index", icon: Code2 },
   { href: "/docs", label: "Docs Center", icon: FileText },
 ];
 
@@ -92,27 +89,29 @@ const enterpriseItems: NavItem[] = [
   { href: "/export", label: "Export/Share", icon: Download },
   { href: "/output-history", label: "Output History", icon: History },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/token-controls", label: "Token Controls", icon: Coins },
-  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
 ];
 
-/** Primary Labs — productivity spine (Skills / Playbooks / Knowledge / Schedules / Memory / Permissions). */
+/** Thin Labs — productivity only. Governance lives under Settings. */
 const labsItems: NavItem[] = [
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
   { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
   { href: "/file-organize", label: "File Organize", icon: HardDrive },
-  { href: "/memory", label: "Memory System", icon: Brain },
-  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
 ];
 
-/** Advanced Labs — still first-class routes; collapsed under More Labs. */
-const labsAdvancedItems: NavItem[] = [
-  { href: "/security-incidents", label: "Security Incidents", icon: ShieldCheck },
-  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
+/** Settings-owned surfaces (routes remain; listed under Settings More). */
+const settingsOwnedItems: NavItem[] = [
+  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
+  { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
+  { href: "/token-controls", label: "Token Controls", icon: Coins },
   { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
   { href: "/conversations", label: "Conversations", icon: MessageCircle },
+  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
+  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
+  { href: "/code-index", label: "Code Index", icon: Code2 },
+  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
   { href: "/tool-comparison", label: "Architecture", icon: GitCompareArrows },
 ];
 
@@ -144,7 +143,7 @@ export default function Sidebar({
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
   const [labsMoreOpen, setLabsMoreOpen] = useState(() =>
-    labsAdvancedItems.some((item) => location.pathname === item.href),
+    settingsOwnedItems.some((item) => location.pathname === item.href),
   );
 
   useEffect(() => {
@@ -162,7 +161,7 @@ export default function Sidebar({
   }, []);
 
   useEffect(() => {
-    if (labsAdvancedItems.some((item) => location.pathname === item.href)) {
+    if (settingsOwnedItems.some((item) => location.pathname === item.href)) {
       setLabsMoreOpen(true);
     }
   }, [location.pathname]);
@@ -243,11 +242,11 @@ export default function Sidebar({
                   <ChevronDown
                     className={`h-4 w-4 shrink-0 transition-transform ${labsMoreOpen ? "" : "-rotate-90"}`}
                   />
-                  <span>More Labs</span>
+                  <span>Settings links</span>
                 </button>
               </li>
             )}
-            {(labsMoreOpen || collapsed) && labsAdvancedItems.map((item) => renderNavLink(item))}
+            {(labsMoreOpen || collapsed) && settingsOwnedItems.map((item) => renderNavLink(item))}
           </>
         )}
       </ul>
@@ -316,7 +315,7 @@ export default function Sidebar({
                   ? localStorage.getItem("zect_username") || "Account"
                   : "Account"}
               </p>
-              <p className="truncate text-[10px] text-slate-500">Settings · Voice · Keys</p>
+              <p className="truncate text-[10px] text-slate-500">Settings · Governance · Voice</p>
             </div>
           )}
           {!collapsed && <Settings className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />}

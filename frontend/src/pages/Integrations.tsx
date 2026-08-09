@@ -49,6 +49,8 @@ export default function Integrations() {
   const [presentonUrl, setPresentonUrl] = useState("");
   const [zoomJoinReady, setZoomJoinReady] = useState(false);
   const [zoomPathReady, setZoomPathReady] = useState(false);
+  const [processReady, setProcessReady] = useState(false);
+  const [processDetail, setProcessDetail] = useState("");
 
   const fetchStatus = async () => {
     try {
@@ -79,7 +81,17 @@ export default function Integrations() {
         setZoomJoinReady(!!integ.zoom_join_url_configured);
         setZoomPathReady(!!integ.zoom_desktop_path_configured);
       } catch {
-        /* ignore */
+        /* companion integrations optional */
+      }
+      try {
+        const pRes = await fetch(`${API}/api/process/status`, { headers });
+        if (pRes.ok) {
+          const p = await pRes.json();
+          setProcessReady(!!p.ready);
+          setProcessDetail(p.detail || p.status || "");
+        }
+      } catch {
+        setProcessReady(false);
       }
     } catch { /* API not available */ }
   };
@@ -183,6 +195,24 @@ export default function Integrations() {
           </p>
           <p className="text-xs text-slate-500">
             Token needs repo + pull_request write for real Mentrix PRs. Keep MENTRIX_PR_DRY_RUN=true until you intend a live PR.
+          </p>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-process-card">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-slate-900 font-semibold">Mentrix Process</h3>
+              <p className="text-xs text-slate-500">BPM deploy / start / incidents</p>
+            </div>
+            {processReady ? (
+              <CheckCircle className="h-5 w-5 text-green-500" data-testid="process-ready" />
+            ) : (
+              <XCircle className="h-5 w-5 text-slate-300" data-testid="process-missing" />
+            )}
+          </div>
+          <p className="text-sm text-slate-600">
+            {processReady
+              ? `Engine ready (${processDetail || "ok"}).`
+              : "Set ZECT_CAMUNDA_BASE_URL (+ user/password) and optional ZECT_CAMUNDA_COCKPIT_URL."}
           </p>
         </div>
         <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-browser-card">

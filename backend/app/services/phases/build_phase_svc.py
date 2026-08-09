@@ -56,6 +56,28 @@ def run_build_generate(
     expected_files = expected_files or ([file_path] if file_path else [])
 
     if not _generation_ready():
+        # Product: fail closed. Offline stub only when CI/tests set the flag.
+        allow_stub = (os.getenv("ZECT_ALLOW_OFFLINE_BUILD_STUB") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if not allow_stub:
+            target = (expected_files[0] if expected_files else None) or file_path or ""
+            return {
+                "ok": False,
+                "error": "generation_unavailable",
+                "generated_code": "",
+                "file_path": target,
+                "language": _infer_lang(target) if target else "text",
+                "explanation": "No LLM configured for Build (set OPENAI_API_KEY and/or ANTHROPIC_API_KEY).",
+                "model": "none",
+                "tokens_used": 0,
+                "files_expected": expected_files or ([target] if target else []),
+                "files_written": [],
+                "offline": False,
+            }
         target = (expected_files[0] if expected_files else None) or file_path or "generated/upgrade_stub.py"
         code = (
             f"# Mentrix offline build stub\n"

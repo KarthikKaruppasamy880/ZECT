@@ -31,11 +31,25 @@ class TestGenerationReadyGate:
 
         assert _generation_ready() is False
 
-    def test_offline_stub_only_triggered_when_truly_no_provider_configured(self, monkeypatch):
+    def test_product_fails_closed_without_provider(self, monkeypatch):
         from app.services.phases.build_phase_svc import run_build_generate
 
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("ZECT_ALLOW_OFFLINE_BUILD_STUB", raising=False)
+
+        result = run_build_generate("Add a health endpoint", file_path="app/health.py")
+
+        assert result.get("error") == "generation_unavailable"
+        assert result.get("offline") is False
+        assert result.get("generated_code") == ""
+
+    def test_offline_stub_only_when_flag_set(self, monkeypatch):
+        from app.services.phases.build_phase_svc import run_build_generate
+
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("ZECT_ALLOW_OFFLINE_BUILD_STUB", "1")
 
         result = run_build_generate("Add a health endpoint", file_path="app/health.py")
 

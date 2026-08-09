@@ -479,3 +479,95 @@ def list_enrichment_templates(current_user: CurrentUser = Depends(get_current_us
         ],
         "note": "Templates are listed for policy planning; execution requires a configured Endpoint Snapshot adapter (Stage D+).",
     }
+
+
+class MalwareScanRequest(BaseModel):
+    path: str = Field(..., min_length=1)
+    quarantine: bool = False
+    workspace: Optional[str] = None
+
+
+@router.get("/malware/status")
+@require_authentication
+def malware_status(current_user: CurrentUser = Depends(get_current_user)):
+    """ZECT Security Agent malware engine status (fail closed when degraded)."""
+    from app.adapters.detection_malware import malware_engine_status
+
+    return malware_engine_status()
+
+
+@router.post("/malware/scan")
+@require_authentication
+def malware_scan(
+    req: MalwareScanRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Scan an allowlisted path with ZECT Security Agent. Never reports clean without engine."""
+    from pathlib import Path as P
+
+    from app.adapters.detection_malware import quarantine_file, scan_file
+    from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+    try:
+        target = path_under_allowed_roots(req.path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"path_not_allowlisted:{exc}") from exc
+
+    result = scan_file(target)
+    if not result.get("ok"):
+        raise HTTPException(503 if result.get("error") == "engine_unavailable" else 400, result)
+
+    if result.get("infected"):
+        finding = result.get("finding") or {}
+        fp = hashlib.sha256(
+            f"malware:{target}:{result.get('signature')}".encode()
+        ).hexdigest()[:40]
+        existing = db.query(SecurityFinding).filter(SecurityFinding.fingerprint == fp).first()
+        if not existing:
+            row = SecurityFinding(
+                fingerprint=fp,
+                source="zect_security_agent",
+                kind="malware",
+                severity="high",
+                status="open",
+                title=finding.get("title") or "Malware detected",
+                description=finding.get("description") or str(target),
+                host="",
+                user_ref=str(getattr(current_user, "user_id", "") or ""),
+                rule_id=str(result.get("signature") or "malware")[:200],
+                indicators_json={"file": str(target), "signature": result.get("signature")},
+                correlation_id=_correlation_id(),
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            result["finding_id"] = row.id
+        else:
+            result["finding_id"] = existing.id
+
+        if req.quarantine:
+            ws = None
+            if req.workspace:
+                try:
+                    ws = path_under_allowed_roots(req.workspace)
+                except Exception:  # noqa: BLE001
+                    ws = None
+            q = quarantine_file(target, workspace=ws)
+            result["quarantine"] = q
+            log_audit(
+                db=db,
+                user_id=getattr(current_user, "user_id", None) or 0,
+                action="security_malware_quarantine",
+                resource_type="file",
+                details=q,
+            )
+
+    log_audit(
+        db=db,
+        user_id=getattr(current_user, "user_id", None) or 0,
+        action="security_malware_scan",
+        resource_type="file",
+        details={"path": str(target), "infected": bool(result.get("infected"))},
+    )
+    return result

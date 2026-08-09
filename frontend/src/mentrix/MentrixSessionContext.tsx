@@ -64,6 +64,7 @@ export type LogLine = { ts: string; text: string };
 
 const SESSION_KEY = "mentrix_session_v1";
 const SKILL_KEY = "mentrix_active_skill_id";
+const CHAT_MODEL_KEY = "mentrix_chat_model";
 const DEFAULT_MSG: ChatMsg = {
   role: "assistant",
   text: "I'm Mentrix — your company operator. Ask for status, research, notes, Delivery, or say Open Lattice.",
@@ -178,13 +179,25 @@ type MentrixSessionValue = {
   micDevices: MicDevice[];
   micDeviceId: string;
   setMicDeviceId: (id: string) => void;
-  integrations: { slack: boolean; jira: boolean; openai: boolean; datadog?: boolean; github?: boolean } | null;
+  integrations: {
+    slack: boolean;
+    jira: boolean;
+    openai: boolean;
+    mentrix_local?: boolean;
+    mentrix_local_label?: string;
+    datadog?: boolean;
+    github?: boolean;
+    browser?: boolean;
+    browser_hint?: string;
+  } | null;
   dockExpanded: boolean;
   setDockExpanded: Dispatch<SetStateAction<boolean>>;
   wakeQueued: boolean;
   skills: SkillOpt[];
   activeSkillId: string;
   setActiveSkillId: (id: string) => void;
+  chatModel: string;
+  setChatModel: (id: string) => void;
   pushLog: (text: string) => void;
   refreshRealtimePreflight: () => Promise<RealtimePreflight>;
   startVoice: () => Promise<void>;
@@ -241,6 +254,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const [skills, setSkills] = useState<SkillOpt[]>([]);
   const [activeSkillId, setActiveSkillIdState] = useState(
     () => localStorage.getItem(SKILL_KEY) || "",
+  );
+  const [chatModel, setChatModelState] = useState(
+    () => localStorage.getItem(CHAT_MODEL_KEY) || "gpt-4o-mini",
   );
 
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
@@ -332,6 +348,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setActiveSkillIdState(id);
     if (id) localStorage.setItem(SKILL_KEY, id);
     else localStorage.removeItem(SKILL_KEY);
+  }, []);
+
+  const setChatModel = useCallback((id: string) => {
+    setChatModelState(id);
+    if (id) localStorage.setItem(CHAT_MODEL_KEY, id);
+    else localStorage.removeItem(CHAT_MODEL_KEY);
   }, []);
 
   useEffect(() => {
@@ -670,6 +692,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               project_key: localStorage.getItem("zect_lattice_key") || "",
               confirmed_tools: confirmed,
               agent_context: agentContext,
+              skill_id: activeSkillId || undefined,
+              model: chatModel,
               signal: controller.signal,
               onEvent: onStreamEvent,
             });
@@ -680,6 +704,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               confirmed_tools: confirmed,
               project_key: localStorage.getItem("zect_lattice_key") || "",
               agent_context: agentContext,
+              skill_id: activeSkillId || undefined,
+              model: chatModel,
               signal: controller.signal,
             });
             if (res.navigate) applyNavPath(res.navigate);
@@ -723,7 +749,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         setTimeout(() => setAvatar((a) => (a === "speaking" ? "idle" : a)), 2200);
       }
     },
-    [activeSkillId, applyNavPath, handleDesktopOutput, handleStreamEvent, speakChat],
+    [activeSkillId, applyNavPath, chatModel, handleDesktopOutput, handleStreamEvent, speakChat],
   );
 
   const onSend = useCallback(async () => {
@@ -987,6 +1013,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       skills,
       activeSkillId,
       setActiveSkillId,
+      chatModel,
+      setChatModel,
       pushLog,
       refreshRealtimePreflight,
       startVoice,
@@ -1030,6 +1058,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       skills,
       activeSkillId,
       setActiveSkillId,
+      chatModel,
+      setChatModel,
       pushLog,
       refreshRealtimePreflight,
       startVoice,

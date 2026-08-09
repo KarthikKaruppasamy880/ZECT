@@ -87,6 +87,7 @@ export default function AskMode() {
         question,
         context || undefined,
         activeRepoId ?? undefined,
+        selectedModel,
       );
       setMessages((prev) => [
         ...prev,

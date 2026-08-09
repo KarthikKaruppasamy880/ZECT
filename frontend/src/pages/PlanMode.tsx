@@ -99,6 +99,7 @@ export default function PlanMode() {
         context || undefined,
         constraints.trim() || undefined,
         activeRepoId ?? undefined,
+        selectedModel,
       );
       setPlan(res.plan);
       setPhases(res.phases);

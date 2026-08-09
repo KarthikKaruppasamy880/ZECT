@@ -24,6 +24,7 @@ import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
+import ModelSelector from "@/components/ModelSelector";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
@@ -267,7 +268,12 @@ export default function MentrixCompanion() {
                   </p>
                   {s.integrations ? (
                     <p className="text-[10px] text-slate-500" data-testid="mentrix-integrations-status">
-                      OpenAI {s.integrations.openai ? "ready" : "missing"} · Slack{" "}
+                      Mentrix Local{" "}
+                      {(s.integrations as { mentrix_local?: boolean }).mentrix_local
+                        ? "online"
+                        : "offline"}
+                      {" · OpenAI "}
+                      {s.integrations.openai ? "ready" : "missing"} · Slack{" "}
                       {s.integrations.slack ? "ready" : "not set"} · Jira{" "}
                       {s.integrations.jira ? "ready" : "not set"}
                       {" · DD "}
@@ -334,6 +340,18 @@ export default function MentrixCompanion() {
                         ))}
                       </select>
                     </label>
+                    <div
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2 py-1.5 text-xs [&_select]:bg-slate-900 [&_select]:text-slate-100 [&_select]:border-0"
+                      data-testid="mentrix-chat-model"
+                    >
+                      <span className="text-slate-400">Model</span>
+                      <ModelSelector
+                        value={s.chatModel}
+                        onChange={s.setChatModel}
+                        compact
+                        showGatewayChip
+                      />
+                    </div>
                     <button
                       type="button"
                       data-testid="mentrix-connect-voice"

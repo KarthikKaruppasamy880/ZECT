@@ -1,0 +1,175 @@
+﻿{
+  "work_item_key": "ZECT-MENTRIX-P1-PROJECT-INTELLIGENCE",
+  "plan_version": 1,
+  "status": "PLANNED",
+  "updated_at": "2026-08-09T18:20:00Z",
+  "resume_operation": "OP-001",
+  "depends_on": "ZECT-MENTRIX-CONSOLIDATION",
+  "reuse_p0": [
+    "MentrixDeveloperService",
+    "MentrixContextEngine",
+    "ArtifactStore",
+    "ProjectIntelligenceService",
+    "EvidenceVerifier",
+    "WorkItemSourceAdapter",
+    "openai_compat",
+    "fallback_policy",
+    "mentrix_native Coding Agent"
+  ],
+  "operations": [
+    {
+      "id": "OP-001",
+      "title": "TI-001 fix auth fixture vs load_dotenv override",
+      "requirements": ["R11"],
+      "dependencies": [],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-002",
+      "title": "TI-002 exclude Playwright e2e from Vitest npm test",
+      "requirements": ["R12"],
+      "dependencies": [],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-010",
+      "title": "Jira WorkItemSourceAdapter ingest + project/repo bind",
+      "requirements": ["R1", "R2"],
+      "dependencies": ["OP-001"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-011",
+      "title": "Camunda WorkItemSourceAdapter ingest + project/repo bind",
+      "requirements": ["R1", "R2"],
+      "dependencies": ["OP-001"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-020",
+      "title": "ProjectIntelligence fill Lattice Blueprint Knowledge Memory",
+      "requirements": ["R3", "R4", "R14"],
+      "dependencies": ["OP-010"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-021",
+      "title": "ProjectIntelligence Skills Playbooks Related Work freshness",
+      "requirements": ["R3"],
+      "dependencies": ["OP-020"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-030",
+      "title": "Wire MentrixDeveloperService Ask/Plan/Agent to live PI",
+      "requirements": ["R5"],
+      "dependencies": ["OP-021"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-031",
+      "title": "Fabric handoff from approved WorkItem/PLAN",
+      "requirements": ["R6"],
+      "dependencies": ["OP-030"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-032",
+      "title": "ForgeLoop mentrix_native + ArtifactStore dual-write unchanged ownership",
+      "requirements": ["R7"],
+      "dependencies": ["OP-030"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-033",
+      "title": "Ultra Review consumes WorkItem ContextPack evidence",
+      "requirements": ["R8"],
+      "dependencies": ["OP-032"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-040",
+      "title": "EvidenceVerifier READY_TO_SHIP closes Jira/Camunda/PR loop",
+      "requirements": ["R9", "R10"],
+      "dependencies": ["OP-033", "OP-011"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-050",
+      "title": "Connectivity + gap analysis regression suite",
+      "requirements": ["R13"],
+      "dependencies": ["OP-040", "OP-002"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-051",
+      "title": "Update ZECT_GAP_ANALYSIS.md P1 rows + P1 ACCEPTANCE evidence",
+      "requirements": ["R13"],
+      "dependencies": ["OP-050"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    },
+    {
+      "id": "OP-060",
+      "title": "P1 gate refuse COMPLETE if mandatory gaps remain",
+      "requirements": ["R13", "NFR-2"],
+      "dependencies": ["OP-051"],
+      "mandatory": true,
+      "attempts": 0,
+      "max_attempts": 3,
+      "evidence_ids": [],
+      "status": "pending"
+    }
+  ]
+}

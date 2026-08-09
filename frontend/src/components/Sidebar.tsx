@@ -364,6 +364,7 @@ export default function Sidebar({
         className={`hidden md:flex fixed left-0 top-0 z-40 h-screen bg-slate-900 text-slate-300 flex-col transition-all duration-200 ease-in-out ${
           collapsed ? "w-16" : "w-56"
         }`}
+        data-testid="app-sidebar"
       >
         {sidebarContent}
       </aside>

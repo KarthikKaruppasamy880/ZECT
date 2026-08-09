@@ -45,11 +45,16 @@ export default function SystemHealth() {
     try {
       const r = await fetch(`${API}/api/system/skills-fs/sync`, {
         method: "POST",
-        headers: authHeaders(),
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: "bidirectional" }),
       });
       if (!r.ok) throw new Error(await r.text());
       const body = await r.json();
-      setSyncMsg(`Synced ${body.scanned ?? 0} packs (created ${body.created ?? 0}, updated ${body.updated ?? 0})`);
+      const inbound = body.fs_to_db || body;
+      const outbound = body.db_to_fs || {};
+      setSyncMsg(
+        `Bi-sync: FS→DB created ${inbound.created ?? 0}/updated ${inbound.updated ?? 0}; DB→FS written ${outbound.written ?? 0}`,
+      );
     } catch (e: any) {
       setSyncMsg(e?.message || "Skills sync failed");
     }
@@ -83,7 +88,7 @@ export default function SystemHealth() {
           onClick={syncSkills}
           className="rounded-md bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800"
         >
-          Sync filesystem skills → DB
+          Sync Skills DB ↔ filesystem
         </button>
         {syncMsg && <p className="text-sm text-slate-600" data-testid="skills-fs-sync-result">{syncMsg}</p>}
       </div>

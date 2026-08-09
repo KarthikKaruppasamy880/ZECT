@@ -23,6 +23,7 @@ jobs:
           pip install pytest
       - name: Pytest
         env:
+          ENCRYPTION_KEY: "REDACTED_EPHEMERAL_KEY_REMOVED"
           ZECT_USERNAME: test@zect.local
           ZECT_PASSWORD: test-pass-1234
           ZECT_AUTH_MODE: local
@@ -79,6 +80,7 @@ jobs:
       - name: Start API
         working-directory: backend
         env:
+          ENCRYPTION_KEY: "REDACTED_EPHEMERAL_KEY_REMOVED"
           ZECT_USERNAME: test@zect.local
           ZECT_PASSWORD: test-pass-1234
           ZECT_AUTH_MODE: local

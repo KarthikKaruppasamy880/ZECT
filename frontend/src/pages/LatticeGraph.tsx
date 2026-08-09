@@ -196,7 +196,7 @@ export default function LatticeGraph() {
       if (e.source === selectedNode.id) otherId = e.target;
       else if (e.target === selectedNode.id) otherId = e.source;
       if (!otherId) continue;
-      const other = byId.get(otherId);
+      const other = byId.get(otherId) as { name?: string; kind?: string } | undefined;
       rows.push({
         id: otherId,
         name: other?.name || otherId,
@@ -514,7 +514,7 @@ export default function LatticeGraph() {
           </button>
           <button
             data-testid="lattice-run-explain"
-            onClick={runExplain}
+            onClick={() => void runExplain()}
             disabled={!key || loading || (!explainNode && !pathSource && !query)}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
           >

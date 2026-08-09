@@ -1,0 +1,19 @@
+{
+  "work_item_key": "ZECT-MENTRIX-P2-P3-REMAINING",
+  "plan_version": 1,
+  "status": "COMPLETE",
+  "updated_at": "2026-08-09T20:00:00Z",
+  "resume_operation": null,
+  "depends_on": ["ZECT-MENTRIX-CONSOLIDATION", "ZECT-MENTRIX-P1-PROJECT-INTELLIGENCE"],
+  "operations": [
+    {"id": "OP-100", "title": "Sidebar target navigation", "mandatory": true, "status": "completed"},
+    {"id": "OP-110", "title": "Work Items + Project Intelligence pages", "mandatory": true, "status": "completed"},
+    {"id": "OP-120", "title": "System Health API + page", "mandatory": true, "status": "completed"},
+    {"id": "OP-130", "title": "Skills FS dual-read .zect/skills", "mandatory": true, "status": "completed"},
+    {"id": "OP-140", "title": "Ultra Review 3-lane merger", "mandatory": true, "status": "completed"},
+    {"id": "OP-150", "title": "Playwright smoke nav updates", "mandatory": true, "status": "completed"},
+    {"id": "OP-200", "title": "SecurityScanner interface", "mandatory": true, "status": "completed"},
+    {"id": "OP-210", "title": "Local model readiness hook", "mandatory": true, "status": "completed"},
+    {"id": "OP-300", "title": "Tests + gap update + gate", "mandatory": true, "status": "completed"}
+  ]
+}

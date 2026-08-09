@@ -397,3 +397,35 @@ def ultrareview_work_item_context(
         return build_ultrareview_work_item_context(db, work_item_id=work_item_id, query=query)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=404, detail=str(exc)[:300]) from exc
+
+
+class LaneMergeRequest(BaseModel):
+    findings: list[dict] = []
+    session_id: int | None = None
+
+
+@router.post("/lanes")
+def ultrareview_three_lanes(
+    body: LaneMergeRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """P2: Requirements / Engineering / Security lanes over existing findings."""
+    from app.services.work_items.ultra_review_lanes import merge_ultrareview_lanes
+
+    findings = list(body.findings or [])
+    if body.session_id is not None and not findings:
+        rows = db.query(ReviewFinding).filter(ReviewFinding.review_session_id == body.session_id).all()
+        findings = [
+            {
+                "id": f.id,
+                "category": getattr(f, "category", "") or "",
+                "severity": getattr(f, "severity", "") or "",
+                "title": getattr(f, "title", "") or "",
+                "message": getattr(f, "description", "") or "",
+                "file": getattr(f, "file_path", "") or "",
+                "line": getattr(f, "line_start", None),
+            }
+            for f in rows
+        ]
+    return merge_ultrareview_lanes(findings)

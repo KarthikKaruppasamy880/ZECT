@@ -163,7 +163,7 @@ class ProjectIntelligenceService:
         except Exception:  # noqa: BLE001
             pass
 
-        # Skills selection (may be empty if none)
+        # Skills selection (DB + filesystem packs)
         try:
             if db is not None:
                 from app.models import SkillDefinition
@@ -175,8 +175,22 @@ class ProjectIntelligenceService:
                             "id": getattr(s, "id", None),
                             "name": getattr(s, "name", "") or getattr(s, "skill_key", ""),
                             "reason": "available_skill",
+                            "source": "db",
                         }
                     )
+            from app.services.skills_fs import list_filesystem_skills
+
+            for fs in list_filesystem_skills(limit=10):
+                if any(str(x.get("name")) == fs["name"] for x in skills):
+                    continue
+                skills.append(
+                    {
+                        "id": f"fs:{fs['name']}",
+                        "name": fs["name"],
+                        "reason": "filesystem_skill",
+                        "source": "filesystem",
+                    }
+                )
         except Exception:  # noqa: BLE001
             pass
 

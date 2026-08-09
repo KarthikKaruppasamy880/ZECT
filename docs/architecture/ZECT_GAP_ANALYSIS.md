@@ -43,7 +43,12 @@ States: COMPLETE | PARTIAL | DUPLICATED | DISCONNECTED | MOCK | MISSING | DEFERR
 | Connectivity suite | COMPLETE | test_mentrix_p1_project_intelligence.py | — | Spine tests | OP-050 | P1 |
 | TI-001 auth fixture | COMPLETE | main.py ZECT_PYTEST preserve + conftest | — | Authed HTTP | OP-001 | P1 |
 | TI-002 Vitest/e2e | COMPLETE | vite.config + npm test exclude | — | Unit-only | OP-002 | P1 |
-| Sidebar / Health | PARTIAL | Sidebar.tsx | Sprawl | P2 | Defer | P2 |
-| E2E Playwright suite | PARTIAL | 13 fail/53 pass | Flakes | Green | P2 | P2 |
-| Skills FS migrate | DEFERRED | — | — | .zect/skills | P2 | P2 |
-| Ultra Review 3-lane redesign | DEFERRED | — | — | Redesign | P2 | P2 |
+| Sidebar / Health | COMPLETE | Sidebar.tsx + SystemHealth | — | Target nav + health | OP-100/120 | P2 |
+| E2E Playwright suite | PARTIAL | smoke nav updated | Full suite flakes | Smoke + nav | OP-150 | P2 |
+| Skills FS migrate | COMPLETE | `.zect/skills` dual-read | Full DB migrate deferred | Dual-read | OP-130 | P2 |
+| Ultra Review 3-lane redesign | COMPLETE | ultra_review_lanes.py | Deep LLM lanes deferred | Merger over findings | OP-140 | P2 |
+| SecurityScanner | COMPLETE | security_scanner.py | Native deep scan deferred | Interface + adapter | OP-200 | P3 |
+| Local model readiness | COMPLETE | /api/system/model-readiness | — | Gateway hook | OP-210 | P3 |
+| Work Items UX | COMPLETE | WorkItems.tsx | — | List page | OP-110 | P2 |
+| Project Intelligence UX | COMPLETE | ProjectIntelligence.tsx | — | PI page | OP-110 | P2 |
+| Context Used panel | COMPLETE | WorkspaceContextUsedPanel | Ideal ASK/PLAN/AGENT chrome partial | PI provenance rail | OP-CTX | P2 |

@@ -166,7 +166,9 @@ def _load_rules_text(db: Session) -> str:
 
 def _load_skills_text() -> str:
     roots = [
+        Path(__file__).resolve().parents[4] / ".zect" / "skills",
         Path(__file__).resolve().parents[4] / "skills",
+        Path.cwd() / ".zect" / "skills",
         Path.cwd() / "skills",
         Path.cwd().parent / "skills",
     ]

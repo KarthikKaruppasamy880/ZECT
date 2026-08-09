@@ -7,11 +7,9 @@ import {
   BarChart3,
   FileText,
   Settings,
-  Microscope,
   Sparkles,
   BookOpen,
   ShieldCheck,
-  GitCompareArrows,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -22,18 +20,13 @@ import {
   ScrollText,
   Plug,
   Scale,
-  Download,
-  History,
   Activity,
   Brain,
   ShieldAlert,
-  ArrowRightLeft,
   Wrench,
   BookMarked,
   Calendar,
   KeyRound,
-  Code2,
-  MessageCircle,
   HardDrive,
   PanelLeft,
   Bot,
@@ -41,88 +34,74 @@ import {
   Network,
   FlaskConical,
   Box,
-  StickyNote,
 } from "lucide-react";
 import { isAgentModeEnabled } from "@/lib/featureFlags";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
-const workflowItems: NavItem[] = [
-  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
+/** P2 target navigation — routes kept; internals moved into composite sections. */
+const mentrixItems: NavItem[] = [
+  { href: "/mentrix-home", label: "Home", icon: Sparkles },
+  { href: "/workspace", label: "Developer", icon: PanelLeft },
   { href: "/ask", label: "Agent Workspace", icon: Bot },
-  { href: "/mentrix", label: "Mentrix Delivery", icon: Rocket },
-  { href: "/fabric", label: "Mentrix Fabric", icon: Network },
-  { href: "/security-incidents", label: "Security Agent", icon: ShieldAlert },
 ];
 
-const workspaceItems: NavItem[] = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+const workItems: NavItem[] = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
-  { href: "/workspace", label: "Developer Workspace", icon: PanelLeft },
+  { href: "/work-items", label: "Work Items", icon: ScrollText },
+  { href: "/fabric", label: "Processes", icon: Network },
 ];
 
-const understandItems: NavItem[] = [
-  { href: "/lattice", label: "Lattice Graph", icon: Network },
+const intelligenceItems: NavItem[] = [
+  { href: "/project-intelligence", label: "Project Intelligence", icon: Brain },
+  { href: "/knowledge-base", label: "Knowledge", icon: BookMarked },
+  { href: "/skills-engine", label: "Skills & Playbooks", icon: Wrench },
+  { href: "/lattice", label: "Lattice", icon: Network },
   { href: "/blueprint", label: "Blueprint", icon: Sparkles },
-  { href: "/docs", label: "Docs Center", icon: FileText },
 ];
 
-/** Ask/Plan/Build/Review/Deploy live in the Agent Workspace rail — not duplicated here. */
-const deliverItemsBase: NavItem[] = [
-  { href: "/orchestration", label: "Orchestration", icon: GitBranch },
+const deliveryItemsBase: NavItem[] = [
+  { href: "/mentrix", label: "Runs", icon: Rocket },
+  { href: "/code-review", label: "Quality", icon: ShieldCheck },
+  { href: "/git-ops", label: "Git & CI", icon: GitBranch },
+  { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
+  { href: "/sandbox", label: "Sandbox", icon: Box },
 ];
 
 const agentModeItem: NavItem = { href: "/agent-mode", label: "Agent Mode (Advanced)", icon: Bot };
 
-const qualityItems: NavItem[] = [
-  { href: "/code-review", label: "Mentrix Ultra Review", icon: ShieldCheck },
-  { href: "/rules", label: "Rules Engine", icon: Scale },
-  { href: "/sandbox", label: "Sandbox Gate", icon: Box },
-  { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
-  { href: "/git-ops", label: "Git Operations", icon: GitBranch },
+const securityItems: NavItem[] = [
+  { href: "/security-incidents", label: "Security", icon: ShieldAlert },
 ];
 
-const enterpriseItems: NavItem[] = [
+const operationsItems: NavItem[] = [
+  { href: "/system-health", label: "System Health", icon: Activity },
   { href: "/integrations", label: "Integrations", icon: Plug },
-  { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
-  { href: "/export", label: "Export/Share", icon: Download },
-  { href: "/output-history", label: "Output History", icon: History },
+  { href: "/scheduled-tasks", label: "Automations", icon: Calendar },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-/** Thin Labs — productivity only. Governance lives under Settings. */
-const labsItems: NavItem[] = [
-  { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
-  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
-  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
-  { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
-  { href: "/file-organize", label: "File Organize", icon: HardDrive },
-];
-
-/** Settings-owned surfaces (routes remain; listed under Settings More). */
 const settingsOwnedItems: NavItem[] = [
+  { href: "/settings", label: "Settings", icon: Settings },
   { href: "/permissions", label: "Permissions", icon: ShieldAlert },
-  { href: "/memory", label: "Memory System", icon: Brain },
-  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
+  { href: "/memory", label: "Memory", icon: Brain },
+  { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/token-controls", label: "Token Controls", icon: Coins },
-  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
-  { href: "/conversations", label: "Conversations", icon: MessageCircle },
-  { href: "/mentrix-notes", label: "Mentrix Notes", icon: StickyNote },
-  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
-  { href: "/code-index", label: "Code Index", icon: Code2 },
-  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
-  { href: "/tool-comparison", label: "Architecture", icon: GitCompareArrows },
+  { href: "/rules", label: "Rules", icon: Scale },
+  { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
+  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/docs", label: "Docs", icon: FileText },
+  { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
 ];
 
 const sections: { title: string; items: NavItem[] }[] = [
-  { title: "Workflow", items: workflowItems },
-  { title: "Workspace", items: workspaceItems },
-  { title: "Understand", items: understandItems },
-  { title: "Deliver", items: deliverItemsBase },
-  { title: "Quality", items: qualityItems },
-  { title: "Enterprise", items: enterpriseItems },
-  { title: "Labs", items: labsItems },
+  { title: "Mentrix", items: mentrixItems },
+  { title: "Work", items: workItems },
+  { title: "Intelligence", items: intelligenceItems },
+  { title: "Delivery", items: deliveryItemsBase },
+  { title: "Security", items: securityItems },
+  { title: "Operations", items: operationsItems },
 ];
 
 interface SidebarProps {
@@ -142,7 +121,7 @@ export default function Sidebar({
 }: SidebarProps) {
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
-  const [labsMoreOpen, setLabsMoreOpen] = useState(() =>
+  const [settingsMoreOpen, setSettingsMoreOpen] = useState(() =>
     settingsOwnedItems.some((item) => location.pathname === item.href),
   );
 
@@ -162,15 +141,15 @@ export default function Sidebar({
 
   useEffect(() => {
     if (settingsOwnedItems.some((item) => location.pathname === item.href)) {
-      setLabsMoreOpen(true);
+      setSettingsMoreOpen(true);
     }
   }, [location.pathname]);
 
   const navSections = sections.map((section) =>
-    section.title === "Deliver"
+    section.title === "Delivery"
       ? {
           ...section,
-          items: agentModeOn ? [...deliverItemsBase, agentModeItem] : deliverItemsBase,
+          items: agentModeOn ? [...deliveryItemsBase, agentModeItem] : deliveryItemsBase,
         }
       : section,
   );
@@ -220,7 +199,7 @@ export default function Sidebar({
           }`}
         >
           {title}
-          {title === "Labs" && (
+          {title === "Operations" && (
             <FlaskConical className="inline h-3 w-3 ml-1 opacity-60" />
           )}
         </p>
@@ -229,24 +208,24 @@ export default function Sidebar({
       )}
       <ul className="space-y-0.5">
         {items.map((item) => renderNavLink(item))}
-        {title === "Labs" && (
+        {title === "Operations" && (
           <>
             {!collapsed && (
               <li>
                 <button
                   type="button"
                   data-testid="sidebar-labs-more"
-                  onClick={() => setLabsMoreOpen((o) => !o)}
+                  onClick={() => setSettingsMoreOpen((o) => !o)}
                   className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-white"
                 >
                   <ChevronDown
-                    className={`h-4 w-4 shrink-0 transition-transform ${labsMoreOpen ? "" : "-rotate-90"}`}
+                    className={`h-4 w-4 shrink-0 transition-transform ${settingsMoreOpen ? "" : "-rotate-90"}`}
                   />
-                  <span>Settings links</span>
+                  <span>More settings</span>
                 </button>
               </li>
             )}
-            {(labsMoreOpen || collapsed) && settingsOwnedItems.map((item) => renderNavLink(item))}
+            {(settingsMoreOpen || collapsed) && settingsOwnedItems.map((item) => renderNavLink(item))}
           </>
         )}
       </ul>
@@ -270,7 +249,7 @@ export default function Sidebar({
                 Control Tower
               </h1>
               <p className="text-[10px] text-slate-400 mt-1 leading-snug" data-testid="sidebar-spine-hint">
-                Ship: Mentrix Delivery · Prep: Agent Workspace · Edit: Developer Workspace
+                Mentrix · Work · Intelligence · Delivery · Security · Operations
               </p>
             </div>
           )}

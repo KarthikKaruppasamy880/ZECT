@@ -54,6 +54,9 @@ import Mentrix from "@/pages/Mentrix";
 import MentrixCompanion from "@/pages/MentrixCompanion";
 import MobileCompanion from "@/pages/MobileCompanion";
 import SandboxGate from "@/pages/SandboxGate";
+import WorkItems from "@/pages/WorkItems";
+import ProjectIntelligencePage from "@/pages/ProjectIntelligence";
+import SystemHealth from "@/pages/SystemHealth";
 import Login from "@/pages/Login";
 import { verifyToken, logout as apiLogout } from "@/lib/api";
 import { ActiveProjectProvider } from "@/contexts/ActiveProjectContext";
@@ -191,6 +194,9 @@ export default function App() {
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
           <Route path="/m/companion" element={<MobileCompanion />} />
           <Route path="/sandbox" element={<SandboxGate />} />
+          <Route path="/work-items" element={<WorkItems />} />
+          <Route path="/project-intelligence" element={<ProjectIntelligencePage />} />
+          <Route path="/system-health" element={<SystemHealth />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -21,9 +21,13 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest pytest-asyncio
+      # Ephemeral vault key for this job only — never commit ENCRYPTION_KEY values.
+      - name: Mint CI encryption key
+        working-directory: backend
+        run: |
+          python -c "import os; from cryptography.fernet import Fernet; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('ENCRYPTION_KEY='+Fernet.generate_key().decode()+'\n')"
       - name: Pytest
         env:
-          ENCRYPTION_KEY: "REDACTED_EPHEMERAL_KEY_REMOVED"
           ZECT_RATE_LIMIT_DISABLED: "1"
           ZECT_USERNAME: test@zect.local
           ZECT_PASSWORD: test-pass-1234
@@ -78,10 +82,13 @@ jobs:
         run: |
           npm ci || npm install
           npx playwright install chromium --with-deps
+      - name: Mint CI encryption key
+        working-directory: backend
+        run: |
+          python -c "import os; from cryptography.fernet import Fernet; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('ENCRYPTION_KEY='+Fernet.generate_key().decode()+'\n')"
       - name: Start API
         working-directory: backend
         env:
-          ENCRYPTION_KEY: "REDACTED_EPHEMERAL_KEY_REMOVED"
           ZECT_RATE_LIMIT_DISABLED: "1"
           ZECT_USERNAME: test@zect.local
           ZECT_PASSWORD: test-pass-1234

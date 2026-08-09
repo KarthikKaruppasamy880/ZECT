@@ -68,6 +68,8 @@ from app.domains.voice import realtime, voice_clone
 from app.domains.security_incident import router as security_incident_router
 from app.domains.fabric import router as fabric_router
 from app.domains.process import router as process_router
+from app.domains.work_items.router import developer_router as mentrix_developer_router
+from app.domains.work_items.router import router as work_items_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -142,6 +144,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(security_incident_router)
     app.include_router(fabric_router)
     app.include_router(process_router)
+    app.include_router(work_items_router)
+    app.include_router(mentrix_developer_router)
     app.include_router(confluence_integration.router)
     app.include_router(datadog_integration.router)
     app.include_router(email_integration.router)

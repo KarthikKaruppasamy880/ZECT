@@ -1576,3 +1576,56 @@ class AutomationWatch(Base):
 
     user = relationship("User", backref="automation_watches")
     project = relationship("Project", backref="automation_watches")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix WorkItem (P0 consolidation) — canonical SDLC unit of work
+# ---------------------------------------------------------------------------
+
+class WorkItem(Base):
+    """Canonical Mentrix work item — ArtifactStore owns PLAN.md for this id."""
+    __tablename__ = "work_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String, default="user", index=True)  # user | jira | camunda | github | ...
+    external_id = Column(String, default="", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    repository_id = Column(Integer, nullable=True, index=True)
+    repository_ref = Column(String, default="")  # branch/tag/ref
+    base_commit_sha = Column(String, default="")
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    # SDLC: NEW→…→DONE; side: BLOCKED, FAILED_VERIFICATION, NEEDS_HUMAN_DECISION, CANCELLED
+    status = Column(String, default="NEW", index=True)
+    requirements_json = Column(Text, default="[]")
+    acceptance_json = Column(Text, default="[]")
+    context_snapshot_json = Column(Text, default="{}")
+    plan_version = Column(Integer, default=0)
+    plan_hash = Column(String, default="")
+    approved_plan_hash = Column(String, nullable=True)
+    mentrix_run_id = Column(Integer, ForeignKey("mentrix_runs.id"), nullable=True, index=True)
+    worktree_path = Column(String, default="")
+    current_commit_sha = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    events = relationship(
+        "WorkItemEvent",
+        back_populates="work_item",
+        cascade="all, delete-orphan",
+        order_by="WorkItemEvent.id",
+    )
+
+
+class WorkItemEvent(Base):
+    """Append-only audit log for WorkItem — no update/delete API."""
+    __tablename__ = "work_item_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    payload_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    work_item = relationship("WorkItem", back_populates="events")

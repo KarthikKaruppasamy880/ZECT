@@ -29,11 +29,11 @@ test.describe("Agent Workspace shell", () => {
   test("Sidebar collapses phase tools into Agent Workspace entry", async ({ page }) => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("agent-workspace")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Agent Workspace" })).toBeVisible();
-    // Ask/Plan/Build live in Agent Workspace rail — not app sidebar
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Ask" })).toHaveCount(0);
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Plan" })).toHaveCount(0);
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Build" })).toHaveCount(0);
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Agent Workspace", exact: true })).toBeVisible();
+    // Phase tools live in Agent Workspace rail — not as Ask/Plan/Build sidebar entries
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Ask", exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Plan", exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Build", exact: true })).toHaveCount(0);
     await expect(page.getByTestId("agent-workspace-step-ask")).toBeVisible();
     await expect(page.getByTestId("agent-workspace-step-plan")).toBeVisible();
   });

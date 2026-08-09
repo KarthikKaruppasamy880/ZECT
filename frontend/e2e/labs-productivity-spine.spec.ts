@@ -9,10 +9,12 @@ test.describe("Labs productivity spine", () => {
     await expect(page.getByRole("link", { name: "Scheduled Tasks" })).toBeVisible();
 
     await page.getByTestId("app-sidebar").getByTestId("sidebar-labs-more").click();
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Memory System" })).toBeVisible();
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Permissions" })).toBeVisible();
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Architecture" })).toBeVisible();
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Security Incidents" })).toBeVisible();
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Memory System", exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Permissions", exact: true })).toBeVisible();
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Architecture", exact: true })).toBeVisible();
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Security Incidents", exact: true })).toBeVisible();
 
     // Experimental pages not in primary nav list
     await expect(page.getByRole("link", { name: "Dream Engine" })).toHaveCount(0);

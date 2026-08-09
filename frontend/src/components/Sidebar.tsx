@@ -125,7 +125,9 @@ export default function Sidebar({
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
   const [settingsMoreOpen, setSettingsMoreOpen] = useState(() =>
-    settingsOwnedItems.some((item) => location.pathname === item.href),
+    settingsOwnedItems.some(
+      (item) => item.href !== "/" && location.pathname === item.href,
+    ),
   );
 
   useEffect(() => {
@@ -143,7 +145,12 @@ export default function Sidebar({
   }, []);
 
   useEffect(() => {
-    if (settingsOwnedItems.some((item) => location.pathname === item.href)) {
+    // Do not treat Dashboard "/" as a reason to force-open More settings
+    if (
+      settingsOwnedItems.some(
+        (item) => item.href !== "/" && location.pathname === item.href,
+      )
+    ) {
       setSettingsMoreOpen(true);
     }
   }, [location.pathname]);

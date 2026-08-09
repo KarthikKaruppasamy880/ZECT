@@ -165,7 +165,9 @@ def test_source_adapter_stubs():
     fields = user.to_work_item_fields({"title": "T", "external_id": "1"})
     assert fields["source"] == "user"
     jira = get_source_adapter("jira")
-    with pytest.raises(NotImplementedError):
+    assert jira.source_name == "jira"
+    # P1: live fetch fail-closed when Jira not configured / no fixture
+    with pytest.raises((RuntimeError, ValueError)):
         jira.fetch_raw("ZECT-1")
 
 

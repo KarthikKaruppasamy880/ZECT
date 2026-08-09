@@ -381,3 +381,19 @@ def start_fix_run_from_findings(
         "finding_count": len(rows),
         "goal_preview": goal[:500],
     }
+
+
+@router.get("/work-item/{work_item_id}/context")
+def ultrareview_work_item_context(
+    work_item_id: int,
+    query: str = "",
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """OP-033: Ultra Review lane consumes WorkItem ContextPack + evidence (no second engine)."""
+    from app.services.work_items.ultra_review_context import build_ultrareview_work_item_context
+
+    try:
+        return build_ultrareview_work_item_context(db, work_item_id=work_item_id, query=query)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail=str(exc)[:300]) from exc

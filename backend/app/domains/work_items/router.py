@@ -264,3 +264,107 @@ def developer_resume(
         work_item_id=body.work_item_id,
         actor=getattr(user, "email", "") or "",
     )
+
+
+class IngestIn(BaseModel):
+    source: str = Field(..., min_length=1)
+    external_id: str = Field(..., min_length=1)
+    raw: Optional[dict] = None
+    project_id: Optional[int] = None
+    repository_id: Optional[int] = None
+    repository_ref: str = ""
+    base_commit_sha: str = ""
+    require_repo: bool = True
+
+
+@router.post("/ingest")
+def ingest_external(
+    body: IngestIn,
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    from app.domains.work_items.ingest import ingest_work_item
+
+    return ingest_work_item(
+        db,
+        source=body.source,
+        external_id=body.external_id,
+        raw=body.raw,
+        project_id=body.project_id,
+        repository_id=body.repository_id,
+        repository_ref=body.repository_ref,
+        base_commit_sha=body.base_commit_sha,
+        created_by=getattr(user, "email", "") or "",
+        require_repo=body.require_repo,
+    )
+
+
+class FabricHandoffIn(BaseModel):
+    work_item_id: int
+    workspace: str = ""
+    text: str = ""
+
+
+@developer_router.post("/fabric-handoff")
+def fabric_handoff(
+    body: FabricHandoffIn,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.work_items.fabric_handoff import fabric_handoff_from_work_item
+
+    return fabric_handoff_from_work_item(
+        db,
+        work_item_id=body.work_item_id,
+        workspace=body.workspace,
+        text=body.text,
+    )
+
+
+class CloseLoopIn(BaseModel):
+    work_item_id: int
+    pr_url: str = ""
+    jira_comment: str = ""
+    jira_transition_id: str = ""
+    camunda_complete: bool = False
+    dry_run: bool = True
+
+
+@developer_router.post("/close-loop")
+def close_loop(
+    body: CloseLoopIn,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.work_items.close_loop import close_external_loop
+
+    return close_external_loop(
+        db,
+        work_item_id=body.work_item_id,
+        pr_url=body.pr_url,
+        jira_comment=body.jira_comment,
+        jira_transition_id=body.jira_transition_id,
+        camunda_complete=body.camunda_complete,
+        dry_run=body.dry_run,
+    )
+
+
+@developer_router.get("/project-intelligence")
+def project_intelligence(
+    project_id: Optional[int] = None,
+    project_key: str = "",
+    repository_id: Optional[int] = None,
+    query: str = "",
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.work_items.project_intelligence import ProjectIntelligenceService
+
+    snap = ProjectIntelligenceService().snapshot(
+        project_id=project_id,
+        project_key=project_key,
+        repository_id=repository_id,
+        db=db,
+        query=query,
+    )
+    return snap.to_dict()

@@ -64,7 +64,22 @@ class MentrixDeveloperService:
         )
 
     def _build_pack(self, wi: WorkItem, goal: str) -> dict[str, Any]:
-        snap = self.pi.snapshot(project_id=wi.project_id, repository_id=wi.repository_id, db=self.db)
+        project_key = ""
+        try:
+            if wi.project_id and self.db is not None:
+                from app.models import Project
+
+                p = self.db.query(Project).filter(Project.id == wi.project_id).first()
+                project_key = (getattr(p, "name", None) or getattr(p, "key", None) or "") if p else ""
+        except Exception:  # noqa: BLE001
+            project_key = ""
+        snap = self.pi.snapshot(
+            project_id=wi.project_id,
+            project_key=str(project_key or ""),
+            repository_id=wi.repository_id,
+            db=self.db,
+            query=goal,
+        )
         pack = self.context_engine.build(
             work_item_id=wi.id,
             repository_id=wi.repository_id,
@@ -462,6 +477,7 @@ class MentrixDeveloperService:
             "EVIDENCE.json",
             {"evidence": evidence, "verification": result.to_dict()},
         )
+        close_loop_result: dict[str, Any] | None = None
         if result.ready_to_ship:
             wi = wi_svc.transition_status(
                 self.db,
@@ -472,6 +488,17 @@ class MentrixDeveloperService:
                 actor=actor,
             )
             record_checkpoint(store, checkpoint_type="completion", operation_id="ready_to_ship")
+            # OP-040: optional external close (dry_run by default — no live Jira/Camunda)
+            try:
+                from app.services.work_items.close_loop import close_external_loop
+
+                close_loop_result = close_external_loop(
+                    self.db,
+                    work_item_id=wi.id,
+                    dry_run=True,
+                )
+            except Exception as exc:  # noqa: BLE001
+                close_loop_result = {"ok": False, "error": str(exc)[:300]}
         else:
             append_event(
                 self.db,
@@ -486,4 +513,10 @@ class MentrixDeveloperService:
                 operation_id="verify",
                 payload=result.to_dict(),
             )
-        return {"work_item": wi_svc.serialize_work_item(wi), "verification": result.to_dict()}
+        out: dict[str, Any] = {
+            "work_item": wi_svc.serialize_work_item(wi),
+            "verification": result.to_dict(),
+        }
+        if close_loop_result is not None:
+            out["close_loop"] = close_loop_result
+        return out

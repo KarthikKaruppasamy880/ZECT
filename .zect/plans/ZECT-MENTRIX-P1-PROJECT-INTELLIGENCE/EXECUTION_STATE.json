@@ -1,0 +1,8 @@
+{
+  "work_item_key": "ZECT-MENTRIX-P1-PROJECT-INTELLIGENCE",
+  "status": "COMPLETE",
+  "updated_at": "2026-08-09T19:00:00Z",
+  "resume_operation": null,
+  "last_completed_operation": "OP-060",
+  "notes": "P1 Project Intelligence + connectivity shipped. P2 (sidebar/health/skills FS/Playwright green) deferred."
+}

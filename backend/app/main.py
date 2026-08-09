@@ -8,8 +8,32 @@ import traceback
 
 # Load backend/.env regardless of process cwd (fixes auth/env when uvicorn cwd differs).
 # override=True so CHATTERBOX_BASE_URL from .env wins over stale shell localhost values.
+# Under pytest (ZECT_PYTEST=1), preserve auth/DB env set by conftest so .env cannot
+# silently stomp test credentials (TI-001).
+import os as _os_for_dotenv
+
 _backend_root = Path(__file__).resolve().parents[1]
+_UNDER_PYTEST = (_os_for_dotenv.getenv("ZECT_PYTEST") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+_PRESERVE_ENV_KEYS = (
+    "ZECT_USERNAME",
+    "ZECT_PASSWORD",
+    "ZECT_AUTH_MODE",
+    "ZECT_AUTH_ENFORCE",
+    "DATABASE_URL",
+)
+_saved_env = {
+    k: _os_for_dotenv.environ[k]
+    for k in _PRESERVE_ENV_KEYS
+    if _UNDER_PYTEST and k in _os_for_dotenv.environ
+}
 load_dotenv(_backend_root / ".env", override=True)
+if _saved_env:
+    _os_for_dotenv.environ.update(_saved_env)
 
 # Initialize encryption vault (must be before other imports that use secrets)
 from app.security.vault import vault

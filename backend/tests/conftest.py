@@ -5,6 +5,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+# Must be set before importing app.main (TI-001): main preserves these when ZECT_PYTEST=1.
+os.environ["ZECT_PYTEST"] = "1"
 os.environ["DATABASE_URL"] = "sqlite:///./test_zect.db"
 os.environ["ZECT_USERNAME"] = "test@zect.local"
 os.environ["ZECT_PASSWORD"] = "test-pass-1234"

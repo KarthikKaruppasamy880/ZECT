@@ -1,0 +1,362 @@
+{
+  "work_item_key": "ZECT-MENTRIX-CONSOLIDATION",
+  "evidence": [
+    {
+      "id": "EV-DOC-001",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-001",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_FINAL_ARCHITECTURE_ANALYSIS.md"
+      }
+    },
+    {
+      "id": "EV-DOC-002",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-002",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_CURRENT_IMPLEMENTATION_MAP.md"
+      }
+    },
+    {
+      "id": "EV-DOC-003",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-003",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_GAP_ANALYSIS.md"
+      }
+    },
+    {
+      "id": "EV-DOC-004",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-004",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_MODEL_USAGE_MAP.md"
+      }
+    },
+    {
+      "id": "EV-DOC-005",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-005",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_PROJECT_INTELLIGENCE_ARCHITECTURE.md"
+      }
+    },
+    {
+      "id": "EV-DOC-006",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-006",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_DEVELOPER_UX_ARCHITECTURE.md"
+      }
+    },
+    {
+      "id": "EV-DOC-007",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-007",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_SDLC_ARCHITECTURE.md"
+      }
+    },
+    {
+      "id": "EV-DOC-008",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-008",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": "docs/architecture/ZECT_DATA_FLOW_AND_OWNERSHIP.md"
+      }
+    },
+    {
+      "id": "EV-DOC-009",
+      "type": "FILE_EXISTS",
+      "operation_id": "OP-009",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "path": ".zect/plans/ZECT-MENTRIX-CONSOLIDATION/"
+      }
+    },
+    {
+      "id": "EV-OP-010",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-010",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-011",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-011",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-015",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-015",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-012",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-012",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-012b",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-012b",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-013",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-013",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-014",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-014",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-016",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-016",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-020",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-020",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-021",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-021",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-022",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-022",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-023",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-023",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-023b",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-023b",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-024",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-024",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-030",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-030",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-031",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-031",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-032",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-032",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-033",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-033",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-034",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-034",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-035",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-035",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-040",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-040",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-OP-041",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-041",
+      "verified_at": "2026-08-09T17:48:05Z",
+      "payload": {
+        "suite": "tests/fixes_and_phases/test_mentrix_p0_consolidation.py",
+        "result": "18 passed"
+      }
+    },
+    {
+      "id": "EV-AUDIT-WHITESPACE",
+      "type": "COMMAND_EXIT",
+      "operation_id": "OP-041",
+      "verified_at": "2026-08-09T18:08:11Z",
+      "payload": {
+        "command": "git diff --check HEAD",
+        "exit_code": 0,
+        "note": "EOF blank line removed from mentrix_native_build.py"
+      }
+    },
+    {
+      "id": "EV-AUDIT-P0-SUITE",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-041",
+      "verified_at": "2026-08-09T18:08:11Z",
+      "payload": {
+        "suite": "test_mentrix_p0_consolidation.py",
+        "passed": 18,
+        "failed": 0
+      }
+    },
+    {
+      "id": "EV-AUDIT-SPINE",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-041",
+      "verified_at": "2026-08-09T18:08:11Z",
+      "payload": {
+        "suite": "product_spine+fabric+coding_agent+cost_tree",
+        "passed": 35,
+        "failed": 0
+      }
+    },
+    {
+      "id": "EV-AUDIT-FIXES",
+      "type": "TEST_RESULT",
+      "operation_id": "OP-041",
+      "verified_at": "2026-08-09T18:08:11Z",
+      "payload": {
+        "suite": "fixes_and_phases ignore phase10_stage_b",
+        "passed": 580,
+        "failed": 0
+      }
+    }
+  ],
+  "verification": {
+    "ready_to_ship": false,
+    "p0_acceptance": "ACCEPTABLE_WITH_KNOWN_PREEXISTING_TEST_INFRA_ISSUES",
+    "fully_repository_green": false,
+    "whitespace_gate": "PASS",
+    "p0_regressions": false,
+    "backlog": [
+      "TI-001_auth_fixture_env_override",
+      "TI-002_vitest_playwright_overlap"
+    ],
+    "verified_at": "2026-08-09T18:08:11Z"
+  }
+}

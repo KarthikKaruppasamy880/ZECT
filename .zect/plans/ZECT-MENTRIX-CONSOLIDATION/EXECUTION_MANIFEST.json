@@ -1,0 +1,592 @@
+{
+  "work_item_key": "ZECT-MENTRIX-CONSOLIDATION",
+  "plan_version": 1,
+  "status": "ACCEPTABLE_WITH_KNOWN_PREEXISTING_TEST_INFRA_ISSUES",
+  "updated_at": "2026-08-09T18:08:11Z",
+  "resume_operation": null,
+  "operations": [
+    {
+      "id": "OP-001",
+      "title": "Write ZECT_FINAL_ARCHITECTURE_ANALYSIS.md",
+      "requirements": [
+        "R3"
+      ],
+      "dependencies": [],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-001"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_FINAL_ARCHITECTURE_ANALYSIS.md"
+    },
+    {
+      "id": "OP-002",
+      "title": "Write ZECT_CURRENT_IMPLEMENTATION_MAP.md",
+      "requirements": [
+        "R3"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-002"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_CURRENT_IMPLEMENTATION_MAP.md"
+    },
+    {
+      "id": "OP-003",
+      "title": "Write ZECT_GAP_ANALYSIS.md (revised)",
+      "requirements": [
+        "R9",
+        "R10",
+        "R11",
+        "R12",
+        "R13",
+        "R14",
+        "R15",
+        "R16",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21",
+        "R22"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-003"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_GAP_ANALYSIS.md"
+    },
+    {
+      "id": "OP-004",
+      "title": "Write ZECT_MODEL_USAGE_MAP.md",
+      "requirements": [
+        "R7",
+        "R19",
+        "R20"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-004"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_MODEL_USAGE_MAP.md"
+    },
+    {
+      "id": "OP-005",
+      "title": "Write ZECT_PROJECT_INTELLIGENCE_ARCHITECTURE.md",
+      "requirements": [
+        "R5",
+        "R6",
+        "R14"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-005"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_PROJECT_INTELLIGENCE_ARCHITECTURE.md"
+    },
+    {
+      "id": "OP-006",
+      "title": "Write ZECT_DEVELOPER_UX_ARCHITECTURE.md",
+      "requirements": [
+        "R1"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-006"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_DEVELOPER_UX_ARCHITECTURE.md"
+    },
+    {
+      "id": "OP-007",
+      "title": "Write ZECT_SDLC_ARCHITECTURE.md",
+      "requirements": [
+        "R2",
+        "R11",
+        "R18"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-007"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_SDLC_ARCHITECTURE.md"
+    },
+    {
+      "id": "OP-008",
+      "title": "Write ZECT_DATA_FLOW_AND_OWNERSHIP.md",
+      "requirements": [
+        "R3",
+        "R9",
+        "R10",
+        "R21"
+      ],
+      "dependencies": [
+        "OP-001"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-008"
+      ],
+      "status": "completed",
+      "path": "docs/architecture/ZECT_DATA_FLOW_AND_OWNERSHIP.md"
+    },
+    {
+      "id": "OP-009",
+      "title": "Write REQUIREMENTS PLAN ACCEPTANCE RISKS + EXECUTION_MANIFEST bootstrap",
+      "requirements": [
+        "R12",
+        "R15",
+        "R22"
+      ],
+      "dependencies": [
+        "OP-003",
+        "OP-008"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-DOC-009"
+      ],
+      "status": "completed",
+      "path": ".zect/plans/ZECT-MENTRIX-CONSOLIDATION/"
+    },
+    {
+      "id": "OP-010",
+      "title": "WorkItem model with repository_id repository_ref base_commit_sha and SDLC enums",
+      "requirements": [
+        "R2",
+        "R9",
+        "R11"
+      ],
+      "dependencies": [
+        "OP-009"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-010"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-011",
+      "title": "WorkItem CRUD domain API register",
+      "requirements": [
+        "R2",
+        "R9"
+      ],
+      "dependencies": [
+        "OP-010",
+        "OP-015"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-011"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-015",
+      "title": "Mandatory append-only WorkItemEvent",
+      "requirements": [
+        "R10"
+      ],
+      "dependencies": [
+        "OP-010"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-015"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-012",
+      "title": "ArtifactStore canonical PLAN.md dual-write MentrixRun",
+      "requirements": [
+        "R3"
+      ],
+      "dependencies": [
+        "OP-009"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-012"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-012b",
+      "title": "plan_version plan_hash approved_plan_hash reapproval gate",
+      "requirements": [
+        "R12"
+      ],
+      "dependencies": [
+        "OP-012",
+        "OP-010"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-012b"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-013",
+      "title": "MentrixContextEngine ContextPack full provenance",
+      "requirements": [
+        "R4",
+        "R13"
+      ],
+      "dependencies": [
+        "OP-009"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-013"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-014",
+      "title": "ProjectIntelligenceService P0 contract",
+      "requirements": [
+        "R5",
+        "R6",
+        "R14"
+      ],
+      "dependencies": [
+        "OP-013"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-014"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-016",
+      "title": "WorkItemSourceAdapter Protocol + stubs",
+      "requirements": [
+        "R21"
+      ],
+      "dependencies": [
+        "OP-010"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-016"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-020",
+      "title": "MentrixDeveloperService ask/plan/approve/agent",
+      "requirements": [
+        "R1",
+        "R3",
+        "R12"
+      ],
+      "dependencies": [
+        "OP-011",
+        "OP-012b",
+        "OP-013",
+        "OP-014"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-020"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-021",
+      "title": "Mentrix Developer HTTP API",
+      "requirements": [
+        "R1"
+      ],
+      "dependencies": [
+        "OP-020"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-021"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-022",
+      "title": "Unify llm_phase Ask/Plan to openai_compat + fallback policy",
+      "requirements": [
+        "R7",
+        "R20"
+      ],
+      "dependencies": [
+        "OP-009"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-022"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-023",
+      "title": "Native coding engine fail-closed no silent mock",
+      "requirements": [
+        "R7"
+      ],
+      "dependencies": [
+        "OP-022"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-023"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-023b",
+      "title": "Real Coding Agent integration smoke read/edit/run/diff",
+      "requirements": [
+        "R22"
+      ],
+      "dependencies": [
+        "OP-023"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-023b"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-024",
+      "title": "Companion routes to MentrixDeveloperService",
+      "requirements": [
+        "R1"
+      ],
+      "dependencies": [
+        "OP-020"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-024"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-030",
+      "title": "Manifest schema + rich checkpoints",
+      "requirements": [
+        "R15",
+        "R16"
+      ],
+      "dependencies": [
+        "OP-020"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-030"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-031",
+      "title": "EvidenceVerifier typed evidence + coverage",
+      "requirements": [
+        "R8",
+        "R18"
+      ],
+      "dependencies": [
+        "OP-030"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-031"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-032",
+      "title": "Resume worktree_path base/current commit",
+      "requirements": [
+        "R17"
+      ],
+      "dependencies": [
+        "OP-030",
+        "OP-031"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-032"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-033",
+      "title": "Model telemetry fallback fields",
+      "requirements": [
+        "R19"
+      ],
+      "dependencies": [
+        "OP-022"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-033"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-034",
+      "title": "Fallback policy tests never/ask/automatic",
+      "requirements": [
+        "R20"
+      ],
+      "dependencies": [
+        "OP-033"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-034"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-035",
+      "title": "E2E WorkItem to READY_TO_SHIP",
+      "requirements": [
+        "R22"
+      ],
+      "dependencies": [
+        "OP-020",
+        "OP-023b",
+        "OP-031",
+        "OP-032",
+        "OP-034"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-035"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-040",
+      "title": "Update PLAN and EVIDENCE traceability",
+      "requirements": [
+        "R15"
+      ],
+      "dependencies": [
+        "OP-035"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-040"
+      ],
+      "status": "completed"
+    },
+    {
+      "id": "OP-041",
+      "title": "P0 gate refuse COMPLETE if mandatory gaps remain",
+      "requirements": [
+        "R8",
+        "R22"
+      ],
+      "dependencies": [
+        "OP-040"
+      ],
+      "mandatory": true,
+      "attempts": 1,
+      "max_attempts": 3,
+      "evidence_ids": [
+        "EV-OP-041"
+      ],
+      "status": "completed"
+    }
+  ],
+  "plan_hash": "66d914d7b543199e4bc6a57f7b2eed0eb794c5a430a03b758a55685f94fd4a47",
+  "acceptance_note": "Not fully repository-green; TI-001/TI-002 deferred"
+}

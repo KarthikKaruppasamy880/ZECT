@@ -386,6 +386,10 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "process_start",
                 "process_incidents",
                 "process_open_cockpit",
+                "mentrix_developer_ask",
+                "mentrix_developer_plan",
+                "mentrix_developer_approve_plan",
+                "mentrix_developer_agent",
             }
         )
         prompt = (
@@ -695,6 +699,14 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         tools.append({"name": "fabric_classify", "args": {"text": message[:800]}})
     if any(k in m for k in ("run fabric", "fabric run", "multi-surface run")):
         tools.append({"name": "fabric_run", "args": {"text": message[:800]}})
+    if any(k in m for k in ("mentrix ask", "developer ask", "ask this work item")):
+        tools.append({"name": "mentrix_developer_ask", "args": {"question": message[:800]}})
+    if any(k in m for k in ("mentrix plan", "developer plan", "write a plan for this work")):
+        tools.append({"name": "mentrix_developer_plan", "args": {"goal": message[:800]}})
+    if any(k in m for k in ("approve plan", "approve the plan")):
+        tools.append({"name": "mentrix_developer_approve_plan", "args": {}})
+    if any(k in m for k in ("start developer agent", "mentrix developer agent", "run work item agent")):
+        tools.append({"name": "mentrix_developer_agent", "args": {"goal": message[:800]}})
     if any(k in m for k in ("camunda", "process engine", "process incidents", "bpmn deploy", "mentrix process")):
         tools.append({"name": "process_status", "args": {}})
     if "process incident" in m or "list incidents" in m:
@@ -2117,6 +2129,92 @@ def _exec_tool(
             else f"Mentrix Fabric surfaces: {', '.join(out.get('surfaces_required') or [])}"
         )
         return {"ok": True, "spoken_summary": spoken, **out}
+
+    if name == "mentrix_developer_ask":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        q = str(args.get("question") or args.get("text") or "").strip()
+        if not q:
+            return {"ok": False, "error": "question_required", "spoken_summary": "Provide a question for Mentrix Developer Ask."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).ask(
+                question=q,
+                work_item_id=args.get("work_item_id"),
+                project_id=args.get("project_id"),
+                repository_id=args.get("repository_id"),
+                repository_ref=str(args.get("repository_ref") or ""),
+                base_commit_sha=str(args.get("base_commit_sha") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": (out.get("answer") or "")[:400],
+            **out,
+        }
+
+    if name == "mentrix_developer_plan":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        goal = str(args.get("goal") or args.get("text") or "").strip()
+        if not goal:
+            return {"ok": False, "error": "goal_required", "spoken_summary": "Provide a goal for Mentrix Developer Plan."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).plan(
+                goal=goal,
+                work_item_id=args.get("work_item_id"),
+                project_id=args.get("project_id"),
+                repository_id=args.get("repository_id"),
+                repository_ref=str(args.get("repository_ref") or ""),
+                base_commit_sha=str(args.get("base_commit_sha") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": f"Plan written for work item {out.get('work_item_id')} (hash {str(out.get('plan_hash') or '')[:12]}).",
+            **out,
+        }
+
+    if name == "mentrix_developer_approve_plan":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        wid = args.get("work_item_id")
+        if not wid:
+            return {"ok": False, "error": "work_item_id_required", "spoken_summary": "Provide work_item_id to approve plan."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).approve_plan(work_item_id=int(wid))
+        finally:
+            db.close()
+        return {"ok": True, "spoken_summary": f"Plan approved for work item {wid}.", **out}
+
+    if name == "mentrix_developer_agent":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        wid = args.get("work_item_id")
+        if not wid:
+            return {"ok": False, "error": "work_item_id_required", "spoken_summary": "Provide work_item_id to start agent."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).start_agent(
+                work_item_id=int(wid),
+                goal=str(args.get("goal") or ""),
+                workspace=str(args.get("workspace") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": f"Mentrix Developer Agent wrote {len(out.get('files_written') or [])} file(s).",
+            **out,
+        }
 
     if name == "fabric_run":
         from app.domains.fabric.router import classify_text

@@ -23,7 +23,7 @@ def run_mentrix_native_build(
     project_key: str | None = None,
 ) -> dict[str, Any]:
     """Execute Mentrix Coding Agent against workspace; return builder-shaped dict."""
-    from app.adapters.coding_runtime import get_mentrix_native_runtime
+    from app.adapters.coding_runtime import get_mentrix_native_runtime, selected_coding_engine
 
     if not (workspace or "").strip():
         return {
@@ -31,6 +31,55 @@ def run_mentrix_native_build(
             "error": "workspace_required",
             "files_written": [],
             "engine": "mentrix_native",
+        }
+
+    # Fail closed: never silently use mock when this native build entrypoint is invoked.
+    engine_mode = selected_coding_engine()
+    smoke = (os.getenv("ZECT_CODING_AGENT_DETERMINISTIC_SMOKE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if engine_mode == "mock" and not smoke:
+        return {
+            "ok": False,
+            "error": "coding_engine_mock_forbidden",
+            "files_written": [],
+            "engine": "mentrix_native",
+            "detail": "ZECT_CODING_ENGINE=mock cannot satisfy mentrix_native build (no silent fallback)",
+        }
+
+    # Deterministic smoke: real tools via Mentrix native path (no LLM) — tests only.
+    if smoke:
+        from app.services.coding_engine.mentrix_agent_tools import execute_tool, resolve_workspace
+
+        root = resolve_workspace(workspace)
+        target = (expected_files or ["mentrix_p0_smoke_marker.py"])[0]
+        rel = target.replace("\\", "/").lstrip("./")
+        w = execute_tool(
+            "write_file",
+            {"path": rel, "content": "# mentrix smoke\nprint('smoke-ok')\n"},
+            workspace=root,
+        )
+        r = execute_tool("read_file", {"path": rel}, workspace=root)
+        cmd = execute_tool("run_command", {"command": f"python {rel}"}, workspace=root)
+        ok = bool(w.get("ok") and r.get("ok"))
+        return {
+            "ok": ok,
+            "status": "completed" if ok else "failed",
+            "run_id": "deterministic-smoke",
+            "files_written": [rel] if w.get("ok") else [],
+            "files_expected": list(expected_files or []),
+            "file_path": rel if w.get("ok") else "",
+            "generated_code": "",
+            "engine": "mentrix_native",
+            "model": "deterministic_smoke",
+            "events_tail": [
+                {"event": "write_file", "ok": w.get("ok"), "file_diff": w.get("file_diff")},
+                {"event": "read_file", "ok": r.get("ok")},
+                {"event": "run_command", "ok": cmd.get("ok"), "exit_code": cmd.get("exit_code")},
+            ],
         }
 
     timeout = float(
@@ -46,6 +95,14 @@ def run_mentrix_native_build(
             "respect Lattice facts in Mentrix context. Prefer grounded edits over invention."
         )
     rt = get_mentrix_native_runtime()
+    if getattr(rt, "provider_name", "") != "mentrix_native":
+        return {
+            "ok": False,
+            "error": "not_mentrix_native_runtime",
+            "files_written": [],
+            "engine": "mentrix_native",
+            "detail": f"got provider={getattr(rt, 'provider_name', None)}",
+        }
     run_id = rt.start_run(
         enriched_goal,
         workspace=workspace,

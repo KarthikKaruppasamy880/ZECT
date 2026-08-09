@@ -27,8 +27,9 @@ def test_path_under_workspace_root(monkeypatch, tmp_path):
 
 
 def test_path_outside_roots_raises():
+    # Must be outside home/tmp/POSIX defaults on both Windows and Linux CI.
     with pytest.raises(ValueError, match="Access denied"):
-        path_under_allowed_roots(os.path.abspath("C:\\Windows\\System32"))
+        path_under_allowed_roots("/__zect_not_allowed__/outside")
 
 
 def test_home_and_tempdir_allowed_without_any_env_var(monkeypatch):

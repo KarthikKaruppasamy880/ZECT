@@ -23,7 +23,7 @@ class TestFileDiffPathAllowlist:
         # tmp_path lives under the system temp dir, which allowed_paths.py now
         # allows by default (see test_allowed_paths.py) — use a path outside
         # every default root (POSIX list, home, and temp) instead.
-        outside = os.path.abspath("C:\\Windows\\System32")
+        outside = "/__zect_not_allowed__/outside"
 
         with pytest.raises(HTTPException) as exc:
             file_diff(FileDiffRequest(repo_path=outside, commit_a="a", commit_b="b", file_path="x.py"))

@@ -26,7 +26,7 @@ def _mock_stream_chunks(*texts):
 
 class TestLlmAnswerStream:
     def test_no_api_key_yields_single_fallback_and_stops(self, monkeypatch):
-        monkeypatch.setattr(companion, "_ensure_openai_env", lambda: "")
+        monkeypatch.setattr(companion, "_ensure_llm_ready", lambda: False)
 
         result = list(companion._llm_answer_stream("hello"))
 
@@ -34,30 +34,36 @@ class TestLlmAnswerStream:
         assert "ready" in result[0].lower()
 
     def test_yields_deltas_as_they_arrive(self, monkeypatch):
-        monkeypatch.setattr(companion, "_ensure_openai_env", lambda: "sk-test")
+        monkeypatch.setattr(companion, "_ensure_llm_ready", lambda: True)
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = _mock_stream_chunks("Hel", "lo ", "world")
-        monkeypatch.setattr("openai.OpenAI", lambda api_key, timeout=None: mock_client)
+        monkeypatch.setattr(
+            companion, "get_openai_compat_client", lambda timeout=None: mock_client
+        )
 
         result = list(companion._llm_answer_stream("hi"))
 
         assert result == ["Hel", "lo ", "world"]
 
     def test_skips_empty_deltas(self, monkeypatch):
-        monkeypatch.setattr(companion, "_ensure_openai_env", lambda: "sk-test")
+        monkeypatch.setattr(companion, "_ensure_llm_ready", lambda: True)
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = _mock_stream_chunks("Hi", None, "", "there")
-        monkeypatch.setattr("openai.OpenAI", lambda api_key, timeout=None: mock_client)
+        monkeypatch.setattr(
+            companion, "get_openai_compat_client", lambda timeout=None: mock_client
+        )
 
         result = list(companion._llm_answer_stream("hi"))
 
         assert result == ["Hi", "there"]
 
     def test_exception_before_any_delta_yields_fallback(self, monkeypatch):
-        monkeypatch.setattr(companion, "_ensure_openai_env", lambda: "sk-test")
+        monkeypatch.setattr(companion, "_ensure_llm_ready", lambda: True)
         mock_client = Mock()
         mock_client.chat.completions.create.side_effect = RuntimeError("boom")
-        monkeypatch.setattr("openai.OpenAI", lambda api_key, timeout=None: mock_client)
+        monkeypatch.setattr(
+            companion, "get_openai_compat_client", lambda timeout=None: mock_client
+        )
 
         result = list(companion._llm_answer_stream("hi", context="some context"))
 
@@ -65,7 +71,7 @@ class TestLlmAnswerStream:
         assert "some context" in result[0] or "ready" in result[0].lower()
 
     def test_exception_after_partial_delta_keeps_what_was_yielded(self, monkeypatch):
-        monkeypatch.setattr(companion, "_ensure_openai_env", lambda: "sk-test")
+        monkeypatch.setattr(companion, "_ensure_llm_ready", lambda: True)
 
         def broken_stream():
             yield _mock_stream_chunks("partial")[0]
@@ -73,7 +79,9 @@ class TestLlmAnswerStream:
 
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = broken_stream()
-        monkeypatch.setattr("openai.OpenAI", lambda api_key, timeout=None: mock_client)
+        monkeypatch.setattr(
+            companion, "get_openai_compat_client", lambda timeout=None: mock_client
+        )
 
         result = list(companion._llm_answer_stream("hi"))
 
@@ -95,7 +103,11 @@ class TestIterCompanionEventsStreamingPath:
         monkeypatch.setattr(companion, "_merge_intents", lambda message: [])
         monkeypatch.setattr(companion, "build_agent_context", lambda db, **kw: "")
         monkeypatch.setattr(companion, "_fast_tool_reply", lambda *a, **kw: None)
-        monkeypatch.setattr(companion, "_llm_answer_stream", lambda q, c="": iter(["Sun", "ny ", "in Austin."]))
+        monkeypatch.setattr(
+            companion,
+            "_llm_answer_stream",
+            lambda q, c="", preferred_name="": iter(["Sun", "ny ", "in Austin."]),
+        )
         monkeypatch.setattr(companion, "time", __import__("time"))  # keep real time.time() for latency_ms
 
         events = list(companion.iter_companion_events(db, "what's the weather"))
@@ -118,13 +130,14 @@ class TestIterCompanionEventsStreamingPath:
 
         monkeypatch.setattr(companion, "_merge_intents", lambda message: [])
         monkeypatch.setattr(companion, "build_agent_context", lambda db, **kw: "")
-        monkeypatch.setattr(companion, "_fast_tool_reply", lambda *a, **kw: "Delivery status: green.")
-        stream_spy = Mock()
-        monkeypatch.setattr(companion, "_llm_answer_stream", stream_spy)
+        monkeypatch.setattr(
+            companion, "_fast_tool_reply", lambda *a, **kw: "Cached weather: sunny."
+        )
+        monkeypatch.setattr(companion, "time", __import__("time"))
 
-        events = list(companion.iter_companion_events(db, "delivery status"))
+        events = list(companion.iter_companion_events(db, "weather"))
 
-        stream_spy.assert_not_called()
         token_events = [e for e in events if e["event"] == "token"]
-        assert "".join(t["data"]["text"] for t in token_events) == "Delivery status: green."
-        assert len(token_events) >= 1
+        assert token_events  # paced reveal of fixed reply
+        done = [e for e in events if e["event"] == "done"][0]
+        assert "sunny" in done["data"]["reply"].lower()

@@ -7,16 +7,16 @@ test.describe("Labs productivity spine", () => {
     await expect(page.getByRole("link", { name: "Playbooks" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Knowledge Base" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Scheduled Tasks" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Memory System" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Permissions" })).toBeVisible();
-
-    // Experimental pages not in primary Labs list
-    await expect(page.getByRole("link", { name: "Dream Engine" })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "File Explorer" })).toHaveCount(0);
 
     await page.getByTestId("sidebar-labs-more").click();
+    await expect(page.getByRole("link", { name: "Memory System" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Permissions" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Architecture" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Security Incidents" })).toBeVisible();
+
+    // Experimental pages not in primary nav list
+    await expect(page.getByRole("link", { name: "Dream Engine" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "File Explorer" })).toHaveCount(0);
 
     await page.goto("/settings");
     await expect(page.getByTestId("settings-demo-mode-toggle")).toHaveCount(0);

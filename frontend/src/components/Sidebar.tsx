@@ -41,7 +41,7 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
 /** P2 target navigation — routes kept; internals moved into composite sections. */
 const mentrixItems: NavItem[] = [
-  { href: "/mentrix-home", label: "Home", icon: Sparkles },
+  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
   { href: "/workspace", label: "Developer", icon: PanelLeft },
   { href: "/ask", label: "Agent Workspace", icon: Bot },
 ];
@@ -54,8 +54,9 @@ const workItems: NavItem[] = [
 
 const intelligenceItems: NavItem[] = [
   { href: "/project-intelligence", label: "Project Intelligence", icon: Brain },
-  { href: "/knowledge-base", label: "Knowledge", icon: BookMarked },
-  { href: "/skills-engine", label: "Skills & Playbooks", icon: Wrench },
+  { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
+  { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
+  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/lattice", label: "Lattice", icon: Network },
   { href: "/blueprint", label: "Blueprint", icon: Sparkles },
 ];
@@ -72,24 +73,26 @@ const agentModeItem: NavItem = { href: "/agent-mode", label: "Agent Mode (Advanc
 
 const securityItems: NavItem[] = [
   { href: "/security-incidents", label: "Security", icon: ShieldAlert },
+  { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: ShieldAlert },
 ];
 
 const operationsItems: NavItem[] = [
   { href: "/system-health", label: "System Health", icon: Activity },
   { href: "/integrations", label: "Integrations", icon: Plug },
-  { href: "/scheduled-tasks", label: "Automations", icon: Calendar },
+  { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ];
 
 const settingsOwnedItems: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/permissions", label: "Permissions", icon: ShieldAlert },
-  { href: "/memory", label: "Memory", icon: Brain },
+  { href: "/memory", label: "Memory System", icon: Brain },
   { href: "/secrets", label: "Secrets", icon: KeyRound },
   { href: "/token-controls", label: "Token Controls", icon: Coins },
   { href: "/rules", label: "Rules", icon: Scale },
   { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
-  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/tool-comparison", label: "Architecture", icon: FileText },
+  { href: "/security-incidents", label: "Security Incidents", icon: ShieldAlert },
   { href: "/docs", label: "Docs", icon: FileText },
   { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
   { href: "/", label: "Dashboard", icon: LayoutDashboard },

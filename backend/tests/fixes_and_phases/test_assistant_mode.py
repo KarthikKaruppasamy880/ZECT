@@ -157,11 +157,14 @@ class TestExecuteHeavyTool:
         assert result["ok"] is False
 
     def test_scan_for_anomalies_runs_inline_against_real_scan(self, monkeypatch):
-        db = _session()
-        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
-            "app.services.security.threat_detection.run_anomaly_scan",
-            lambda db, lookback_hours=24: {"findings": [{"kind": "ip_churn"}], "scanned": {"audit_logs": 3}},
+            assistant_phase,
+            "_scan_for_anomalies",
+            lambda args: {
+                "ok": True,
+                "findings": [{"kind": "ip_churn"}],
+                "scanned": {"audit_logs": 3},
+            },
         )
 
         result = assistant_phase.execute_heavy_tool("scan_for_anomalies", {"lookback_hours": 12})
@@ -171,11 +174,10 @@ class TestExecuteHeavyTool:
         assert result["scanned"] == {"audit_logs": 3}
 
     def test_scan_for_anomalies_handles_exception(self, monkeypatch):
-        db = _session()
-        monkeypatch.setattr("app.infrastructure.database.SessionLocal", lambda: db)
         monkeypatch.setattr(
-            "app.services.security.threat_detection.run_anomaly_scan",
-            Mock(side_effect=RuntimeError("db exploded")),
+            assistant_phase,
+            "_scan_for_anomalies",
+            lambda args: {"ok": False, "error": "db exploded"},
         )
 
         result = assistant_phase.execute_heavy_tool("scan_for_anomalies", {})

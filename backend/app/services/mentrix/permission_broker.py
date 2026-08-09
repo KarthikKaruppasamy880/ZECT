@@ -62,6 +62,8 @@ TOOL_ACTIONS: dict[str, str] = {
     "connector_architecture": "companion_diagnose",
     "capability_refuse": "companion_diagnose",
     "coding_engine_status": "companion_diagnose",
+    "coding_agent_status": "companion_diagnose",
+    "coding_agent_start": "companion_coding_agent",
     "note_add": "companion_notes_write",
     "note_list": "companion_notes_read",
     "jira_get_issue": "companion_jira_read",
@@ -69,7 +71,16 @@ TOOL_ACTIONS: dict[str, str] = {
     "datadog_query_logs": "companion_datadog_read",
     "jira_comment_pr": "companion_jira_write",
     "scan_for_anomalies": "companion_security_scan",
+    "malware_scan_path": "companion_security_scan",
+    "malware_status": "companion_security_scan",
     "file_security_ticket": "companion_jira_write",
+    "fabric_classify": "companion_fabric",
+    "fabric_run": "companion_fabric",
+    "process_status": "companion_process",
+    "process_deploy": "companion_process",
+    "process_start": "companion_process",
+    "process_incidents": "companion_process",
+    "process_open_cockpit": "companion_process",
 }
 
 ALWAYS_CONFIRM_TOOLS = {
@@ -80,6 +91,7 @@ ALWAYS_CONFIRM_TOOLS = {
     "media_generate",
     "media_edit",
     "start_delivery",
+    "coding_agent_start",
     "approve_delivery",
     "create_pr",
     "desktop_read",
@@ -98,6 +110,9 @@ ALWAYS_CONFIRM_TOOLS = {
     "browser_fill",
     "meeting_followup_draft",
     "file_organize_approve",
+    "fabric_run",
+    "process_deploy",
+    "process_start",
 }
 
 

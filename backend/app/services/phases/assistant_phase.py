@@ -355,8 +355,6 @@ def _file_security_ticket(args: dict[str, Any], *, created_by: str = "") -> dict
         return {"ok": False, "error": str(e)}
     finally:
         db.close()
-    finally:
-        db.close()
 
 
 def _trigger_deploy(args: dict[str, Any], *, created_by: str = "") -> dict[str, Any]:

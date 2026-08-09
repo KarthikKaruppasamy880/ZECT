@@ -309,8 +309,30 @@ def realtime_tool_schemas() -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "coding_engine_status",
-            "description": "Explain Mentrix Delivery vs mock/remote coding engine readiness",
+            "description": "Explain Mentrix Delivery vs Mentrix Coding Agent (mentrix_native/mock/remote) readiness",
             "parameters": {"type": "object", "properties": {}},
+        },
+        {
+            "type": "function",
+            "name": "coding_agent_start",
+            "description": "Start Mentrix Coding Agent on the Mentrix workspace; opens Developer Workspace session",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {"type": "string"},
+                    "workspace": {"type": "string"},
+                },
+                "required": ["goal"],
+            },
+        },
+        {
+            "type": "function",
+            "name": "coding_agent_status",
+            "description": "Status of Mentrix Coding Agent or a session_id",
+            "parameters": {
+                "type": "object",
+                "properties": {"session_id": {"type": "string"}},
+            },
         },
         {
             "type": "function",

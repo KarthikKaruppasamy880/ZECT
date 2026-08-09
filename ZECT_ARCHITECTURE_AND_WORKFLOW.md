@@ -410,9 +410,9 @@ model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 - ✅ Registered `gpt-5.4` in `model_selection.py`'s `MODELS` registry (so `/api/models/chat` — the one endpoint that already does real per-request provider dispatch — can serve it today) and in `token_tracker.py`'s `PRICING` table (so usage isn't silently mis-costed at gpt-4o-mini's rate).
 - ⚠️ **Pricing for GPT-5.4 is an estimate**, not confirmed against OpenAI's published rate card — correct `cost_per_1k_input`/`cost_per_1k_output` in `model_selection.py` and `PRICING` in `token_tracker.py` once real pricing is known. This only affects displayed cost, not model behavior.
 
-### 5.3 What minionbot actually uses (verified, for comparison)
+### 5.3 Strong codegen models (verified)
 
-`minionbot-qa-workbench/app/config/settings.py`: `llm_model = "gpt-5.4"`, `llm_model_fast = "gpt-4.1-mini"`. Not "GPT-4.6" (that model name doesn't exist). This is one component's config; other minionbot services weren't verified.
+GPT-5.4 and Claude Sonnet 5 are both registered for Build/HLD/Bugfix. Prefer Anthropic when `ANTHROPIC_API_KEY` is set; override with `CODEGEN_MODEL`.
 
 ### 5.4 When to select GPT-5.4 vs. the alternatives
 
@@ -420,7 +420,7 @@ model_name = ANTHROPIC_MODEL if use_anthropic else "gpt-4o-mini"
 |---|---|---|
 | `gpt-4o-mini` | Everything else — Ask, Plan, Review, Assistant, Companion, cheap/fast turns | Default everywhere; no action needed |
 | `claude-sonnet-5` | Build/HLD/Bugfix code generation on real repo-editing tasks (current default when `ANTHROPIC_API_KEY` is set) | Set `ANTHROPIC_API_KEY`; no `CODEGEN_MODEL` needed |
-| **`gpt-5.4`** | Build/HLD/Bugfix generation, if/when you want to compare it against Claude Sonnet 5 on your own repos, or match minionbot's code-gen model choice | Set `CODEGEN_MODEL=gpt-5.4` in `backend/.env`; also now listed in `/api/models/chat`'s registry for direct one-off comparisons |
+| **`gpt-5.4`** | Build/HLD/Bugfix generation when comparing against Claude Sonnet 5 | Set `CODEGEN_MODEL=gpt-5.4` in `backend/.env`; listed in `/api/models/chat` |
 
 ### 5.5 How the workflow operates end-to-end with this change
 

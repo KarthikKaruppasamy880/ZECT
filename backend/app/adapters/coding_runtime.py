@@ -1,7 +1,7 @@
 """Coding-agent runtime adapter interface + MockRuntime + factory (Phase 2 Stage A).
 
-Public provider names: mock | remote. Third-party product names must not appear
-in routes, UI, or public API payloads.
+Public provider names: mock | remote | mentrix_native.
+Third-party product names must not appear in routes, UI, or public API payloads.
 """
 
 from __future__ import annotations
@@ -141,11 +141,14 @@ class MockCodingRuntime:
 
 
 def selected_coding_engine() -> str:
-    return (os.getenv("ZECT_CODING_ENGINE") or "mock").strip().lower() or "mock"
+    """Product default is mentrix_native; CI sets ZECT_CODING_ENGINE=mock explicitly."""
+    return (os.getenv("ZECT_CODING_ENGINE") or "mentrix_native").strip().lower() or "mentrix_native"
 
 
 _runtime_singleton: CodingAgentRuntime | None = None
 _runtime_singleton_key: str | None = None
+# Sticky Mentrix native instance so coding-agent sessions survive env flips back to mock.
+_mentrix_native_singleton: CodingAgentRuntime | None = None
 
 
 def _runtime_config_key() -> str:
@@ -160,16 +163,24 @@ def _runtime_config_key() -> str:
 
 def reset_coding_runtime_for_tests() -> None:
     """Clear process-local engine singleton (tests only)."""
-    global _runtime_singleton, _runtime_singleton_key
+    global _runtime_singleton, _runtime_singleton_key, _mentrix_native_singleton
     _runtime_singleton = None
     _runtime_singleton_key = None
+    _mentrix_native_singleton = None
+
+
+def get_mentrix_native_runtime() -> CodingAgentRuntime:
+    """Always return the Mentrix Coding Agent singleton (for /api/coding-agent)."""
+    global _mentrix_native_singleton
+    if _mentrix_native_singleton is None:
+        from app.adapters.coding_engine_mentrix import MentrixNativeCodingRuntime
+
+        _mentrix_native_singleton = MentrixNativeCodingRuntime()
+    return _mentrix_native_singleton
 
 
 def get_coding_runtime() -> CodingAgentRuntime:
-    """Factory — default mock; remote requires URL + API key (server-side).
-
-    Returns a process-local singleton so run state survives across HTTP handlers.
-    """
+    """Factory — mock (CI default), mentrix_native, or remote."""
     global _runtime_singleton, _runtime_singleton_key
     key = _runtime_config_key()
     if _runtime_singleton is not None and _runtime_singleton_key == key:
@@ -178,9 +189,9 @@ def get_coding_runtime() -> CodingAgentRuntime:
     mode = selected_coding_engine()
     if mode == "mock":
         rt: CodingAgentRuntime = MockCodingRuntime()
+    elif mode in ("mentrix_native", "native"):
+        rt = get_mentrix_native_runtime()
     elif mode == "remote":
-        # Agent Server HTTP client (internal module may specialize protocol paths).
-        # Public provider name stays "remote" — never brand third-party products in API/UI.
         from app.adapters.coding_engine_openhands import (
             CodingEngineConfigError,
             build_agent_server_engine,
@@ -191,7 +202,7 @@ def get_coding_runtime() -> CodingAgentRuntime:
         except CodingEngineConfigError:
             raise
     else:
-        raise ValueError(f"Unknown ZECT_CODING_ENGINE={mode!r}; use mock|remote")
+        raise ValueError(f"Unknown ZECT_CODING_ENGINE={mode!r}; use mock|mentrix_native|remote")
 
     _runtime_singleton = rt
     _runtime_singleton_key = key
@@ -199,10 +210,13 @@ def get_coding_runtime() -> CodingAgentRuntime:
 
 
 def coding_engine_health() -> dict[str, Any]:
-    """Public health payload — provider is mock|remote only."""
+    """Public health payload — provider is mock|mentrix_native|remote."""
     mode = selected_coding_engine()
     if mode == "mock":
         return MockCodingRuntime().health()
+    if mode in ("mentrix_native", "native"):
+        rt = get_mentrix_native_runtime()
+        return getattr(rt, "health", lambda: {"provider": "mentrix_native", "ready": True})()
     if mode == "remote":
         from app.adapters.coding_engine_openhands import (
             CodingEngineConfigError,

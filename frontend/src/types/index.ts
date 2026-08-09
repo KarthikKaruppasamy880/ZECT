@@ -190,6 +190,7 @@ export interface EnhanceBlueprintResponse {
 export interface LLMKeyStatus {
   configured: boolean;
   model: string;
+  mentrix_local?: boolean;
 }
 
 // Token Dashboard

@@ -34,7 +34,7 @@ from app.domains.integration import (
     ci_monitor,
     ci_remediation,
 )
-from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer, coding_engine
+from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer, coding_engine, coding_agent
 from app.domains.repository import (
     repo_analysis,
     file_explorer,
@@ -66,6 +66,8 @@ from app.domains.personal_agent import (
 )
 from app.domains.voice import realtime, voice_clone
 from app.domains.security_incident import router as security_incident_router
+from app.domains.fabric import router as fabric_router
+from app.domains.process import router as process_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -132,11 +134,14 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(file_watcher.router)
     app.include_router(diff_viewer.router)
     app.include_router(coding_engine.router)
+    app.include_router(coding_agent.router)
 
     app.include_router(lattice_router.router)
     app.include_router(mentrix_router.router)
     app.include_router(voice_clone.router)
     app.include_router(security_incident_router)
+    app.include_router(fabric_router)
+    app.include_router(process_router)
     app.include_router(confluence_integration.router)
     app.include_router(datadog_integration.router)
     app.include_router(email_integration.router)

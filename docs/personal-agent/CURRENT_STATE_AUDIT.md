@@ -1,14 +1,14 @@
 # Personal Agent — Current State Audit
 
-**Updated:** 2026-08-08 (desktop Notepad++ / long-notes / Present prefetch / coding readiness)  
-**Authoritative status:** Prefer [`CAPABILITY_MATRIX.md`](./CAPABILITY_MATRIX.md), [`CODING_READINESS.md`](./CODING_READINESS.md), and [`IMPLEMENTATION_ROADMAP.md`](./IMPLEMENTATION_ROADMAP.md) over historical PA-0 snapshots.  
+**Updated:** 2026-08-09 (product spine: mentrix_native default, schedule ticker, ZECT Security Agent malware)  
+**Authoritative status:** Prefer [`CAPABILITY_MATRIX.md`](./CAPABILITY_MATRIX.md), [`CODING_READINESS.md`](./CODING_READINESS.md), [`docs/guides/ZECT_SECURITY_AND_CODING_OPERATOR.md`](../guides/ZECT_SECURITY_AND_CODING_OPERATOR.md), and [`IMPLEMENTATION_ROADMAP.md`](./IMPLEMENTATION_ROADMAP.md) over historical PA-0 snapshots.  
 **Source brief:** [`docs/screenshots/DesktopControl.md`](../screenshots/DesktopControl.md)
 
 ---
 
 ## Executive summary
 
-ZECT Mentrix personal-agent spine is **implemented** for typed + spoken Companion, MentrixOrchestrator + permission broker, Email/Slack draft-before-send, local Notes, Calendar read/demo, durable file organize, Electron Computer Mode (allowlisted apps including **Notepad++**), and desktop bridge. Long editor content uses **`desktop_write_note`** (not SendKeys). Remaining gaps are mostly **deferred product depth** (Notion live, LiveKit, full UIA, Calendar OAuth write, Zoom **schedule** API, open-any-app), not missing spine.
+ZECT Mentrix personal-agent spine is **implemented** for typed + spoken Companion, MentrixOrchestrator + permission broker, Email/Slack draft-before-send, local Notes, Calendar read/demo, durable file organize, Electron Computer Mode (allowlisted apps including **Notepad++**), and desktop bridge. **Mentrix Coding Agent** is the product default coding engine (`mentrix_native`). **ZECT Security Agent** adds malware file scan (daemon via `services/zect-security-scan`) plus audit IR. Schedules run via in-process ticker. Remaining gaps are mostly **deferred product depth** (Notion live, LiveKit, full UIA, Calendar OAuth write, Zoom **schedule** API, open-any-app), not missing spine.
 
 ---
 
@@ -28,9 +28,11 @@ ZECT Mentrix personal-agent spine is **implemented** for typed + spoken Companio
 | Slack / email | Providers + `outbound_drafts.py`; compose via `email_send` draft+Allow (not Outlook typing) |
 | Calendar read/draft | `/api/calendar/*` + ICS/demo provider; companion + Realtime tools |
 | File organize | Durable SHA plans + UI `/file-organize` |
-| Skills / schedules | `skills_engine.py`, `scheduler.py`, schedule grants |
+| Skills / schedules | `skills_engine.py`, `scheduler.py`, schedule grants + **in-process ticker** (`schedule_ticker.py`) |
 | Connector architecture Mermaid | Companion tool `connector_architecture` → Artifacts (subgraphs + deferred list) |
-| Coding readiness honesty | [`CODING_READINESS.md`](./CODING_READINESS.md) + tool `coding_engine_status` |
+| Coding readiness honesty | [`CODING_READINESS.md`](./CODING_READINESS.md) + tool `coding_engine_status`; **product default `mentrix_native`** |
+| Mentrix Coding Agent context | skills/memory/Lattice/Blueprint via `agent_context.py` |
+| ZECT Security Agent malware | `detection_malware.py`, `/api/security/malware/*`, `services/zect-security-scan` |
 
 ---
 

@@ -58,7 +58,7 @@ const LAYOUT = {
   tile: true,
 };
 
-const STYLESHEET: cytoscape.Stylesheet[] = [
+const STYLESHEET: cytoscape.StylesheetJson = [
   {
     selector: "node",
     style: {

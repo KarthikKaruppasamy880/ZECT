@@ -31,6 +31,7 @@ declare global {
         onSttGoal?: (cb: (payload: { goal?: string }) => void) => () => void;
         onComputerMode?: (cb: (payload: { computerMode?: boolean; reason?: string }) => void) => () => void;
         setComputerMode?: (enabled: boolean) => Promise<unknown>;
+        setEmergencyStop?: (active: boolean) => Promise<unknown>;
         setDictationEnabled?: (enabled: boolean) => Promise<unknown>;
         armDictation?: (durationMs?: number) => Promise<unknown>;
         disarmDictation?: () => Promise<unknown>;

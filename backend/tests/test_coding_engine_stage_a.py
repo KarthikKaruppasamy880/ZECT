@@ -28,8 +28,21 @@ def _init_git_repo(root: Path) -> Path:
     return root
 
 
-def test_factory_defaults_to_mock(monkeypatch):
+def test_factory_defaults_to_mentrix_native(monkeypatch):
     monkeypatch.delenv("ZECT_CODING_ENGINE", raising=False)
+    from app.adapters.coding_runtime import reset_coding_runtime_for_tests
+    from app.adapters.coding_engine_mentrix import MentrixNativeCodingRuntime
+
+    reset_coding_runtime_for_tests()
+    assert selected_coding_engine() == "mentrix_native"
+    rt = get_coding_runtime()
+    assert isinstance(rt, MentrixNativeCodingRuntime)
+    health = coding_engine_health()
+    assert health["provider"] == "mentrix_native"
+
+
+def test_factory_mock_when_explicit(monkeypatch):
+    monkeypatch.setenv("ZECT_CODING_ENGINE", "mock")
     from app.adapters.coding_runtime import reset_coding_runtime_for_tests
 
     reset_coding_runtime_for_tests()

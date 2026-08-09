@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -183,12 +184,19 @@ def run_due_schedules(db: Session) -> list[ScheduleRun]:
     results = []
     for sched in list_due_schedules(db):
         results.append(execute_schedule(db, sched, trigger_type="scheduled"))
-        # Advance next_run_at for interval jobs
+        # Advance next_run_at for interval / cron jobs
         if sched.schedule_type == "interval" and sched.interval_minutes:
             from datetime import timedelta
 
             sched.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=int(sched.interval_minutes))
             db.commit()
+        elif sched.schedule_type == "cron" or (sched.cron_expression or "").strip():
+            from app.domains.personal_agent.schedule_ticker import compute_next_cron_run
+
+            nxt = compute_next_cron_run(sched.cron_expression or "")
+            if nxt is not None:
+                sched.next_run_at = nxt
+                db.commit()
         elif sched.schedule_type == "once":
             sched.is_active = False
             db.commit()
@@ -220,10 +228,38 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
             f"steps={prun.steps_completed}/{prun.total_steps}"
         )
 
-    if task in ("custom", "mentrix", "report", "build", "deploy", "review"):
+    if task in ("coding", "coding_agent", "code"):
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+
         goal = cfg.get("goal") or cfg.get("prompt") or schedule.description or schedule.name
-        mode = cfg.get("mode") or ("bugfix" if task == "review" else "build" if task == "build" else "ask")
-        if mode not in ("ask", "plan", "build", "review", "bugfix", "deploy"):
+        ws = (cfg.get("workspace") or os.getenv("MENTRIX_WORKSPACE") or "").strip()
+        if not ws:
+            raise RuntimeError("coding schedule requires task_config.workspace or MENTRIX_WORKSPACE")
+        rt = get_mentrix_native_runtime()
+        sid = rt.start_run(
+            str(goal),
+            workspace=ws,
+            auto_approve_edits=bool(cfg.get("auto_approve_edits", True)),
+            project_id=schedule.project_id or cfg.get("project_id"),
+            skill_id=cfg.get("skill_id"),
+            project_key=cfg.get("project_key"),
+        )
+        return f"Started Mentrix Coding Agent session {sid}"
+
+    if task in ("custom", "mentrix", "report", "build", "deploy", "review", "ask", "plan", "bugfix", "upgrade"):
+        goal = cfg.get("goal") or cfg.get("prompt") or schedule.description or schedule.name
+        mode = cfg.get("mode") or (
+            "bugfix"
+            if task == "review"
+            else "build"
+            if task == "build"
+            else "ask"
+            if task in ("custom", "mentrix", "report", "ask")
+            else task
+            if task in ("plan", "bugfix", "upgrade", "deploy")
+            else "ask"
+        )
+        if mode not in ("ask", "plan", "build", "review", "bugfix", "deploy", "upgrade"):
             mode = "ask"
         run = MentrixRun(
             project_id=schedule.project_id or cfg.get("project_id"),
@@ -240,12 +276,9 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
         db.add(run)
         db.commit()
         db.refresh(run)
-        # Fire-and-forget via existing worker when available
         try:
             from app.workers.mentrix_worker import run_mentrix_in_background
-            import asyncio
 
-            # Prefer sync-safe: if worker expects background task, mark queued
             try:
                 run_mentrix_in_background(
                     run.id,
@@ -260,12 +293,11 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
                     repo_id=cfg.get("repo_id"),
                 )
             except TypeError:
-                # Signature drift — still leave MentrixRun queued for UI
                 pass
             return f"Started Mentrix run #{run.id} mode={mode}"
         except Exception as e:
             run.status = "failed"
             db.commit()
-            return f"Mentrix run #{run.id} created but worker failed: {e}"
+            raise RuntimeError(f"Mentrix run #{run.id} created but worker failed: {e}") from e
 
-    return f"Executed schedule '{schedule.name}' task_type={task} (no-op handler)"
+    raise RuntimeError(f"Unknown schedule task_type={task!r} — set playbook_id or a supported task_type")

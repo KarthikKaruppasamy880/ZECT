@@ -83,7 +83,7 @@ class TestValidateCwdAllowlist:
         monkeypatch.delenv("ZECT_WORKSPACE_ROOT", raising=False)
         monkeypatch.delenv("MENTRIX_WORKSPACE", raising=False)
         with pytest.raises(HTTPException) as exc:
-            _validate_cwd(r"C:\Windows\System32")
+            _validate_cwd("/__zect_not_allowed__/outside")
         assert exc.value.status_code == 403
 
     def test_accepts_path_under_workspace_root(self, monkeypatch, tmp_path):

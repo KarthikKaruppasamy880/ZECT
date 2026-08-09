@@ -1045,6 +1045,10 @@ def run_mentrix(
             if can_write_build:
                 from app.services.build_intel.file_ops import check_rule_violations
                 from app.services.phases.build_phase_svc import run_build_from_plan
+                from app.services.coding_engine.mentrix_native_build import (
+                    mentrix_native_build_enabled,
+                    run_mentrix_native_build,
+                )
 
                 plan = attach_files_expected(plan)
                 if isinstance(result.get("plan"), dict):
@@ -1055,7 +1059,42 @@ def run_mentrix(
                 batch_index = int(rs.get("batch_index") or result.get("batch_index") or 0)
                 batches = chunk_files(files_expected, MENTRIX_BUILD_BATCH_SIZE)
 
-                if batches:
+                if mentrix_native_build_enabled() and workspace:
+                    # Mentrix Coding Agent owns file edits for this Delivery build.
+                    batch_goal = (
+                        f"{plan_text}\n\nImplement or update these files: "
+                        f"{', '.join(files_expected[:40]) or '(infer from goal)'}"
+                    )
+                    push(
+                        "builder",
+                        "Mentrix Coding Agent building in workspace",
+                        phase="build",
+                        event="mentrix_native_build",
+                    )
+                    native = run_mentrix_native_build(
+                        goal=batch_goal,
+                        workspace=workspace,
+                        expected_files=files_expected,
+                        project_id=project_id,
+                        project_key=project_key,
+                    )
+                    for f in native.get("files_written") or []:
+                        if f not in all_files_written:
+                            all_files_written.append(f)
+                    builder = {
+                        **native,
+                        "files_written": list(all_files_written),
+                        "files_expected": list(all_files_expected),
+                    }
+                    result["builder"] = builder
+                    result["engine_provider"] = "mentrix_native"
+                    push(
+                        "builder",
+                        f"Mentrix Coding Agent wrote {len(all_files_written)} file(s) status={native.get('status')}",
+                        phase="build",
+                        event="mentrix_native_build_done",
+                    )
+                elif batches:
                     # File-list batched build with human confirm between batches
                     while batch_index < len(batches):
                         batch = batches[batch_index]

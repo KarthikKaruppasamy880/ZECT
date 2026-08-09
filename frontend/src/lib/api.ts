@@ -128,6 +128,7 @@ export const askQuestion = (
   question: string,
   repo_context?: string,
   repo_id?: number,
+  model?: string,
 ) =>
   request<AskResponse>("/api/llm/ask", {
     method: "POST",
@@ -135,6 +136,7 @@ export const askQuestion = (
       question,
       ...(repo_context ? { repo_context } : {}),
       ...(repo_id != null ? { repo_id } : {}),
+      ...(model ? { model } : {}),
     }),
   });
 export const generatePlan = (
@@ -142,6 +144,7 @@ export const generatePlan = (
   repo_context?: string,
   constraints?: string,
   repo_id?: number,
+  model?: string,
 ) =>
   request<PlanResponse>("/api/llm/plan", {
     method: "POST",
@@ -150,6 +153,7 @@ export const generatePlan = (
       ...(repo_context ? { repo_context } : {}),
       ...(constraints ? { constraints } : {}),
       ...(repo_id != null ? { repo_id } : {}),
+      ...(model ? { model } : {}),
     }),
   });
 export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =>
@@ -160,6 +164,19 @@ export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =
 export const configureLLMKey = (openai_api_key: string) =>
   request<LLMKeyStatus>("/api/llm/configure-key", { method: "POST", body: JSON.stringify({ openai_api_key }) });
 export const getLLMStatus = () => request<LLMKeyStatus>("/api/llm/status");
+
+export type MentrixLlmGatewayStatus = {
+  configured: boolean;
+  online: boolean;
+  base_url?: string;
+  models?: string[];
+  label?: string;
+  detail?: string;
+  default_model?: string;
+};
+
+export const getMentrixLlmGateway = () =>
+  request<MentrixLlmGatewayStatus>("/api/models/gateway");
 
 // Context store (cross-page workflow persistence)
 export type ContextEntry = { key: string; value: string; page: string; expires_at?: string | null };
@@ -366,6 +383,8 @@ export const mentrixCompanionTurn = (
     confirmed_tools?: string[];
     history?: { role: string; content: string }[];
     agent_context?: string;
+    skill_id?: number | string;
+    model?: string;
     signal?: AbortSignal;
   },
 ) =>
@@ -379,6 +398,10 @@ export const mentrixCompanionTurn = (
       confirmed_tools: opts?.confirmed_tools || [],
       history: opts?.history || [],
       agent_context: opts?.agent_context || "",
+      ...(opts?.skill_id != null && opts.skill_id !== ""
+        ? { skill_id: Number(opts.skill_id) }
+        : {}),
+      ...(opts?.model ? { model: opts.model } : {}),
     }),
   });
 
@@ -395,6 +418,8 @@ export async function mentrixCompanionStream(
     project_key?: string;
     confirmed_tools?: string[];
     agent_context?: string;
+    skill_id?: number | string;
+    model?: string;
     signal?: AbortSignal;
     onEvent: (ev: MentrixStreamEvent) => void;
   },
@@ -408,6 +433,12 @@ export async function mentrixCompanionStream(
   }
   if (opts.agent_context?.trim()) {
     params.set("agent_context", opts.agent_context.trim().slice(0, 4000));
+  }
+  if (opts.skill_id != null && opts.skill_id !== "") {
+    params.set("skill_id", String(opts.skill_id));
+  }
+  if (opts.model?.trim()) {
+    params.set("model", opts.model.trim());
   }
   const res = await apiFetch(`/api/mentrix/companion/stream?${params.toString()}`, {
     method: "GET",
@@ -1104,6 +1135,92 @@ export const fileSearch = (directory: string, pattern: string, fileExtensions?: 
   });
 export const fileTree = (path: string, depth = 3) =>
   request<any[]>(`/api/files/tree?path=${encodeURIComponent(path)}&depth=${depth}`);
+
+// Mentrix Coding Agent (Cursor-class)
+export type MentrixCodingAgentEvent = {
+  sequence_id: number;
+  event: string;
+  message: string;
+  phase?: string;
+  data?: Record<string, any>;
+};
+
+export const codingAgentCreateSession = (body: {
+  goal: string;
+  workspace: string;
+  model?: string;
+  auto_approve_edits?: boolean;
+  max_steps?: number;
+  expected_files?: string[];
+}) =>
+  request<{ id: string; status: string; events?: MentrixCodingAgentEvent[] }>("/api/coding-agent/sessions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const codingAgentGetSession = (sessionId: string) =>
+  request<any>(`/api/coding-agent/sessions/${encodeURIComponent(sessionId)}`);
+
+export const codingAgentCancel = (sessionId: string) =>
+  request<any>(`/api/coding-agent/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: "POST" });
+
+export const codingAgentApprove = (sessionId: string, actionId: string, approve = true) =>
+  request<any>(`/api/coding-agent/sessions/${encodeURIComponent(sessionId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ action_id: actionId, approve }),
+  });
+
+export const codingAgentMessage = (sessionId: string, message: string) =>
+  request<any>(`/api/coding-agent/sessions/${encodeURIComponent(sessionId)}/message`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+
+/** SSE stream for Mentrix Coding Agent session events. */
+export async function codingAgentStream(
+  sessionId: string,
+  opts: {
+    after?: number;
+    signal?: AbortSignal;
+    onEvent: (ev: MentrixCodingAgentEvent) => void;
+  },
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (opts.after != null) params.set("after", String(opts.after));
+  const res = await apiFetch(
+    `/api/coding-agent/sessions/${encodeURIComponent(sessionId)}/stream?${params.toString()}`,
+    { method: "GET", signal: opts.signal },
+  );
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Coding agent stream failed");
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine) continue;
+      try {
+        const parsed = JSON.parse(dataLine) as MentrixCodingAgentEvent;
+        if (parsed.event === "ping" || (parsed as any).after != null && !parsed.sequence_id) continue;
+        opts.onEvent(parsed);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
 
 // Git Operations
 export const gitStatus = (repoPath: string) =>

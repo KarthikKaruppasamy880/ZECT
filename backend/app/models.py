@@ -1025,6 +1025,23 @@ class Schedule(Base):
     runs = relationship("ScheduleRun", back_populates="schedule", cascade="all, delete-orphan")
 
 
+class FabricSurface(Base):
+    """Mentrix Multi-Surface Fabric — registered change domain."""
+    __tablename__ = "fabric_surfaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    surface_id = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, default="")
+    project_key = Column(String, default="")
+    workspace = Column(String, default="")
+    repo_hints = Column(JSON, default=list)
+    keywords = Column(JSON, default=list)
+    active = Column(Boolean, default=False)
+    config_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
 class ScheduleRun(Base):
     """Execution record for a scheduled task run."""
     __tablename__ = "schedule_runs"

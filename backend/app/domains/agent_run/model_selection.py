@@ -4,6 +4,13 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from openai import OpenAI, APIError
+from app.adapters.llm.openai_compat import (
+    MENTRIX_LOCAL_MODELS,
+    get_openai_compat_client,
+    mentrix_local_llm_configured,
+    mentrix_llm_chat_model,
+    probe_mentrix_local_llm,
+)
 from app.token_tracker import log_tokens
 
 router = APIRouter(prefix="/api/models", tags=["models"])
@@ -14,6 +21,8 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 # ---------------------------------------------------------------------------
 
 MODELS = [
+    # Mentrix Local LLM (OpenAI-compatible gateway)
+    *MENTRIX_LOCAL_MODELS,
     # OpenAI
     {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "cost_per_1k_input": 0.00015, "cost_per_1k_output": 0.0006, "free": False, "quality": "high", "speed": "fast"},
     {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "cost_per_1k_input": 0.005, "cost_per_1k_output": 0.015, "free": False, "quality": "best", "speed": "medium"},
@@ -68,17 +77,32 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _get_client(provider: str) -> tuple[OpenAI, str]:
-    """Get the OpenAI client. Anthropic is handled separately in chat_with_model —
-    Anthropic's Messages API has a different request/response shape entirely
-    (separate `system` param, content-block list, different token field names);
-    it cannot be reached by pointing this same SDK at a different base_url."""
+    """Get chat client for openai or mentrix_local providers."""
+    if provider == "mentrix_local":
+        if not mentrix_local_llm_configured():
+            raise HTTPException(
+                status_code=503,
+                detail="Mentrix Local LLM not configured. Set ZECT_LLM_BASE_URL.",
+            )
+        try:
+            return get_openai_compat_client(), "mentrix_local"
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     if provider == "openai":
+        if mentrix_local_llm_configured():
+            # Prefer Mentrix Local when gateway is configured (same OpenAI SDK path).
+            try:
+                return get_openai_compat_client(), "mentrix_local"
+            except RuntimeError:
+                pass
         key = os.getenv("OPENAI_API_KEY", "")
         if not key:
-            raise HTTPException(status_code=503, detail="OpenAI API key not configured. Set OPENAI_API_KEY in backend/.env")
+            raise HTTPException(
+                status_code=503,
+                detail="OpenAI API key not configured. Set OPENAI_API_KEY in backend/.env",
+            )
         return OpenAI(api_key=key), "openai"
-    else:
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+    raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
 
 def _find_model(model_id: str) -> dict:
@@ -86,9 +110,22 @@ def _find_model(model_id: str) -> dict:
     for m in MODELS:
         if m["id"] == model_id:
             return m
-    # Default fallback
+    # Unknown id → treat as Mentrix Local when gateway is up, else openai default
+    if mentrix_local_llm_configured():
+        return {
+            "id": model_id,
+            "name": model_id,
+            "provider": "mentrix_local",
+            "cost_per_1k_input": 0.0,
+            "cost_per_1k_output": 0.0,
+            "free": True,
+            "quality": "good",
+            "speed": "medium",
+        }
+    for m in MODELS:
+        if m["id"] == "gpt-4o-mini":
+            return m
     return MODELS[0]
-
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -98,7 +135,37 @@ def _find_model(model_id: str) -> dict:
 @router.get("/", response_model=list[ModelInfo])
 def list_models():
     """List all available models with their pricing and capabilities."""
-    return [ModelInfo(**m) for m in MODELS]
+    models = list(MODELS)
+    # Merge live Mentrix Local models when gateway is up
+    probe = probe_mentrix_local_llm()
+    if probe.get("online") and probe.get("models"):
+        known = {m["id"] for m in models}
+        for mid in probe["models"]:
+            if mid not in known:
+                models.append(
+                    {
+                        "id": mid,
+                        "name": f"Mentrix Local — {mid}",
+                        "provider": "mentrix_local",
+                        "cost_per_1k_input": 0.0,
+                        "cost_per_1k_output": 0.0,
+                        "free": True,
+                        "quality": "good",
+                        "speed": "medium",
+                    }
+                )
+    return [ModelInfo(**m) for m in models]
+
+
+@router.get("/gateway")
+def mentrix_llm_gateway_status():
+    """Probe Mentrix Local LLM OpenAI-compatible /v1/models."""
+    probe = probe_mentrix_local_llm()
+    return {
+        **probe,
+        "default_model": mentrix_llm_chat_model(),
+        "chat_model_env": mentrix_llm_chat_model(),
+    }
 
 
 @router.get("/status")
@@ -106,16 +173,21 @@ def get_model_status():
     """Check which providers are configured."""
     openai_key = bool(os.getenv("OPENAI_API_KEY", ""))
     anthropic_key = bool(os.getenv("ANTHROPIC_API_KEY", ""))
+    local = mentrix_local_llm_configured()
+    probe = probe_mentrix_local_llm() if local else {"online": False}
+    providers = []
+    if local:
+        providers.append("mentrix_local")
+    if openai_key:
+        providers.append("openai")
+    if anthropic_key:
+        providers.append("anthropic")
     return {
         "openai_configured": openai_key,
-        # Previously reported true whenever an OpenAI key existed, even with
-        # no ANTHROPIC_API_KEY at all — Anthropic is a genuinely separate
-        # provider/account, so this must not be inferred from OpenAI's key.
         "anthropic_configured": anthropic_key,
-        "available_providers": [
-            p for p, configured in [("openai", openai_key), ("anthropic", anthropic_key)]
-            if configured
-        ],
+        "mentrix_local_configured": local,
+        "mentrix_local_online": bool(probe.get("online")),
+        "available_providers": providers,
     }
 
 
@@ -138,8 +210,9 @@ def chat_with_model(req: ChatRequest):
                 max_tokens=req.max_tokens,
                 temperature=req.temperature,
             )
+            used_provider = "anthropic"
         else:
-            client, _ = _get_client(provider)
+            client, used_provider = _get_client(provider)
             resp = client.chat.completions.create(
                 model=req.model,
                 messages=req.messages,
@@ -166,7 +239,7 @@ def chat_with_model(req: ChatRequest):
         return ChatResponse(
             content=content,
             model=req.model,
-            provider=provider,
+            provider=used_provider,
             tokens_used=total_tokens,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,

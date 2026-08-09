@@ -90,6 +90,16 @@ def create_schedule(data: ScheduleCreate, db: Session = Depends(get_db)):
                 sched.scheduled_time = datetime.fromisoformat(data.scheduled_time)
             except ValueError:
                 pass
+        if data.schedule_type == "cron" or (data.cron_expression or "").strip():
+            from app.domains.personal_agent.schedule_ticker import compute_next_cron_run
+
+            nxt = compute_next_cron_run(data.cron_expression or "")
+            if nxt is not None:
+                sched.next_run_at = nxt
+        elif data.schedule_type == "interval" and data.interval_minutes:
+            from datetime import timedelta
+
+            sched.next_run_at = datetime.now(timezone.utc) + timedelta(minutes=int(data.interval_minutes))
         db.add(sched)
         db.commit()
         db.refresh(sched)

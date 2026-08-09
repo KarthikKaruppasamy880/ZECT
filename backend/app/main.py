@@ -298,3 +298,19 @@ def on_startup():
     purge_demo_projects()
     seed_demo_projects()
     seed_default_rules()
+    try:
+        from app.domains.personal_agent.schedule_ticker import start_schedule_ticker
+
+        start_schedule_ticker()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    try:
+        from app.domains.personal_agent.schedule_ticker import stop_schedule_ticker
+
+        stop_schedule_ticker()
+    except Exception:  # noqa: BLE001
+        pass

@@ -49,3 +49,16 @@ def test_coding_engine_status_exec():
     out = c._exec_tool(db=None, name="coding_engine_status", args={})  # type: ignore[arg-type]
     assert out.get("ok") is True
     assert out.get("board", {}).get("type") == "markdown"
+
+
+def test_coding_agent_start_intent():
+    tools = c._parse_intents("start coding agent: add a hello.py helper")
+    assert any(t["name"] == "coding_agent_start" for t in tools)
+
+
+def test_coding_agent_start_requires_workspace(monkeypatch):
+    monkeypatch.delenv("MENTRIX_WORKSPACE", raising=False)
+    monkeypatch.delenv("ZECT_WORKSPACE_ROOT", raising=False)
+    out = c._exec_tool(db=None, name="coding_agent_start", args={"goal": "add file"})  # type: ignore[arg-type]
+    assert out.get("ok") is False
+    assert out.get("error") == "workspace_required"

@@ -185,9 +185,10 @@ class TestChatterboxClient:
         def boom(**kw):
             raise RuntimeError("connection refused")
 
+        chatterbox_client.invalidate_health_cache()
         monkeypatch.setattr(chatterbox_client.httpx, "Client", boom)
 
-        assert chatterbox_client.chatterbox_available() is False
+        assert chatterbox_client.chatterbox_available(force_refresh=True) is False
 
     def test_clone_voice_requires_reference_text(self):
         with pytest.raises(ValueError, match="reference_text"):
@@ -497,7 +498,7 @@ class TestVoiceCloneEndpoints:
 
         assert result.body == b"wav-bytes"
         assert result.media_type == "audio/mpeg"
-        assert result.headers["X-Mentrix-TTS-Engine"] == "chatterbox"
+        assert result.headers["X-Mentrix-TTS-Engine"] == "zect_voicebox"
 
     def test_speak_clone_offline_503_no_openai(self, monkeypatch):
         from app.domains.voice.voice_clone import SpeakRequest, speak
@@ -528,7 +529,7 @@ class TestVoiceCloneEndpoints:
         with pytest.raises(HTTPException) as exc:
             speak(SpeakRequest(text="hello", require_clone=True), current_user=USER, db=db)
         assert exc.value.status_code == 503
-        assert "Chatterbox offline" in str(exc.value.detail)
+        assert "ZECT Voicebox offline" in str(exc.value.detail)
         assert openai_calls == []
 
     def test_speak_stock_voice_works_without_chatterbox(self, monkeypatch):
@@ -569,7 +570,8 @@ class TestVoiceCloneEndpoints:
         )
         db.commit()
         monkeypatch.setattr(
-            "app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True
+            "app.adapters.llm.chatterbox_client.chatterbox_available",
+            lambda force_refresh=False: True,
         )
         # localhost must normalize to 127.0.0.1 (Windows IPv6 localhost trap).
         monkeypatch.setenv("CHATTERBOX_BASE_URL", "http://localhost:17493")
@@ -680,6 +682,10 @@ class TestMintRealtimeSessionSurfacesClonedVoice:
     def test_mint_includes_cloned_voice_when_present(self, monkeypatch):
         monkeypatch.setattr("app.services.mentrix.realtime.realtime_enabled", lambda: True)
         monkeypatch.setattr("app.services.mentrix.realtime._ensure_openai_env", lambda: "sk-test")
+        monkeypatch.setattr(
+            "app.adapters.llm.chatterbox_client.chatterbox_available",
+            lambda force_refresh=False: True,
+        )
 
         db = _session()
         db.add(

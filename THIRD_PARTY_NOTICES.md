@@ -37,6 +37,35 @@ Source references (implementation detail, not product branding):
 - https://github.com/OpenHands/software-agent-sdk
 - https://github.com/OpenHands/OpenHands
 
+## Mentrix Local LLM runtime (optional)
+
+Mentrix Local LLM is ZECT’s branded local chat gateway. The optional container
+image used under `services/mentrix-llm/` is the MIT-licensed Ollama server
+(`ollama/ollama`). Product UI and Mentrix docs refer only to Mentrix Local LLM /
+Mentrix LLM gateway — not the upstream project name.
+
+Copyright (c) Ollama contributors and/or respective authors.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Source reference (implementation detail, not product branding):
+- https://github.com/ollama/ollama
+
 ## Monaco Editor (Phase 3 Developer Workspace)
 
 The Developer Workspace embeds the Monaco editor via `monaco-editor` and
@@ -67,12 +96,24 @@ boundaries keep provider names out of ZECT routes and UI labels.
 
 ## Detection / endpoint / forensics adapters (Phase 9)
 
-ZECT Security Incidents use a ZECT-owned **Detection Provider** interface.
-Optional external SIEM/EDR/forensic collectors may be wired behind that
+ZECT Security Incidents / **ZECT Security Agent** use a ZECT-owned **Detection Provider**
+interface. Optional external SIEM/EDR/forensic collectors may be wired behind that
 interface; product UI, routes, and models never brand those vendors.
 Attribution for any installed connector libraries belongs here when added.
 
-Current built-in provider: audit-trail anomaly scan (ZECT-native).
+Current built-in providers:
+- audit-trail anomaly scan (ZECT-native)
+- malware file scan via the ZECT Security Scan daemon (`services/zect-security-scan`)
+
+Underlying open-source malware engine (when the security-scan compose image is used):
+ClamAV — GPL-2.0 — https://www.clamav.net/ — https://github.com/Cisco-Talos/clamav
+(Product chrome never displays this name; this notice is license compliance only.)
+
+## Mentrix Process (BPM)
+
+Mentrix Process may connect to a Camunda BPM engine over REST
+(`ZECT_CAMUNDA_BASE_URL`). Product UI and Companion say **Mentrix Process** only.
+Camunda — https://camunda.com/ — attribution for the connected engine belongs here.
 
 
 The optional desktop shell uses Electron (MIT) for windowing. App identity

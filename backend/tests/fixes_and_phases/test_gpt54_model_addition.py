@@ -1,6 +1,5 @@
-"""GPT-5.4 added as a selectable model (matching the model minionbot's
-qa-workbench config uses for code generation) — registered in the
-multi-provider model registry and priced in the token tracker so usage
+"""GPT-5.4 added as a selectable model for code generation —
+registered in the multi-provider model registry and priced in the token tracker so usage
 isn't silently mis-costed at gpt-4o-mini's rate.
 """
 

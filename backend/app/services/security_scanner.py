@@ -1,4 +1,4 @@
-"""SecurityScanner interface — product layer over ZECT Security Agent (P3)."""
+"""SecurityScanner — Mentrix Security Agent adapter with live DB findings (P3)."""
 
 from __future__ import annotations
 
@@ -11,23 +11,57 @@ class SecurityScanner(Protocol):
 
     name: str
 
-    def scan(self, *, target: str = "", context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def scan(self, *, target: str = "", context: dict[str, Any] | None = None, db: Any = None) -> dict[str, Any]:
         ...
 
 
 class MentrixSecurityAgentScanner:
-    """Adapter that reports Security Agent surface readiness (no foreign AV branding)."""
+    """Reads SecurityFinding / SecurityIncident — product Security Agent path only."""
 
     name = "mentrix_security_agent"
 
-    def scan(self, *, target: str = "", context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def scan(self, *, target: str = "", context: dict[str, Any] | None = None, db: Any = None) -> dict[str, Any]:
+        findings: list[dict[str, Any]] = []
+        incidents = 0
+        if db is not None:
+            try:
+                from app.models import SecurityFinding, SecurityIncident
+
+                incidents = db.query(SecurityIncident).count()
+                rows = (
+                    db.query(SecurityFinding)
+                    .order_by(SecurityFinding.id.desc())
+                    .limit(25)
+                    .all()
+                )
+                for f in rows:
+                    findings.append(
+                        {
+                            "id": f.id,
+                            "title": getattr(f, "title", "") or "",
+                            "severity": getattr(f, "severity", "") or "",
+                            "kind": getattr(f, "kind", "") or "security",
+                            "status": getattr(f, "status", "") or "",
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "ok": False,
+                    "scanner": self.name,
+                    "target": target or "workspace",
+                    "error": str(exc)[:300],
+                    "findings": [],
+                    "route": "/security-incidents",
+                }
+
         return {
             "ok": True,
             "scanner": self.name,
             "target": target or "workspace",
-            "findings": [],
+            "findings": findings,
+            "incident_count": incidents,
             "route": "/security-incidents",
-            "note": "Use ZECT Security Agent UI/API for incident workflow; native deep scanner deferred.",
+            "note": "Findings sourced from ZECT Security Agent store; no foreign AV engine.",
             "context_keys": sorted((context or {}).keys()),
         }
 

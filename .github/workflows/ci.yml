@@ -94,6 +94,7 @@ jobs:
           ZECT_PASSWORD: test-pass-1234
           ZECT_AUTH_MODE: local
           ZECT_AUTH_ENFORCE: "true"
+          ZECT_PYTEST: "1"
           DATABASE_URL: sqlite:///./e2e_zect.db
           MENTRIX_PR_DRY_RUN: "true"
           MENTRIX_ENABLED: "true"
@@ -102,7 +103,7 @@ jobs:
         run: |
           nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/zect-api.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 1; done
-      - name: Playwright e2e
+      - name: Playwright e2e (core product)
         working-directory: frontend
         env:
           CI: "true"
@@ -110,4 +111,4 @@ jobs:
           ZECT_PASSWORD: test-pass-1234
           VITE_API_URL: http://127.0.0.1:8000
           PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
-        run: npm run test:e2e
+        run: npm run test:e2e:core

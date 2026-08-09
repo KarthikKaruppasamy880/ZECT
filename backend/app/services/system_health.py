@@ -105,6 +105,44 @@ def build_system_health(db: Any = None) -> dict[str, Any]:
         }
     )
 
+    try:
+        from app.services.desktop_readiness import build_desktop_readiness
+
+        desk = build_desktop_readiness()
+        components.append(
+            {
+                "id": "desktop",
+                "name": "Desktop / Computer Mode",
+                "status": "ok" if desk.get("electron_main_present") else "degraded",
+                "detail": {
+                    "electron": desk.get("electron_main_present"),
+                    "computer": desk.get("computer_module_present"),
+                    "bridge_queue": desk.get("bridge_queue_present"),
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(
+            {"id": "desktop", "name": "Desktop / Computer Mode", "status": "unknown", "detail": str(exc)[:200]}
+        )
+
+    try:
+        from app.services.skills_fs import list_filesystem_skills
+
+        fs_n = len(list_filesystem_skills(limit=20))
+        components.append(
+            {
+                "id": "skills_fs",
+                "name": "Skills filesystem",
+                "status": "ok" if fs_n else "not_configured",
+                "detail": {"pack_count": fs_n},
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(
+            {"id": "skills_fs", "name": "Skills filesystem", "status": "unknown", "detail": str(exc)[:200]}
+        )
+
     worst = "ok"
     for c in components:
         st = c.get("status")

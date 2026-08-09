@@ -16,13 +16,11 @@ async function gotoWithHeal(page: Page, path: string) {
 }
 
 test.describe("ZECT phase completion smoke", () => {
-  test("tool comparison matrix loads", async ({ page }) => {
+  test("Architecture guide loads (no competitor matrix)", async ({ page }) => {
     await gotoWithHeal(page, "/tool-comparison");
-    await expect(page.getByRole("heading", { name: /Development tool comparison/i })).toBeVisible({
-      timeout: 20000,
-    });
-    await expect(page.getByText("ZECT")).toBeVisible();
-    await expect(page.getByText("Cursor")).toBeVisible();
+    await expect(page.getByTestId("architecture-guide")).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("heading", { name: "Architecture" })).toBeVisible();
+    await expect(page.getByText(/Comparison matrix/i)).toHaveCount(0);
   });
 
   test("memory and security nav surfaces", async ({ page }) => {

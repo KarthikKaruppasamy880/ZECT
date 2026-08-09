@@ -223,6 +223,22 @@ def _ensure_llm_ready() -> bool:
     return openai_compat_available()
 
 
+def _ensure_openai_env() -> str:
+    """Return cloud OPENAI_API_KEY (Realtime / legacy callers). Empty if unset."""
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parents[3] / ".env"
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+    except Exception:  # noqa: BLE001
+        pass
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
 def _resolve_companion_model() -> str:
     override = (_companion_model_ctx.get() or "").strip()
     if override:

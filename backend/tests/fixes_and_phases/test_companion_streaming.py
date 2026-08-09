@@ -120,6 +120,7 @@ class TestIterCompanionEventsStreamingPath:
     def test_fast_tool_reply_still_pages_through_token_events(self, monkeypatch):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
+        from unittest.mock import Mock
 
         import app.models  # noqa: F401
         from app.infrastructure.database import Base
@@ -130,14 +131,13 @@ class TestIterCompanionEventsStreamingPath:
 
         monkeypatch.setattr(companion, "_merge_intents", lambda message: [])
         monkeypatch.setattr(companion, "build_agent_context", lambda db, **kw: "")
-        monkeypatch.setattr(
-            companion, "_fast_tool_reply", lambda *a, **kw: "Cached weather: sunny."
-        )
-        monkeypatch.setattr(companion, "time", __import__("time"))
+        monkeypatch.setattr(companion, "_fast_tool_reply", lambda *a, **kw: "Delivery status: green.")
+        stream_spy = Mock()
+        monkeypatch.setattr(companion, "_llm_answer_stream", stream_spy)
 
-        events = list(companion.iter_companion_events(db, "weather"))
+        events = list(companion.iter_companion_events(db, "delivery status"))
 
+        stream_spy.assert_not_called()
         token_events = [e for e in events if e["event"] == "token"]
-        assert token_events  # paced reveal of fixed reply
-        done = [e for e in events if e["event"] == "done"][0]
-        assert "sunny" in done["data"]["reply"].lower()
+        assert "".join(t["data"]["text"] for t in token_events) == "Delivery status: green."
+        assert len(token_events) >= 1

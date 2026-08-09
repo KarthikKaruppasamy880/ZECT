@@ -7,12 +7,15 @@
 - [x] Skills FS dual-read `.zect/skills/*/SKILL.md`
 - [x] Ultra Review 3-lane merger (`POST /api/ultrareview/lanes`)
 - [x] Playwright smoke nav update + P2 surfaces test
-- [x] SecurityScanner interface + `/api/system/security-scan`
+- [x] Developer Workspace **Context Used** panel (P1 PI + WorkItems + model-readiness; no new context engine)
+- [x] Thin SecurityScanner interface + `/api/system/security-scan` (not a native deep scanner)
 - [x] Model readiness `/api/system/model-readiness`
-- [x] Tests: `test_mentrix_p2_p3_remaining.py` + P0/P1 still green (34 passed)
+- [x] Tests: backend P0/P1/P2 (34) + frontend unit (60) + practical Playwright Context Used
 
-## Explicit non-DoD
+## Explicitly deferred (NOT complete)
 
 - Full Playwright suite green
-- Native deep security scanner implementation
+- Native deep security scanner
 - Full Skills DB↔FS bidirectional sync
+- Advanced desktop automation
+- Deeper local-model stack work

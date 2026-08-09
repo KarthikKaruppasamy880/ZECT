@@ -22,6 +22,7 @@ import WorkspaceMentrixTimeline from "@/components/WorkspaceMentrixTimeline";
 import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/WorkspaceSymbolsPanel";
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
+import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   fileList,
@@ -119,7 +120,9 @@ export default function DeveloperWorkspace() {
   const deepPath = searchParams.get("path") || "";
   const deepSession = searchParams.get("session") || "";
   const deepGoal = searchParams.get("goal") || "";
-  const { activeLocalPath, activeRepo, activeRepoId } = useActiveProject();
+  const deepWorkItem = searchParams.get("work_item_id");
+  const workItemId = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
+  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey } = useActiveProject();
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
@@ -533,13 +536,15 @@ export default function DeveloperWorkspace() {
 
       <PhaseErrorBanner error={error} testId="workspace-error" density="compact" />
 
+      <div className="flex flex-1 min-h-0 gap-3">
+        <div className="flex flex-1 min-h-0 flex-col gap-3 min-w-0">
       {!rootPath ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 flex items-start gap-2">
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           Select an Active Project with a local clone, or set Mentrix workspace, then refresh.
         </div>
       ) : (
-        <div className="flex flex-1 min-h-0 flex-col gap-3">
+            <>
           <div className="flex flex-1 min-h-0 gap-3">
             <aside className="w-64 shrink-0 flex flex-col gap-2 min-h-0">
               <div
@@ -733,8 +738,20 @@ export default function DeveloperWorkspace() {
             <WorkspaceTerminal workspaceRoot={rootPath} />
             <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
           </div>
+            </>
+          )}
         </div>
-      )}
+
+        <WorkspaceContextUsedPanel
+          projectId={activeProjectId}
+          projectKey={activeProjectKey || ""}
+          repositoryId={activeRepoId}
+          activeRepoLabel={
+            activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
+          }
+          workItemId={workItemId}
+        />
+      </div>
     </div>
   );
 }

@@ -51,3 +51,4 @@ States: COMPLETE | PARTIAL | DUPLICATED | DISCONNECTED | MOCK | MISSING | DEFERR
 | Local model readiness | COMPLETE | /api/system/model-readiness | — | Gateway hook | OP-210 | P3 |
 | Work Items UX | COMPLETE | WorkItems.tsx | — | List page | OP-110 | P2 |
 | Project Intelligence UX | COMPLETE | ProjectIntelligence.tsx | — | PI page | OP-110 | P2 |
+| Context Used panel | COMPLETE | WorkspaceContextUsedPanel | Ideal ASK/PLAN/AGENT chrome partial | PI provenance rail | OP-CTX | P2 |

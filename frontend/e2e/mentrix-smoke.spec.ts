@@ -55,6 +55,17 @@ test.describe("Mentrix smoke", () => {
     await expect(page.getByTestId("system-health-page")).toBeVisible();
   });
 
+  test("Developer Workspace shows Context Used panel", async ({ page }) => {
+    await page.goto("/workspace");
+    await expect(page.getByTestId("developer-workspace")).toBeVisible();
+    await expect(page.getByTestId("workspace-context-used")).toBeVisible();
+    await expect(page.getByTestId("workspace-context-used-rows")).toBeVisible();
+    await expect(page.getByTestId("context-used-work_item")).toBeVisible();
+    await expect(page.getByTestId("context-used-knowledge")).toBeVisible();
+    await expect(page.getByTestId("context-used-memory")).toBeVisible();
+    await expect(page.getByTestId("context-used-model")).toBeVisible();
+  });
+
   test("Mentrix upgrade mode chat + gates", async ({ page }) => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("mentrix-page")).toBeVisible();

@@ -12,6 +12,8 @@ class ConnectorCapability:
     description: str = ""
     permission_requirement: str = "require_approval"
     scopes: list[str] = field(default_factory=list)
+    kind: str = "read"  # read | write
+    permission_policy: str = "CONFIRM"  # ALLOW | CONFIRM | DENY
 
 
 @dataclass
@@ -23,24 +25,47 @@ class ConnectorHealth:
     detail: str = ""
     capabilities: list[ConnectorCapability] = field(default_factory=list)
     permission_requirement: str = "require_approval"
+    auth_status: str = ""
+    read_tools: list[str] = field(default_factory=list)
+    write_tools: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
+        caps = [
+            {
+                "name": c.name,
+                "description": c.description,
+                "permission_requirement": c.permission_requirement,
+                "scopes": c.scopes,
+                "kind": c.kind,
+                "permission_policy": c.permission_policy,
+            }
+            for c in self.capabilities
+        ]
+        reads = self.read_tools or [c["name"] for c in caps if c.get("kind") == "read"]
+        writes = self.write_tools or [c["name"] for c in caps if c.get("kind") == "write"]
+        policies = {str(c.get("permission_policy") or "CONFIRM").upper() for c in caps}
+        if not caps:
+            agg_policy = "CONFIRM"
+        elif "DENY" in policies:
+            agg_policy = "DENY"
+        elif "CONFIRM" in policies or writes:
+            agg_policy = "CONFIRM"
+        else:
+            # Read-only caps with explicit ALLOW only
+            agg_policy = "ALLOW" if policies == {"ALLOW"} else "CONFIRM"
         return {
             "id": self.id,
             "name": self.name,
             "status": self.status,
+            "health": self.status,
             "transport": self.transport,
             "detail": self.detail,
             "permission_requirement": self.permission_requirement,
-            "capabilities": [
-                {
-                    "name": c.name,
-                    "description": c.description,
-                    "permission_requirement": c.permission_requirement,
-                    "scopes": c.scopes,
-                }
-                for c in self.capabilities
-            ],
+            "permission_policy": agg_policy,
+            "auth_status": self.auth_status or self.status,
+            "read_tools": reads,
+            "write_tools": writes,
+            "capabilities": caps,
         }
 
 

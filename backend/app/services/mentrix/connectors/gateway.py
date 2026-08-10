@@ -38,10 +38,11 @@ class M365Connector(_BaseConnector):
             detail="Graph mail/calendar" if configured else "IMAP/SMTP fallback active",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("list_messages", "Outlook inbox", "email:read", ["Mail.Read"]),
-                ConnectorCapability("list_events", "Calendar events", "email:read", ["Calendars.Read"]),
-                ConnectorCapability("create_draft", "Outlook draft", "email:draft", ["Mail.ReadWrite"]),
+                ConnectorCapability("list_messages", "Outlook inbox", "email:read", ["Mail.Read"], kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("list_events", "Calendar events", "email:read", ["Calendars.Read"], kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("create_draft", "Outlook draft", "email:draft", ["Mail.ReadWrite"], kind="write", permission_policy="CONFIRM"),
             ],
+            auth_status="configured" if configured else "missing_creds",
         )
 
     def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -70,8 +71,8 @@ class EmailImapSmtpConnector(_BaseConnector):
             detail=f"imap={imap} smtp={smtp}",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("digest", "IMAP inbox digest", "email:read"),
-                ConnectorCapability("send", "SMTP send", "email:send"),
+                ConnectorCapability("digest", "IMAP inbox digest", "email:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("send", "SMTP send", "email:send", kind="write", permission_policy="CONFIRM"),
             ],
         )
 
@@ -103,9 +104,9 @@ class SlackConnector(_BaseConnector):
             detail="SLACK_BOT_TOKEN" if tok else "set SLACK_BOT_TOKEN",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("digest", "Channel history / mentions", "slack:read"),
-                ConnectorCapability("send_message", "Post message", "slack:send"),
-                ConnectorCapability("mentions", "Mention scan", "slack:read"),
+                ConnectorCapability("digest", "Channel history / mentions", "slack:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("send_message", "Post message", "slack:send", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("mentions", "Mention scan", "slack:read", kind="read", permission_policy="ALLOW"),
             ],
         )
 
@@ -170,9 +171,9 @@ class JiraConnector(_BaseConnector):
             detail="JIRA_* configured" if ok else "set JIRA_BASE_URL + JIRA_EMAIL + JIRA_API_TOKEN",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("assigned", "Issues assigned to me", "jira:read"),
-                ConnectorCapability("get_issue", "Get issue", "jira:read"),
-                ConnectorCapability("search", "JQL search", "jira:read"),
+                ConnectorCapability("assigned", "Issues assigned to me", "jira:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("get_issue", "Get issue", "jira:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("search", "JQL search", "jira:read", kind="read", permission_policy="ALLOW"),
             ],
         )
 
@@ -216,8 +217,8 @@ class GitHubConnector(_BaseConnector):
             detail="GITHUB_TOKEN" if tok else "set GITHUB_TOKEN",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("list_prs", "Open PRs", "repository:read"),
-                ConnectorCapability("ci_status", "PR / CI summary", "repository:read"),
+                ConnectorCapability("list_prs", "Open PRs", "repository:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("ci_status", "PR / CI summary", "repository:read", kind="read", permission_policy="ALLOW"),
             ],
         )
 
@@ -264,17 +265,33 @@ class ZoomConnector(_BaseConnector):
             detail="Open/join only — no Zoom Meeting API schedule",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("open", "Open Zoom.exe", "desktop:control"),
-                ConnectorCapability("join_url", "Open zoom.us join URL", "desktop:control"),
+                ConnectorCapability("open", "Open Zoom.exe", "desktop:control", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("join_url", "Open zoom.us join URL", "desktop:control", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("schedule", "Zoom Meeting API schedule", "desktop:control", kind="write", permission_policy="DENY"),
             ],
         )
 
     def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        act = str(action or "").strip().lower()
+        if act in ("schedule", "create_meeting", "auto_share", "share"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "zoom_schedule_and_auto_share_denied",
+                "note": "Open/join only — Zoom Meeting API schedule and auto screen-share are out of scope",
+            }
+        if act not in ("open", "join_url", "join"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "zoom_action_not_allowed",
+                "action": act,
+            }
         return {
             "ok": True,
             "via": "desktop",
-            "action": action,
-            "desktop": "computer_open_app" if action == "open" else "open_zoom",
+            "action": act,
+            "desktop": "computer_open_app" if act == "open" else "open_zoom",
             "args": arguments or {},
             "note": "Routed to Computer Mode — schedule refused by design",
         }
@@ -294,19 +311,35 @@ class FilesystemConnector(_BaseConnector):
             detail="Desktop/Documents/Downloads — never delete",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("mkdir", "Create folder", "filesystem:move"),
-                ConnectorCapability("list_dir", "List directory", "filesystem:scan"),
-                ConnectorCapability("move_path", "Move/rename", "filesystem:move"),
-                ConnectorCapability("organize", "File organize plan/execute", "filesystem:move"),
+                ConnectorCapability("mkdir", "Create folder", "filesystem:move", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("list_dir", "List directory", "filesystem:scan", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("move_path", "Move/rename", "filesystem:move", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("organize", "File organize plan/execute", "filesystem:move", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("delete", "Delete files", "filesystem:move", kind="write", permission_policy="DENY"),
             ],
         )
 
     def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        act = str(action or "").strip().lower()
+        if act in ("delete", "unlink", "rmdir", "remove", "rm", "rmtree", "delete_file"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "delete_never_allowed",
+                "note": "Mentrix never deletes files",
+            }
+        if act not in ("mkdir", "list_dir", "move_path", "organize", "file_organize"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "filesystem_action_not_allowed",
+                "action": act,
+            }
         return {
             "ok": True,
             "via": "desktop",
-            "action": action,
-            "desktop": action if action in ("mkdir", "list_dir", "move_path") else "file_organize",
+            "action": act,
+            "desktop": act if act in ("mkdir", "list_dir", "move_path") else "file_organize",
             "args": arguments or {},
         }
 
@@ -325,8 +358,8 @@ class BrowserFallbackConnector(_BaseConnector):
             detail="Playwright / browser_navigate allowlisted",
             permission_requirement=self.permission_requirement,
             capabilities=[
-                ConnectorCapability("navigate", "Open allowlisted URL", "desktop:control"),
-                ConnectorCapability("snapshot", "DOM snapshot", "desktop:view"),
+                ConnectorCapability("navigate", "Open allowlisted URL", "desktop:control", kind="write", permission_policy="CONFIRM"),
+                ConnectorCapability("snapshot", "DOM snapshot", "desktop:view", kind="read", permission_policy="ALLOW"),
             ],
         )
 

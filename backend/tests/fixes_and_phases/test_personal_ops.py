@@ -31,6 +31,10 @@ def test_connector_health_matrix_shape():
         assert "status" in row
         assert "capabilities" in row
         assert "permission_requirement" in row
+        assert "auth_status" in row
+        assert "permission_policy" in row
+        assert "read_tools" in row
+        assert "write_tools" in row
 
 
 def test_m365_status_missing_creds():

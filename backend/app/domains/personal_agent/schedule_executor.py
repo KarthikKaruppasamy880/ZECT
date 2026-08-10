@@ -235,6 +235,22 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
         n = len(brief.get("actions") or [])
         return f"DailyBrief actions={n} upserted={brief.get('upserted')} mail={len((brief.get('information') or {}).get('email') or [])}"
 
+    if task.startswith("automation_loop:") or task.startswith("automation_loop_"):
+        from app.services.mentrix.automation_loops import get_loop_runtime
+
+        key = task.split(":", 1)[-1].replace("automation_loop_", "").strip()
+        if task.startswith("automation_loop_"):
+            key = task[len("automation_loop_") :]
+        out = get_loop_runtime().run_once(
+            db,
+            loop_key=key,
+            user_id=schedule.user_id,
+            autonomy=(cfg.get("autonomy") if isinstance(cfg, dict) else None),
+            prompt=str((cfg.get("prompt") if isinstance(cfg, dict) else "") or ""),
+            dry_run=bool(cfg.get("dry_run")) if isinstance(cfg, dict) else False,
+        )
+        return f"AutomationLoop {key} ok={out.get('ok')} status={out.get('status')} run={out.get('run_id')}"
+
     if task in ("coding", "coding_agent", "code"):
         from app.adapters.coding_runtime import get_mentrix_native_runtime
 

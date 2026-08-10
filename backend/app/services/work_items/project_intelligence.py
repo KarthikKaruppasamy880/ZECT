@@ -46,15 +46,53 @@ class ProjectIntelligenceService:
         playbooks: list[dict[str, Any]] = []
         related = list(related_work or [])
 
-        # Lattice
+        # Lattice — status + query hits for Developer Ask context
         try:
             if project_key:
-                try:
-                    from app.services.lattice.indexer import get_lattice_status  # type: ignore
+                from app.services.lattice.indexer import get_lattice_status, query_graph
 
-                    lattice = {"status": "ok", "detail": get_lattice_status(project_key), "hits": []}
+                detail = {}
+                status_err = False
+                query_err = False
+                try:
+                    detail = get_lattice_status(project_key) or {}
                 except Exception:  # noqa: BLE001
-                    lattice = {"status": "ok", "project_key": project_key, "hits": [], "freshness": "ephemeral"}
+                    detail = {"project_key": project_key, "error": "lattice_status_failed"}
+                    status_err = True
+                hits: list[dict[str, Any]] = []
+                q = (query or "").strip()
+                if q:
+                    try:
+                        raw_hits = query_graph(project_key, q, limit=12) or []
+                        for h in raw_hits:
+                            hits.append(
+                                {
+                                    "id": str(h.get("id") or h.get("path") or h.get("name") or ""),
+                                    "content": (
+                                        f"{h.get('kind', 'node')} {h.get('name') or ''} "
+                                        f"path={h.get('path') or ''} {h.get('title') or ''}"
+                                    ).strip()[:1500],
+                                    "text": str(h.get("name") or h.get("path") or "")[:500],
+                                    "summary": str(h.get("title") or h.get("group") or "")[:500],
+                                    "repository": str(repository_id or ""),
+                                    "score": 0.8,
+                                    "freshness": "indexed",
+                                    "verification_state": "structural",
+                                }
+                            )
+                    except Exception:  # noqa: BLE001
+                        hits = []
+                        query_err = True
+                lattice_status = "degraded" if (status_err or query_err) else "ok"
+                lattice = {
+                    "status": lattice_status,
+                    "detail": detail,
+                    "hits": hits,
+                    "project_key": project_key,
+                    "freshness": "ephemeral" if not hits else "indexed",
+                    "query_error": query_err,
+                    "status_error": status_err,
+                }
         except Exception:  # noqa: BLE001
             lattice = {"status": "unavailable", "hits": []}
 

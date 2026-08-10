@@ -88,6 +88,7 @@ class MentrixDeveloperService:
             goal=goal,
             knowledge_hits=snap.knowledge,
             memory_hits=snap.memory,
+            lattice_hits=list((snap.lattice or {}).get("hits") or []),
             blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
         )
         return {"pack": pack.to_dict(), "pi": snap.to_dict()}
@@ -131,7 +132,8 @@ class MentrixDeveloperService:
             pass
         result = llm_phase.run_ask(
             question,
-            repo_context=built["pack"].get("items") and MentrixContextEngine().build(
+            repo_context=MentrixContextEngine()
+            .build(
                 work_item_id=wi.id,
                 repository_id=wi.repository_id,
                 repository_ref=wi.repository_ref or "",
@@ -139,8 +141,10 @@ class MentrixDeveloperService:
                 goal=question,
                 knowledge_hits=built["pi"].get("knowledge") or [],
                 memory_hits=built["pi"].get("memory") or [],
+                lattice_hits=(built["pi"].get("lattice") or {}).get("hits") or [],
                 blueprint_snippet=str((built["pi"].get("blueprint") or {}).get("snippet") or ""),
-            ).text_blob(),
+            )
+            .text_blob(),
             repo_id=wi.repository_id,
             db=self.db,
         )
@@ -208,6 +212,7 @@ class MentrixDeveloperService:
                 goal=goal,
                 knowledge_hits=built["pi"].get("knowledge") or [],
                 memory_hits=built["pi"].get("memory") or [],
+                lattice_hits=(built["pi"].get("lattice") or {}).get("hits") or [],
                 blueprint_snippet=str((built["pi"].get("blueprint") or {}).get("snippet") or ""),
             )
             .text_blob(),

@@ -17,7 +17,22 @@ from app.models import PersonalAction, WorkItem
 
 router = APIRouter(prefix="/api/personal-actions", tags=["personal-actions"])
 
-SUGGESTED_VERBS = ("Analyze", "Fix", "Draft", "Reply", "Prepare", "Organize", "Continue")
+SUGGESTED_VERBS = (
+    "Analyze",
+    "Fix",
+    "Draft",
+    "Draft Reply",
+    "Reply",
+    "Prepare",
+    "Prepare Meeting",
+    "Organize",
+    "Organize Files",
+    "Continue",
+    "Continue Agent",
+    "Review PR",
+    "Open Jira",
+    "Approve",
+)
 
 
 def _parse_json(raw: str | None, default: Any) -> Any:
@@ -30,13 +45,17 @@ def _parse_json(raw: str | None, default: Any) -> Any:
 
 
 def serialize_action(row: PersonalAction) -> dict[str, Any]:
+    due_iso = row.due.isoformat() if row.due else None
     return {
         "id": row.id,
         "user_id": row.user_id,
         "source": row.source,
+        "connector_id": getattr(row, "connector_id", None) or "",
         "type": row.type,
         "title": row.title,
-        "due": row.due.isoformat() if row.due else None,
+        "description": getattr(row, "description", None) or "",
+        "due": due_iso,
+        "due_at": due_iso,
         "priority": row.priority or "normal",
         "status": row.status or "open",
         "target": row.target or "",
@@ -52,9 +71,12 @@ def serialize_action(row: PersonalAction) -> dict[str, Any]:
 
 class PersonalActionCreate(BaseModel):
     source: str
+    connector_id: str = ""
     type: str = "task"
     title: str
+    description: str = ""
     due: Optional[datetime] = None
+    due_at: Optional[datetime] = None
     priority: str = "normal"
     status: str = "open"
     target: str = ""
@@ -74,6 +96,14 @@ class PersonalActionPatch(BaseModel):
     target: Optional[str] = None
 
 
+def _owner_filter(uid: int | None):
+    """Strict per-user isolation — never include other users' rows."""
+    if uid is None:
+        # Unauthenticated path should not list anything (require_authentication normally blocks)
+        return PersonalAction.user_id == -1
+    return PersonalAction.user_id == uid
+
+
 @router.get("")
 @require_authentication
 def list_personal_actions(
@@ -83,10 +113,8 @@ def list_personal_actions(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(PersonalAction)
     uid = getattr(current_user, "user_id", None)
-    if uid:
-        q = q.filter((PersonalAction.user_id == uid) | (PersonalAction.user_id.is_(None)))
+    q = db.query(PersonalAction).filter(_owner_filter(uid))
     if status:
         q = q.filter(PersonalAction.status == status)
     if source:
@@ -105,12 +133,17 @@ def create_personal_action(
     verbs = [v for v in (data.suggested_actions or []) if v in SUGGESTED_VERBS]
     if not verbs:
         verbs = ["Continue"]
+    uid = getattr(current_user, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "User must be authenticated")
     row = PersonalAction(
-        user_id=getattr(current_user, "user_id", None),
+        user_id=uid,
         source=(data.source or "other").strip().lower(),
+        connector_id=(data.connector_id or "")[:120],
         type=(data.type or "task").strip().lower(),
         title=(data.title or "").strip()[:500] or "Untitled",
-        due=data.due,
+        description=(data.description or "")[:4000],
+        due=data.due or data.due_at,
         priority=(data.priority or "normal").strip().lower(),
         status=(data.status or "open").strip().lower(),
         target=(data.target or "")[:2000],
@@ -125,7 +158,7 @@ def create_personal_action(
     db.refresh(row)
     log_audit(
         db=db,
-        user_id=getattr(current_user, "user_id", None) or 0,
+        user_id=uid or 0,
         action="create_personal_action",
         resource_id=row.id,
         resource_type="personal_action",
@@ -142,7 +175,13 @@ def patch_personal_action(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = db.query(PersonalAction).filter(PersonalAction.id == action_id).first()
+    uid = getattr(current_user, "user_id", None)
+    row = (
+        db.query(PersonalAction)
+        .filter(PersonalAction.id == action_id)
+        .filter(_owner_filter(uid))
+        .first()
+    )
     if not row:
         raise HTTPException(404, "PersonalAction not found")
     if data.status is not None:
@@ -196,34 +235,44 @@ def _upsert_action(
     permission: str = "require_approval",
     provenance: dict | None = None,
     priority: str = "normal",
+    connector_id: str = "",
+    description: str = "",
 ) -> PersonalAction:
     existing = None
     if external_id:
-        existing = (
-            db.query(PersonalAction)
-            .filter(
-                PersonalAction.external_id == external_id,
-                PersonalAction.source == source,
-            )
-            .first()
+        q = db.query(PersonalAction).filter(
+            PersonalAction.external_id == external_id,
+            PersonalAction.source == source,
         )
+        if user_id is not None:
+            q = q.filter(PersonalAction.user_id == user_id)
+        else:
+            q = q.filter(PersonalAction.user_id.is_(None))
+        existing = q.first()
     verbs = [v for v in (suggested or []) if v in SUGGESTED_VERBS] or ["Continue"]
     if existing:
+        # Never reassign ownership across users
+        if user_id is not None and existing.user_id is None:
+            existing.user_id = user_id
         existing.title = title[:500]
         existing.target = target[:2000]
         existing.suggested_actions_json = json.dumps(verbs)
         existing.provenance_json = json.dumps(provenance or {})
+        if connector_id:
+            existing.connector_id = connector_id[:120]
+        if description:
+            existing.description = description[:4000]
         existing.updated_at = datetime.now(timezone.utc)
-        if existing.status == "done":
-            pass
         db.commit()
         db.refresh(existing)
         return existing
     row = PersonalAction(
         user_id=user_id,
         source=source,
+        connector_id=(connector_id or "")[:120],
         type=type_,
         title=title[:500],
+        description=(description or "")[:4000],
         target=target[:2000],
         external_id=external_id[:200],
         suggested_actions_json=json.dumps(verbs),
@@ -240,6 +289,7 @@ def _upsert_action(
 
 def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str, Any]:
     from app.services.mentrix.connectors.gateway import route_personal_action, connector_health_matrix
+    from app.services.mentrix.untrusted_content import tag_untrusted
 
     info: dict[str, Any] = {"email": [], "calendar": [], "slack": [], "jira": [], "github": [], "work_items": []}
     created: list[dict[str, Any]] = []
@@ -255,7 +305,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
         for m in (mail.get("messages") or [])[:8]:
             title = m.get("subject") or m.get("title") or "Email"
             eid = str(m.get("id") or "")[:180]
-            info["email"].append(m)
+            info["email"].append(tag_untrusted(m, source="email"))
             row = _upsert_action(
                 db,
                 user_id=user_id,
@@ -264,9 +314,10 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"Reply: {title}"[:500],
                 target=str(m.get("from") or ""),
                 external_id=f"email:{eid}" if eid else "",
-                suggested=["Analyze", "Draft", "Reply"],
+                suggested=["Analyze", "Draft Reply", "Reply"],
                 permission="email:draft",
                 provenance={"connector": mail.get("connector") or mail.get("via"), "raw_id": eid},
+                connector_id=str(mail.get("connector") or mail.get("via") or "email"),
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -286,7 +337,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
         for e in events[:8]:
             title = e.get("title") or e.get("subject") or "Event"
             eid = str(e.get("id") or "")[:180]
-            info["calendar"].append(e)
+            info["calendar"].append(tag_untrusted(e, source="calendar"))
             row = _upsert_action(
                 db,
                 user_id=user_id,
@@ -295,9 +346,10 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"Prepare: {title}"[:500],
                 target=str(e.get("web_link") or e.get("start") or ""),
                 external_id=f"cal:{eid}" if eid else "",
-                suggested=["Prepare", "Continue"],
+                suggested=["Prepare Meeting", "Prepare", "Continue"],
                 permission="email:read",
                 provenance={"start": e.get("start"), "raw_id": eid},
+                connector_id="calendar",
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -308,7 +360,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
         for m in (slack.get("messages") or [])[:10]:
             text = (m.get("text") or "")[:120]
             eid = str(m.get("ts") or "")[:180]
-            info["slack"].append(m)
+            info["slack"].append(tag_untrusted(m, source="slack"))
             row = _upsert_action(
                 db,
                 user_id=user_id,
@@ -317,9 +369,10 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"Slack: {text}"[:500],
                 target=str(slack.get("channel") or ""),
                 external_id=f"slack:{eid}" if eid else "",
-                suggested=["Analyze", "Draft", "Reply"],
+                suggested=["Analyze", "Draft Reply", "Reply"],
                 permission="slack:read",
                 provenance={"ts": eid, "channel": slack.get("channel")},
+                connector_id="slack",
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -335,7 +388,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
             key = issue.get("key") or ""
             fields = issue.get("fields") or {}
             summary = fields.get("summary") or key or "Jira issue"
-            info["jira"].append({"key": key, "summary": summary})
+            info["jira"].append(tag_untrusted({"key": key, "summary": summary}, source="jira"))
             row = _upsert_action(
                 db,
                 user_id=user_id,
@@ -344,10 +397,11 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"{key}: {summary}"[:500],
                 target=key,
                 external_id=f"jira:{key}" if key else "",
-                suggested=["Analyze", "Fix", "Continue"],
+                suggested=["Analyze", "Fix", "Open Jira", "Continue"],
                 permission="jira:read",
                 provenance={"key": key},
                 priority="high",
+                connector_id="jira",
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -368,7 +422,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
             else:
                 title = str(pr)[:200]
                 num = ""
-            info["github"].append(pr if isinstance(pr, dict) else {"title": title})
+            info["github"].append(tag_untrusted(pr if isinstance(pr, dict) else {"title": title}, source="github"))
             row = _upsert_action(
                 db,
                 user_id=user_id,
@@ -377,9 +431,10 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"Review PR: {title}"[:500],
                 target=num,
                 external_id=f"gh-pr:{num}" if num else "",
-                suggested=["Analyze", "Fix", "Continue"],
+                suggested=["Analyze", "Review PR", "Fix", "Continue"],
                 permission="repository:read",
                 provenance={"pr": num},
+                connector_id="github",
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -403,9 +458,10 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 title=f"Continue: {wi.title}"[:500],
                 target=str(wi.id),
                 external_id=f"wi:{wi.id}",
-                suggested=["Continue", "Analyze", "Fix"],
+                suggested=["Continue Agent", "Continue", "Analyze", "Fix"],
                 permission="repository:edit_workspace",
                 provenance={"work_item_id": wi.id, "status": wi.status},
+                connector_id="work_item",
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -414,17 +470,55 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
     open_actions = (
         db.query(PersonalAction)
         .filter(PersonalAction.status.in_(["open", "in_progress"]))
+        .filter(_owner_filter(user_id))
         .order_by(PersonalAction.updated_at.desc())
         .limit(40)
         .all()
     )
+    serialized = [serialize_action(a) for a in open_actions]
+    role_key = "developer"
+    try:
+        from app.models import User
+
+        if user_id:
+            u = db.query(User).filter(User.id == user_id).first()
+            if u and u.role:
+                role_key = str(u.role)
+    except Exception:
+        pass
+    r = role_key.lower()
+    if r in ("admin", "lead", "executive", "exec"):
+        persona = {
+            "persona": "executive",
+            "sections": ["Decisions needed", "Risks", "Status snapshot"],
+            "summary": f"{len(serialized)} open actions; prioritize decisions.",
+        }
+    elif "manager" in r:
+        persona = {
+            "persona": "manager",
+            "sections": ["Team blockers", "PRs / Jira", "Meetings"],
+            "summary": f"Team actions={len(serialized)}",
+        }
+    elif r in ("ea", "assistant", "executive_assistant"):
+        persona = {
+            "persona": "ea",
+            "sections": ["Calendar", "Inbox drafts", "Meeting prep"],
+            "summary": f"Ops queue actions={len(serialized)}",
+        }
+    else:
+        persona = {
+            "persona": "developer",
+            "sections": ["Continue Agent", "Review PR", "Open Jira"],
+            "summary": f"Dev queue actions={len(serialized)}",
+        }
 
     return {
         "ok": True,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "information": info,
-        "actions": [serialize_action(a) for a in open_actions],
+        "actions": serialized,
         "upserted": len(created),
         "connectors": connector_health_matrix(),
         "suggested_verbs": list(SUGGESTED_VERBS),
+        "role": persona,
     }

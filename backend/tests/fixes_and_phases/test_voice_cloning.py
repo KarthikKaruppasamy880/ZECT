@@ -497,8 +497,9 @@ class TestVoiceCloneEndpoints:
         result = speak(SpeakRequest(text="hello there"), current_user=USER, db=db)
 
         assert result.body == b"wav-bytes"
-        assert result.media_type == "audio/mpeg"
+        assert result.media_type == "audio/wav"
         assert result.headers["X-Mentrix-TTS-Engine"] == "zect_voicebox"
+        assert result.headers.get("X-Mentrix-TTS-Content-Type") == "audio/wav"
 
     def test_speak_clone_offline_503_no_openai(self, monkeypatch):
         from app.domains.voice.voice_clone import SpeakRequest, speak

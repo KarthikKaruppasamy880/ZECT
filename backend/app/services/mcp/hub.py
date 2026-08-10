@@ -18,6 +18,7 @@ from app.adapters import (
     github,
     gmail_adapter,
     jira,
+    m365_graph,
     notion_adapter,
     playwright_adapter,
     slack,
@@ -34,6 +35,8 @@ ADAPTERS = {
     "playwright": playwright_adapter,
     "notion": notion_adapter,
     "gmail": gmail_adapter,
+    "m365": m365_graph,
+    "microsoft365": m365_graph,
 }
 
 

@@ -143,6 +143,40 @@ def build_system_health(db: Any = None) -> dict[str, Any]:
             {"id": "skills_fs", "name": "Skills filesystem", "status": "unknown", "detail": str(exc)[:200]}
         )
 
+    try:
+        from app.services.mentrix.connectors import connector_health_matrix
+
+        matrix = connector_health_matrix()
+        for row in matrix.get("connectors") or []:
+            components.append(
+                {
+                    "id": f"connector:{row.get('id')}",
+                    "name": row.get("name") or row.get("id"),
+                    "status": row.get("status") or "unknown",
+                    "detail": {
+                        "transport": row.get("transport"),
+                        "detail": row.get("detail"),
+                        "permission_requirement": row.get("permission_requirement"),
+                        "capabilities": [c.get("name") for c in (row.get("capabilities") or [])],
+                    },
+                }
+            )
+        components.append(
+            {
+                "id": "mail_routing",
+                "name": "Mail primary/fallback",
+                "status": "ok",
+                "detail": {
+                    "primary": matrix.get("mail_primary"),
+                    "fallback": matrix.get("mail_fallback"),
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(
+            {"id": "connectors", "name": "MentrixConnectors", "status": "unknown", "detail": str(exc)[:200]}
+        )
+
     worst = "ok"
     for c in components:
         st = c.get("status")

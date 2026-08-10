@@ -26,7 +26,7 @@ CAPABILITY_TO_ACTIONS: dict[str, list[str]] = {
     "desktop:view": ["companion_desktop_read", "companion_desktop_screenshot", "companion_computer_inspect"],
     "desktop:control": ["companion_computer_control", "companion_computer_open", "companion_desktop_write"],
     "filesystem:scan": ["search_code", "companion_desktop_read"],
-    "filesystem:move": ["companion_desktop_write"],
+    "filesystem:move": ["companion_desktop_write", "companion_file_organize"],
     "email:read": ["companion_email_read"],
     "email:draft": ["companion_email_send"],
     "email:send": ["companion_email_send"],

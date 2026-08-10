@@ -81,7 +81,7 @@ app.add_middleware(
     # by default (Cache-Control, Content-Type, etc.) — any custom header,
     # like X-Mentrix-TTS-Engine, is invisible to fetch()'s res.headers.get()
     # unless explicitly exposed here, even though the server did send it.
-    expose_headers=["X-Mentrix-TTS-Engine"],
+    expose_headers=["X-Mentrix-TTS-Engine", "X-Mentrix-TTS-Content-Type"],
 )
 
 # ✅ Add additional security headers

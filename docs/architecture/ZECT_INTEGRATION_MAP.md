@@ -50,3 +50,18 @@ Close-loop: `POST /api/mentrix/developer/close-loop` (dry_run accepted in P1 tes
 ## Optional connectors (env-gated)
 
 Slack, SMTP, Datadog, Confluence MCP, Presenton/Zoom — present in `.env.example`; not Mentrix spine SoT. System health marks Jira/Camunda `not_configured` when unset.
+
+## Mentrix Personal Ops (Companion)
+
+| Surface | Role |
+|---------|------|
+| `MentrixConnector` gateway | `backend/app/services/mentrix/connectors/` — native → MCP → desktop/browser |
+| `GET /api/personal-actions/connectors/health` | Connector health + capability/permission matrix |
+| `PersonalAction` | Canonical actionable personal work (Email/Calendar/Slack/Jira/GitHub/WorkItems) |
+| `POST /api/personal-actions/daily-brief` | Aggregates information + PersonalActions |
+| Schedule `task_type=daily_brief` | Same assembly via schedule ticker |
+| M365 / Graph | First-class Outlook mail+calendar when `MS_GRAPH_*` set; IMAP/SMTP fallback |
+| Session Allow | `POST /api/permissions/grants/session` → CapabilityGrant TTL skips per-step desktop Allow |
+| Desktop FS | Electron `mkdir` / `list_dir` / `move_path` (allowlisted; never delete) |
+
+Suggested PersonalAction verbs: Analyze · Fix · Draft · Reply · Prepare · Organize · Continue.

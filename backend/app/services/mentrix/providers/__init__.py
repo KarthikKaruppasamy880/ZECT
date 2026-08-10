@@ -85,9 +85,18 @@ class CalendarProvider(Protocol):
 
 
 class MentrixEmailProvider:
-    """Wraps IMAP digest + outbound draft create (no send)."""
+    """Graph-first when configured; IMAP digest fallback (no second email system)."""
 
     def digest(self, *, limit: int = 8) -> dict[str, Any]:
+        from app.adapters import m365_graph
+
+        if m365_graph.configured():
+            out = m365_graph.execute("list_messages", {"limit": limit})
+            if out.get("ok"):
+                out["via"] = "m365_graph"
+                return out
+            # fall through to IMAP on Graph errors
+
         from app.services.mentrix.email_inbox import fetch_inbox_digest
 
         out = fetch_inbox_digest(limit=limit)
@@ -105,6 +114,7 @@ class MentrixEmailProvider:
             if "items" in out:
                 out["items"] = filtered
             out["allowlist_applied"] = True
+        out.setdefault("via", "imap")
         return out
 
     def draft_reply(
@@ -179,9 +189,28 @@ class MentrixSlackProvider:
 
 
 class MentrixCalendarProvider:
-    """Greenfield calendar — ICS URL or env-configured JSON feed; never deletes events."""
+    """Graph calendar when configured; else ICS / demo — never deletes events."""
 
     def upcoming(self, *, limit: int = 10) -> list[ProviderItem]:
+        from app.adapters import m365_graph
+
+        if m365_graph.configured():
+            out = m365_graph.execute("list_events", {"limit": limit})
+            if out.get("ok"):
+                items: list[ProviderItem] = []
+                for e in out.get("events") or []:
+                    items.append(
+                        ProviderItem(
+                            id=str(e.get("id") or "")[:200],
+                            title=str(e.get("title") or "Event")[:300],
+                            body=str(e.get("preview") or "")[:1000],
+                            source="m365_graph",
+                            when=e.get("start"),
+                            meta={"web_link": e.get("web_link"), "end": e.get("end")},
+                        )
+                    )
+                return items
+
         ics_url = (os.getenv("MENTRIX_CALENDAR_ICS_URL") or "").strip()
         if ics_url:
             return self._from_ics(ics_url, limit=limit)
@@ -192,7 +221,7 @@ class MentrixCalendarProvider:
                 ProviderItem(
                     id="demo-1",
                     title="Mentrix standup",
-                    body="Demo calendar event (set MENTRIX_CALENDAR_ICS_URL for real data)",
+                    body="Demo calendar event (set MENTRIX_CALENDAR_ICS_URL or MS_GRAPH_* for real data)",
                     source="calendar_demo",
                     when=now,
                     meta={"attendees": []},

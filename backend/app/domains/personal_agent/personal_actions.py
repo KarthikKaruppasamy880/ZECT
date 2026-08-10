@@ -96,6 +96,14 @@ class PersonalActionPatch(BaseModel):
     target: Optional[str] = None
 
 
+def _owner_filter(uid: int | None):
+    """Strict per-user isolation — never include other users' rows."""
+    if uid is None:
+        # Unauthenticated path should not list anything (require_authentication normally blocks)
+        return PersonalAction.user_id == -1
+    return PersonalAction.user_id == uid
+
+
 @router.get("")
 @require_authentication
 def list_personal_actions(
@@ -105,10 +113,8 @@ def list_personal_actions(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    q = db.query(PersonalAction)
     uid = getattr(current_user, "user_id", None)
-    if uid:
-        q = q.filter((PersonalAction.user_id == uid) | (PersonalAction.user_id.is_(None)))
+    q = db.query(PersonalAction).filter(_owner_filter(uid))
     if status:
         q = q.filter(PersonalAction.status == status)
     if source:
@@ -127,8 +133,11 @@ def create_personal_action(
     verbs = [v for v in (data.suggested_actions or []) if v in SUGGESTED_VERBS]
     if not verbs:
         verbs = ["Continue"]
+    uid = getattr(current_user, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "User must be authenticated")
     row = PersonalAction(
-        user_id=getattr(current_user, "user_id", None),
+        user_id=uid,
         source=(data.source or "other").strip().lower(),
         connector_id=(data.connector_id or "")[:120],
         type=(data.type or "task").strip().lower(),
@@ -149,7 +158,7 @@ def create_personal_action(
     db.refresh(row)
     log_audit(
         db=db,
-        user_id=getattr(current_user, "user_id", None) or 0,
+        user_id=uid or 0,
         action="create_personal_action",
         resource_id=row.id,
         resource_type="personal_action",
@@ -166,7 +175,13 @@ def patch_personal_action(
     current_user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    row = db.query(PersonalAction).filter(PersonalAction.id == action_id).first()
+    uid = getattr(current_user, "user_id", None)
+    row = (
+        db.query(PersonalAction)
+        .filter(PersonalAction.id == action_id)
+        .filter(_owner_filter(uid))
+        .first()
+    )
     if not row:
         raise HTTPException(404, "PersonalAction not found")
     if data.status is not None:
@@ -225,16 +240,20 @@ def _upsert_action(
 ) -> PersonalAction:
     existing = None
     if external_id:
-        existing = (
-            db.query(PersonalAction)
-            .filter(
-                PersonalAction.external_id == external_id,
-                PersonalAction.source == source,
-            )
-            .first()
+        q = db.query(PersonalAction).filter(
+            PersonalAction.external_id == external_id,
+            PersonalAction.source == source,
         )
+        if user_id is not None:
+            q = q.filter(PersonalAction.user_id == user_id)
+        else:
+            q = q.filter(PersonalAction.user_id.is_(None))
+        existing = q.first()
     verbs = [v for v in (suggested or []) if v in SUGGESTED_VERBS] or ["Continue"]
     if existing:
+        # Never reassign ownership across users
+        if user_id is not None and existing.user_id is None:
+            existing.user_id = user_id
         existing.title = title[:500]
         existing.target = target[:2000]
         existing.suggested_actions_json = json.dumps(verbs)
@@ -298,7 +317,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
                 suggested=["Analyze", "Draft Reply", "Reply"],
                 permission="email:draft",
                 provenance={"connector": mail.get("connector") or mail.get("via"), "raw_id": eid},
-                connector_id=str(mail.get("connector") or "email"),
+                connector_id=str(mail.get("connector") or mail.get("via") or "email"),
             )
             created.append(serialize_action(row))
     except Exception as exc:  # noqa: BLE001
@@ -451,6 +470,7 @@ def assemble_daily_brief(db: Session, *, user_id: int | None = None) -> dict[str
     open_actions = (
         db.query(PersonalAction)
         .filter(PersonalAction.status.in_(["open", "in_progress"]))
+        .filter(_owner_filter(user_id))
         .order_by(PersonalAction.updated_at.desc())
         .limit(40)
         .all()

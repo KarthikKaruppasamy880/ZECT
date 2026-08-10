@@ -17,5 +17,6 @@ from app.domains.personal_agent import automation_watches
 from app.domains.personal_agent import personal_actions
 from app.domains.personal_agent import presentation_api
 from app.domains.personal_agent import learning
+from app.domains.personal_agent import automation_loops_api
 
-__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions', 'file_organize', 'automation_watches', 'personal_actions', 'presentation_api', 'learning']
+__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions', 'file_organize', 'automation_watches', 'personal_actions', 'presentation_api', 'learning', 'automation_loops_api']

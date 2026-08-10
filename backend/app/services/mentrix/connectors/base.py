@@ -44,12 +44,15 @@ class ConnectorHealth:
         reads = self.read_tools or [c["name"] for c in caps if c.get("kind") == "read"]
         writes = self.write_tools or [c["name"] for c in caps if c.get("kind") == "write"]
         policies = {str(c.get("permission_policy") or "CONFIRM").upper() for c in caps}
-        if "DENY" in policies:
+        if not caps:
+            agg_policy = "CONFIRM"
+        elif "DENY" in policies:
             agg_policy = "DENY"
         elif "CONFIRM" in policies or writes:
             agg_policy = "CONFIRM"
         else:
-            agg_policy = "ALLOW"
+            # Read-only caps with explicit ALLOW only
+            agg_policy = "ALLOW" if policies == {"ALLOW"} else "CONFIRM"
         return {
             "id": self.id,
             "name": self.name,

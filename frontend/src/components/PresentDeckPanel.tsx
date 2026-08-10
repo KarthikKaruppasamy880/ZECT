@@ -117,6 +117,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>
   >([]);
   const [analysisNote, setAnalysisNote] = useState("");
+  const [flowBApproved, setFlowBApproved] = useState(false);
   const abortRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
@@ -385,7 +386,19 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         setStatus(prep.reason || "Blocked by sensitivity / model route — review classification before generating.");
         return;
       }
-      const adapted = prep.adapted_prompt || content;
+      const unverified = (prep.claims || []).filter((c) => c.present_as_fact === false);
+      if (prep.requires_user_approval && !flowBApproved) {
+        setStatus(
+          `Review ${prep.claims?.length || 0} claims (${unverified.length} not presentable as fact), then check “Approve generation” and click Generate again.`,
+        );
+        return;
+      }
+      let adapted = prep.adapted_prompt || content;
+      if (unverified.length) {
+        adapted +=
+          "\n\nIMPORTANT: Do not present the following as verified facts:\n" +
+          unverified.map((c) => `- ${c.claim}`).join("\n");
+      }
       const slidesHint = prep.n_slides_hint || nSlides;
       if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
       const out = await mentrixPresentonGenerate({
@@ -394,6 +407,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         template,
         filename: "mentrix-deck.pptx",
       });
+      setFlowBApproved(false);
       if (out?.path) {
         persistPath(out.path);
         setStatus(
@@ -428,7 +442,7 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setAnalysisNote(
         `Flow A · ${out.sensitivity?.sensitivity || "?"} · claims=${out.claims?.length || 0} · rehearse=${!!out.rehearse_ready}`,
       );
-      if (out.improved_notes?.length && !notes.trim()) {
+      if (out.ok && out.improved_notes?.length && !notes.trim()) {
         const joined = out.improved_notes.map((n) => n.notes).join("\n\n---\n\n");
         persistNotes(joined.slice(0, 8000));
       }
@@ -885,6 +899,18 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           ))}
         </div>
       )}
+      <label
+        className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}
+        data-testid="present-deck-flow-b-approve"
+      >
+        <input
+          type="checkbox"
+          checked={flowBApproved}
+          onChange={(e) => setFlowBApproved(e.target.checked)}
+          className="rounded border-slate-500"
+        />
+        Approve generation (Flow B — review claims first)
+      </label>
       {templateChoice === CUSTOM_TEMPLATE_OPTION && (
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
           Custom template id (Presenton master)

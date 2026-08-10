@@ -272,18 +272,26 @@ class ZoomConnector(_BaseConnector):
         )
 
     def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        if action in ("schedule", "create_meeting", "auto_share"):
+        act = str(action or "").strip().lower()
+        if act in ("schedule", "create_meeting", "auto_share", "share"):
             return {
                 "ok": False,
                 "status": "denied",
                 "error": "zoom_schedule_and_auto_share_denied",
                 "note": "Open/join only — Zoom Meeting API schedule and auto screen-share are out of scope",
             }
+        if act not in ("open", "join_url", "join"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "zoom_action_not_allowed",
+                "action": act,
+            }
         return {
             "ok": True,
             "via": "desktop",
-            "action": action,
-            "desktop": "computer_open_app" if action == "open" else "open_zoom",
+            "action": act,
+            "desktop": "computer_open_app" if act == "open" else "open_zoom",
             "args": arguments or {},
             "note": "Routed to Computer Mode — schedule refused by design",
         }
@@ -312,18 +320,26 @@ class FilesystemConnector(_BaseConnector):
         )
 
     def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        if action in ("delete", "unlink", "rmdir", "remove"):
+        act = str(action or "").strip().lower()
+        if act in ("delete", "unlink", "rmdir", "remove", "rm", "rmtree", "delete_file"):
             return {
                 "ok": False,
                 "status": "denied",
                 "error": "delete_never_allowed",
                 "note": "Mentrix never deletes files",
             }
+        if act not in ("mkdir", "list_dir", "move_path", "organize", "file_organize"):
+            return {
+                "ok": False,
+                "status": "denied",
+                "error": "filesystem_action_not_allowed",
+                "action": act,
+            }
         return {
             "ok": True,
             "via": "desktop",
-            "action": action,
-            "desktop": action if action in ("mkdir", "list_dir", "move_path") else "file_organize",
+            "action": act,
+            "desktop": act if act in ("mkdir", "list_dir", "move_path") else "file_organize",
             "args": arguments or {},
         }
 

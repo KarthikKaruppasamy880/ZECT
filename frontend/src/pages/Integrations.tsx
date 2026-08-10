@@ -89,6 +89,8 @@ export default function Integrations() {
         if (cm.ok) {
           const data = await cm.json();
           setConnectorMatrix(data.connectors || []);
+        } else {
+          setConnectorMatrix([]);
         }
       } catch {
         setConnectorMatrix([]);

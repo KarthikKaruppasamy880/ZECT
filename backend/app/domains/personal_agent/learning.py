@@ -169,15 +169,14 @@ def sync_pbl_catalog(db: Session, *, markdown: str | None = None) -> dict[str, A
 
     parsed = parse_pbl_readme(text or "")
     upserted = 0
+    existing_by_url = {
+        row.source_url: row
+        for row in db.query(LearningResource)
+        .filter(LearningResource.learning_source_id == source.id)
+        .all()
+    }
     for item in parsed:
-        existing = (
-            db.query(LearningResource)
-            .filter(
-                LearningResource.learning_source_id == source.id,
-                LearningResource.source_url == item["source_url"],
-            )
-            .first()
-        )
+        existing = existing_by_url.get(item["source_url"])
         if existing:
             existing.title = item["title"]
             existing.language = item["language"]
@@ -186,23 +185,23 @@ def sync_pbl_catalog(db: Session, *, markdown: str | None = None) -> dict[str, A
             existing.summary = item["summary"]
             existing.indexed_at = datetime.now(timezone.utc)
         else:
-            db.add(
-                LearningResource(
-                    learning_source_id=source.id,
-                    title=item["title"],
-                    source_url=item["source_url"],
-                    language=item["language"],
-                    technologies_json=json.dumps(item["technologies"]),
-                    project_type=item["project_type"],
-                    difficulty=item["difficulty"],
-                    prerequisites_json=json.dumps(item["prerequisites"]),
-                    skills_json=json.dumps(item["skills"]),
-                    summary=item["summary"],
-                    attribution=item["attribution"],
-                    content_policy=item["content_policy"],
-                    external_license_status=item["external_license_status"],
-                )
+            row = LearningResource(
+                learning_source_id=source.id,
+                title=item["title"],
+                source_url=item["source_url"],
+                language=item["language"],
+                technologies_json=json.dumps(item["technologies"]),
+                project_type=item["project_type"],
+                difficulty=item["difficulty"],
+                prerequisites_json=json.dumps(item["prerequisites"]),
+                skills_json=json.dumps(item["skills"]),
+                summary=item["summary"],
+                attribution=item["attribution"],
+                content_policy=item["content_policy"],
+                external_license_status=item["external_license_status"],
             )
+            db.add(row)
+            existing_by_url[item["source_url"]] = row
             upserted += 1
     source.last_synced_at = datetime.now(timezone.utc)
     db.commit()
@@ -273,20 +272,20 @@ def search_resources(
         query = query.filter(LearningResource.language.ilike(f"%{language}%"))
     if difficulty:
         query = query.filter(LearningResource.difficulty == difficulty)
-    rows = query.order_by(LearningResource.id.desc()).limit(500).all()
-    out = []
-    qn = (q or "").lower()
-    sk = (skill or "").lower()
-    for r in rows:
-        blob = f"{r.title} {r.language} {r.summary} {r.skills_json}".lower()
-        if qn and qn not in blob:
-            continue
-        if sk and sk not in (r.skills_json or "").lower():
-            continue
-        out.append(serialize_resource(r))
-        if len(out) >= limit:
-            break
-    return {"resources": out, "content_policy": "external_link_only"}
+    qn = (q or "").strip()
+    sk = (skill or "").strip()
+    if qn:
+        like = f"%{qn}%"
+        query = query.filter(
+            (LearningResource.title.ilike(like))
+            | (LearningResource.summary.ilike(like))
+            | (LearningResource.skills_json.ilike(like))
+            | (LearningResource.language.ilike(like))
+        )
+    if sk:
+        query = query.filter(LearningResource.skills_json.ilike(f"%{sk}%"))
+    rows = query.order_by(LearningResource.id.desc()).limit(limit).all()
+    return {"resources": [serialize_resource(r) for r in rows], "content_policy": "external_link_only"}
 
 
 @router.post("/projects")
@@ -341,17 +340,23 @@ def update_progress(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    proj = db.query(LearningProject).filter(LearningProject.id == project_id).first()
+    uid = getattr(current_user, "user_id", None)
+    q = db.query(LearningProject).filter(LearningProject.id == project_id)
+    if uid is not None:
+        q = q.filter(LearningProject.user_id == uid)
+    proj = q.first()
     if not proj:
         raise HTTPException(404, "project_not_found")
     progress = _jload(proj.progress_json, {})
     evidence = _jload(proj.evidence_json, [])
+    # user_confirmed is evidence only — does not grant verified skills / completion
+    verified_event = body.event in ("test_passed", "milestone", "completed")
     ev = {
         "event": body.event,
         "milestone": body.milestone,
         "evidence": body.evidence,
         "at": datetime.now(timezone.utc).isoformat(),
-        "verified": body.event in ("test_passed", "user_confirmed", "milestone", "completed"),
+        "verified": verified_event,
     }
     evidence.append(ev)
     if body.event == "milestone" and body.milestone:
@@ -359,7 +364,9 @@ def update_progress(
         if body.milestone not in done:
             done.append(body.milestone)
         progress["milestones_done"] = done
-    if body.event == "completed" or body.event == "user_confirmed":
+    if body.event == "user_confirmed":
+        progress["user_confirmed"] = True
+    if body.event == "completed":
         proj.status = "completed"
         proj.completed_at = datetime.now(timezone.utc)
         progress["completed"] = True
@@ -384,7 +391,13 @@ def mentor_ask(
     project = None
     resource = None
     if body.project_id:
-        project = db.query(LearningProject).filter(LearningProject.id == body.project_id).first()
+        uid = getattr(current_user, "user_id", None)
+        pq = db.query(LearningProject).filter(LearningProject.id == body.project_id)
+        if uid is not None:
+            pq = pq.filter(LearningProject.user_id == uid)
+        project = pq.first()
+        if body.project_id and not project:
+            raise HTTPException(404, "project_not_found")
         if project and project.resource_id:
             resource = db.query(LearningResource).filter(LearningResource.id == project.resource_id).first()
 
@@ -447,6 +460,17 @@ def recommend_for_work_item(
     """Skill-gap recommendation — never blocks work unless org policy says so."""
     wi = db.query(WorkItem).filter(WorkItem.id == work_item_id).first()
     if not wi:
+        raise HTTPException(404, "work_item_not_found")
+    # Authorize: creator match or admin/lead; do not leak other users' WI content
+    identity = (
+        getattr(current_user, "email", None)
+        or getattr(current_user, "username", None)
+        or ""
+    ).strip().lower()
+    role = str(getattr(current_user, "role", "") or "").lower()
+    created = str(wi.created_by or "").strip().lower()
+    is_admin = role in ("admin", "lead", "executive")
+    if created and identity and created not in (identity,) and not is_admin:
         raise HTTPException(404, "work_item_not_found")
     blob = f"{wi.title}\n{wi.description}\n{wi.requirements_json}".lower()
     # crude skill tokens

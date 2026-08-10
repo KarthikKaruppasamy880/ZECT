@@ -1682,6 +1682,9 @@ class LearningSource(Base):
 
 class LearningResource(Base):
     __tablename__ = "learning_resources"
+    __table_args__ = (
+        UniqueConstraint("learning_source_id", "source_url", name="uq_learning_resource_source_url"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     learning_source_id = Column(Integer, ForeignKey("learning_sources.id"), nullable=True, index=True)
@@ -1717,4 +1720,56 @@ class LearningProject(Base):
     progress_json = Column(Text, default="{}")
     evidence_json = Column(Text, default="[]")
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Mentrix Automation Loops — thin persistent definitions/runs (not ForgeLoop)
+# ---------------------------------------------------------------------------
+
+class LoopDefinition(Base):
+    """Persisted loop definition — budgets/policy/checkpoint per user scope."""
+
+    __tablename__ = "mentrix_loop_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    org_id = Column(String, default="", index=True)
+    autonomy_level = Column(String, default="L0", index=True)
+    status = Column(String, default="idle", index=True)
+    target = Column(String, default="personal_action")
+    budget_json = Column(Text, default="{}")
+    policy_json = Column(Text, default="{}")
+    trigger_json = Column(Text, default="{}")
+    checkpoint_json = Column(Text, default="{}")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class LoopRun(Base):
+    """One iteration of a Mentrix Automation Loop — evidence + checkpoint."""
+
+    __tablename__ = "mentrix_loop_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loop_definition_id = Column(
+        Integer, ForeignKey("mentrix_loop_definitions.id"), nullable=False, index=True
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    autonomy_level = Column(String, default="L0")
+    status = Column(String, default="running", index=True)
+    trigger_kind = Column(String, default="manual")
+    checkpoint_json = Column(Text, default="{}")
+    evidence_json = Column(Text, default="[]")
+    result_json = Column(Text, default="{}")
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)

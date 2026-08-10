@@ -52,10 +52,13 @@ class ProjectIntelligenceService:
                 from app.services.lattice.indexer import get_lattice_status, query_graph
 
                 detail = {}
+                status_err = False
+                query_err = False
                 try:
                     detail = get_lattice_status(project_key) or {}
                 except Exception:  # noqa: BLE001
-                    detail = {"project_key": project_key}
+                    detail = {"project_key": project_key, "error": "lattice_status_failed"}
+                    status_err = True
                 hits: list[dict[str, Any]] = []
                 q = (query or "").strip()
                 if q:
@@ -79,12 +82,16 @@ class ProjectIntelligenceService:
                             )
                     except Exception:  # noqa: BLE001
                         hits = []
+                        query_err = True
+                lattice_status = "degraded" if (status_err or query_err) else "ok"
                 lattice = {
-                    "status": "ok",
+                    "status": lattice_status,
                     "detail": detail,
                     "hits": hits,
                     "project_key": project_key,
                     "freshness": "ephemeral" if not hits else "indexed",
+                    "query_error": query_err,
+                    "status_error": status_err,
                 }
         except Exception:  # noqa: BLE001
             lattice = {"status": "unavailable", "hits": []}

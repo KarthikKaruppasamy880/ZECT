@@ -99,9 +99,9 @@ def enforce_model_route(classification: str) -> dict[str, Any]:
     return {
         **pol,
         "blocked": bool(route.blocked),
-        "reason": route.block_reason,
+        "reason": route.block_reason or route.fallback_reason,
         "provider": route.provider,
         "fallback_used": route.fallback_used,
         "fallback_reason": route.fallback_reason,
-        "model": route.model or mentrix_llm_chat_model(),
+        "model": (route.model or mentrix_llm_chat_model()) if (not route.blocked and (route.model or local_ok)) else "",
     }

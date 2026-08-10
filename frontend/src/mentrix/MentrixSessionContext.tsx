@@ -809,10 +809,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         const { createCapabilityGrant } = await import("@/lib/api");
         const caps = new Set<string>();
         for (const t of tools) {
-          if (
+          if (t.startsWith("browser_")) {
+            caps.add("browser:control");
+            caps.add("desktop:control");
+          } else if (
             t.startsWith("computer_") ||
             t.startsWith("desktop_") ||
-            t.startsWith("browser_") ||
             t === "file_organize_approve"
           ) {
             caps.add("desktop:control");

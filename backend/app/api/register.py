@@ -66,6 +66,7 @@ from app.domains.personal_agent import (
     personal_actions,
     presentation_api,
     learning,
+    automation_loops_api,
 )
 from app.domains.voice import realtime, voice_clone
 from app.domains.security_incident import router as security_incident_router
@@ -127,6 +128,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(personal_actions.router)
     app.include_router(presentation_api.router)
     app.include_router(learning.router)
+    app.include_router(automation_loops_api.router)
     app.include_router(secrets_manager.router)
     app.include_router(code_index.router)
     app.include_router(session_insights.router)

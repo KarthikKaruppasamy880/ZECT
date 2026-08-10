@@ -33,7 +33,7 @@ def analyze_existing_deck(
     claims = filter_presentable(extract_claims_from_text(blob, sensitivity=sens["sensitivity"]))
     improved_notes = []
     for i, s in enumerate(slides):
-        raw = (s.get("notes") or s.get("text") or "").strip()
+        raw = str(s.get("notes") or s.get("text") or "").strip()
         note = raw or f"Slide {i + 1}: cover key point for {audience['label']} audience."
         if sens["sensitivity"] in ("CONFIDENTIAL", "RESTRICTED"):
             note = f"[{sens['sensitivity']}] {note}"

@@ -279,18 +279,18 @@ def test_context_engine_accepts_lattice_hits():
         repository_id=None,
         repository_ref="",
         base_commit_sha="",
-        goal="Where is auth middleware?",
+        goal="Where is the login gate?",
         lattice_hits=[
             {
                 "id": "auth.py",
-                "content": "def require_auth(): ...",
+                "content": "def require_auth(): ... path=app/auth.py",
                 "path": "app/auth.py",
                 "score": 0.9,
             }
         ],
     )
     blob = pack.text_blob() if hasattr(pack, "text_blob") else str(pack.to_dict())
-    assert "auth" in blob.lower() or "lattice" in blob.lower()
+    assert "app/auth.py" in blob or "require_auth" in blob
 
 
 def test_voice_mime_regression():
@@ -300,4 +300,4 @@ def test_voice_mime_regression():
     test_path = Path(__file__).with_name("test_voice_cloning.py")
     text = test_path.read_text(encoding="utf-8")
     assert "audio/wav" in text
-    assert "audio/mpeg" not in text or "audio/wav" in text
+    assert "audio/mpeg" not in text

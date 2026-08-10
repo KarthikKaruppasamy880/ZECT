@@ -10,6 +10,9 @@ import {
   mentrixPresentonGenerate,
   mentrixPresentonTemplates,
   mentrixParsePptx,
+  mentrixPresentationAudiences,
+  mentrixAnalyzeDeck,
+  mentrixPreparePromptDeck,
   listMyClonedVoices,
   mentrixVoiceEngineStatus,
   type ClonedVoiceInfo,
@@ -27,6 +30,9 @@ const TEMPLATE_KEY = "mentrix_present_template";
 const N_SLIDES_KEY = "mentrix_present_n_slides";
 const CUSTOM_TEMPLATE_KEY = "mentrix_present_custom_template";
 const CUSTOM_TEMPLATE_OPTION = "__custom__";
+
+const AUDIENCE_KEY = "zect_mentrix_present_audience";
+const SENS_KEY = "zect_mentrix_present_sensitivity";
 
 const BUILTIN_TEMPLATES: PresentonTemplate[] = [
   { id: "general", name: "General" },
@@ -103,6 +109,14 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [voiceChoice, setVoiceChoice] = useState("");
   const [pptxFile, setPptxFile] = useState<File | null>(null);
   const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus | null>(null);
+  const [shareApproved, setShareApproved] = useState(false);
+  const [audienceId, setAudienceId] = useState("general");
+  const [audiences, setAudiences] = useState<Array<{ id: string; label: string; slide_count_hint?: number }>>([]);
+  const [sensitivityHint, setSensitivityHint] = useState("");
+  const [claimsPreview, setClaimsPreview] = useState<
+    Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>
+  >([]);
+  const [analysisNote, setAnalysisNote] = useState("");
   const abortRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
@@ -118,6 +132,8 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setPrompt(localStorage.getItem(PROMPT_KEY) || "");
       setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
       setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
+      setAudienceId(localStorage.getItem(AUDIENCE_KEY) || "general");
+      setSensitivityHint(localStorage.getItem(SENS_KEY) || "");
       const savedTemplate = localStorage.getItem(TEMPLATE_KEY) || "general";
       setTemplateChoice(savedTemplate);
       setCustomTemplateId(localStorage.getItem(CUSTOM_TEMPLATE_KEY) || "");
@@ -148,6 +164,15 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     listMyClonedVoices()
       .then((v) => setMyVoices(Array.isArray(v) ? v : []))
       .catch(() => setMyVoices([]));
+    mentrixPresentationAudiences()
+      .then((res) => setAudiences(Array.isArray(res.audiences) ? res.audiences : []))
+      .catch(() =>
+        setAudiences([
+          { id: "general", label: "General" },
+          { id: "executive", label: "Executive" },
+          { id: "technical", label: "Technical" },
+        ]),
+      );
   }, []);
 
   useEffect(() => {
@@ -346,22 +371,74 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         setStatus("Enter a custom template id (from Presenton uploaded master), or pick a built-in template.");
         return;
       }
+      // Flow B: classify → audience → claims → user approval gate before Presenton
+      const prep = await mentrixPreparePromptDeck({
+        prompt: content,
+        audience_id: audienceId,
+        sensitivity_hint: sensitivityHint || undefined,
+      });
+      setClaimsPreview(prep.claims || []);
+      setAnalysisNote(
+        `Sensitivity ${prep.sensitivity?.sensitivity || "?"} · ${prep.claims?.length || 0} claims · outline ready`,
+      );
+      if (!prep.ok) {
+        setStatus(prep.reason || "Blocked by sensitivity / model route — review classification before generating.");
+        return;
+      }
+      const adapted = prep.adapted_prompt || content;
+      const slidesHint = prep.n_slides_hint || nSlides;
+      if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
       const out = await mentrixPresentonGenerate({
-        content,
-        n_slides: nSlides,
+        content: adapted,
+        n_slides: slidesHint,
         template,
         filename: "mentrix-deck.pptx",
       });
       if (out?.path) {
         persistPath(out.path);
         setStatus(
-          `Deck saved to ${out.path} (template: ${template}, ${nSlides} slides). Open presentation, then join Zoom and share.`,
+          `Deck saved to ${out.path} (audience: ${audienceId}, template: ${template}, ${slidesHint} slides). Review claims, then Open → Zoom → share approve → Narrate.`,
         );
       } else {
         setStatus("Presenton returned no path — check PRESENTON_BASE_URL and that Presenton Docker is running.");
       }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Generate deck failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const analyzeExisting = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      let slides: SlideParsed[] = [];
+      if (pptxFile) {
+        const parsed = await mentrixParsePptx(pptxFile);
+        slides = parsed.slides || [];
+      }
+      const out = await mentrixAnalyzeDeck({
+        slides,
+        notes_blob: notes,
+        audience_id: audienceId,
+        sensitivity_hint: sensitivityHint || undefined,
+      });
+      setClaimsPreview(out.claims || []);
+      setAnalysisNote(
+        `Flow A · ${out.sensitivity?.sensitivity || "?"} · claims=${out.claims?.length || 0} · rehearse=${!!out.rehearse_ready}`,
+      );
+      if (out.improved_notes?.length && !notes.trim()) {
+        const joined = out.improved_notes.map((n) => n.notes).join("\n\n---\n\n");
+        persistNotes(joined.slice(0, 8000));
+      }
+      setStatus(
+        out.ok
+          ? `Deck analyzed for ${out.audience?.label || audienceId}. Review claims before presenting.`
+          : out.reason || "Analysis blocked",
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Analyze failed");
     } finally {
       setBusy(false);
     }
@@ -524,6 +601,12 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     setStatus("");
 
     try {
+      if (isDesktop && !shareApproved) {
+        setStatus(
+          "Approve screen-share first — Mentrix will narrate only after you confirm you will share PowerPoint in Zoom yourself.",
+        );
+        return;
+      }
       if (cloneNarrateBlocked) {
         setStatus(
           `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
@@ -718,6 +801,90 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
           />
         </label>
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Audience
+          <select
+            data-testid="present-deck-audience"
+            value={audienceId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setAudienceId(v);
+              try {
+                localStorage.setItem(AUDIENCE_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {(audiences.length
+              ? audiences
+              : [
+                  { id: "general", label: "General" },
+                  { id: "executive", label: "Executive" },
+                  { id: "manager", label: "Manager" },
+                  { id: "technical", label: "Technical" },
+                ]
+            ).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Sensitivity hint
+          <select
+            data-testid="present-deck-sensitivity"
+            value={sensitivityHint}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSensitivityHint(v);
+              try {
+                localStorage.setItem(SENS_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            <option value="">Auto-detect</option>
+            <option value="PUBLIC">PUBLIC</option>
+            <option value="INTERNAL">INTERNAL</option>
+            <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+            <option value="RESTRICTED">RESTRICTED</option>
+          </select>
+        </label>
+      </div>
+      {analysisNote && (
+        <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`} data-testid="present-deck-analysis-note">
+          {analysisNote}
+        </p>
+      )}
+      {claimsPreview.length > 0 && (
+        <div
+          className={`max-h-28 overflow-auto rounded border px-2 py-1 text-[10px] ${
+            dark ? "border-slate-700 text-slate-300" : "border-slate-200 text-slate-700"
+          }`}
+          data-testid="present-deck-claims"
+        >
+          {claimsPreview.slice(0, 8).map((c) => (
+            <div key={c.id}>
+              [{c.verification_status}] {c.claim.slice(0, 120)}
+              {c.present_as_fact ? "" : " — not as fact"}
+            </div>
+          ))}
+        </div>
+      )}
       {templateChoice === CUSTOM_TEMPLATE_OPTION && (
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
           Custom template id (Presenton master)
@@ -748,6 +915,16 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       >
         <Sparkles className="h-3.5 w-3.5" />
         Generate deck
+      </button>
+      <button
+        type="button"
+        data-testid="present-deck-analyze"
+        disabled={busy}
+        onClick={() => void analyzeExisting()}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
+        title="Flow A: classify + audience + claims for existing notes/upload"
+      >
+        Analyze deck
       </button>
       <p className={`text-[11px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
         Pick template + slides, then Generate. Open presentation / Open Zoom need Electron. Clone narrate needs
@@ -871,6 +1048,24 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         >
           Open Zoom
         </button>
+        {isDesktop && (
+          <label
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer ${
+              shareApproved
+                ? "border-amber-500 bg-amber-900/30 text-amber-100"
+                : "border-slate-600 text-slate-300"
+            }`}
+            data-testid="present-deck-share-approve"
+          >
+            <input
+              type="checkbox"
+              checked={shareApproved}
+              onChange={(e) => setShareApproved(e.target.checked)}
+              className="rounded border-slate-500"
+            />
+            I will share PowerPoint in Zoom (Mentrix does not auto-share)
+          </label>
+        )}
         <button
           type="button"
           data-testid="present-deck-narrate"
@@ -889,15 +1084,17 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         <button
           type="button"
           data-testid="present-deck-present-all"
-          disabled={busy || cloneNarrateBlocked}
+          disabled={busy || cloneNarrateBlocked || (isDesktop && !shareApproved)}
           onClick={() => void presentAllSlides()}
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-900/40 px-2.5 py-1.5 text-xs text-amber-50 hover:bg-amber-900 disabled:opacity-40"
           title={
-            cloneNarrateBlocked
-              ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice)"
-              : isDesktop
-                ? "Reads slide text + speaker notes, opens PowerPoint, F5, narrates, advances with Right Arrow"
-                : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
+            isDesktop && !shareApproved
+              ? "Approve screen-share first"
+              : cloneNarrateBlocked
+                ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice)"
+                : isDesktop
+                  ? "Reads slide text + speaker notes, opens PowerPoint, F5, narrates, advances with Right Arrow"
+                  : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
           }
         >
           <Presentation className="h-3.5 w-3.5" />

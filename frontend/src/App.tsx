@@ -21,6 +21,7 @@ import TokenControls from "@/pages/TokenControls";
 import AuditTrail from "@/pages/AuditTrail";
 import RulesEngine from "@/pages/RulesEngine";
 import Integrations from "@/pages/Integrations";
+import ZectLearning from "@/pages/ZectLearning";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
 import AppRunner from "@/pages/AppRunner";
@@ -182,6 +183,7 @@ export default function App() {
           <Route path="/skills-engine" element={<SkillsEngine />} />
           <Route path="/file-organize" element={<FileOrganize />} />
           <Route path="/knowledge-base" element={<KnowledgeBase />} />
+          <Route path="/learning" element={<ZectLearning />} />
           <Route path="/playbooks" element={<Playbooks />} />
           <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
           <Route path="/secrets" element={<SecretsManager />} />

@@ -55,6 +55,7 @@ const workItems: NavItem[] = [
 const intelligenceItems: NavItem[] = [
   { href: "/project-intelligence", label: "Project Intelligence", icon: Brain },
   { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
+  { href: "/learning", label: "ZECT Learning", icon: BookOpen },
   { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
   { href: "/lattice", label: "Lattice", icon: Network },

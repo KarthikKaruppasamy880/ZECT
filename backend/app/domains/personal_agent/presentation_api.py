@@ -1,0 +1,75 @@
+"""Present Deck analysis API — Flow A/B (Presenton remains the generator)."""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.auth.rbac import require_authentication
+from app.services.mentrix.presentation import (
+    analyze_existing_deck,
+    list_audiences,
+    prepare_prompt_deck,
+    verify_claim,
+)
+
+router = APIRouter(prefix="/api/mentrix/presentation", tags=["mentrix-presentation"])
+
+
+class AnalyzeDeckIn(BaseModel):
+    slides: list[dict[str, Any]] = Field(default_factory=list)
+    notes_blob: str = ""
+    audience_id: str = "general"
+    sensitivity_hint: Optional[str] = None
+
+
+class PreparePromptIn(BaseModel):
+    prompt: str
+    audience_id: str = "general"
+    sensitivity_hint: Optional[str] = None
+    documents: list[str] = Field(default_factory=list)
+
+
+class VerifyClaimIn(BaseModel):
+    claim_id: str
+    claims: list[dict[str, Any]]
+    source: str
+    status: str = "VERIFIED"
+
+
+@router.get("/audiences")
+@require_authentication
+def audiences(current_user: CurrentUser = Depends(get_current_user)):
+    return {"audiences": list_audiences()}
+
+
+@router.post("/analyze-deck")
+@require_authentication
+def analyze_deck(body: AnalyzeDeckIn, current_user: CurrentUser = Depends(get_current_user)):
+    return analyze_existing_deck(
+        slides=body.slides,
+        notes_blob=body.notes_blob,
+        audience_id=body.audience_id,
+        sensitivity_hint=body.sensitivity_hint,
+    )
+
+
+@router.post("/prepare-prompt")
+@require_authentication
+def prepare_prompt(body: PreparePromptIn, current_user: CurrentUser = Depends(get_current_user)):
+    return prepare_prompt_deck(
+        prompt=body.prompt,
+        audience_id=body.audience_id,
+        sensitivity_hint=body.sensitivity_hint,
+        documents=body.documents,
+    )
+
+
+@router.post("/verify-claim")
+@require_authentication
+def verify_claim_endpoint(body: VerifyClaimIn, current_user: CurrentUser = Depends(get_current_user)):
+    claims = verify_claim(body.claim_id, body.claims, source=body.source, status=body.status)
+    return {"claims": claims}

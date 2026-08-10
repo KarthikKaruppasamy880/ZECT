@@ -591,6 +591,54 @@ export const mentrixPresentonGenerate = (data: {
     { method: "POST", body: JSON.stringify(data) },
   );
 
+export const mentrixPresentationAudiences = () =>
+  request<{ audiences: Array<{ id: string; label: string; slide_count_hint?: number }> }>(
+    "/api/mentrix/presentation/audiences",
+  );
+
+export const mentrixAnalyzeDeck = (data: {
+  slides?: Array<{ index?: number; notes?: string; text?: string }>;
+  notes_blob?: string;
+  audience_id?: string;
+  sensitivity_hint?: string;
+}) =>
+  request<{
+    ok: boolean;
+    reason?: string;
+    flow: string;
+    sensitivity: { sensitivity: string; model_route?: Record<string, unknown> };
+    audience: { id: string; label: string };
+    claims: Array<{
+      id: string;
+      claim: string;
+      verification_status: string;
+      present_as_fact?: boolean;
+      source?: string;
+    }>;
+    claims_markdown?: string;
+    improved_notes?: Array<{ index: number; notes: string }>;
+    rehearse_ready?: boolean;
+  }>("/api/mentrix/presentation/analyze-deck", { method: "POST", body: JSON.stringify(data) });
+
+export const mentrixPreparePromptDeck = (data: {
+  prompt: string;
+  audience_id?: string;
+  sensitivity_hint?: string;
+  documents?: string[];
+}) =>
+  request<{
+    ok: boolean;
+    reason?: string;
+    adapted_prompt: string;
+    outline: string[];
+    n_slides_hint?: number;
+    sensitivity: { sensitivity: string };
+    claims: Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>;
+    claims_markdown?: string;
+    requires_user_approval?: boolean;
+    presenton_ready?: boolean;
+  }>("/api/mentrix/presentation/prepare-prompt", { method: "POST", body: JSON.stringify(data) });
+
 /** Upload .pptx → slide text + speaker notes (browser Present narration). */
 export const mentrixParsePptx = async (
   file: File,

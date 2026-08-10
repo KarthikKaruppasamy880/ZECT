@@ -1643,17 +1643,78 @@ class PersonalAction(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     # email | calendar | slack | jira | github | work_item | filesystem | other
     source = Column(String, nullable=False, default="other", index=True)
+    connector_id = Column(String, default="", index=True)
     # message | event | mention | issue | pr | ci | file | task | …
     type = Column(String, nullable=False, default="task", index=True)
     title = Column(String, nullable=False)
+    description = Column(Text, default="")
     due = Column(DateTime, nullable=True, index=True)
     priority = Column(String, default="normal", index=True)  # low | normal | high | urgent
     status = Column(String, default="open", index=True)  # open | in_progress | done | dismissed
     target = Column(String, default="")  # URL, issue key, path, channel, …
     provenance_json = Column(Text, default="{}")  # source ids / connector / raw refs
-    suggested_actions_json = Column(Text, default="[]")  # Analyze|Fix|Draft|Reply|Prepare|Organize|Continue
+    suggested_actions_json = Column(Text, default="[]")
     permission_requirement = Column(String, default="require_approval")
     external_id = Column(String, default="", index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# ZECT Learning — curated catalog + LearningProject (Mentrix Learning Advisor)
+# ---------------------------------------------------------------------------
+
+class LearningSource(Base):
+    __tablename__ = "learning_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_type = Column(String, default="catalog", index=True)
+    name = Column(String, nullable=False)
+    repository_url = Column(String, default="")
+    license = Column(String, default="")
+    attribution = Column(Text, default="")
+    refresh_policy = Column(String, default="manual")
+    enabled = Column(Boolean, default=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LearningResource(Base):
+    __tablename__ = "learning_resources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    learning_source_id = Column(Integer, ForeignKey("learning_sources.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    source_url = Column(String, default="")
+    language = Column(String, default="", index=True)
+    technologies_json = Column(Text, default="[]")
+    project_type = Column(String, default="")
+    difficulty = Column(String, default="intermediate", index=True)
+    prerequisites_json = Column(Text, default="[]")
+    skills_json = Column(Text, default="[]")
+    summary = Column(Text, default="")
+    attribution = Column(Text, default="")
+    content_policy = Column(String, default="external_link_only")
+    external_license_status = Column(String, default="link_only")
+    indexed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LearningProject(Base):
+    __tablename__ = "learning_projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    resource_id = Column(Integer, ForeignKey("learning_resources.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    mode = Column(String, default="GUIDED", index=True)  # GUIDED|PAIR|DEMO|AUTONOMOUS
+    status = Column(String, default="active", index=True)
+    goals_json = Column(Text, default="[]")
+    milestones_json = Column(Text, default="[]")
+    skills_json = Column(Text, default="[]")
+    repository_id = Column(Integer, nullable=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=True, index=True)
+    progress_json = Column(Text, default="{}")
+    evidence_json = Column(Text, default="[]")
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)

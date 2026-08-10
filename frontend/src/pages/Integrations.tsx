@@ -51,6 +51,7 @@ export default function Integrations() {
   const [zoomPathReady, setZoomPathReady] = useState(false);
   const [processReady, setProcessReady] = useState(false);
   const [processDetail, setProcessDetail] = useState("");
+  const [connectorMatrix, setConnectorMatrix] = useState<any[]>([]);
 
   const fetchStatus = async () => {
     try {
@@ -82,6 +83,15 @@ export default function Integrations() {
         setZoomPathReady(!!integ.zoom_desktop_path_configured);
       } catch {
         /* companion integrations optional */
+      }
+      try {
+        const cm = await fetch(`${API}/api/personal-actions/connectors/health`, { headers });
+        if (cm.ok) {
+          const data = await cm.json();
+          setConnectorMatrix(data.connectors || []);
+        }
+      } catch {
+        setConnectorMatrix([]);
       }
       try {
         const pRes = await fetch(`${API}/api/process/status`, { headers });
@@ -253,6 +263,58 @@ export default function Integrations() {
           </ul>
         </div>
       </div>
+
+      {connectorMatrix.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="connector-health-matrix">
+          <h3 className="font-semibold text-slate-900 mb-1">Mentrix connector gateway</h3>
+          <p className="text-xs text-slate-500 mb-3">
+            Connected / Degraded / Missing credentials · read/write tools · permission policy (ALLOW / CONFIRM / DENY)
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead>
+                <tr className="text-xs text-slate-500 border-b border-slate-100">
+                  <th className="py-2 pr-3 font-medium">Connector</th>
+                  <th className="py-2 pr-3 font-medium">Health</th>
+                  <th className="py-2 pr-3 font-medium">Auth</th>
+                  <th className="py-2 pr-3 font-medium">Policy</th>
+                  <th className="py-2 pr-3 font-medium">Read</th>
+                  <th className="py-2 font-medium">Write</th>
+                </tr>
+              </thead>
+              <tbody>
+                {connectorMatrix.map((c) => {
+                  const health = String(c.health || c.status || "unknown");
+                  const auth = String(c.auth_status || "unknown");
+                  const policy = String(c.permission_policy || c.policy || "CONFIRM");
+                  const healthColor =
+                    health === "connected" || health === "ok"
+                      ? "text-green-600"
+                      : health === "degraded"
+                        ? "text-amber-600"
+                        : health === "missing_creds" || health === "missing"
+                          ? "text-slate-400"
+                          : "text-slate-600";
+                  return (
+                    <tr key={c.id || c.connector_id || c.name} className="border-b border-slate-50">
+                      <td className="py-2 pr-3 font-medium text-slate-800">{c.name || c.id || c.connector_id}</td>
+                      <td className={`py-2 pr-3 ${healthColor}`}>{health}</td>
+                      <td className="py-2 pr-3 text-slate-600">{auth}</td>
+                      <td className="py-2 pr-3 text-slate-600">{policy}</td>
+                      <td className="py-2 pr-3 text-xs text-slate-500">
+                        {(c.read_tools || c.tools_read || []).join(", ") || "—"}
+                      </td>
+                      <td className="py-2 text-xs text-slate-500">
+                        {(c.write_tools || c.tools_write || []).join(", ") || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {mcpServers.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-5" data-testid="mcp-enable-panel">

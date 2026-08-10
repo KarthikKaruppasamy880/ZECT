@@ -804,22 +804,39 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const onAllow = useCallback(
     async (tools: string[]) => {
       setPending([]);
-      // Session Allow → CapabilityGrant TTL so multi-step desktop writes skip per-step Allow.
+      // Session Allow → CapabilityGrant TTL so multi-step actions skip per-step Allow.
       try {
         const { createCapabilityGrant } = await import("@/lib/api");
-        const desktopish = tools.some(
-          (t) =>
+        const caps = new Set<string>();
+        for (const t of tools) {
+          if (
             t.startsWith("computer_") ||
             t.startsWith("desktop_") ||
-            t === "file_organize_approve" ||
-            t.startsWith("browser_"),
-        );
-        if (desktopish) {
+            t.startsWith("browser_") ||
+            t === "file_organize_approve"
+          ) {
+            caps.add("desktop:control");
+          }
+          if (t === "file_organize_approve" || t === "desktop_move_path" || t === "desktop_mkdir") {
+            caps.add("filesystem:move");
+          }
+          if (t === "email_send" || t === "email_digest") {
+            caps.add(t === "email_send" ? "email:draft" : "email:read");
+          }
+          if (t === "slack_digest") caps.add("slack:read");
+          if (t === "jira_get_issue" || t === "jira_search_incidents") caps.add("jira:read");
+        }
+        const minted: string[] = [];
+        for (const capability of caps) {
           await createCapabilityGrant({
-            capability: "desktop:control",
+            capability,
             duration_minutes: 30,
             reason: "Mentrix Companion Allow session",
           });
+          minted.push(capability);
+        }
+        if (minted.length) {
+          setStatusLine(`Session grant: ${minted.join(", ")} (30m)`);
         }
       } catch {
         /* grant mint is best-effort — Allow still proceeds */

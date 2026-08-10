@@ -1,0 +1,166 @@
+{
+  "started_at": "2026-08-10T19:22:56.234499+00:00",
+  "jira": "BLOCKED_EXTERNAL",
+  "jira_reason": "Controlled User WorkItem used against disposable test repo (Jira not required for this acceptance)",
+  "production_merge": false,
+  "worktree_path": "C:\\Users\\karuppk\\Downloads\\ZECT\\.zect\\live-endurance\\run-1786389776",
+  "base_commit_sha": "202b1e0d9f6230d6c45a3980bd6d39f17d4acd80",
+  "coding_engine": "mentrix_native",
+  "openai_configured": true,
+  "work_item_id": 47,
+  "plan_hash": "a9dee5f71ae8c95c421b8b0be281b60561a0a014ec57040c5612ffae63e9a8f7",
+  "run_id": "lrr-9000ec22117142c4",
+  "after_first_batch": {
+    "ok": true,
+    "completed": 4,
+    "resume": "OP-005",
+    "status": "RUNNING",
+    "current_sha": "0a623912c43550d80342f50342de6419ef69d3b2"
+  },
+  "pause": {
+    "status": "PAUSED",
+    "ok": true
+  },
+  "resume": {
+    "ok": true,
+    "status": "RUNNING",
+    "resume_operation": "OP-005"
+  },
+  "after_resume_batch": {
+    "completed": 6,
+    "resume": "OP-007",
+    "sha": "b90630f07ebfddece554dbf1fc1219dd850463c3"
+  },
+  "restart_recovery": {
+    "ok": true,
+    "recovered": [
+      {
+        "run_id": "lrr-9000ec22117142c4",
+        "resume_operation": "OP-007"
+      }
+    ],
+    "at": "2026-08-10T19:23:06.323513+00:00"
+  },
+  "post_restart_state": {
+    "worker_id": "",
+    "lease_expires_at": null,
+    "resume_operation": "OP-007",
+    "completed": 6,
+    "sha": "b90630f07ebfddece554dbf1fc1219dd850463c3"
+  },
+  "final_tick": {
+    "ok": false,
+    "status": "FAILED_VERIFICATION",
+    "completed": 8,
+    "total": 8,
+    "error": "test_or_review_not_clean",
+    "acceptance": null
+  },
+  "tests": {
+    "ok": true,
+    "exit_code": 0,
+    "stdout_tail": ".                                                                        [100%]\n1 passed in 0.03s\n"
+  },
+  "review": {
+    "clean": true,
+    "blocking": 0,
+    "findings": 0
+  },
+  "acceptance": {
+    "ok": true,
+    "ready_to_ship": true,
+    "missing_operations": [],
+    "missing_requirements": [],
+    "missing_acceptance": [],
+    "errors": [],
+    "role": "acceptance_verifier",
+    "work_item_id": 47,
+    "shipped": false
+  },
+  "final_run": {
+    "status": "FAILED_VERIFICATION",
+    "completed": 8,
+    "total": 8,
+    "telemetry_count": 8,
+    "telemetry_sample": [
+      {
+        "operation_id": "OP-001",
+        "requested_model": "QUALITY",
+        "actual_model": "mentrix_native:QUALITY",
+        "provider": "cloud",
+        "local_or_cloud": "cloud",
+        "fallback_used": false,
+        "fallback_reason": "",
+        "latency_ms": 1127,
+        "work_item_id": 47,
+        "at": "2026-08-10T19:22:59.293490+00:00"
+      },
+      {
+        "operation_id": "OP-002",
+        "requested_model": "QUALITY",
+        "actual_model": "mentrix_native:QUALITY",
+        "provider": "cloud",
+        "local_or_cloud": "cloud",
+        "fallback_used": false,
+        "fallback_reason": "",
+        "latency_ms": 923,
+        "work_item_id": 47,
+        "at": "2026-08-10T19:23:00.478057+00:00"
+      },
+      {
+        "operation_id": "OP-003",
+        "requested_model": "QUALITY",
+        "actual_model": "mentrix_native:QUALITY",
+        "provider": "cloud",
+        "local_or_cloud": "cloud",
+        "fallback_used": false,
+        "fallback_reason": "",
+        "latency_ms": 1016,
+        "work_item_id": 47,
+        "at": "2026-08-10T19:23:01.450360+00:00"
+      }
+    ],
+    "budget": {
+      "max_runtime_seconds": 300,
+      "max_tokens": 50000,
+      "max_cost_usd": 5.0,
+      "max_actions": 200,
+      "max_retries": 3,
+      "max_same_failure": 3,
+      "max_files_changed": 200,
+      "max_coder_test_cycles": 5,
+      "max_coder_review_cycles": 3,
+      "no_progress_threshold": 2
+    },
+    "current_commit_sha": "28ecb545ddbbca38b730fb8fce75e1c0394ccaec"
+  },
+  "files_changed": [
+    "pkg/mod_001.py",
+    "pkg/mod_002.py",
+    "pkg/mod_003.py",
+    "pkg/mod_004.py",
+    "pkg/mod_005.py",
+    "pkg/mod_006.py",
+    "pkg/mod_007.py",
+    "pkg/mod_008.py"
+  ],
+  "git_log": [
+    "28ecb54 lrr:OP-008 Add pkg/mod_008.py",
+    "672450e lrr:OP-007 Add pkg/mod_007.py",
+    "b90630f lrr:OP-006 Add pkg/mod_006.py",
+    "9d6cc41 lrr:OP-005 Add pkg/mod_005.py",
+    "0a62391 lrr:OP-004 Add pkg/mod_004.py",
+    "a778f13 lrr:OP-003 Add pkg/mod_003.py",
+    "db1c2a1 lrr:OP-002 Add pkg/mod_002.py",
+    "9cc2eb4 lrr:OP-001 Add pkg/mod_001.py",
+    "202b1e0 chore: seed disposable endurance repo"
+  ],
+  "models_used": [
+    "mentrix_native:QUALITY"
+  ],
+  "pr_status": "NOT_CREATED_BY_DESIGN",
+  "pr_note": "No production PR/merge; disposable local commits only",
+  "verdict": "LIVE_VIABLE",
+  "duration_seconds": 19.92,
+  "finished_at": "2026-08-10T19:23:16.149997+00:00"
+}

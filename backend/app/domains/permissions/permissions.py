@@ -437,6 +437,80 @@ def list_grants(
     return out
 
 
+# Mentrix Companion Allow may mint these for the current user (session TTL) — not admin-only.
+_SESSION_GRANT_CAPABILITIES = frozenset(
+    {
+        "desktop:view",
+        "desktop:control",
+        "filesystem:scan",
+        "filesystem:move",
+        "email:read",
+        "email:draft",
+        "slack:read",
+        "jira:read",
+    }
+)
+
+
+class SessionGrantCreate(BaseModel):
+    capability: str = "desktop:control"
+    duration_minutes: int = 30
+    reason: str = "Mentrix Companion Allow session"
+    project_id: Optional[int] = None
+
+
+@router.post("/grants/session")
+@require_authentication
+def create_session_grant(
+    data: SessionGrantCreate,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Mint a short-lived CapabilityGrant for the current user after Mentrix Allow."""
+    from datetime import timedelta
+
+    cap = (data.capability or "").strip()
+    if cap not in _SESSION_GRANT_CAPABILITIES:
+        raise HTTPException(
+            400,
+            f"Session grants limited to: {', '.join(sorted(_SESSION_GRANT_CAPABILITIES))}",
+        )
+    minutes = max(1, min(int(data.duration_minutes or 30), 120))
+    granter_id = None
+    try:
+        u = get_user_from_current_user(current_user, db)
+        if u:
+            granter_id = u.id
+    except Exception:
+        granter_id = getattr(current_user, "user_id", None)
+    if not granter_id:
+        raise HTTPException(400, "Cannot resolve user for session grant")
+
+    exp = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    grant = CapabilityGrant(
+        capability=cap,
+        subject_type="user",
+        subject_id=str(granter_id),
+        project_id=data.project_id,
+        permission_level="allow",
+        reason=(data.reason or "Mentrix Companion Allow session")[:500],
+        granted_by=granter_id,
+        expires_at=exp,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(grant)
+    log_audit(
+        db=db,
+        user_id=granter_id,
+        action="create_session_capability_grant",
+        resource_id=grant.id,
+        resource_type="capability_grant",
+        details={"capability": grant.capability, "expires_at": exp.isoformat(), "minutes": minutes},
+    )
+    return serialize_grant(grant)
+
+
 @router.post("/grants")
 @require_role("admin", "lead")
 def create_grant(

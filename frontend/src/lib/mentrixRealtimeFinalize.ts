@@ -39,11 +39,17 @@ export function chunkSpeakText(text: string, maxChars = 220): string[] {
   const parts: string[] = [];
   let buf = "";
 
+  /** Prefer word boundaries so TTS does not jump mid-word between chunks. */
   const pushHardWrap = (piece: string) => {
-    for (let i = 0; i < piece.length; i += maxChars) {
-      const slice = piece.slice(i, i + maxChars).trim();
+    let rest = piece.trim();
+    while (rest.length > maxChars) {
+      let cut = rest.lastIndexOf(" ", maxChars);
+      if (cut < Math.floor(maxChars * 0.4)) cut = maxChars;
+      const slice = rest.slice(0, cut).trim();
       if (slice) parts.push(slice);
+      rest = rest.slice(cut).trim();
     }
+    if (rest) parts.push(rest);
   };
 
   for (const raw of sentences) {

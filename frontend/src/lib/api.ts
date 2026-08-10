@@ -780,6 +780,9 @@ export async function mentrixSpeakClonedDetailed(
     voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== ""
       ? false
       : voiceOpts?.requireClone !== false;
+  const speakTimeoutMs = Number(import.meta.env.VITE_MENTRIX_SPEAK_TIMEOUT_MS || 45000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), speakTimeoutMs);
   let res: Response;
   try {
     res = await fetch(url, {
@@ -791,9 +794,15 @@ export async function mentrixSpeakClonedDetailed(
         stock_voice: voiceOpts?.stockVoice,
         require_clone: requireClone,
       }),
+      signal: controller.signal,
     });
-  } catch {
+  } catch (e: any) {
+    if (e?.name === "AbortError") {
+      throw new Error(`Speak timed out after ${speakTimeoutMs}ms — is ZECT Voicebox models_ready?`);
+    }
     throw new Error(`Cannot reach ZECT API at ${API} — is the backend running?`);
+  } finally {
+    clearTimeout(timer);
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -805,10 +814,37 @@ export async function mentrixSpeakClonedDetailed(
     );
   }
   const engine = res.headers.get("X-Mentrix-TTS-Engine") || "unknown";
-  const blob = await res.blob();
-  if (!blob.size) throw new Error("Speak returned empty audio");
+  const declared =
+    res.headers.get("X-Mentrix-TTS-Content-Type") ||
+    res.headers.get("Content-Type") ||
+    (engine.includes("voicebox") || engine === "zect_voicebox" || engine === "chatterbox"
+      ? "audio/wav"
+      : "audio/mpeg");
+  const buf = await res.arrayBuffer();
+  if (!buf.byteLength) throw new Error("Speak returned empty audio");
+  const blob = new Blob([buf], { type: declared.split(";")[0].trim() || "audio/mpeg" });
   return { url: URL.createObjectURL(blob), engine };
 }
+
+/** Mint a short-lived CapabilityGrant after Mentrix Allow (session desktop/connector writes). */
+export const createCapabilityGrant = (body: {
+  capability: string;
+  duration_minutes?: number;
+  reason?: string;
+}) =>
+  request<{
+    id: number;
+    capability: string;
+    expires_at?: string;
+  }>("/api/permissions/grants/session", {
+    method: "POST",
+    body: JSON.stringify({
+      capability: body.capability,
+      duration_minutes: body.duration_minutes ?? 30,
+      reason: body.reason || "Mentrix Companion Allow session",
+    }),
+  });
+
 
 export const mcpExecute = (server_id: string, tool_name: string, arguments_: Record<string, unknown> = {}) =>
   request<{

@@ -228,6 +228,13 @@ def _dispatch(db: Session, schedule: Schedule) -> str:
             f"steps={prun.steps_completed}/{prun.total_steps}"
         )
 
+    if task in ("daily_brief", "personal_brief", "mentrix_brief"):
+        from app.domains.personal_agent.personal_actions import assemble_daily_brief
+
+        brief = assemble_daily_brief(db, user_id=schedule.user_id)
+        n = len(brief.get("actions") or [])
+        return f"DailyBrief actions={n} upserted={brief.get('upserted')} mail={len((brief.get('information') or {}).get('email') or [])}"
+
     if task in ("coding", "coding_agent", "code"):
         from app.adapters.coding_runtime import get_mentrix_native_runtime
 

@@ -804,6 +804,26 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const onAllow = useCallback(
     async (tools: string[]) => {
       setPending([]);
+      // Session Allow → CapabilityGrant TTL so multi-step desktop writes skip per-step Allow.
+      try {
+        const { createCapabilityGrant } = await import("@/lib/api");
+        const desktopish = tools.some(
+          (t) =>
+            t.startsWith("computer_") ||
+            t.startsWith("desktop_") ||
+            t === "file_organize_approve" ||
+            t.startsWith("browser_"),
+        );
+        if (desktopish) {
+          await createCapabilityGrant({
+            capability: "desktop:control",
+            duration_minutes: 30,
+            reason: "Mentrix Companion Allow session",
+          });
+        }
+      } catch {
+        /* grant mint is best-effort — Allow still proceeds */
+      }
       const msg = lastMessage || input;
       if (realtimeRef.current?.mode === "realtime") {
         const outputs = await confirmRealtimeTools(tools, pendingArgsRef.current, {

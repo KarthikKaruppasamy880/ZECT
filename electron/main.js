@@ -541,6 +541,12 @@ ipcMain.handle("mentrix-computer", async (_e, action, args) => {
     }
   } else if (action === "write_note" || action === "desktop_write_note" || action === "write_path") {
     result = await computer.writeNoteFile(a);
+  } else if (action === "mkdir" || action === "desktop_mkdir" || action === "create_folder") {
+    result = computer.mkdirPath(a);
+  } else if (action === "list_dir" || action === "desktop_list_dir") {
+    result = computer.listDir(a);
+  } else if (action === "move_path" || action === "desktop_move_path" || action === "rename_path") {
+    result = computer.movePath(a);
   } else if (action === "click" || action === "computer_click") {
     const intended = a.app || a.appName || lastOpenedApp;
     const before = await computer.uiInspect();

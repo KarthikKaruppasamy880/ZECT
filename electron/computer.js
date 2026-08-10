@@ -804,6 +804,98 @@ function writeNoteFile(args) {
   }
 }
 
+function pathUnderAllowlist(target) {
+  const resolved = path.resolve(String(target || ""));
+  const home = os.homedir();
+  const roots = [
+    path.resolve(path.join(home, "Desktop")),
+    path.resolve(path.join(home, "Documents")),
+    path.resolve(path.join(home, "Downloads")),
+  ];
+  // OneDrive Desktop/Documents common on Windows corp machines
+  try {
+    const od = path.join(home, "OneDrive");
+    if (fs.existsSync(od)) {
+      roots.push(path.resolve(path.join(od, "Desktop")));
+      roots.push(path.resolve(path.join(od, "Documents")));
+      roots.push(path.resolve(path.join(od, "Downloads")));
+    }
+  } catch {
+    /* ignore */
+  }
+  const ok = roots.some(
+    (root) =>
+      resolved.toLowerCase() === root.toLowerCase() ||
+      resolved.toLowerCase().startsWith(root.toLowerCase() + path.sep)
+  );
+  return { ok, resolved, roots };
+}
+
+function listDir(args) {
+  const a = args || {};
+  const target = a.path || a.dir || "";
+  if (!target) return { ok: false, error: "path_required" };
+  const { ok, resolved } = pathUnderAllowlist(target);
+  if (!ok) return { ok: false, error: "path_outside_allowlist", path: resolved };
+  try {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return { ok: false, error: "not_a_directory", path: resolved };
+    }
+    const entries = fs.readdirSync(resolved, { withFileTypes: true }).slice(0, 200).map((d) => ({
+      name: d.name,
+      type: d.isDirectory() ? "dir" : "file",
+    }));
+    return { ok: true, desktop: "list_dir", path: resolved, entries, audited: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+function mkdirPath(args) {
+  const a = args || {};
+  const target = a.path || a.dir || "";
+  if (!target) return { ok: false, error: "path_required" };
+  const { ok, resolved } = pathUnderAllowlist(target);
+  if (!ok) return { ok: false, error: "path_outside_allowlist", path: resolved };
+  try {
+    fs.mkdirSync(resolved, { recursive: true });
+    return { ok: true, desktop: "mkdir", path: resolved, audited: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+function movePath(args) {
+  const a = args || {};
+  const src = a.src || a.source || a.from || "";
+  const dest = a.dest || a.destination || a.to || "";
+  if (!src || !dest) return { ok: false, error: "src_and_dest_required" };
+  const s = pathUnderAllowlist(src);
+  const d = pathUnderAllowlist(dest);
+  if (!s.ok) return { ok: false, error: "path_outside_allowlist", path: s.resolved };
+  if (!d.ok) return { ok: false, error: "path_outside_allowlist", path: d.resolved };
+  const blocked = [".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh"];
+  if (blocked.some((b) => s.resolved.toLowerCase().includes(b) || d.resolved.toLowerCase().includes(b))) {
+    return { ok: false, error: "path_blocked" };
+  }
+  try {
+    if (!fs.existsSync(s.resolved)) return { ok: false, error: "not_found", path: s.resolved };
+    fs.mkdirSync(path.dirname(d.resolved), { recursive: true });
+    if (fs.existsSync(d.resolved)) return { ok: false, error: "dest_exists", path: d.resolved };
+    fs.renameSync(s.resolved, d.resolved);
+    return {
+      ok: true,
+      desktop: "move_path",
+      src: s.resolved,
+      dest: d.resolved,
+      audited: true,
+      note: "Move only — Mentrix never deletes",
+    };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 module.exports = {
   WIN_APPS,
   MAC_APPS,
@@ -828,4 +920,8 @@ module.exports = {
   refuseDelete,
   writeNoteFile,
   stripPathQuotes,
+  listDir,
+  mkdirPath,
+  movePath,
+  pathUnderAllowlist,
 };

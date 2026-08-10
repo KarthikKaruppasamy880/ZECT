@@ -33,7 +33,19 @@ const BUILTIN_TEMPLATES: PresentonTemplate[] = [
   { id: "modern", name: "Modern" },
   { id: "standard", name: "Standard" },
   { id: "swift", name: "Swift" },
+  { id: "zinnia-exec", name: "Zinnia — Executive brief" },
+  { id: "zinnia-delivery", name: "Zinnia — Delivery status" },
+  { id: "zinnia-risk", name: "Zinnia — Risk & next actions" },
 ];
+
+const ZINNIA_PROMPT_PRESETS: Record<string, string> = {
+  "zinnia-exec":
+    "Zinnia executive brief: title slide, status snapshot, decisions needed, owners, next 7 days.",
+  "zinnia-delivery":
+    "Zinnia delivery status: workstream health, milestones, blockers, dependencies, ask for leadership.",
+  "zinnia-risk":
+    "Zinnia risk review: top risks, mitigations, owners, timeline impact, recommended actions.",
+};
 
 const STOCK_VOICES: { id: string; label: string }[] = [
   { id: "alloy", label: "OpenAI — Alloy (neutral)" },
@@ -119,7 +131,12 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       .catch(() => setPresentonReady(false));
     mentrixPresentonTemplates()
       .then((res) => {
-        const list = Array.isArray(res.templates) && res.templates.length ? res.templates : BUILTIN_TEMPLATES;
+        const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
+        const byId = new Map<string, PresentonTemplate>();
+        for (const t of [...BUILTIN_TEMPLATES, ...remote]) {
+          if (t?.id) byId.set(t.id, t);
+        }
+        const list = Array.from(byId.values());
         setTemplates(list);
         setTemplateChoice((prev) => {
           if (prev === CUSTOM_TEMPLATE_OPTION) return prev;
@@ -221,15 +238,6 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     }
   };
 
-  const persistTemplateChoice = (value: string) => {
-    setTemplateChoice(value);
-    try {
-      localStorage.setItem(TEMPLATE_KEY, value);
-    } catch {
-      /* ignore */
-    }
-  };
-
   const persistCustomTemplate = (value: string) => {
     setCustomTemplateId(value);
     try {
@@ -253,7 +261,23 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
       return customTemplateId.trim() || "general";
     }
-    return (templateChoice || "general").trim() || "general";
+    const raw = (templateChoice || "general").trim() || "general";
+    // Zinnia presets are prompt-side; Presenton gets a known visual template.
+    if (raw.startsWith("zinnia-")) return "modern";
+    return raw;
+  };
+
+  const persistTemplateChoice = (value: string) => {
+    setTemplateChoice(value);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+    const preset = ZINNIA_PROMPT_PRESETS[value];
+    if (preset) {
+      persistPrompt(preset);
+    }
   };
 
   const persistJoin = (value: string) => {
@@ -427,7 +451,15 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       return capPresentSlideScript(raw);
     };
     const opts = voiceOptsFromChoice(voiceChoice);
-    let pendingPrefetch: Promise<PrefetchedSpeakChunk[] | null> | null = null;
+    // Warm Voicebox + prefetch slide 0 before first play (cuts cold-start lag).
+    setStatus(`${modeLabel}: warming voice engine…`);
+    try {
+      await mentrixVoiceEngineStatus({ forceRefresh: true });
+    } catch {
+      /* best-effort */
+    }
+    let pendingPrefetch: Promise<PrefetchedSpeakChunk[] | null> | null =
+      n > 0 ? prefetchMentrixSpeakChunks(scriptFor(0), opts) : null;
 
     for (let i = 0; i < slides.length; i++) {
       if (abortRef.current) {

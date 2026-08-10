@@ -38,6 +38,10 @@ TOOL_ACTIONS: dict[str, str] = {
     "meeting_followup_draft": "companion_meeting_draft",
     "file_organize_plan": "companion_file_organize",
     "file_organize_approve": "companion_file_organize",
+    "desktop_mkdir": "companion_desktop_write",
+    "desktop_list_dir": "companion_desktop_read",
+    "desktop_move_path": "companion_desktop_write",
+    "daily_brief": "companion_email_read",
     "image_avatar": "companion_image_gen",
     "media_generate": "companion_image_gen",
     "media_edit": "companion_image_gen",
@@ -110,6 +114,8 @@ ALWAYS_CONFIRM_TOOLS = {
     "browser_fill",
     "meeting_followup_draft",
     "file_organize_approve",
+    "desktop_mkdir",
+    "desktop_move_path",
     "fabric_run",
     "process_deploy",
     "process_start",
@@ -164,6 +170,10 @@ def check_tool_permission(
     result, level, grant = apply_grant_override(result, level, grants)
 
     needs_confirm = tool_name in ALWAYS_CONFIRM_TOOLS or result == "pending_approval"
+    # Session Allow → CapabilityGrant TTL: active allow grant skips per-step confirm
+    # for tools covered by that grant (e.g. desktop:control for long type/write runs).
+    if grant is not None and result == "granted" and level == "allow":
+        needs_confirm = False
     if needs_confirm and user_confirmed and result == "pending_approval":
         result = "granted"
     elif needs_confirm and user_confirmed and result == "granted":

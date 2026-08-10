@@ -34,7 +34,23 @@ export function flattenDesktopArgs(parsed: Record<string, unknown>): Record<stri
     ...electronArgs,
   };
   // Prefer nested text/coords when top-level missing
-  for (const key of ["text", "x", "y", "app", "path", "file", "direction", "content", "filename", "folder"]) {
+  for (const key of [
+    "text",
+    "x",
+    "y",
+    "app",
+    "path",
+    "file",
+    "direction",
+    "content",
+    "filename",
+    "folder",
+    "src",
+    "dest",
+    "from",
+    "to",
+    "dir",
+  ]) {
     if (out[key] == null && nested[key] != null) out[key] = nested[key];
     if (out[key] == null && electronArgs[key] != null) out[key] = electronArgs[key];
   }
@@ -48,6 +64,9 @@ function normalizeDesktopAction(action: string): string {
   if (a === "desktop_write_note") return "write_note";
   if (a === "desktop_read") return "read_path";
   if (a === "desktop_open_presentation") return "open_presentation";
+  if (a === "desktop_mkdir") return "mkdir";
+  if (a === "desktop_list_dir") return "list_dir";
+  if (a === "desktop_move_path") return "move_path";
   return a;
 }
 

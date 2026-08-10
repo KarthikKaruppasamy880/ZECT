@@ -1629,3 +1629,31 @@ class WorkItemEvent(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     work_item = relationship("WorkItem", back_populates="events")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix PersonalAction — actionable personal work (Email/Calendar/Slack/…)
+# ---------------------------------------------------------------------------
+
+class PersonalAction(Base):
+    """Canonical personal-ops action item — Mentrix Companion only (not WorkItem/SDLC)."""
+    __tablename__ = "personal_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # email | calendar | slack | jira | github | work_item | filesystem | other
+    source = Column(String, nullable=False, default="other", index=True)
+    # message | event | mention | issue | pr | ci | file | task | …
+    type = Column(String, nullable=False, default="task", index=True)
+    title = Column(String, nullable=False)
+    due = Column(DateTime, nullable=True, index=True)
+    priority = Column(String, default="normal", index=True)  # low | normal | high | urgent
+    status = Column(String, default="open", index=True)  # open | in_progress | done | dismissed
+    target = Column(String, default="")  # URL, issue key, path, channel, …
+    provenance_json = Column(Text, default="{}")  # source ids / connector / raw refs
+    suggested_actions_json = Column(Text, default="[]")  # Analyze|Fix|Draft|Reply|Prepare|Organize|Continue
+    permission_requirement = Column(String, default="require_approval")
+    external_id = Column(String, default="", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

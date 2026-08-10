@@ -637,8 +637,10 @@ def speak(
     except Exception:
         pass
 
+    # Voicebox returns WAV; OpenAI stock/fallback returns MPEG
+    media = "audio/wav" if engine_used == "zect_voicebox" else "audio/mpeg"
     return Response(
         content=audio,
-        media_type="audio/mpeg",
-        headers={"X-Mentrix-TTS-Engine": engine_used},
+        media_type=media,
+        headers={"X-Mentrix-TTS-Engine": engine_used, "X-Mentrix-TTS-Content-Type": media},
     )

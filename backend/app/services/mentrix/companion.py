@@ -364,6 +364,12 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "connector_architecture",
                 "calendar_upcoming",
                 "meeting_brief",
+                "daily_brief",
+                "file_organize_plan",
+                "file_organize_approve",
+                "desktop_mkdir",
+                "desktop_list_dir",
+                "desktop_move_path",
                 "media_generate",
                 "media_list",
                 "media_edit",
@@ -660,6 +666,47 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         tools.append({"name": "meeting_brief", "args": {}})
     if "follow-up" in m or "follow up" in m or "meeting followup" in m:
         tools.append({"name": "meeting_followup_draft", "args": {"channel": "email"}})
+
+    if any(
+        p in m
+        for p in (
+            "daily brief",
+            "morning brief",
+            "personal brief",
+            "what's on my plate",
+            "whats on my plate",
+            "personal actions",
+        )
+    ):
+        tools.append({"name": "daily_brief", "args": {}})
+
+    # Desktop mkdir / organize (allowlisted; never delete)
+    mkdir_m = re.search(
+        r"\b(?:create|make)\s+(?:a\s+)?(?:new\s+)?(?:folder|directory)\b(?:\s+(?:called|named|at|on))?\s*[\"']?([^\"'\n]+)?",
+        m,
+        re.I,
+    )
+    if mkdir_m or re.search(r"\bmkdir\b", m):
+        import os as _os
+
+        name_hint = (mkdir_m.group(1) if mkdir_m else "").strip() or "Mentrix"
+        name_hint = re.sub(r"[\\/:*?\"<>|]+", "_", name_hint)[:80] or "Mentrix"
+        desk = _os.path.join(_os.path.expanduser("~"), "Desktop", name_hint)
+        tools.append({"name": "desktop_mkdir", "args": {"path": desk}})
+    if any(p in m for p in ("organize desktop", "organize my files", "organize downloads", "file organize")):
+        import os as _os
+
+        home = _os.path.expanduser("~")
+        src = _os.path.join(home, "Desktop")
+        if "download" in m:
+            src = _os.path.join(home, "Downloads")
+        dest = _os.path.join(home, "Desktop", "MentrixOrganized")
+        tools.append(
+            {
+                "name": "file_organize_plan",
+                "args": {"source_dir": src, "dest_dir": dest, "patterns": ["*"]},
+            }
+        )
 
     # Zoom: open/join only — refuse schedule/book/create meeting
     if re.search(r"\b(schedule|book|create|set up|setup)\b.{0,40}\bzoom\b", m) or re.search(
@@ -1986,7 +2033,8 @@ def _exec_tool(
         if topic == "zoom_schedule":
             msg = (
                 "I can open Zoom or a zoom.us join link, but Mentrix cannot schedule Zoom meetings "
-                "(no Zoom schedule API). Open Zoom and create the meeting there, or paste a join URL."
+                "(no Zoom Meeting API yet). Open Zoom and create the meeting there, or paste a join URL. "
+                "I can draft a calendar invite (Outlook/M365 or IMAP calendar) with the Zoom link once you have one."
             )
             return {
                 "ok": True,
@@ -1994,10 +2042,19 @@ def _exec_tool(
                 "topic": topic,
                 "spoken_summary": msg,
                 "note": msg,
+                "suggested_next": [
+                    "Open Zoom and create the meeting",
+                    "Paste a zoom.us join URL for me to open",
+                    "Ask me to draft a calendar invite with the join link",
+                ],
                 "board": {
                     "type": "markdown",
-                    "title": "Zoom scheduling — not wired",
-                    "body": msg + "\n\n**Deferred:** Zoom Meeting API / auto-join / auto screen-share.",
+                    "title": "Zoom scheduling — open/join only",
+                    "body": (
+                        msg
+                        + "\n\n**Available now:** open Zoom, open join URL, draft calendar invite with link.\n"
+                        + "**Deferred:** Zoom Meeting API create / auto-join / auto screen-share."
+                    ),
                 },
             }
         if topic == "open_any_app":
@@ -2455,12 +2512,110 @@ def _exec_tool(
             },
         }
     if name == "file_organize_approve":
+        from app.domains.personal_agent import file_organize as fo
+
+        plan_id = str(args.get("plan_id") or "").strip()
+        if not plan_id:
+            return {
+                "ok": False,
+                "error": "plan_id_required",
+                "spoken_summary": "Need a file organize plan_id to approve.",
+                "navigate": "/file-organize",
+            }
+        plan = fo._load(db, plan_id)
+        if not plan:
+            return {"ok": False, "error": "plan_not_found", "spoken_summary": f"Plan {plan_id} not found."}
+        # Execute moves server-side (allowlisted paths) — never delete
+        try:
+            from pathlib import Path as P
+            import shutil
+
+            executed = []
+            rollback = []
+            for mv in plan.get("moves") or []:
+                if mv.get("collision") == "skip":
+                    continue
+                src = P(mv["from"])
+                dest = P(mv["to"])
+                if not src.is_file():
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    continue
+                shutil.move(str(src), str(dest))
+                executed.append({"from": str(src), "to": str(dest)})
+                rollback.append({"from": str(dest), "to": str(src)})
+            plan["status"] = "executed"
+            plan["executed"] = executed
+            plan["rollback"] = rollback
+            plan["dry_run"] = False
+            fo._persist(db, plan, user_id=user_id)
+            return {
+                "ok": True,
+                "plan_id": plan_id,
+                "moved": len(executed),
+                "spoken_summary": f"Organized {len(executed)} file(s). Never deletes.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Organized {plan_id}",
+                    "body": f"Moved **{len(executed)}** file(s). Rollback entries stored on the plan.",
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)[:300], "spoken_summary": f"Organize failed: {exc}"}
+
+    if name == "desktop_mkdir":
+        folder = str(args.get("path") or args.get("dir") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "path_required", "spoken_summary": "Need a folder path under Desktop/Documents/Downloads."}
         return {
             "ok": True,
-            "navigate": "/file-organize",
-            "note": "Approve moves in the File Organize UI — companion does not auto-execute FS moves",
-            "spoken_summary": "Open File Organize to approve the plan.",
+            "desktop": "mkdir",
+            "args": {"path": folder},
+            "spoken_summary": f"Create folder queued: {folder}",
         }
+    if name == "desktop_list_dir":
+        folder = str(args.get("path") or args.get("dir") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "path_required"}
+        return {"ok": True, "desktop": "list_dir", "args": {"path": folder}}
+    if name == "desktop_move_path":
+        src = str(args.get("src") or args.get("from") or "").strip()
+        dest = str(args.get("dest") or args.get("to") or "").strip()
+        if not src or not dest:
+            return {"ok": False, "error": "src_and_dest_required"}
+        return {
+            "ok": True,
+            "desktop": "move_path",
+            "args": {"src": src, "dest": dest},
+            "spoken_summary": f"Move queued: {src} → {dest}",
+        }
+    if name == "daily_brief":
+        from app.domains.personal_agent.personal_actions import assemble_daily_brief
+
+        brief = assemble_daily_brief(db, user_id=user_id)
+        n = len(brief.get("actions") or [])
+        md_lines = [
+            "# Mentrix Daily Brief",
+            "",
+            f"**{n}** open PersonalActions · upserted={brief.get('upserted')}",
+            "",
+            "## Suggested verbs",
+            ", ".join(brief.get("suggested_verbs") or []),
+            "",
+            "## Top actions",
+        ]
+        for a in (brief.get("actions") or [])[:12]:
+            verbs = ", ".join(a.get("suggested_actions") or [])
+            md_lines.append(f"- **{a.get('title')}** ({a.get('source')}) — {verbs}")
+        body = "\n".join(md_lines)
+        return {
+            "ok": True,
+            "brief": brief,
+            "spoken_summary": f"Daily brief ready with {n} personal actions.",
+            "board": {"type": "markdown", "title": "Daily Brief", "body": body},
+        }
+
     if name == "diagnose_fix":
         issue = args.get("issue") or ""
         runs = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(3).all()

@@ -45,6 +45,24 @@ class TickIn(BaseModel):
     runtime_delta_seconds: float = 0.0
 
 
+def _require_run_owner(db: Session, run_id: str, current_user: CurrentUser):
+    """Load run; 404 if missing; 403 unless caller owns it."""
+    rt = LongRunningAgentRuntime(db)
+    try:
+        row = rt.get(run_id)
+    except LookupError:
+        raise HTTPException(404, "run_not_found") from None
+    uid = getattr(current_user, "user_id", None)
+    if uid is None:
+        raise HTTPException(401, "User must be authenticated")
+    if row.user_id != uid:
+        # Admins may inspect (not mutate leases of others via recover — separate)
+        role = str(getattr(current_user, "role", "") or "").lower()
+        if role != "admin":
+            raise HTTPException(403, "forbidden")
+    return rt, row
+
+
 @router.post("/start")
 @require_authentication
 def start_run(
@@ -54,6 +72,8 @@ def start_run(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = getattr(current_user, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "User must be authenticated")
     ops = list(body.operations or [])
     if not ops and body.operation_count > 0:
         ops = build_synthetic_operations(body.operation_count)
@@ -80,7 +100,7 @@ def start_run(
         background_tasks.add_task(
             run_long_running_batch_in_background,
             out["run_id"],
-            worker_id=f"bg-{uid or 0}",
+            worker_id=f"bg-{uid}",
             max_ops=body.max_ops_batch,
         )
     return {"ok": True, **out}
@@ -89,39 +109,36 @@ def start_run(
 @router.get("/{run_id}")
 @require_authentication
 def get_run(run_id: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    rt = LongRunningAgentRuntime(db)
-    try:
-        row = rt.get(run_id)
-    except LookupError:
-        raise HTTPException(404, "run_not_found") from None
-    uid = getattr(current_user, "user_id", None)
-    if row.user_id and uid and row.user_id != uid:
-        raise HTTPException(403, "forbidden")
-    return rt.serialize(row)
+    rt, _row = _require_run_owner(db, run_id, current_user)
+    return rt.serialize(_row)
 
 
 @router.post("/{run_id}/pause")
 @require_authentication
 def pause_run(run_id: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    return LongRunningAgentRuntime(db).pause(run_id)
+    rt, _row = _require_run_owner(db, run_id, current_user)
+    return rt.pause(run_id)
 
 
 @router.post("/{run_id}/resume")
 @require_authentication
 def resume_run(run_id: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    return LongRunningAgentRuntime(db).resume(run_id)
+    rt, _row = _require_run_owner(db, run_id, current_user)
+    return rt.resume(run_id)
 
 
 @router.post("/{run_id}/cancel")
 @require_authentication
 def cancel_run(run_id: str, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    return LongRunningAgentRuntime(db).cancel(run_id)
+    rt, _row = _require_run_owner(db, run_id, current_user)
+    return rt.cancel(run_id)
 
 
 @router.post("/{run_id}/tick")
 @require_authentication
 def tick_run(run_id: str, body: TickIn, db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    return LongRunningAgentRuntime(db).tick(
+    rt, _row = _require_run_owner(db, run_id, current_user)
+    return rt.tick(
         run_id,
         worker_id=body.worker_id,
         max_ops=body.max_ops,
@@ -139,5 +156,10 @@ def tick_run(run_id: str, body: TickIn, db: Session = Depends(get_db), current_u
 @router.post("/recover")
 @require_authentication
 def recover_runs(db: Session = Depends(get_db), current_user: CurrentUser = Depends(get_current_user)):
-    """Backend restart recovery — expire leases; durable resume points remain."""
-    return LongRunningAgentRuntime(db).recover_after_restart()
+    """Backend restart recovery — scoped to caller's runs (admins: all)."""
+    uid = getattr(current_user, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "User must be authenticated")
+    role = str(getattr(current_user, "role", "") or "").lower()
+    scope_user = None if role == "admin" else uid
+    return LongRunningAgentRuntime(db).recover_after_restart(user_id=scope_user)

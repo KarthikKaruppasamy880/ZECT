@@ -57,7 +57,8 @@ def test_04_coder_only_approved_manifest_ops(db: Session):
     assert bad["error"] == "unapproved_operations"
     good = coder.execute_approved_ops(work_item_id=wi, dry_run=True, operation_ids=["OP-1"])
     assert good["ok"] is True
-    assert "OP-1" in good["operations_completed"]
+    assert "OP-1" in (good.get("operations_simulated") or [])
+    assert good.get("operations_completed") == []
 
 
 def test_05_test_failure_routes_back_to_coder(db: Session):
@@ -326,7 +327,9 @@ def test_17_coding_agent_native_path(db: Session, monkeypatch):
 
 def test_18_full_flow_ready_to_ship_with_evidence(db: Session):
     from app.services.mentrix.engineering_agents import EngineeringLoopRunner
+    from app.services.work_items.artifact_store import ArtifactStore
 
+    # Dry-run cannot READY_TO_SHIP (simulated ops). Prove gate refuses fabrication.
     out = EngineeringLoopRunner(db).run(
         loop_key="engineering_delivery",
         goal="Ship with evidence",
@@ -337,15 +340,24 @@ def test_18_full_flow_ready_to_ship_with_evidence(db: Session):
         autonomy="L3",
         ship=True,
     )
-    assert out.get("ok") is True
-    assert out.get("acceptance", {}).get("ready_to_ship") is True or out.get("status") in (
-        "READY_TO_SHIP",
-        "READY_FOR_HUMAN_SHIP_GATE",
-        "ACCEPTED",
-    )
+    assert out.get("acceptance", {}).get("ready_to_ship") is not True
     phase_names = [p["phase"] for p in out.get("phases") or []]
     for required in ("planner", "coding_agent", "test_agent", "review_agent", "acceptance_verifier"):
         assert required in phase_names
+
+    # Real completion path: mark ops completed + agent artifacts → READY_TO_SHIP
+    from app.services.mentrix.engineering_agents import AcceptanceVerifier
+
+    wi = out["work_item_id"]
+    store = ArtifactStore(wi)
+    man = store.read_json("EXECUTION_MANIFEST.json")
+    for op in man.get("operations") or []:
+        op["status"] = "completed"
+    store.write_json("EXECUTION_MANIFEST.json", man)
+    store.write_json("TEST_RESULTS.json", {"ok": True, "passed": 1, "failed": 0, "role": "test_agent"})
+    store.write_json("REVIEW.json", {"clean": True, "blocking": [], "role": "review_agent"})
+    acc = AcceptanceVerifier(db, wi).verify(ship=True, actor="test")
+    assert acc.get("ready_to_ship") is True
 
 
 def test_19_failed_tests_prevent_ready_to_ship(db: Session):

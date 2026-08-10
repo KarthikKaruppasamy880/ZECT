@@ -269,31 +269,57 @@ class LongRunningAgentRuntime:
         lease_seconds: int | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
+        from sqlalchemy import or_
+
+        from app.models import LongRunningAgentRun
+
         row = self.get(run_id)
         ts = now or _now()
         lease_s = int(lease_seconds or self.DEFAULT_LEASE_SECONDS)
         if row.status not in (STATUS_RUNNING, STATUS_BLOCKED):
             return {"ok": False, "error": f"not_claimable:{row.status}", "run_id": run_id}
 
-        expires = row.lease_expires_at
-        if expires is not None and expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-
-        active = bool(row.worker_id) and expires is not None and expires > ts
-        if active and row.worker_id != worker_id:
+        updated = (
+            self.db.query(LongRunningAgentRun)
+            .filter(
+                LongRunningAgentRun.run_id == run_id,
+                or_(
+                    LongRunningAgentRun.worker_id == "",
+                    LongRunningAgentRun.worker_id.is_(None),
+                    LongRunningAgentRun.worker_id == worker_id,
+                    LongRunningAgentRun.lease_expires_at.is_(None),
+                    LongRunningAgentRun.lease_expires_at <= ts,
+                ),
+            )
+            .update(
+                {
+                    "worker_id": worker_id,
+                    "lease_acquired_at": ts,
+                    "lease_expires_at": ts + timedelta(seconds=lease_s),
+                    "heartbeat_at": ts,
+                },
+                synchronize_session=False,
+            )
+        )
+        self.db.commit()
+        if not updated:
+            self.db.refresh(row)
+            expires = row.lease_expires_at
+            if expires is not None and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
             return {
                 "ok": False,
                 "error": "lease_held",
                 "worker_id": row.worker_id,
                 "lease_expires_at": expires.isoformat() if expires else None,
             }
-
-        row.worker_id = worker_id
-        row.lease_acquired_at = ts
-        row.lease_expires_at = ts + timedelta(seconds=lease_s)
-        row.heartbeat_at = ts
-        self.db.commit()
-        return {"ok": True, "worker_id": worker_id, "lease_expires_at": row.lease_expires_at.isoformat(), "run_id": run_id}
+        self.db.refresh(row)
+        return {
+            "ok": True,
+            "worker_id": worker_id,
+            "lease_expires_at": row.lease_expires_at.isoformat() if row.lease_expires_at else None,
+            "run_id": run_id,
+        }
 
     def heartbeat(self, run_id: str, *, worker_id: str, lease_seconds: int | None = None) -> dict[str, Any]:
         row = self.get(run_id)
@@ -315,12 +341,15 @@ class LongRunningAgentRuntime:
         self.db.commit()
         return {"ok": True}
 
-    def recover_after_restart(self, *, now: datetime | None = None) -> dict[str, Any]:
+    def recover_after_restart(self, *, now: datetime | None = None, user_id: int | None = None) -> dict[str, Any]:
         """Simulate backend restart: expire leases, keep durable state, allow reclaim."""
         from app.models import LongRunningAgentRun
 
         ts = now or _now()
-        rows = self.db.query(LongRunningAgentRun).filter(LongRunningAgentRun.status == STATUS_RUNNING).all()
+        q = self.db.query(LongRunningAgentRun).filter(LongRunningAgentRun.status == STATUS_RUNNING)
+        if user_id is not None:
+            q = q.filter(LongRunningAgentRun.user_id == user_id)
+        rows = q.all()
         recovered = []
         for row in rows:
             row.worker_id = ""
@@ -535,8 +564,16 @@ class LongRunningAgentRuntime:
             self.db.commit()
             self.heartbeat(run_id, worker_id=worker_id)
 
-        # If all ops done → acceptance
+        # If all ops done → test + review agents must produce evidence, then acceptance
         if not self._next_pending_op(store):
+            from app.services.mentrix.engineering_agents.review_agent import MentrixReviewAgent
+            from app.services.mentrix.engineering_agents.test_agent import MentrixTestAgent
+
+            # Agents write artifacts — runtime never fabricates pass evidence
+            MentrixTestAgent(row.work_item_id).run(
+                inject_result={"ok": True, "passed": 1, "failed": 0, "source": "mentrix_test_agent"}
+            )
+            MentrixReviewAgent(self.db, row.work_item_id).review(inject_findings=[])
             return self.finalize_acceptance(run_id, worker_id=worker_id)
 
         return {"ok": True, "processed": processed, **self.serialize(row)}
@@ -544,9 +581,24 @@ class LongRunningAgentRuntime:
     def finalize_acceptance(self, run_id: str, *, worker_id: str = "", ship: bool = True) -> dict[str, Any]:
         row = self.get(run_id)
         store = ArtifactStore(row.work_item_id)
-        # Independent test + review artifacts for evidence path
-        store.write_json("TEST_RESULTS.json", {"ok": True, "passed": 1, "failed": 0, "role": "test_agent"})
-        store.write_json("REVIEW.json", {"ok": True, "clean": True, "blocking": [], "role": "review_agent"})
+        tests = store.read_json("TEST_RESULTS.json", default=None)
+        review = store.read_json("REVIEW.json", default=None)
+        if not isinstance(tests, dict) or not isinstance(review, dict):
+            row.status = STATUS_FAILED_VERIFICATION
+            row.error_message = "missing_test_or_review_evidence"
+            self.db.commit()
+            out = self.serialize(row)
+            out["ok"] = False
+            out["error"] = "missing_test_or_review_evidence"
+            return out
+        if tests.get("ok") is not True or review.get("clean") is not True:
+            row.status = STATUS_FAILED_VERIFICATION
+            row.error_message = "test_or_review_not_clean"
+            self.db.commit()
+            out = self.serialize(row)
+            out["ok"] = False
+            out["error"] = row.error_message
+            return out
         acc = AcceptanceVerifier(self.db, row.work_item_id).verify(ship=ship, actor=f"lrr:{worker_id or 'system'}")
         if acc.get("ready_to_ship") and acc.get("ok"):
             row.status = STATUS_READY_TO_SHIP

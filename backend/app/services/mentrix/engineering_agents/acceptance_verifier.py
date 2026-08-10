@@ -44,24 +44,27 @@ class AcceptanceVerifier:
 
         ev_list: list[Any] = list(evidence or self.store.read_json("EVIDENCE.json", default=[]) or [])
 
-        # Only claim req/AC coverage for completed ops that declare those links (no blanket pass)
         ops = list(manifest.get("operations") or [])
         linked_reqs: list[str] = []
         linked_acs: list[str] = []
         completed_op_ids: list[str] = []
+        has_simulated = False
         for op in ops:
             st = str(op.get("status") or "").lower()
             if st in ("done", "completed", "verified"):
                 completed_op_ids.append(str(op.get("id") or ""))
                 linked_reqs.extend(str(x) for x in (op.get("requirement_ids") or []))
                 linked_acs.extend(str(x) for x in (op.get("acceptance_ids") or []))
-        # Deduplicate while preserving order
+            elif st == "simulated":
+                has_simulated = True
         linked_reqs = list(dict.fromkeys(linked_reqs))
         linked_acs = list(dict.fromkeys(linked_acs))
 
-        # Auto-attach typed evidence from tests/review when present
-        if tests.get("ok") is True:
+        # Auto-attach typed evidence from tests/review only for truly completed ops
+        if tests.get("ok") is True and not tests.get("unverified"):
             for oid in completed_op_ids or ([mandatory[0]] if mandatory else [""]):
+                if not oid:
+                    continue
                 ev_list.append(
                     {
                         "id": f"test-pass:{oid}",
@@ -75,17 +78,18 @@ class AcceptanceVerifier:
                 )
         if review.get("clean") is True:
             oid = completed_op_ids[0] if completed_op_ids else (mandatory[0] if mandatory else "")
-            ev_list.append(
-                {
-                    "id": "review-clean",
-                    "type": "REVIEW_FINDING",
-                    "operation_id": oid,
-                    "requirement_ids": [r for r in linked_reqs if r in reqs],
-                    "acceptance_ids": [a for a in linked_acs if a in acs],
-                    "payload": {"clean": True},
-                    "llm_claim": False,
-                }
-            )
+            if oid:
+                ev_list.append(
+                    {
+                        "id": "review-clean",
+                        "type": "REVIEW_FINDING",
+                        "operation_id": oid,
+                        "requirement_ids": [r for r in linked_reqs if r in reqs],
+                        "acceptance_ids": [a for a in linked_acs if a in acs],
+                        "payload": {"clean": True},
+                        "llm_claim": False,
+                    }
+                )
 
         result = self.verifier.verify(
             mandatory_operation_ids=mandatory,
@@ -94,7 +98,11 @@ class AcceptanceVerifier:
             evidence=ev_list,
         )
         errors = list(result.errors)
-        if tests and tests.get("ok") is False:
+        if has_simulated:
+            errors.append("simulated_ops_cannot_ready_to_ship")
+            result.ok = False
+            result.ready_to_ship = False
+        if tests and (tests.get("ok") is False or tests.get("unverified")):
             errors.append("tests_failed_block_ready_to_ship")
             result.ok = False
             result.ready_to_ship = False
@@ -102,23 +110,20 @@ class AcceptanceVerifier:
             errors.append("blocking_review_findings")
             result.ok = False
             result.ready_to_ship = False
-        # 100-op manifest cannot finish at 99/100
         if ops:
-            done = [o for o in ops if str(o.get("status") or "").lower() in ("done", "completed", "verified")]
-            if len(done) < len(ops):
-                # Only enforce if operations declared status tracking
-                pending_mandatory = [
-                    o["id"]
-                    for o in ops
-                    if o.get("mandatory") and str(o.get("status") or "pending").lower() not in ("done", "completed", "verified")
-                ]
-                if pending_mandatory:
-                    for oid in pending_mandatory:
-                        if oid not in result.missing_operations:
-                            result.missing_operations.append(oid)
-                    result.ok = False
-                    result.ready_to_ship = False
-                    errors.append("incomplete_manifest_operations")
+            pending_mandatory = [
+                o["id"]
+                for o in ops
+                if o.get("mandatory")
+                and str(o.get("status") or "pending").lower() not in ("done", "completed", "verified")
+            ]
+            if pending_mandatory:
+                for oid in pending_mandatory:
+                    if oid not in result.missing_operations:
+                        result.missing_operations.append(oid)
+                result.ok = False
+                result.ready_to_ship = False
+                errors.append("incomplete_manifest_operations")
 
         out = result.to_dict()
         out["errors"] = errors

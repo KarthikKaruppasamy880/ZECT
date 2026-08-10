@@ -74,14 +74,15 @@ class MentrixCodingAgentRole:
         if dry_run or not workspace:
             for op in ops:
                 if op.get("id") in mandatory or op.get("mandatory") or str(op.get("id")) in requested:
-                    op["status"] = "completed"
+                    # Dry-run / empty workspace never claims real completion for EvidenceVerifier
+                    op["status"] = "simulated"
             manifest["operations"] = ops
             store.write_json("EXECUTION_MANIFEST.json", manifest)
             record_checkpoint(
                 store,
                 checkpoint_type="completion",
                 operation_id="coding_agent_dry",
-                payload={"engine": engine, "ops": requested},
+                payload={"engine": engine, "ops": requested, "status": "simulated"},
             )
             return {
                 "ok": True,
@@ -91,7 +92,8 @@ class MentrixCodingAgentRole:
                 "native_ok": native_ok,
                 "native_error": native_err,
                 "may_ready_to_ship": False,
-                "operations_completed": [o["id"] for o in ops if o.get("status") == "completed"],
+                "operations_completed": [],
+                "operations_simulated": [o["id"] for o in ops if o.get("status") == "simulated"],
                 "work_item_id": work_item_id,
             }
 
@@ -247,10 +249,8 @@ class EngineeringLoopRunner:
             )
             phases.append({"phase": "coding_agent", "ok": code_out.get("ok"), "cycle": coder_test_cycles})
 
-            # Default inject for tests when none provided: pass once after any prior fail inject
+            # Default: no invented pass — TestAgent soft path is unverified without inject/args
             run_inject = test_inject
-            if run_inject is None:
-                run_inject = {"ok": True, "passed": 1, "failed": 0}
             test_out = test_agent.run(inject_result=run_inject)
             phases.append(
                 {"phase": "test_agent", "ok": test_out.get("ok"), "route_back": test_out.get("route_back_to_coder")}
@@ -292,26 +292,23 @@ class EngineeringLoopRunner:
                 }
             )
             if review_out.get("route_back_to_coder"):
-                coder.execute_approved_ops(work_item_id=wi_id, goal=goal, workspace=workspace, dry_run=True)
+                coder.execute_approved_ops(work_item_id=wi_id, goal=goal, workspace=workspace, dry_run=dry_run)
                 review_inject = []  # after fix cycle, re-review clean unless reinjected
                 checkpoint, tripped = breaker.record(checkpoint, "review_blocking")
                 if tripped:
                     return self._escalate(
                         loop_key, wi_id, phases, checkpoint, "circuit_breaker_review", tripped=True
                     )
-                test_agent.run(inject_result={"ok": True, "passed": 1, "failed": 0})
+                # Re-run tester with same inject policy (never invent a pass)
+                test_agent.run(inject_result=inject_test if inject_test is not None else None)
                 continue
             break
         else:
             return self._escalate(loop_key, wi_id, phases, checkpoint, "max_coder_review_cycles")
 
         acceptance = AcceptanceVerifier(self.db, wi_id)
-        manifest = store.read_json("EXECUTION_MANIFEST.json", default={}) or {}
-        for op in manifest.get("operations") or []:
-            op["status"] = "completed"
-        store.write_json("EXECUTION_MANIFEST.json", manifest)
-
-        do_ship = bool(ship and autonomy == AUTONOMY_L3)
+        # Do not manufacture completed statuses — AcceptanceVerifier reads real/simulated states
+        do_ship = bool(ship and autonomy == AUTONOMY_L3 and not dry_run)
         acc = acceptance.verify(ship=do_ship, actor=f"loop:{loop_key}")
         phases.append(
             {"phase": "acceptance_verifier", "ok": acc.get("ok"), "ready_to_ship": acc.get("ready_to_ship")}

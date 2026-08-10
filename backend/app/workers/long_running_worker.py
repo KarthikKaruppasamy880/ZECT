@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.infrastructure.database import SessionLocal
 from app.services.mentrix.long_running_runtime.runtime import LongRunningAgentRuntime
+
+logger = logging.getLogger(__name__)
 
 
 def run_long_running_batch_in_background(
@@ -18,12 +22,15 @@ def run_long_running_batch_in_background(
         rt = LongRunningAgentRuntime(db)
         rt.tick(run_id, worker_id=worker_id, max_ops=max_ops)
     except Exception as exc:  # noqa: BLE001
+        logger.exception("long_running_batch_failed run_id=%s worker_id=%s", run_id, worker_id)
         try:
-            row = rt.get(run_id)  # type: ignore[name-defined]
+            db.rollback()
+            row = LongRunningAgentRuntime(db).get(run_id)
             row.status = "NEEDS_HUMAN_DECISION"
             row.error_message = str(exc)[:500]
             db.commit()
         except Exception:
-            pass
+            logger.exception("long_running_failure_persist_failed run_id=%s", run_id)
+            db.rollback()
     finally:
         db.close()

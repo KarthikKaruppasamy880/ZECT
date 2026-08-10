@@ -68,11 +68,12 @@ class MentrixTestAgent:
         else:
             # Soft smoke — do not claim full suite without args
             result = {
-                "ok": True,
+                "ok": False,
                 "passed": 0,
                 "failed": 0,
                 "skipped": True,
-                "reason": "no_pytest_args_soft_pass_for_design_only",
+                "unverified": True,
+                "reason": "no_pytest_args_unverified",
                 "suites": chosen,
                 "at": datetime.now(timezone.utc).isoformat(),
                 "role": self.role,
@@ -81,7 +82,12 @@ class MentrixTestAgent:
                 "commands": [],
             }
             self.store.write_json("TEST_RESULTS.json", result)
-            record_checkpoint(self.store, checkpoint_type="verification", operation_id="test_agent", payload={"ok": True, "soft": True})
+            record_checkpoint(
+                self.store,
+                checkpoint_type="verification",
+                operation_id="test_agent",
+                payload={"ok": False, "unverified": True},
+            )
             return result
 
         try:

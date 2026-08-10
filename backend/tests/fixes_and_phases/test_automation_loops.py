@@ -33,9 +33,12 @@ def test_circuit_breaker_trips_on_same_failure():
 def test_builtin_five_loops_registered():
     from app.services.mentrix.automation_loops.definitions import BUILTIN_LOOPS, list_builtin_definitions
 
+    personal = {"daily_brief", "pr_ci_watch", "jira_triage", "presentation_prep", "personal_followup"}
+    engineering = {"engineering_delivery", "bug_fix", "jira_delivery", "ci_fix", "pr_review_fix"}
     keys = set(BUILTIN_LOOPS)
-    assert keys == {"daily_brief", "pr_ci_watch", "jira_triage", "presentation_prep", "personal_followup"}
-    assert len(list_builtin_definitions()) == 5
+    assert personal.issubset(keys)
+    assert engineering.issubset(keys)
+    assert len(list_builtin_definitions()) == 10
     for spec in list_builtin_definitions():
         assert spec["default_autonomy"] in ("L0", "L1")
 

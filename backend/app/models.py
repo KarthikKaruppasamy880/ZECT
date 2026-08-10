@@ -1773,3 +1773,35 @@ class LoopRun(Base):
     error_message = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
+
+
+class LongRunningAgentRun(Base):
+    """Durable Mentrix engineering run — survives HTTP/LLM/backend restarts."""
+
+    __tablename__ = "mentrix_long_running_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String, unique=True, nullable=False, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    loop_run_id = Column(Integer, ForeignKey("mentrix_loop_runs.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    repository_id = Column(Integer, nullable=True, index=True)
+    worktree_path = Column(String, default="")
+    base_commit_sha = Column(String, default="")
+    current_commit_sha = Column(String, default="")
+    current_operation_id = Column(String, default="")
+    status = Column(String, default="RUNNING", index=True)
+    worker_id = Column(String, default="")
+    lease_acquired_at = Column(DateTime, nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
+    state_json = Column(Text, default="{}")
+    budget_json = Column(Text, default="{}")
+    telemetry_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

@@ -1,4 +1,4 @@
-"""First five ZECT Mentrix Automation Loop definitions (L0/L1 default)."""
+"""ZECT Mentrix Automation Loop definitions (personal + engineering; L0/L1 default)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,36 @@ PR_CI_WATCH = "pr_ci_watch"
 JIRA_TRIAGE = "jira_triage"
 PRESENTATION_PREP = "presentation_prep"
 PERSONAL_FOLLOWUP = "personal_followup"
+
+ENGINEERING_DELIVERY = "engineering_delivery"
+BUG_FIX = "bug_fix"
+JIRA_DELIVERY = "jira_delivery"
+CI_FIX = "ci_fix"
+PR_REVIEW_FIX = "pr_review_fix"
+
+ENGINEERING_LOOP_KEYS = frozenset(
+    {ENGINEERING_DELIVERY, BUG_FIX, JIRA_DELIVERY, CI_FIX, PR_REVIEW_FIX}
+)
+
+_ENG_BUDGET = LoopBudget(
+    max_actions=40,
+    max_runtime_seconds=900,
+    max_tokens=100_000,
+    max_cost_usd=25.0,
+    max_retries=3,
+    max_same_failure=3,
+    max_files_changed=200,
+    max_coder_test_cycles=3,
+    max_coder_review_cycles=3,
+    no_progress_threshold=2,
+).as_dict()
+
+_ENG_POLICY = LoopPolicy(
+    autonomy_level=AUTONOMY_L1,
+    require_human_gate=True,
+    allow_l2=False,
+    allow_l3=False,
+).as_dict()
 
 BUILTIN_LOOPS: dict[str, dict[str, Any]] = {
     DAILY_BRIEF: {
@@ -82,6 +112,71 @@ BUILTIN_LOOPS: dict[str, dict[str, Any]] = {
         ).as_dict(),
         "phases": ["scan_open_actions", "recommend_followups", "draft_optional", "gate"],
     },
+    # --- Engineering loops (Planner→Coder↔Test↔Review→Acceptance on MentrixAutomationLoop) ---
+    ENGINEERING_DELIVERY: {
+        "key": ENGINEERING_DELIVERY,
+        "name": "Engineering Delivery Loop",
+        "description": "Planner → approval → Coding Agent ↔ Test ↔ Review → AcceptanceVerifier → Evidence → PR",
+        "target": "work_item",
+        "default_autonomy": AUTONOMY_L1,
+        "budget": dict(_ENG_BUDGET),
+        "policy": dict(_ENG_POLICY),
+        "trigger": LoopTrigger(kind="manual", schedule_task_type="automation_loop:engineering_delivery").as_dict(),
+        "phases": [
+            "planner",
+            "plan_approval",
+            "coding_agent",
+            "test_agent",
+            "review_agent",
+            "acceptance_verifier",
+            "evidence_verifier",
+            "gate",
+        ],
+    },
+    BUG_FIX: {
+        "key": BUG_FIX,
+        "name": "Bug Fix Loop",
+        "description": "Reproduce → plan → code ↔ test ↔ review → acceptance for defect WorkItems",
+        "target": "work_item",
+        "default_autonomy": AUTONOMY_L1,
+        "budget": dict(_ENG_BUDGET),
+        "policy": dict(_ENG_POLICY),
+        "trigger": LoopTrigger(kind="event", event_name="bug_reported", schedule_task_type="automation_loop:bug_fix").as_dict(),
+        "phases": ["planner", "coding_agent", "test_agent", "review_agent", "acceptance_verifier", "gate"],
+    },
+    JIRA_DELIVERY: {
+        "key": JIRA_DELIVERY,
+        "name": "Jira Delivery Loop",
+        "description": "Jira issue → WorkItem → Project Intelligence → engineering delivery spine",
+        "target": "work_item",
+        "default_autonomy": AUTONOMY_L1,
+        "budget": dict(_ENG_BUDGET),
+        "policy": dict(_ENG_POLICY),
+        "trigger": LoopTrigger(kind="manual", schedule_task_type="automation_loop:jira_delivery").as_dict(),
+        "phases": ["jira_context", "planner", "coding_agent", "test_agent", "review_agent", "acceptance_verifier", "gate"],
+    },
+    CI_FIX: {
+        "key": CI_FIX,
+        "name": "CI Fix Loop",
+        "description": "CI failure signal → WorkItem → code ↔ test ↔ review → acceptance",
+        "target": "work_item",
+        "default_autonomy": AUTONOMY_L1,
+        "budget": dict(_ENG_BUDGET),
+        "policy": dict(_ENG_POLICY),
+        "trigger": LoopTrigger(kind="event", event_name="ci_failure", schedule_task_type="automation_loop:ci_fix").as_dict(),
+        "phases": ["observe_ci", "planner", "coding_agent", "test_agent", "review_agent", "acceptance_verifier", "gate"],
+    },
+    PR_REVIEW_FIX: {
+        "key": PR_REVIEW_FIX,
+        "name": "PR Review Fix Loop",
+        "description": "Review findings → verified blockers → coder ↔ test → acceptance",
+        "target": "work_item",
+        "default_autonomy": AUTONOMY_L1,
+        "budget": dict(_ENG_BUDGET),
+        "policy": dict(_ENG_POLICY),
+        "trigger": LoopTrigger(kind="event", event_name="pr_review_blocking", schedule_task_type="automation_loop:pr_review_fix").as_dict(),
+        "phases": ["review_agent", "coding_agent", "test_agent", "acceptance_verifier", "gate"],
+    },
 }
 
 
@@ -91,3 +186,7 @@ def list_builtin_definitions() -> list[dict[str, Any]]:
 
 def get_builtin(key: str) -> dict[str, Any] | None:
     return dict(BUILTIN_LOOPS[key]) if key in BUILTIN_LOOPS else None
+
+
+def is_engineering_loop(key: str) -> bool:
+    return key in ENGINEERING_LOOP_KEYS

@@ -37,6 +37,10 @@ class LoopBudget:
     max_actions: int = 20
     max_retries: int = 3
     max_same_failure: int = 3
+    max_files_changed: int = 200
+    max_coder_test_cycles: int = 3
+    max_coder_review_cycles: int = 3
+    no_progress_threshold: int = 2
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

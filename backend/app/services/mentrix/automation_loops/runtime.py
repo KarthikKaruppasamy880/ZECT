@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.services.mentrix.automation_loops.definitions import BUILTIN_LOOPS, get_builtin
+from app.services.mentrix.automation_loops.definitions import BUILTIN_LOOPS, get_builtin, is_engineering_loop
 from app.services.mentrix.automation_loops.types import (
     AUTONOMY_L0,
     AUTONOMY_L1,
@@ -136,7 +136,20 @@ class MentrixAutomationLoop:
         error = ""
 
         try:
-            if dry_run:
+            if is_engineering_loop(loop_key):
+                # Engineering loops always run the role spine; dry_run only skips live workspace edits
+                result.update(
+                    self._phase_engineering(
+                        db,
+                        loop_key=loop_key,
+                        user_id=user_id,
+                        level=level,
+                        prompt=prompt,
+                        dry_run=True if dry_run or level in (AUTONOMY_L0, AUTONOMY_L1) else dry_run,
+                        budget=budget,
+                    )
+                )
+            elif dry_run:
                 result["phases"].append({"phase": "dry_run", "ok": True})
             elif loop_key == "daily_brief":
                 result.update(self._phase_daily_brief(db, user_id=user_id, level=level))
@@ -407,6 +420,44 @@ class MentrixAutomationLoop:
             "artifacts": [{"type": "personal_actions", "ref": f"user:{user_id}", "count": len(followups)}],
             "recommendations": followups[:15],
             "needs_human": level != AUTONOMY_L3,
+        }
+
+    def _phase_engineering(
+        self,
+        db: Session,
+        *,
+        loop_key: str,
+        user_id: int | None,
+        level: str,
+        prompt: str,
+        dry_run: bool,
+        budget: LoopBudget,
+    ) -> dict[str, Any]:
+        """Delegate to EngineeringLoopRunner — no second orchestrator."""
+        from app.services.mentrix.engineering_agents.engineering_loop import EngineeringLoopRunner
+
+        runner = EngineeringLoopRunner(db)
+        # L1 default: recommend/plan-gated dry run; L3 may ship only with policy allow_l3 already applied to level
+        out = runner.run(
+            loop_key=loop_key,
+            goal=prompt or f"Mentrix {loop_key}",
+            user_id=user_id,
+            autonomy=level,
+            dry_run=True if level in (AUTONOMY_L0, AUTONOMY_L1) else dry_run,
+            auto_approve_plan=level == AUTONOMY_L3,
+            ship=level == AUTONOMY_L3,
+            budget_override=budget,
+        )
+        return {
+            "summary": f"{loop_key} status={out.get('status')} wi={out.get('work_item_id')}",
+            "artifacts": [
+                {"type": "engineering_loop", "ref": f"wi:{out.get('work_item_id')}", "loop_key": loop_key},
+                {"type": "phases", "ref": "engineering_phases", "count": len(out.get("phases") or [])},
+            ],
+            "engineering": out,
+            "needs_human": bool(out.get("needs_human")),
+            "work_item_id": out.get("work_item_id"),
+            "status": out.get("status"),
         }
 
 

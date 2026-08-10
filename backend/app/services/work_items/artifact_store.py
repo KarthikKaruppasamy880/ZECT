@@ -17,6 +17,8 @@ ARTIFACT_NAMES = (
     "EXECUTION_MANIFEST.json",
     "EXECUTION_STATE.json",
     "EVIDENCE.json",
+    "TEST_RESULTS.json",
+    "REVIEW.json",
 )
 
 

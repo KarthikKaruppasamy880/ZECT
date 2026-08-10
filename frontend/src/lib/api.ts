@@ -1731,3 +1731,31 @@ export const verifyToken = (token: string) =>
   request<{ valid: boolean; username: string }>(`/api/auth/verify?token=${token}`);
 export const logout = (token: string) =>
   request<{ status: string }>(`/api/auth/logout?token=${token}`, { method: "POST" });
+
+// Mentrix long-running engineering runtime
+export const mentrixLongRunningStart = (data: {
+  work_item_id: number;
+  operation_count?: number;
+  worktree_path?: string;
+  base_commit_sha?: string;
+  autonomy?: string;
+  model_profile?: string;
+  background?: boolean;
+}) =>
+  request<any>("/api/mentrix/long-running/start", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const mentrixLongRunningGet = (runId: string) =>
+  request<any>(`/api/mentrix/long-running/${encodeURIComponent(runId)}`);
+export const mentrixLongRunningPause = (runId: string) =>
+  request<any>(`/api/mentrix/long-running/${encodeURIComponent(runId)}/pause`, { method: "POST" });
+export const mentrixLongRunningResume = (runId: string) =>
+  request<any>(`/api/mentrix/long-running/${encodeURIComponent(runId)}/resume`, { method: "POST" });
+export const mentrixLongRunningCancel = (runId: string) =>
+  request<any>(`/api/mentrix/long-running/${encodeURIComponent(runId)}/cancel`, { method: "POST" });
+export const mentrixLongRunningTick = (runId: string, data?: Record<string, unknown>) =>
+  request<any>(`/api/mentrix/long-running/${encodeURIComponent(runId)}/tick`, {
+    method: "POST",
+    body: JSON.stringify(data || { worker_id: "ui", max_ops: 1 }),
+  });

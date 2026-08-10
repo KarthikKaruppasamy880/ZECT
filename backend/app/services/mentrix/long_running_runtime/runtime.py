@@ -592,17 +592,17 @@ class LongRunningAgentRuntime:
             self.db.commit()
             self.heartbeat(run_id, worker_id=worker_id)
 
-        # If all ops done → test + review agents must produce evidence, then acceptance
+        # If all ops done → agents must supply evidence (synthetic may inject; live must not fabricate)
         if not self._next_pending_op(store):
             from app.services.mentrix.engineering_agents.review_agent import MentrixReviewAgent
             from app.services.mentrix.engineering_agents.test_agent import MentrixTestAgent
 
-            # Agents write artifacts — runtime never fabricates pass evidence
-            MentrixTestAgent(row.work_item_id).run(
-                inject_result={"ok": True, "passed": 1, "failed": 0, "source": "mentrix_test_agent"}
-            )
-            MentrixReviewAgent(self.db, row.work_item_id).review(inject_findings=[])
-            return self.finalize_acceptance(run_id, worker_id=worker_id)
+            if state.get("synthetic", True):
+                MentrixTestAgent(row.work_item_id).run(
+                    inject_result={"ok": True, "passed": 1, "failed": 0, "source": "mentrix_test_agent"}
+                )
+                MentrixReviewAgent(self.db, row.work_item_id).review(inject_findings=[])
+            return self.finalize_acceptance(run_id, worker_id=worker_id, ship=bool(state.get("synthetic", True)))
 
         return {"ok": True, "processed": processed, **self.serialize(row)}
 

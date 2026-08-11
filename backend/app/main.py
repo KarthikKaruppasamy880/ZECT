@@ -8,17 +8,31 @@ import traceback
 
 # Load backend/.env regardless of process cwd (fixes auth/env when uvicorn cwd differs).
 # override=True so CHATTERBOX_BASE_URL from .env wins over stale shell localhost values.
-# Under pytest (ZECT_PYTEST=1), preserve auth/DB env set by conftest so .env cannot
+# Under a real pytest run, preserve auth/DB env set by conftest so .env cannot
 # silently stomp test credentials (TI-001).
+# Stray ZECT_PYTEST=1 left in an interactive shell must NOT preserve test@zect.local
+# over backend/.env (that caused live login 401 for the configured local admin).
 import os as _os_for_dotenv
+import sys as _sys_for_dotenv
 
 _backend_root = Path(__file__).resolve().parents[1]
-_UNDER_PYTEST = (_os_for_dotenv.getenv("ZECT_PYTEST") or "").strip().lower() in (
+_ZECT_PYTEST_FLAG = (_os_for_dotenv.getenv("ZECT_PYTEST") or "").strip().lower() in (
     "1",
     "true",
     "yes",
     "on",
 )
+_PYTEST_RUNNER = (
+    "PYTEST_CURRENT_TEST" in _os_for_dotenv.environ
+    or bool((_os_for_dotenv.getenv("PYTEST_VERSION") or "").strip())
+    or "pytest" in _sys_for_dotenv.modules
+)
+_UNDER_PYTEST = _ZECT_PYTEST_FLAG and _PYTEST_RUNNER
+if _ZECT_PYTEST_FLAG and not _PYTEST_RUNNER:
+    print(
+        "[ZECT AUTH] Ignoring stray ZECT_PYTEST outside pytest — "
+        "loading auth from backend/.env (interactive uvicorn)."
+    )
 _PRESERVE_ENV_KEYS = (
     "ZECT_USERNAME",
     "ZECT_PASSWORD",
@@ -34,6 +48,9 @@ _saved_env = {
 load_dotenv(_backend_root / ".env", override=True)
 if _saved_env:
     _os_for_dotenv.environ.update(_saved_env)
+_auth_user = (_os_for_dotenv.getenv("ZECT_USERNAME") or "").strip()
+if _auth_user and not _UNDER_PYTEST:
+    print(f"[ZECT AUTH] Local login identity: {_auth_user}")
 
 # Initialize encryption vault (must be before other imports that use secrets)
 from app.security.vault import vault

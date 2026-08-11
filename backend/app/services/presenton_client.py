@@ -34,6 +34,65 @@ def _bearer_headers() -> dict[str, str]:
     return {}
 
 
+def _session_headers(client: httpx.Client) -> dict[str, str]:
+    """Authenticate Presenton (≥0.9 session cookie or API key; Basic as legacy).
+
+    Fresh self-host builds return 428 setup_required until an admin exists, then
+    use cookie sessions for /api/v1/* (HTTP Basic alone often returns 401).
+    """
+    headers = {**_bearer_headers()}
+    if headers.get("Authorization"):
+        return headers
+
+    creds = _auth()
+    if not creds:
+        return headers
+
+    base = presenton_base_url()
+    if not base:
+        return headers
+
+    try:
+        login = client.post(
+            f"{base}/api/v1/auth/login",
+            json={"username": creds[0], "password": creds[1]},
+            headers={"Content-Type": "application/json"},
+        )
+        if login.status_code < 400:
+            cookie = login.cookies.get("presenton_session")
+            if cookie:
+                headers["Cookie"] = f"presenton_session={cookie}"
+                return headers
+            data: dict[str, Any] = {}
+            try:
+                data = login.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+            token = (
+                data.get("access_token")
+                or data.get("token")
+                or data.get("api_key")
+                or ""
+            )
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                return headers
+    except Exception:  # noqa: BLE001
+        pass
+
+    return headers
+
+
+def _client_kwargs() -> dict[str, Any]:
+    """httpx client options.
+
+    Presenton 0.9+ prefers session cookies from /api/v1/auth/login. Do not attach
+    HTTP Basic by default — it returns 401 on /api/v1/* even with correct password
+    while cookie sessions succeed.
+    """
+    return {"timeout": 15.0, "follow_redirects": True}
+
+
 def _safe_filename(name: str) -> str:
     base = re.sub(r"[^\w.\- ]+", "", (name or "mentrix-deck").strip())[:80] or "mentrix-deck"
     if not base.lower().endswith(".pptx"):
@@ -68,7 +127,7 @@ def _normalize_template_rows(raw: Any) -> list[dict[str, str]]:
     if isinstance(raw, list):
         rows = raw
     elif isinstance(raw, dict):
-        rows = raw.get("templates") or raw.get("data") or []
+        rows = raw.get("templates") or raw.get("items") or raw.get("data") or []
         if not isinstance(rows, list):
             rows = []
     else:
@@ -115,10 +174,29 @@ def list_templates() -> dict[str, Any]:
         }
 
     url = f"{base}/api/v1/ppt/template/all"
-    headers = {**_bearer_headers()}
     try:
-        with httpx.Client(timeout=15.0, auth=_auth()) as client:
+        with httpx.Client(**_client_kwargs()) as client:
+            headers = _session_headers(client)
             res = client.get(url, params={"include_defaults": "true"}, headers=headers)
+            if res.status_code in (401, 403, 428):
+                detail = (res.text or "")[:400]
+                setup = "setup_required" in detail or res.status_code == 428
+                return {
+                    "ok": True,
+                    "source": "builtin",
+                    "templates": list(BUILTIN_TEMPLATES),
+                    "reachable": False,
+                    "configured": True,
+                    "hint": (
+                        "Presenton requires admin setup / auth "
+                        "(set PRESENTON_USERNAME+PASSWORD or PRESENTON_API_KEY; open Presenton UI once)"
+                        if setup or res.status_code in (401, 403)
+                        else f"Presenton templates HTTP {res.status_code}"
+                    ),
+                    "detail": detail,
+                    "blocked_external": True,
+                    "block_code": "presenton_auth_or_setup",
+                }
             if res.status_code >= 400:
                 return {
                     "ok": True,
@@ -147,6 +225,8 @@ def list_templates() -> dict[str, Any]:
             "reachable": False,
             "configured": True,
             "hint": f"Cannot reach {base} — start Presenton Docker; showing built-ins",
+            "blocked_external": True,
+            "block_code": "presenton_unreachable",
         }
     except Exception as exc:  # noqa: BLE001
         return {
@@ -168,6 +248,56 @@ def presenton_reachable() -> bool:
     return bool(result.get("reachable"))
 
 
+def resolve_presenton_template_id(choice: str | None, *, custom_id: str | None = None) -> dict[str, Any]:
+    """Map UI template choice to the Presenton template id actually sent on generate.
+
+    Zinnia UI presets are prompt-side only unless ZINNIA_PRESENTON_TEMPLATE_ID is set
+    (or a custom master id is provided). Silently mapping zinnia-* → modern is not a
+    Zinnia PASS for live acceptance.
+    """
+    raw = (choice or "general").strip() or "general"
+    custom = (custom_id or "").strip()
+    zinnia_master = (os.getenv("ZINNIA_PRESENTON_TEMPLATE_ID") or "").strip()
+
+    if raw == "__custom__" or raw.lower() == "custom":
+        tid = custom or zinnia_master or "general"
+        return {
+            "template_id": tid,
+            "ui_choice": raw,
+            "zinnia_verified": bool(custom or zinnia_master) and tid not in ("modern", "general"),
+            "note": "custom_template_id" if custom else ("zinnia_env" if zinnia_master else "fallback_general"),
+        }
+
+    if raw.startswith("zinnia-"):
+        if custom:
+            return {
+                "template_id": custom,
+                "ui_choice": raw,
+                "zinnia_verified": True,
+                "note": "zinnia_preset_with_custom_master",
+            }
+        if zinnia_master:
+            return {
+                "template_id": zinnia_master,
+                "ui_choice": raw,
+                "zinnia_verified": True,
+                "note": "zinnia_env_ZINNIA_PRESENTON_TEMPLATE_ID",
+            }
+        return {
+            "template_id": "modern",
+            "ui_choice": raw,
+            "zinnia_verified": False,
+            "note": "zinnia_prompt_preset_only_maps_to_modern_not_a_zinnia_master_PASS",
+        }
+
+    return {
+        "template_id": raw,
+        "ui_choice": raw,
+        "zinnia_verified": False,
+        "note": "direct_template_id",
+    }
+
+
 def generate_presentation(
     content: str,
     *,
@@ -183,6 +313,7 @@ def generate_presentation(
             "ok": False,
             "error": "presenton_not_configured",
             "hint": "Set PRESENTON_BASE_URL (e.g. http://127.0.0.1:5000) and run Presenton Docker",
+            "blocked_external": True,
         }
     prompt = (content or "").strip()
     if not prompt:
@@ -198,31 +329,52 @@ def generate_presentation(
     if instructions:
         payload["instructions"] = instructions
 
+    template_sent = str(payload["template"])
     url = f"{base}/api/v1/ppt/presentation/generate"
-    headers = {"Content-Type": "application/json", **_bearer_headers()}
     try:
-        with httpx.Client(timeout=180.0, auth=_auth()) as client:
+        kwargs = _client_kwargs()
+        # Presenton LLM generate + export is often >3m on first run
+        kwargs["timeout"] = float(os.getenv("PRESENTON_GENERATE_TIMEOUT", "600") or "600")
+        with httpx.Client(**kwargs) as client:
+            headers = {"Content-Type": "application/json", **_session_headers(client)}
             res = client.post(url, json=payload, headers=headers)
+            if res.status_code in (401, 403, 428):
+                return {
+                    "ok": False,
+                    "error": "presenton_auth_or_setup",
+                    "status": res.status_code,
+                    "detail": (res.text or "")[:800],
+                    "template_sent": template_sent,
+                    "blocked_external": True,
+                    "hint": "Presenton auth/setup required — set PRESENTON_USERNAME/PASSWORD and complete admin login",
+                }
             if res.status_code >= 400:
                 return {
                     "ok": False,
                     "error": "presenton_generate_failed",
                     "status": res.status_code,
                     "detail": (res.text or "")[:800],
+                    "template_sent": template_sent,
                 }
             data = res.json()
             rel = data.get("path") or data.get("edit_path") or ""
             if not rel:
-                return {"ok": False, "error": "presenton_missing_path", "response": data}
+                return {
+                    "ok": False,
+                    "error": "presenton_missing_path",
+                    "response": data,
+                    "template_sent": template_sent,
+                }
 
             download_url = rel if str(rel).startswith("http") else urljoin(base + "/", str(rel).lstrip("/"))
-            file_res = client.get(download_url, headers=_bearer_headers(), follow_redirects=True)
+            file_res = client.get(download_url, headers=_session_headers(client), follow_redirects=True)
             if file_res.status_code >= 400 or not file_res.content:
                 return {
                     "ok": False,
                     "error": "presenton_download_failed",
                     "status": file_res.status_code,
                     "url": download_url,
+                    "template_sent": template_sent,
                 }
 
             out_name = _safe_filename(filename or Path(str(rel)).name or "mentrix-deck.pptx")
@@ -234,12 +386,21 @@ def generate_presentation(
                 "presentation_id": data.get("presentation_id"),
                 "presenton_path": rel,
                 "bytes": len(file_res.content),
+                "template_sent": template_sent,
+                "presenton_request": {"template": template_sent, "n_slides": payload["n_slides"]},
             }
     except httpx.ConnectError:
         return {
             "ok": False,
             "error": "presenton_unreachable",
             "hint": f"Cannot reach {base} — start Presenton Docker or fix PRESENTON_BASE_URL",
+            "blocked_external": True,
+            "template_sent": template_sent,
         }
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": "presenton_error", "detail": str(exc)[:500]}
+        return {
+            "ok": False,
+            "error": "presenton_error",
+            "detail": str(exc)[:500],
+            "template_sent": template_sent,
+        }

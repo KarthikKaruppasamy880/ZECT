@@ -8,9 +8,16 @@ Mentrix **Generate deck** calls your local Presenton instance, downloads the PPT
 docker run -d --name presenton \
   -p 5000:80 \
   -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -e LLM=openai \
+  -e OPENAI_MODEL=gpt-4o-mini \
+  -e AUTH_USERNAME=zect-presenton \
+  -e AUTH_PASSWORD=change-me-local \
+  -e DISABLE_IMAGE_GENERATION=true \
   -v presenton_data:/app_data \
   ghcr.io/presenton/presenton:latest
 ```
+
+Presenton **0.9+** requires an admin account and `LLM=<provider>` (e.g. `openai`). Without those, Mentrix sees `428 setup_required` / `Invalid LLM provider` — treat as **BLOCKED_EXTERNAL**, never fake PASS.
 
 Adjust image tag / ports per [Presenton docs](https://docs.presenton.ai/). Some builds use port `5001`.
 
@@ -20,10 +27,13 @@ In `backend/.env`:
 
 ```env
 PRESENTON_BASE_URL=http://127.0.0.1:5000
-# Optional if your Presenton build requires auth:
+# Presenton 0.9+ uses session login (Mentrix client posts /api/v1/auth/login):
+PRESENTON_USERNAME=zect-presenton
+PRESENTON_PASSWORD=change-me-local
+# Optional API key instead of username/password:
 PRESENTON_API_KEY=
-PRESENTON_USERNAME=
-PRESENTON_PASSWORD=
+# Optional real brand master id for Zinnia presets (UI alone is not a Zinnia PASS):
+# ZINNIA_PRESENTON_TEMPLATE_ID=your-presenton-master-id
 ```
 
 Restart the ZECT backend. Integrations → Zoom + Presenton card shows readiness. Companion → Voice → Present Deck → pick **Template** + **Slides** → **Generate deck**.

@@ -81,6 +81,9 @@ def test_list_templates_connect_error_falls_back(monkeypatch):
 
 def test_generate_payload_includes_template(monkeypatch, tmp_path):
     monkeypatch.setenv("PRESENTON_BASE_URL", "http://127.0.0.1:5000")
+    monkeypatch.delenv("PRESENTON_USERNAME", raising=False)
+    monkeypatch.delenv("PRESENTON_PASSWORD", raising=False)
+    monkeypatch.delenv("PRESENTON_API_KEY", raising=False)
     monkeypatch.setattr(
         "app.services.presenton_client.default_save_dir",
         lambda: tmp_path,
@@ -114,3 +117,4 @@ def test_generate_payload_includes_template(monkeypatch, tmp_path):
     assert payload["template"] == "modern"
     assert payload["n_slides"] == 8
     assert payload["content"] == "Q2 delivery brief"
+    assert out.get("template_sent") == "modern"

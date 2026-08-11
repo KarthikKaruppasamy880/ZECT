@@ -91,10 +91,13 @@ def enforce_model_route(classification: str) -> dict[str, Any]:
             "fallback_reason": route.fallback_reason,
             "model": mentrix_llm_chat_model() if local_ok else "",
         }
+    # PUBLIC/INTERNAL: allow cloud for Companion Present claims even when the
+    # coding-agent default ZECT_MODEL_FALLBACK_POLICY=never (RESTRICTED stays never above).
     route = resolve_model_route(
         local_configured=local_ok,
         cloud_configured=cloud_ok,
         local_model=mentrix_llm_chat_model(),
+        policy="automatic",
     )
     return {
         **pol,
@@ -103,5 +106,5 @@ def enforce_model_route(classification: str) -> dict[str, Any]:
         "provider": route.provider,
         "fallback_used": route.fallback_used,
         "fallback_reason": route.fallback_reason,
-        "model": (route.model or mentrix_llm_chat_model()) if (not route.blocked and (route.model or local_ok)) else "",
+        "model": (route.model or mentrix_llm_chat_model()) if (not route.blocked and (route.model or local_ok or cloud_ok)) else "",
     }

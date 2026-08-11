@@ -77,7 +77,11 @@ export default function Integrations() {
         setGithubReady(!!integ.github);
         setBrowserReady(!!integ.browser);
         setBrowserHint(integ.browser_hint || "");
-        setPresentonReady(!!integ.presenton);
+        setPresentonReady(
+          integ.presenton_configured != null || integ.presenton_reachable != null
+            ? !!integ.presenton_configured && !!integ.presenton_reachable
+            : !!integ.presenton,
+        );
         setPresentonUrl(integ.presenton_base_url || "");
         setZoomJoinReady(!!integ.zoom_join_url_configured);
         setZoomPathReady(!!integ.zoom_desktop_path_configured);
@@ -259,7 +263,14 @@ export default function Integrations() {
             )}
           </div>
           <ul className="text-sm text-slate-600 space-y-1">
-            <li>Presenton: {presentonReady ? `ready (${presentonUrl || "configured"})` : "set PRESENTON_BASE_URL"}</li>
+            <li>
+              Presenton:{" "}
+              {presentonReady
+                ? `reachable (${presentonUrl || "configured"})`
+                : presentonUrl
+                  ? `configured but unreachable (${presentonUrl}) — BLOCKED_EXTERNAL until Docker is up`
+                  : "set PRESENTON_BASE_URL"}
+            </li>
             <li>Zoom path: {zoomPathReady ? "ZOOM_DESKTOP_PATH set" : "auto-detect Zoom.exe / set path"}</li>
             <li>Join URL: {zoomJoinReady ? "ZOOM_DEFAULT_JOIN_URL set" : "optional — paste in Present Deck"}</li>
           </ul>

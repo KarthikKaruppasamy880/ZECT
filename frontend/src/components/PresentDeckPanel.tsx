@@ -8,6 +8,7 @@ import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide
 import {
   mentrixCompanionIntegrations,
   mentrixPresentonGenerate,
+  mentrixPresentonStatus,
   mentrixPresentonTemplates,
   mentrixParsePptx,
   mentrixPresentationAudiences,
@@ -123,6 +124,8 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
   const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
+  const [zinniaMasterId, setZinniaMasterId] = useState("");
+  const [lastTemplateSent, setLastTemplateSent] = useState("");
   const usingStock = voiceChoice.startsWith("stock:");
   const cloneNarrateBlocked = !usingStock && engineStatus !== null && !engineStatus.online;
 
@@ -143,11 +146,23 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
     } catch {
       /* ignore */
     }
-    mentrixCompanionIntegrations()
-      .then((s) => setPresentonReady(!!s.presenton))
+    mentrixPresentonStatus()
+      .then((s) => setPresentonReady(!!s.configured && !!s.reachable))
       .catch(() => setPresentonReady(false));
+    mentrixCompanionIntegrations()
+      .then((s) => {
+        if (s.zinnia_presenton_template_id) setZinniaMasterId(s.zinnia_presenton_template_id);
+        // Prefer status endpoint for ready; integrations is backup if status fails earlier
+        if (s.presenton_reachable != null) {
+          setPresentonReady(!!s.presenton_configured && !!s.presenton_reachable);
+        } else if (s.presenton != null) {
+          setPresentonReady(!!s.presenton);
+        }
+      })
+      .catch(() => {});
     mentrixPresentonTemplates()
       .then((res) => {
+        if (res.reachable === false) setPresentonReady(false);
         const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
         const byId = new Map<string, PresentonTemplate>();
         for (const t of [...BUILTIN_TEMPLATES, ...remote]) {
@@ -285,11 +300,14 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
 
   const resolveTemplateId = () => {
     if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
-      return customTemplateId.trim() || "general";
+      return customTemplateId.trim() || zinniaMasterId || "general";
     }
     const raw = (templateChoice || "general").trim() || "general";
-    // Zinnia presets are prompt-side; Presenton gets a known visual template.
-    if (raw.startsWith("zinnia-")) return "modern";
+    // Zinnia presets: use env master or custom id — never claim Zinnia PASS when silently mapping to modern.
+    if (raw.startsWith("zinnia-")) {
+      const master = customTemplateId.trim() || zinniaMasterId;
+      return master || "modern";
+    }
     return raw;
   };
 
@@ -408,10 +426,18 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         filename: "mentrix-deck.pptx",
       });
       setFlowBApproved(false);
+      const sent = out?.template_sent || template;
+      setLastTemplateSent(sent);
       if (out?.path) {
         persistPath(out.path);
+        const zinniaNote =
+          templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
+            ? ` Zinnia NOT verified (wire template=${sent}; set ZINNIA_PRESENTON_TEMPLATE_ID or Custom master id).`
+            : out.zinnia_verified
+              ? ` Zinnia verified (wire template=${sent}).`
+              : ` Presenton template_sent=${sent}.`;
         setStatus(
-          `Deck saved to ${out.path} (audience: ${audienceId}, template: ${template}, ${slidesHint} slides). Review claims, then Open → Zoom → share approve → Narrate.`,
+          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${slidesHint} slides).${zinniaNote} Review claims, then Open → Zoom → share approve → Narrate.`,
         );
       } else {
         setStatus("Presenton returned no path — check PRESENTON_BASE_URL and that Presenton Docker is running.");
@@ -936,12 +962,18 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
         title={
           presentonReady
             ? "Calls PRESENTON_BASE_URL generate API with selected template"
-            : "Set PRESENTON_BASE_URL and run Presenton Docker"
+            : "Presenton unreachable — set PRESENTON_BASE_URL and start Presenton Docker"
         }
       >
         <Sparkles className="h-3.5 w-3.5" />
         Generate deck
       </button>
+      {lastTemplateSent && (
+        <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
+          Last Presenton template_sent: {lastTemplateSent}
+          {zinniaMasterId ? ` · ZINNIA_PRESENTON_TEMPLATE_ID=${zinniaMasterId}` : ""}
+        </p>
+      )}
       <button
         type="button"
         data-testid="present-deck-analyze"

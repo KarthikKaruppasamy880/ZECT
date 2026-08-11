@@ -65,10 +65,23 @@ def revoke_token(db: Session, token: str) -> bool:
 
 
 def upsert_local_user(db: Session, username: str) -> User:
+    """Create or refresh the local login user.
+
+    The configured ZECT_USERNAME (env local credential) is always promoted to
+    admin so interactive Mentrix / Companion is not stuck as developer after a
+    prior OIDC or seed row.
+    """
+    import os
+
     email = username.strip().lower()
+    configured = (os.getenv("ZECT_USERNAME") or "").strip().lower()
+    is_configured_local = bool(configured) and email == configured
+
     user = db.query(User).filter(User.email == email).first()
     if user:
         user.last_login = datetime.now(timezone.utc)
+        if is_configured_local and (user.role or "").strip().lower() != "admin":
+            user.role = "admin"
         db.commit()
         return user
     user = User(

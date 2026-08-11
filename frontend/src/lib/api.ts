@@ -560,7 +560,10 @@ export const mentrixCompanionIntegrations = () =>
     browser_hint?: string;
     browser_provider?: string;
     presenton?: boolean;
+    presenton_configured?: boolean;
+    presenton_reachable?: boolean;
     presenton_base_url?: string;
+    zinnia_presenton_template_id?: string;
     zoom_join_url_configured?: boolean;
     zoom_desktop_path_configured?: boolean;
     slack_channel?: string;
@@ -586,7 +589,16 @@ export const mentrixPresentonGenerate = (data: {
   instructions?: string;
   filename?: string;
 }) =>
-  request<{ ok: boolean; path: string; bytes?: number; presentation_id?: string }>(
+  request<{
+    ok: boolean;
+    path: string;
+    bytes?: number;
+    presentation_id?: string;
+    template_sent?: string;
+    zinnia_verified?: boolean;
+    zinnia_note?: string;
+    presenton_request?: { template?: string; n_slides?: number };
+  }>(
     "/api/mentrix/presenton/generate",
     { method: "POST", body: JSON.stringify(data) },
   );

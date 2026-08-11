@@ -427,6 +427,60 @@ class TestVoiceCloneEndpoints:
         assert remaining[0].voice_id == "za"
         assert remaining[0].is_default is True
 
+    def test_voices_are_isolated_per_user(self, monkeypatch, tmp_path):
+        """User B must not list, default, or delete User A's clone."""
+        from app.domains.voice import voice_clone as vc
+
+        monkeypatch.setattr(vc, "VOICES_DIR", tmp_path)
+        monkeypatch.setattr("app.domains.voice.voice_clone.log_audit", lambda **kw: None)
+        user_a = Mock(user_id=5)
+        user_b = Mock(user_id=99)
+        db = _session()
+        db.add(
+            ClonedVoice(
+                user_id=5,
+                voice_id="secret-a",
+                external_voice_id="ext-a",
+                name="A only",
+                provider="chatterbox",
+                is_default=True,
+            )
+        )
+        db.add(
+            ClonedVoice(
+                user_id=99,
+                voice_id="b-voice",
+                external_voice_id="ext-b",
+                name="B only",
+                provider="chatterbox",
+                is_default=True,
+            )
+        )
+        db.commit()
+
+        listed_b = vc.list_my_voices(current_user=user_b, db=db)
+        assert [v.voice_id for v in listed_b] == ["b-voice"]
+        assert all(v.voice_id != "secret-a" for v in listed_b)
+
+        listed_a = vc.list_my_voices(current_user=user_a, db=db)
+        assert [v.voice_id for v in listed_a] == ["secret-a"]
+
+        with pytest.raises(HTTPException) as exc:
+            vc.set_default_voice("secret-a", current_user=user_b, db=db)
+        assert exc.value.status_code == 404
+
+        with pytest.raises(HTTPException) as exc2:
+            vc.delete_voice_by_id("secret-a", current_user=user_b, db=db)
+        assert exc2.value.status_code == 404
+
+        # A's voice still present after B's failed delete
+        assert (
+            db.query(ClonedVoice)
+            .filter(ClonedVoice.user_id == 5, ClonedVoice.voice_id == "secret-a")
+            .first()
+            is not None
+        )
+
     def test_get_my_voice_returns_none_when_unset(self):
         from app.domains.voice.voice_clone import get_my_voice
 

@@ -1350,7 +1350,7 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     """Non-secret readiness for Mentrix tools (env-backed Slack/Jira). Never returns tokens."""
     import os
 
-    from app.services.presenton_client import presenton_configured
+    from app.services.presenton_client import presenton_configured, presenton_reachable
 
     slack = bool((os.getenv("SLACK_BOT_TOKEN") or "").strip())
     jira = bool(
@@ -1387,8 +1387,11 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         "browser_label": browser.get("label") or "Browser automation",
         "browser_hint": browser.get("hint") or "",
         "browser_provider": browser.get("provider") or "playwright",
-        "presenton": presenton_configured(),
+        "presenton": presenton_configured() and presenton_reachable(),
+        "presenton_configured": presenton_configured(),
+        "presenton_reachable": presenton_reachable(),
         "presenton_base_url": (os.getenv("PRESENTON_BASE_URL") or "").strip() or "",
+        "zinnia_presenton_template_id": (os.getenv("ZINNIA_PRESENTON_TEMPLATE_ID") or "").strip(),
         "zoom_join_url_configured": bool(zoom_join),
         "zoom_desktop_path_configured": bool((os.getenv("ZOOM_DESKTOP_PATH") or "").strip()),
         "slack_channel": (os.getenv("SLACK_DEFAULT_CHANNEL") or "#engineering") if slack else "",
@@ -1442,12 +1445,15 @@ def presenton_generate(
     _user: CurrentUser = Depends(get_current_user),
 ):
     """Proxy Presenton generate → save PPTX under Documents/Desktop for Present Deck."""
-    from app.services.presenton_client import generate_presentation
+    from app.services.presenton_client import generate_presentation, resolve_presenton_template_id
 
+    resolved = resolve_presenton_template_id(req.template, custom_id=None)
+    # Client may already send the resolved Presenton id; still echo evidence fields.
+    template_id = (req.template or resolved["template_id"] or "general").strip() or "general"
     out = generate_presentation(
         req.content,
         n_slides=req.n_slides,
-        template=req.template or None,
+        template=template_id,
         instructions=req.instructions or None,
         filename=req.filename or None,
     )
@@ -1455,6 +1461,19 @@ def presenton_generate(
         raise HTTPException(
             status_code=502,
             detail=out.get("detail") or out.get("hint") or out.get("error") or "presenton_failed",
+        )
+    out["template_sent"] = out.get("template_sent") or template_id
+    out["ui_template_choice"] = resolved.get("ui_choice")
+    out["zinnia_verified"] = bool(resolved.get("zinnia_verified")) and (
+        str(out["template_sent"]) == str(resolved.get("template_id"))
+        or not str(resolved.get("ui_choice") or "").startswith("zinnia-")
+    )
+    # Honest: if UI chose zinnia-* but wire id is generic modern/general without env master → not verified
+    if str(req.template or "").startswith("zinnia-") and str(out["template_sent"]) in ("modern", "general"):
+        out["zinnia_verified"] = False
+        out["zinnia_note"] = (
+            "Zinnia UI preset only — set ZINNIA_PRESENTON_TEMPLATE_ID or Custom template id "
+            "to the Presenton master for a Zinnia PASS"
         )
     return out
 

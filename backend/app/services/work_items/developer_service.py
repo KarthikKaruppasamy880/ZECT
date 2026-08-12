@@ -63,6 +63,23 @@ class MentrixDeveloperService:
             created_by=actor,
         )
 
+    def _resolve_user_id(self, actor_or_created_by: str) -> int | None:
+        s = (actor_or_created_by or "").strip()
+        if not s:
+            return None
+        try:
+            if s.isdigit():
+                return int(s)
+        except ValueError:
+            pass
+        try:
+            from app.models import User
+
+            u = self.db.query(User).filter(User.email == s).first()
+            return int(u.id) if u else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _build_pack(self, wi: WorkItem, goal: str) -> dict[str, Any]:
         project_key = ""
         try:
@@ -80,6 +97,21 @@ class MentrixDeveloperService:
             db=self.db,
             query=goal,
         )
+        doc_items: list = []
+        try:
+            from app.services.document_intelligence.service import retrieve_document_context
+
+            actor_uid = self._resolve_user_id(getattr(wi, "created_by", "") or "")
+            if actor_uid:
+                doc_items, _meta = retrieve_document_context(
+                    self.db,
+                    user_id=actor_uid,
+                    query=goal,
+                    project_id=wi.project_id,
+                    max_tokens=1000,
+                )
+        except Exception:  # noqa: BLE001
+            doc_items = []
         pack = self.context_engine.build(
             work_item_id=wi.id,
             repository_id=wi.repository_id,
@@ -90,8 +122,9 @@ class MentrixDeveloperService:
             memory_hits=snap.memory,
             lattice_hits=list((snap.lattice or {}).get("hits") or []),
             blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
+            extra_items=doc_items,
         )
-        return {"pack": pack.to_dict(), "pi": snap.to_dict()}
+        return {"pack": pack.to_dict(), "pi": snap.to_dict(), "pack_obj": pack}
 
     def ask(
         self,
@@ -132,19 +165,7 @@ class MentrixDeveloperService:
             pass
         result = llm_phase.run_ask(
             question,
-            repo_context=MentrixContextEngine()
-            .build(
-                work_item_id=wi.id,
-                repository_id=wi.repository_id,
-                repository_ref=wi.repository_ref or "",
-                base_commit_sha=wi.base_commit_sha or "",
-                goal=question,
-                knowledge_hits=built["pi"].get("knowledge") or [],
-                memory_hits=built["pi"].get("memory") or [],
-                lattice_hits=(built["pi"].get("lattice") or {}).get("hits") or [],
-                blueprint_snippet=str((built["pi"].get("blueprint") or {}).get("snippet") or ""),
-            )
-            .text_blob(),
+            repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=question)).text_blob(),
             repo_id=wi.repository_id,
             db=self.db,
         )
@@ -203,19 +224,7 @@ class MentrixDeveloperService:
 
         result = llm_phase.run_plan(
             goal,
-            repo_context=MentrixContextEngine()
-            .build(
-                work_item_id=wi.id,
-                repository_id=wi.repository_id,
-                repository_ref=wi.repository_ref or "",
-                base_commit_sha=wi.base_commit_sha or "",
-                goal=goal,
-                knowledge_hits=built["pi"].get("knowledge") or [],
-                memory_hits=built["pi"].get("memory") or [],
-                lattice_hits=(built["pi"].get("lattice") or {}).get("hits") or [],
-                blueprint_snippet=str((built["pi"].get("blueprint") or {}).get("snippet") or ""),
-            )
-            .text_blob(),
+            repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob(),
             constraints=constraints,
             repo_id=wi.repository_id,
             db=self.db,

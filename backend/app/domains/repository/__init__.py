@@ -9,6 +9,19 @@ from app.domains.repository import git_ops
 from app.domains.repository import code_index
 from app.domains.repository import lattice
 from app.domains.repository import knowledge_base
+from app.domains.repository import document_intelligence
 from app.domains.repository import build_intel
 
-__all__ = ['repo_analysis', 'repo_browser', 'repo_clone', 'file_explorer', 'file_watcher', 'git_ops', 'code_index', 'lattice', 'knowledge_base', 'build_intel']
+__all__ = [
+    'repo_analysis',
+    'repo_browser',
+    'repo_clone',
+    'file_explorer',
+    'file_watcher',
+    'git_ops',
+    'code_index',
+    'lattice',
+    'knowledge_base',
+    'document_intelligence',
+    'build_intel',
+]

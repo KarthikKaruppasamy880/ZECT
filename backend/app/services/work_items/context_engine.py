@@ -193,6 +193,13 @@ class MentrixContextEngine:
             )
 
         for item in extra_items or []:
+            # Never inject stale/replaced document (or other) versions into ContextPack.
+            if str(getattr(item, "freshness", "") or "").lower() == "stale":
+                continue
+            if getattr(item, "source_type", "") == "document" and str(
+                getattr(item, "freshness", "") or ""
+            ).lower() not in ("current",):
+                continue
             _add(item)
 
         pack.token_used = used

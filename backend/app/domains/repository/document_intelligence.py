@@ -80,21 +80,24 @@ def list_documents(
     uid = _uid(current_user)
     from sqlalchemy import and_, or_
 
-    q = db.query(DocumentArtifact).filter(
-        or_(
-            and_(DocumentArtifact.scope == USER_PRIVATE, DocumentArtifact.user_id == uid),
-            DocumentArtifact.scope == PROJECT_SHARED,
+    # Without project_id: USER_PRIVATE only (never dump all PROJECT_SHARED).
+    if project_id is None:
+        q = db.query(DocumentArtifact).filter(
+            DocumentArtifact.scope == USER_PRIVATE,
+            DocumentArtifact.user_id == uid,
         )
-    )
-    if current_only:
-        q = q.filter(DocumentArtifact.is_current == True)  # noqa: E712
-    if project_id is not None:
-        q = q.filter(
+    else:
+        q = db.query(DocumentArtifact).filter(
             or_(
-                DocumentArtifact.project_id == project_id,
                 and_(DocumentArtifact.scope == USER_PRIVATE, DocumentArtifact.user_id == uid),
+                and_(
+                    DocumentArtifact.scope == PROJECT_SHARED,
+                    DocumentArtifact.project_id == project_id,
+                ),
             )
         )
+    if current_only:
+        q = q.filter(DocumentArtifact.is_current == True)  # noqa: E712
     if scope:
         q = q.filter(DocumentArtifact.scope == scope.upper())
     rows = q.order_by(DocumentArtifact.id.desc()).limit(100).all()
@@ -105,14 +108,13 @@ def list_documents(
 @require_authentication
 def get_document(
     artifact_id: int,
+    project_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    art = get_accessible_artifact(db, artifact_id, uid)
+    art = get_accessible_artifact(db, artifact_id, uid, project_id=project_id)
     if not art:
-        raise HTTPException(404, "document_not_found")
-    if art.scope == USER_PRIVATE and art.user_id != uid:
         raise HTTPException(404, "document_not_found")
     cv = None
     if art.content_version_id:
@@ -129,12 +131,13 @@ def get_document(
 @require_authentication
 def get_markdown(
     artifact_id: int,
+    project_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    art = get_accessible_artifact(db, artifact_id, uid)
-    if not art or (art.scope == USER_PRIVATE and art.user_id != uid):
+    art = get_accessible_artifact(db, artifact_id, uid, project_id=project_id)
+    if not art:
         raise HTTPException(404, "document_not_found")
     cv = db.query(DocumentContentVersion).filter(DocumentContentVersion.id == art.content_version_id).first()
     md = ""
@@ -202,11 +205,20 @@ def remove_document(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
+    perm = check_tool_permission(db, "document_delete", user_id=uid, project_id=None)
+    if not perm.get("allowed") and perm.get("level") == "never":
+        raise HTTPException(403, detail={"error": "permission_denied", **perm})
     art = db.query(DocumentArtifact).filter(DocumentArtifact.id == artifact_id, DocumentArtifact.user_id == uid).first()
     if not art:
         raise HTTPException(404, "document_not_found")
     art.is_current = False
     art.status = "SUPERSEDED"
     db.query(DocumentChunk).filter(DocumentChunk.document_artifact_id == art.id).update({"freshness": "stale"})
+    if art.knowledge_entry_id:
+        from app.models import KnowledgeEntry
+
+        ke = db.query(KnowledgeEntry).filter(KnowledgeEntry.id == art.knowledge_entry_id).first()
+        if ke:
+            ke.is_active = False
     db.commit()
-    return {"ok": True, "id": artifact_id, "status": "SUPERSEDED"}
+    return {"ok": True, "id": artifact_id, "status": "SUPERSEDED", "permission": perm}

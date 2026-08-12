@@ -191,3 +191,29 @@ def test_documents_api_upload_list_retrieve(authed_client, tmp_path, monkeypatch
     assert all(i.get("freshness") == "current" for i in payload["items"])
     pack_items = (payload.get("context_pack") or {}).get("items") or []
     assert not any(i.get("freshness") == "stale" for i in pack_items)
+
+    # Cleanup so shared test DB does not pollute companion empty-context tests.
+    authed_client.delete(f"/api/documents/{art_id}")
+
+
+def test_project_shared_requires_project_id_for_retrieve(db):
+    session, u1, u2 = db
+    payload = b"# Shared\n\nsecret project material"
+    a1 = ingest_document(
+        session,
+        user_id=u1.id,
+        filename="shared.md",
+        data=payload,
+        project_id=42,
+        scope=PROJECT_SHARED,
+    )
+    # Unscoped retrieve must not leak PROJECT_SHARED
+    items_none, _ = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=None)
+    assert all(
+        not (getattr(i, "commit_sha", None) == a1["content_sha256"]) for i in items_none
+    ) or items_none == []
+    items_wrong, _ = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=99)
+    assert items_wrong == []
+    items_ok, meta = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=42)
+    assert items_ok
+    assert all(m["document_artifact_id"] == a1["id"] for m in meta["chunks"])

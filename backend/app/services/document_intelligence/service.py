@@ -607,17 +607,26 @@ def serialize_artifact(
     }
 
 
-def get_accessible_artifact(db: Session, artifact_id: int, user_id: int) -> DocumentArtifact | None:
+def get_accessible_artifact(
+    db: Session,
+    artifact_id: int,
+    user_id: int,
+    *,
+    project_id: int | None = None,
+) -> DocumentArtifact | None:
+    """USER_PRIVATE = owner only. PROJECT_SHARED = uploader or matching project_id bound."""
     art = db.query(DocumentArtifact).filter(DocumentArtifact.id == artifact_id).first()
     if not art:
         return None
-    if art.scope == USER_PRIVATE and art.user_id != user_id:
-        return None
+    if art.scope == USER_PRIVATE:
+        return art if art.user_id == user_id else None
     if art.scope == PROJECT_SHARED:
-        # Project members: MVP allows any authenticated user with project_id match on their requests;
-        # still require same project binding — cross-project denied.
-        pass
-    return art
+        if art.user_id == user_id:
+            return art
+        if project_id is not None and art.project_id is not None and int(art.project_id) == int(project_id):
+            return art
+        return None
+    return None
 
 
 def retrieve_document_context(
@@ -629,8 +638,21 @@ def retrieve_document_context(
     artifact_ids: list[int] | None = None,
     max_tokens: int = 1200,
 ) -> tuple[list[ProvenanceItem], dict[str, Any]]:
-    """Only current + freshness=current chunks whose sha matches artifact content_sha256."""
+    """Only current + freshness=current chunks whose sha matches artifact content_sha256.
+
+    PROJECT_SHARED chunks require an explicit matching project_id (no unscoped cross-project leak).
+    """
     from sqlalchemy import and_, or_
+
+    scope_filter = and_(DocumentArtifact.scope == USER_PRIVATE, DocumentArtifact.user_id == user_id)
+    if project_id is not None:
+        scope_filter = or_(
+            scope_filter,
+            and_(
+                DocumentArtifact.scope == PROJECT_SHARED,
+                DocumentArtifact.project_id == project_id,
+            ),
+        )
 
     q = (
         db.query(DocumentChunk, DocumentArtifact)
@@ -640,19 +662,9 @@ def retrieve_document_context(
             DocumentArtifact.status == "READY",
             DocumentChunk.freshness == "current",
             DocumentChunk.content_sha256 == DocumentArtifact.content_sha256,
-            or_(
-                and_(DocumentArtifact.scope == USER_PRIVATE, DocumentArtifact.user_id == user_id),
-                DocumentArtifact.scope == PROJECT_SHARED,
-            ),
+            scope_filter,
         )
     )
-    if project_id is not None:
-        q = q.filter(
-            or_(
-                DocumentArtifact.project_id == project_id,
-                and_(DocumentArtifact.scope == USER_PRIVATE, DocumentArtifact.user_id == user_id),
-            )
-        )
     if artifact_ids:
         q = q.filter(DocumentArtifact.id.in_(artifact_ids))
 
@@ -678,8 +690,9 @@ def retrieve_document_context(
     for ch, art in rows:
         if art.scope == USER_PRIVATE and art.user_id != user_id:
             continue
-        if art.scope == PROJECT_SHARED and project_id is not None and art.project_id != project_id:
-            continue
+        if art.scope == PROJECT_SHARED:
+            if project_id is None or art.project_id != project_id:
+                continue
         if not art.is_current or ch.freshness != "current":
             continue
         if ch.content_sha256 != art.content_sha256:

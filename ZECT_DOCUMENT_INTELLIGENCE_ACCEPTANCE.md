@@ -19,9 +19,9 @@
 
 ## Verdict
 
-**PASS with honest PARTIAL capabilities** for OCR/scanned PDF, XLSX, and image-layout/table/formula completeness.
+**PASS (implementation) with honest PARTIAL capabilities** for OCR/scanned PDF, XLSX, and image-layout/table/formula completeness. CI tracked on PR #134.
 
-Document Intelligence reuses Mentrix spine only: KnowledgeEntry indexing, MentrixContextEngine / ProvenanceItem, Permission Broker actions, Phase-13 scopes (`USER_PRIVATE` / `PROJECT_SHARED`). **No second RAG/vector/memory system.**
+Document Intelligence reuses Mentrix spine only: KnowledgeEntry indexing, MentrixContextEngine / ProvenanceItem, Permission Broker actions, Phase-13 scopes (`USER_PRIVATE` / `PROJECT_SHARED`). **No second RAG/vector/memory system.** Document Knowledge entries are excluded from generic Knowledge dumps — prompts use DI retrieve + provenance only.
 
 ## Requirements coverage
 

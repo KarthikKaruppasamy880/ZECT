@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { Eye, FileCode, FileText, FolderGit2, Plus, Upload, X } from "lucide-react";
 import {
   getDocumentMarkdown,
-  removeDocument,
   uploadDocument,
   type DocumentArtifactInfo,
 } from "@/lib/api";
@@ -174,15 +173,9 @@ export default function AttachedContextPanel({
     }
   };
 
-  const handleRemoveFile = async (file: AttachedFile) => {
+  const handleRemoveFile = (file: AttachedFile) => {
+    // Detach from local context only — do not supersede shared/remote artifacts.
     onChange((prev) => prev.filter((f) => f.id !== file.id));
-    if (file.type === "document" && file.documentArtifactId) {
-      try {
-        await removeDocument(file.documentArtifactId);
-      } catch {
-        // local detach still applies
-      }
-    }
   };
 
   const handlePreviewDocument = async (file: AttachedFile) => {

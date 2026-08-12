@@ -59,6 +59,9 @@ def retrieve_knowledge_for_context(
     """Return a short Knowledge block and metadata (entries used, chars, est tokens)."""
     max_chars = max(200, int(max_tokens) * 4)
     q = db.query(KnowledgeEntry).filter(KnowledgeEntry.is_active == True)  # noqa: E712
+    # Document Intelligence entries enter prompts only via DI retrieve + provenance —
+    # never through the generic Knowledge dump (avoids unscoped/stale injection).
+    q = q.filter(KnowledgeEntry.source != "document_intelligence")
     if project_id is not None:
         q = q.filter(
             (KnowledgeEntry.project_id == project_id) | (KnowledgeEntry.project_id == None)  # noqa: E711

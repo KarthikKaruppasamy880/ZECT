@@ -31,6 +31,7 @@ TOOL_ACTIONS: dict[str, str] = {
     "docs_draft": "companion_docs_write",
     "document_upload": "companion_docs_write",
     "document_retrieve": "companion_docs_read",
+    "document_delete": "companion_docs_write",
     "slack_digest": "companion_slack_read",
     "slack_send": "companion_slack_send",
     "email_digest": "companion_email_read",

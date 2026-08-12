@@ -75,11 +75,7 @@ class MentrixDeveloperService:
         try:
             from app.models import User
 
-            u = (
-                self.db.query(User)
-                .filter((User.email == s) | (User.username == s))
-                .first()
-            )
+            u = self.db.query(User).filter(User.email == s).first()
             return int(u.id) if u else None
         except Exception:  # noqa: BLE001
             return None
@@ -228,19 +224,7 @@ class MentrixDeveloperService:
 
         result = llm_phase.run_plan(
             goal,
-            repo_context=MentrixContextEngine()
-            .build(
-                work_item_id=wi.id,
-                repository_id=wi.repository_id,
-                repository_ref=wi.repository_ref or "",
-                base_commit_sha=wi.base_commit_sha or "",
-                goal=goal,
-                knowledge_hits=built["pi"].get("knowledge") or [],
-                memory_hits=built["pi"].get("memory") or [],
-                lattice_hits=(built["pi"].get("lattice") or {}).get("hits") or [],
-                blueprint_snippet=str((built["pi"].get("blueprint") or {}).get("snippet") or ""),
-            )
-            .text_blob(),
+            repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob(),
             constraints=constraints,
             repo_id=wi.repository_id,
             db=self.db,

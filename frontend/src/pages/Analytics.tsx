@@ -97,56 +97,62 @@ export default function Analytics() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <h2 className="text-sm font-semibold text-slate-700 mb-4">Stage Distribution</h2>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={stageData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#64748b" }} />
-              <YAxis tick={{ fontSize: 12, fill: "#64748b" }} allowDecimals={false} />
-              <Tooltip />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                {stageData.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div style={{ width: "100%", minHeight: 240 }}>
+            <ResponsiveContainer width="100%" height={240} minHeight={240}>
+              <BarChart data={stageData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12, fill: "#64748b" }} />
+                <YAxis tick={{ fontSize: 12, fill: "#64748b" }} width={36} allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                  {stageData.map((_, i) => (
+                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <h2 className="text-sm font-semibold text-slate-700 mb-4">Project Status</h2>
-          <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                innerRadius={60}
-                outerRadius={90}
-                paddingAngle={3}
-                dataKey="value"
-                label={({ name, value }) => `${name} (${value})`}
-              >
-                {pieData.map((_, i) => (
-                  <Cell key={i} fill={pieFills[i % pieFills.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          <div style={{ width: "100%", minHeight: 240 }}>
+            <ResponsiveContainer width="100%" height={240} minHeight={240}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={90}
+                  paddingAngle={3}
+                  dataKey="value"
+                  label={({ name, value }) => `${name} (${value})`}
+                >
+                  {pieData.map((_, i) => (
+                    <Cell key={i} fill={pieFills[i % pieFills.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5 mb-8">
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Team Performance</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={teamChart}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
-            <YAxis tick={{ fontSize: 12, fill: "#64748b" }} />
-            <Tooltip />
-            <Bar dataKey="avgCompletion" name="Avg Completion %" fill="#6366f1" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+        <div style={{ width: "100%", minHeight: 240 }}>
+          <ResponsiveContainer width="100%" height={240} minHeight={240}>
+            <BarChart data={teamChart} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} />
+              <YAxis tick={{ fontSize: 12, fill: "#64748b" }} width={36} allowDecimals={false} />
+              <Tooltip />
+              <Bar dataKey="avgCompletion" name="Avg Completion %" fill="#6366f1" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5">

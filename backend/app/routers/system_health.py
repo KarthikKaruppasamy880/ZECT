@@ -26,50 +26,45 @@ def system_health(
 
 @router.get("/model-readiness")
 def model_readiness(_user: CurrentUser = Depends(get_current_user)):
-    """Local/cloud model gateway readiness + surface matrix (no secrets)."""
-    from app.adapters.llm.openai_compat import (
-        mentrix_local_llm_configured,
-        openai_compat_available,
-        mentrix_llm_chat_model,
-    )
-    from app.services.work_items.fallback_policy import resolve_model_route
+    """Local/cloud model gateway readiness + per-profile matrix (no secrets)."""
+    from app.adapters.llm.openai_compat import mentrix_llm_chat_model
     from app.services.local_model_matrix import build_local_model_matrix
-    import os
+    from app.services.model_gateway import MODEL_PROFILES, build_gateway_audit
 
-    local_ok = mentrix_local_llm_configured()
-    cloud_ok = bool((os.getenv("OPENAI_API_KEY") or "").strip()) or openai_compat_available()
-    route = resolve_model_route(
-        local_configured=local_ok,
-        cloud_configured=cloud_ok,
-        local_model=mentrix_llm_chat_model(),
-    )
-    base_url = (
-        os.getenv("ZECT_LLM_BASE_URL")
-        or os.getenv("MENTRIX_LLM_BASE_URL")
-        or os.getenv("OPENAI_BASE_URL")
-        or ""
-    ).strip()
+    audit = build_gateway_audit()
+    default_route = audit["profiles"].get("QUALITY") or next(iter(audit["profiles"].values()), {})
     optimizations: list[str] = []
-    if local_ok:
+    if audit.get("local_configured"):
         optimizations.append("prefer_local_for_coding")
         optimizations.append("cache_identical_prompts")
-    if cloud_ok and not local_ok:
+    if audit.get("cloud_configured") and not audit.get("local_configured"):
         optimizations.append("configure_local_llm_for_lower_latency")
-    if not local_ok and not cloud_ok:
+    if not audit.get("local_configured") and not audit.get("cloud_configured"):
         optimizations.append("set_ZECT_LLM_BASE_URL_or_OPENAI_API_KEY")
+    if audit.get("duplicate_config_warning"):
+        optimizations.append("resolve_duplicate_ZECT_vs_MENTRIX_LLM_BASE_URL")
     return {
-        "local_configured": local_ok,
-        "cloud_configured": cloud_ok,
+        "local_configured": audit["local_configured"],
+        "cloud_configured": audit["cloud_configured"],
         "model": mentrix_llm_chat_model(),
-        "base_url_configured": bool(base_url),
+        "base_url_configured": audit["canonical_base_url_configured"],
+        "canonical_env": audit["canonical_env"],
+        "alias_envs": audit["alias_envs"],
+        "duplicate_config_warning": audit["duplicate_config_warning"],
+        "model_profiles": list(MODEL_PROFILES),
+        "profiles": audit["profiles"],
         "optimizations": optimizations,
         "route": {
-            "provider": route.provider,
-            "blocked": route.blocked,
-            "fallback_used": route.fallback_used,
-            "fallback_reason": route.fallback_reason,
+            "provider": default_route.get("provider"),
+            "blocked": default_route.get("blocked"),
+            "fallback_used": default_route.get("fallback_used"),
+            "fallback_reason": default_route.get("fallback_reason"),
+            "requested_model": default_route.get("requested_model"),
+            "actual_model": default_route.get("actual_model"),
+            "local_or_cloud": default_route.get("local_or_cloud"),
         },
         "matrix": build_local_model_matrix(),
+        "gateway_audit": audit,
     }
 
 

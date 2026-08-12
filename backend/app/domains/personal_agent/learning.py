@@ -30,6 +30,19 @@ PBL_ATTRIBUTION = "practical-tutorials/project-based-learning (MIT) — tutorial
 
 MODES = ("GUIDED", "PAIR", "DEMO", "AUTONOMOUS")
 
+# Curated initial language paths (catalog filter + UI chips)
+SUPPORTED_LANGUAGES = (
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "Java",
+    "C#",
+    "Go",
+    "Rust",
+    "C",
+    "C++",
+)
+
 
 def _jload(raw: str | None, default: Any) -> Any:
     if not raw:
@@ -224,7 +237,7 @@ class StartProjectIn(BaseModel):
 
 
 class ProgressIn(BaseModel):
-    event: str  # started | milestone | test_passed | user_confirmed | completed
+    event: str  # started | milestone | test_passed | user_confirmed | completed | practice_attempt
     milestone: str = ""
     evidence: dict[str, Any] = Field(default_factory=dict)
 
@@ -233,6 +246,38 @@ class MentorAskIn(BaseModel):
     question: str
     project_id: Optional[int] = None
     mode: str = "GUIDED"
+
+
+class PracticeVerifyIn(BaseModel):
+    """Practice → Code → Tests path. LLM claims alone cannot verify progress."""
+
+    code: str = ""
+    language: str = "Python"
+    passed: bool = False
+    test_output: str = ""
+    exit_code: int = 1
+
+
+@router.get("/languages")
+@require_authentication
+def list_languages(current_user: CurrentUser = Depends(get_current_user)):
+    return {
+        "languages": list(SUPPORTED_LANGUAGES),
+        "modes": list(MODES),
+        "path": [
+            "Choose Language/Skill",
+            "Learning Path",
+            "Topic/Lesson",
+            "Practice",
+            "Code",
+            "Run Tests",
+            "Hint",
+            "Retry",
+            "Evidence",
+            "Verified Progress",
+        ],
+        "scope": "USER_PRIVATE",
+    }
 
 
 @router.get("/sources")
@@ -332,14 +377,102 @@ def my_projects(
     return {"projects": [serialize_project(p) for p in rows]}
 
 
-@router.post("/projects/{project_id}/progress")
-@require_authentication
-def update_progress(
+def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
+    """EvidenceVerifier is authority — user_confirmed / LLM claims never grant verified progress."""
+    from app.services.work_items.evidence_verifier import EvidenceVerifier
+
+    if body.event == "user_confirmed":
+        return {"ok": True, "verified": False, "reason": "user_confirmed_not_verified"}
+    if body.event == "practice_attempt":
+        return {"ok": True, "verified": False, "reason": "attempt_logged"}
+    if body.event not in ("test_passed", "milestone", "completed"):
+        return {"ok": True, "verified": False, "reason": "informational"}
+
+    raw = body.evidence or {}
+    items = list(raw.get("items") or [])
+    if not items and raw.get("type"):
+        items = [raw]
+    if not items and raw.get("passed") is True:
+        items = [
+            {
+                "id": "learn-test-1",
+                "type": "TEST_RESULT",
+                "operation_id": "OP-LEARN-TEST",
+                "requirement_ids": ["REQ-LEARN-PASS"],
+                "acceptance_ids": ["AC-LEARN-PASS"],
+                "payload": raw,
+                "llm_claim": False,
+            }
+        ]
+    if body.event == "milestone" and not items:
+        items = [
+            {
+                "id": f"learn-ms-{body.milestone or 'x'}",
+                "type": "HUMAN_APPROVAL",
+                "operation_id": "OP-LEARN-MILESTONE",
+                "requirement_ids": ["REQ-LEARN-MILESTONE"],
+                "acceptance_ids": ["AC-LEARN-MILESTONE"],
+                "payload": {"milestone": body.milestone, **raw},
+                "llm_claim": False,
+            }
+        ]
+    if any(bool(i.get("llm_claim")) for i in items if isinstance(i, dict)) and not any(
+        (i.get("type") in ("TEST_RESULT", "COMMAND_EXIT", "HUMAN_APPROVAL", "FILE_CHANGED"))
+        and not i.get("llm_claim")
+        for i in items
+        if isinstance(i, dict)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "llm_text_alone_cannot_verify_learning", "verified": False},
+        )
+
+    result = EvidenceVerifier().verify(
+        mandatory_operation_ids=["OP-LEARN-TEST"] if body.event == "test_passed" else (
+            ["OP-LEARN-MILESTONE"] if body.event == "milestone" else ["OP-LEARN-TEST", "OP-LEARN-COMPLETE"]
+        ),
+        requirement_ids=(
+            ["REQ-LEARN-PASS"]
+            if body.event == "test_passed"
+            else (["REQ-LEARN-MILESTONE"] if body.event == "milestone" else ["REQ-LEARN-PASS", "REQ-LEARN-COMPLETE"])
+        ),
+        acceptance_ids=(
+            ["AC-LEARN-PASS"]
+            if body.event == "test_passed"
+            else (["AC-LEARN-MILESTONE"] if body.event == "milestone" else ["AC-LEARN-PASS", "AC-LEARN-COMPLETE"])
+        ),
+        evidence=items
+        if body.event != "completed"
+        else items
+        + [
+            {
+                "id": "learn-complete-1",
+                "type": "TEST_RESULT",
+                "operation_id": "OP-LEARN-COMPLETE",
+                "requirement_ids": ["REQ-LEARN-COMPLETE"],
+                "acceptance_ids": ["AC-LEARN-COMPLETE"],
+                "payload": raw,
+                "llm_claim": False,
+            }
+        ]
+        if items
+        else [],
+    )
+    if not result.ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "evidence_required", "verified": False, **result.to_dict()},
+        )
+    return {"ok": True, "verified": True, **result.to_dict()}
+
+
+def _apply_progress(
+    *,
     project_id: int,
     body: ProgressIn,
-    db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
-):
+    db: Session,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
     uid = getattr(current_user, "user_id", None)
     q = db.query(LearningProject).filter(LearningProject.id == project_id)
     if uid is not None:
@@ -349,32 +482,144 @@ def update_progress(
         raise HTTPException(404, "project_not_found")
     progress = _jload(proj.progress_json, {})
     evidence = _jload(proj.evidence_json, [])
-    # user_confirmed is evidence only — does not grant verified skills / completion
-    verified_event = body.event in ("test_passed", "milestone", "completed")
+    verification = _verify_learning_evidence(body)
+    verified_event = bool(verification.get("verified"))
     ev = {
         "event": body.event,
         "milestone": body.milestone,
         "evidence": body.evidence,
         "at": datetime.now(timezone.utc).isoformat(),
         "verified": verified_event,
+        "verification": verification,
+        "scope": "USER_PRIVATE",
     }
     evidence.append(ev)
-    if body.event == "milestone" and body.milestone:
+    if body.event == "milestone" and body.milestone and verified_event:
         done = list(progress.get("milestones_done") or [])
         if body.milestone not in done:
             done.append(body.milestone)
         progress["milestones_done"] = done
+    if body.event == "test_passed" and verified_event:
+        progress["tests_passed"] = int(progress.get("tests_passed") or 0) + 1
     if body.event == "user_confirmed":
         progress["user_confirmed"] = True
     if body.event == "completed":
-        proj.status = "completed"
-        proj.completed_at = datetime.now(timezone.utc)
-        progress["completed"] = True
+        prior_verified = any(
+            isinstance(x, dict) and x.get("verified") and x.get("event") == "test_passed" for x in evidence[:-1]
+        )
+        if not prior_verified and not verified_event:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "completion_requires_verified_tests", "verified": False},
+            )
+        if verified_event or prior_verified:
+            proj.status = "completed"
+            proj.completed_at = datetime.now(timezone.utc)
+            progress["completed"] = True
+            progress["verified_complete"] = True
     proj.progress_json = json.dumps(progress)
     proj.evidence_json = json.dumps(evidence[-50:])
     db.commit()
     db.refresh(proj)
-    return serialize_project(proj)
+    out = serialize_project(proj)
+    out["verification"] = verification
+    return out
+
+
+@router.post("/projects/{project_id}/progress")
+@require_authentication
+def update_progress(
+    project_id: int,
+    body: ProgressIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    return _apply_progress(project_id=project_id, body=body, db=db, current_user=current_user)
+
+
+@router.post("/projects/{project_id}/practice/verify")
+@require_authentication
+def practice_verify(
+    project_id: int,
+    body: PracticeVerifyIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Code → Run Tests bridge. Passes through EvidenceVerifier via progress update."""
+    uid = getattr(current_user, "user_id", None)
+    q = db.query(LearningProject).filter(LearningProject.id == project_id)
+    if uid is not None:
+        q = q.filter(LearningProject.user_id == uid)
+    proj = q.first()
+    if not proj:
+        raise HTTPException(404, "project_not_found")
+
+    lang = (body.language or "Python").strip()
+    code = body.code or ""
+    syntax_ok = True
+    syntax_error = ""
+    if lang.lower() == "python" and code.strip():
+        try:
+            compile(code, "<practice>", "exec")
+        except SyntaxError as e:
+            syntax_ok = False
+            syntax_error = str(e)
+
+    passed = bool(body.passed) and syntax_ok and int(body.exit_code) == 0
+    evidence = {
+        "passed": passed,
+        "language": lang,
+        "exit_code": 0 if passed else (body.exit_code if body.exit_code else 1),
+        "test_output": (body.test_output or syntax_error)[:4000],
+        "code_chars": len(code),
+        "type": "TEST_RESULT",
+        "operation_id": "OP-LEARN-TEST",
+        "requirement_ids": ["REQ-LEARN-PASS"],
+        "acceptance_ids": ["AC-LEARN-PASS"],
+        "llm_claim": False,
+        "items": [
+            {
+                "id": "practice-cmd",
+                "type": "COMMAND_EXIT",
+                "operation_id": "OP-LEARN-TEST",
+                "requirement_ids": ["REQ-LEARN-PASS"],
+                "acceptance_ids": ["AC-LEARN-PASS"],
+                "payload": {"exit_code": 0 if passed else 1, "language": lang},
+                "llm_claim": False,
+            },
+            {
+                "id": "practice-test",
+                "type": "TEST_RESULT",
+                "operation_id": "OP-LEARN-TEST",
+                "requirement_ids": ["REQ-LEARN-PASS"],
+                "acceptance_ids": ["AC-LEARN-PASS"],
+                "payload": {"passed": passed, "output": (body.test_output or "")[:2000]},
+                "llm_claim": False,
+            },
+        ],
+    }
+    attempt = _apply_progress(
+        project_id=project_id,
+        body=ProgressIn(event="practice_attempt", evidence={"passed": False, "syntax_ok": syntax_ok, **evidence}),
+        db=db,
+        current_user=current_user,
+    )
+    if not passed:
+        return {
+            "ok": False,
+            "passed": False,
+            "syntax_ok": syntax_ok,
+            "syntax_error": syntax_error,
+            "project": attempt,
+            "hint": "Fix failing tests or syntax, then retry. Ask Mentor for a GUIDED hint — not a full solution.",
+        }
+    verified = _apply_progress(
+        project_id=project_id,
+        body=ProgressIn(event="test_passed", evidence=evidence),
+        db=db,
+        current_user=current_user,
+    )
+    return {"ok": True, "passed": True, "syntax_ok": True, "project": verified}
 
 
 @router.post("/mentor/ask")

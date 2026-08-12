@@ -1805,3 +1805,89 @@ class LongRunningAgentRun(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+# ---------------------------------------------------------------------------
+# Document Intelligence — parsed document artifacts (reuse Knowledge/ContextEngine)
+# ---------------------------------------------------------------------------
+
+
+class DocumentContentVersion(Base):
+    """Parsed content identity by SHA-256. PROJECT_SHARED may reuse; USER_PRIVATE is per-owner."""
+
+    __tablename__ = "document_content_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "project_id",
+            "owner_user_id",
+            "content_sha256",
+            name="uq_doc_content_version_identity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    owner_user_id = Column(Integer, nullable=True, index=True)  # USER_PRIVATE owner; 0 sentinel for PROJECT_SHARED
+    parser_name = Column(String, default="")
+    parser_version = Column(String, default="1")
+    mime_type = Column(String, default="")
+    page_count = Column(Integer, default=0)
+    markdown_path = Column(String, default="")
+    json_path = Column(String, default="")
+    original_path = Column(String, default="")
+    partial_capabilities = Column(JSON, default=list)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DocumentArtifact(Base):
+    """User/project-visible document artifact bound to a content version."""
+
+    __tablename__ = "document_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, default="")
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("document_content_versions.id"), nullable=True, index=True)
+    sensitivity = Column(String, default="INTERNAL")
+    status = Column(String, default="UPLOADED", index=True)
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    knowledge_entry_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True)
+    source_map_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    bytes_size = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class DocumentChunk(Base):
+    """Chunk with full provenance — stale/replaced versions never enter ContextPack."""
+
+    __tablename__ = "document_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_artifact_id = Column(Integer, ForeignKey("document_artifacts.id"), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("document_content_versions.id"), nullable=False, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    page = Column(Integer, nullable=True)
+    slide = Column(Integer, nullable=True)
+    sheet = Column(String, default="")
+    heading_path = Column(String, default="")
+    source_offset = Column(Integer, default=0)
+    token_count = Column(Integer, default=0)
+    chunk_hash = Column(String(64), default="")
+    text = Column(Text, default="")
+    sensitivity = Column(String, default="INTERNAL")
+    freshness = Column(String, default="current", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

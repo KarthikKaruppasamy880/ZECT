@@ -41,6 +41,7 @@ from app.domains.repository import (
     git_ops,
     code_index,
     knowledge_base,
+    document_intelligence,
     repo_clone,
     repo_browser,
     build_intel,
@@ -121,6 +122,7 @@ def register_routers(app: FastAPI) -> None:
 
     app.include_router(conversations.router)
     app.include_router(knowledge_base.router)
+    app.include_router(document_intelligence.router)
     app.include_router(playbooks.router)
     app.include_router(scheduler.router)
     app.include_router(automation_watches.router)

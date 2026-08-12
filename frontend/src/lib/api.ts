@@ -1771,3 +1771,83 @@ export const mentrixLongRunningTick = (runId: string, data?: Record<string, unkn
     method: "POST",
     body: JSON.stringify(data || { worker_id: "ui", max_ops: 1 }),
   });
+
+// Document Intelligence
+export type DocumentArtifactInfo = {
+  id: number;
+  filename: string;
+  scope: string;
+  project_id?: number | null;
+  content_sha256: string;
+  content_version_id?: number | null;
+  status: string;
+  is_current: boolean;
+  reused_shared_version?: boolean;
+  partial_capabilities?: string[];
+  page_count?: number;
+  parser_name?: string;
+  freshness?: string;
+};
+
+export const uploadDocument = async (opts: {
+  file: File;
+  projectId?: number | null;
+  scope?: "USER_PRIVATE" | "PROJECT_SHARED";
+  sensitivity?: string;
+  replaceArtifactId?: number | null;
+}): Promise<{ ok: boolean; artifact: DocumentArtifactInfo }> => {
+  const form = new FormData();
+  form.append("file", opts.file);
+  if (opts.projectId != null) form.append("project_id", String(opts.projectId));
+  form.append("scope", opts.scope || "USER_PRIVATE");
+  form.append("sensitivity", opts.sensitivity || "INTERNAL");
+  if (opts.replaceArtifactId != null) form.append("replace_artifact_id", String(opts.replaceArtifactId));
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API}/api/documents/upload`, { method: "POST", body: form, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = err.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || `Upload failed (${res.status})`);
+  }
+  return res.json();
+};
+
+export const listDocuments = (projectId?: number | null) =>
+  request<{ documents: DocumentArtifactInfo[] }>(
+    `/api/documents${projectId != null ? `?project_id=${projectId}` : ""}`,
+  );
+
+export const getDocumentMarkdown = (artifactId: number) =>
+  request<{
+    artifact_id: number;
+    content_version_id?: number | null;
+    content_sha256: string;
+    is_current: boolean;
+    freshness: string;
+    markdown: string;
+    tag: string;
+  }>(`/api/documents/${artifactId}/markdown`);
+
+export const removeDocument = (artifactId: number) =>
+  request<{ ok: boolean; id: number; status: string }>(`/api/documents/${artifactId}`, {
+    method: "DELETE",
+  });
+
+export const retrieveDocumentContext = (data: {
+  query?: string;
+  project_id?: number | null;
+  artifact_ids?: number[];
+  max_tokens?: number;
+  build_context_pack?: boolean;
+}) =>
+  request<{
+    ok: boolean;
+    meta: Record<string, unknown>;
+    items: Array<Record<string, unknown>>;
+    context_pack?: Record<string, unknown>;
+  }>("/api/documents/retrieve", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });

@@ -1,13 +1,27 @@
 import { useRef, useState } from "react";
-import { FileCode, FileText, FolderGit2, Plus, Upload, X } from "lucide-react";
+import { Eye, FileCode, FileText, FolderGit2, Plus, Upload, X } from "lucide-react";
+import {
+  getDocumentMarkdown,
+  removeDocument,
+  uploadDocument,
+  type DocumentArtifactInfo,
+} from "@/lib/api";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
-export type AttachedFileType = "file" | "repo" | "snippet";
+export type AttachedFileType = "file" | "repo" | "snippet" | "document";
 
 export interface AttachedFile {
   id: string;
   name: string;
   type: AttachedFileType;
   content: string;
+  /** Document Intelligence provenance (when type === document) */
+  documentArtifactId?: number;
+  contentSha256?: string;
+  contentVersionId?: number | null;
+  freshness?: string;
+  scope?: string;
+  partialCapabilities?: string[];
 }
 
 type Accent = "blue" | "indigo" | "amber";
@@ -63,7 +77,13 @@ export default function AttachedContextPanel({
   const [newFileName, setNewFileName] = useState("");
   const [newFileContent, setNewFileContent] = useState("");
   const [newFileType, setNewFileType] = useState<AttachedFileType>("file");
+  const [docScope, setDocScope] = useState<"USER_PRIVATE" | "PROJECT_SHARED">("USER_PRIVATE");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [previewMd, setPreviewMd] = useState<{ name: string; text: string; meta: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const { activeProjectId } = useActiveProject();
 
   const handleAddFile = () => {
     if (!newFileName.trim() || !newFileContent.trim()) return;
@@ -72,7 +92,7 @@ export default function AttachedContextPanel({
       {
         id: Date.now().toString(),
         name: newFileName.trim(),
-        type: newFileType,
+        type: newFileType === "document" ? "file" : newFileType,
         content: newFileContent.trim(),
       },
     ]);
@@ -103,8 +123,80 @@ export default function AttachedContextPanel({
     e.target.value = "";
   };
 
-  const handleRemoveFile = (id: string) => {
-    onChange((prev) => prev.filter((f) => f.id !== id));
+  const attachArtifact = (art: DocumentArtifactInfo, markdownPreview: string) => {
+    onChange((prev) => [
+      ...prev.filter((f) => f.documentArtifactId !== art.id),
+      {
+        id: `doc-${art.id}`,
+        name: art.filename,
+        type: "document",
+        content: markdownPreview.slice(0, 4000) || `[Document ${art.filename} sha=${art.content_sha256.slice(0, 12)}]`,
+        documentArtifactId: art.id,
+        contentSha256: art.content_sha256,
+        contentVersionId: art.content_version_id,
+        freshness: art.is_current ? "current" : "stale",
+        scope: art.scope,
+        partialCapabilities: art.partial_capabilities || [],
+      },
+    ]);
+  };
+
+  const handleUploadDocument = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = e.target.files?.[0];
+    e.target.value = "";
+    if (!picked) return;
+    if (docScope === "PROJECT_SHARED" && activeProjectId == null) {
+      setUploadError("Select an active project before uploading PROJECT_SHARED documents.");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
+    try {
+      const res = await uploadDocument({
+        file: picked,
+        projectId: docScope === "PROJECT_SHARED" ? activeProjectId : activeProjectId,
+        scope: docScope,
+      });
+      const art = res.artifact;
+      let md = "";
+      try {
+        const m = await getDocumentMarkdown(art.id);
+        md = m.markdown || "";
+      } catch {
+        md = "";
+      }
+      attachArtifact(art, md);
+      setShowAddPanel(false);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveFile = async (file: AttachedFile) => {
+    onChange((prev) => prev.filter((f) => f.id !== file.id));
+    if (file.type === "document" && file.documentArtifactId) {
+      try {
+        await removeDocument(file.documentArtifactId);
+      } catch {
+        // local detach still applies
+      }
+    }
+  };
+
+  const handlePreviewDocument = async (file: AttachedFile) => {
+    if (!file.documentArtifactId) return;
+    try {
+      const m = await getDocumentMarkdown(file.documentArtifactId);
+      setPreviewMd({
+        name: file.name,
+        text: m.markdown,
+        meta: `sha=${(m.content_sha256 || "").slice(0, 12)} · ${m.freshness} · v${m.content_version_id ?? "?"} · ${m.tag}`,
+      });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Preview failed");
+    }
   };
 
   return (
@@ -116,20 +208,39 @@ export default function AttachedContextPanel({
           className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition ${styles.chipBtn}`}
         >
           <Plus size={12} />
-          Add files, repos, snippets
+          Add files, repos, snippets, documents
         </button>
         {files.map((file) => (
           <div
             key={file.id}
             className="flex items-center gap-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs"
+            title={
+              file.type === "document"
+                ? `${file.freshness || "current"} · ${(file.contentSha256 || "").slice(0, 12)} · ${file.scope || ""}`
+                : undefined
+            }
           >
             {file.type === "file" && <FileText className="h-3 w-3 text-blue-500" />}
             {file.type === "repo" && <FolderGit2 className="h-3 w-3 text-green-500" />}
             {file.type === "snippet" && <FileCode className="h-3 w-3 text-purple-500" />}
+            {file.type === "document" && <FileText className="h-3 w-3 text-teal-600" />}
             <span className="text-slate-700 max-w-[100px] truncate">{file.name}</span>
+            {file.type === "document" && (
+              <>
+                <span className="text-[10px] text-teal-700">{file.freshness || "current"}</span>
+                <button
+                  type="button"
+                  onClick={() => handlePreviewDocument(file)}
+                  className="text-slate-400 hover:text-teal-600"
+                  title="View markdown"
+                >
+                  <Eye className="h-3 w-3" />
+                </button>
+              </>
+            )}
             <button
               type="button"
-              onClick={() => handleRemoveFile(file.id)}
+              onClick={() => handleRemoveFile(file)}
               className="text-slate-400 hover:text-red-500"
             >
               <X className="h-3 w-3" />
@@ -138,9 +249,30 @@ export default function AttachedContextPanel({
         ))}
       </div>
 
+      {uploadError && (
+        <p className="mt-2 text-[11px] text-red-600" data-testid="document-upload-error">
+          {uploadError}
+        </p>
+      )}
+
+      {previewMd && (
+        <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl max-h-48 overflow-auto">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div>
+              <p className="text-xs font-medium text-slate-800">{previewMd.name}</p>
+              <p className="text-[10px] text-slate-500">{previewMd.meta}</p>
+            </div>
+            <button type="button" className="text-xs text-slate-500" onClick={() => setPreviewMd(null)}>
+              Close
+            </button>
+          </div>
+          <pre className="text-[11px] whitespace-pre-wrap font-mono text-slate-700">{previewMd.text}</pre>
+        </div>
+      )}
+
       {showAddPanel && (
         <div className="mt-3 p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-          <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+          <div className="flex items-center gap-3 pb-3 border-b border-slate-200 flex-wrap">
             <input
               ref={fileInputRef}
               type="file"
@@ -157,7 +289,34 @@ export default function AttachedContextPanel({
               <Upload className="h-3.5 w-3.5" />
               Browse Files from System
             </button>
-            <span className="text-[11px] text-slate-500">Select files from your local machine</span>
+            <input
+              ref={docInputRef}
+              type="file"
+              onChange={handleUploadDocument}
+              className="hidden"
+              accept=".txt,.md,.markdown,.docx,.pdf,.pptx"
+              data-testid="document-upload-input"
+            />
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => docInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 text-xs rounded-lg font-medium border border-teal-300 bg-teal-50 text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+              data-testid="document-upload-button"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {uploading ? "Uploading…" : "Upload Document"}
+            </button>
+            <select
+              value={docScope}
+              onChange={(e) => setDocScope(e.target.value as "USER_PRIVATE" | "PROJECT_SHARED")}
+              className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+              data-testid="document-scope-select"
+            >
+              <option value="USER_PRIVATE">USER_PRIVATE</option>
+              <option value="PROJECT_SHARED">PROJECT_SHARED</option>
+            </select>
+            <span className="text-[11px] text-slate-500">Parsed docs reuse Knowledge + ContextPack provenance</span>
           </div>
 
           <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">

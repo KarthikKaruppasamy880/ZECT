@@ -50,7 +50,20 @@ async def upload_document(
     if not perm.get("allowed") and perm.get("level") == "never":
         raise HTTPException(403, detail={"error": "permission_denied", **perm})
 
+    # Reject oversized uploads before buffering when Content-Length is present.
+    from app.services.document_intelligence.service import MAX_UPLOAD_BYTES
+
+    cl = file.headers.get("content-length") if getattr(file, "headers", None) else None
+    if cl:
+        try:
+            if int(cl) > MAX_UPLOAD_BYTES:
+                raise HTTPException(413, detail="file_too_large")
+        except ValueError:
+            pass
+
     data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail="file_too_large")
     try:
         out = ingest_document(
             db,
@@ -101,7 +114,16 @@ def list_documents(
     if scope:
         q = q.filter(DocumentArtifact.scope == scope.upper())
     rows = q.order_by(DocumentArtifact.id.desc()).limit(100).all()
-    return {"documents": [serialize_artifact(a) for a in rows]}
+    version_ids = [a.content_version_id for a in rows if a.content_version_id]
+    versions = {}
+    if version_ids:
+        for cv in db.query(DocumentContentVersion).filter(DocumentContentVersion.id.in_(version_ids)).all():
+            versions[cv.id] = cv
+    return {
+        "documents": [
+            serialize_artifact(a, content_version=versions.get(a.content_version_id)) for a in rows
+        ]
+    }
 
 
 @router.get("/{artifact_id}")

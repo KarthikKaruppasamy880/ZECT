@@ -196,6 +196,27 @@ def test_documents_api_upload_list_retrieve(authed_client, tmp_path, monkeypatch
     authed_client.delete(f"/api/documents/{art_id}")
 
 
+def test_parse_error_does_not_supersede_prior(db):
+    session, u1, _ = db
+    good = ingest_document(
+        session, user_id=u1.id, filename="keep.docx", data=_minimal_docx("stay"), scope=USER_PRIVATE
+    )
+    bad = ingest_document(
+        session,
+        user_id=u1.id,
+        filename="keep.docx",
+        data=b"not-a-real-docx",
+        scope=USER_PRIVATE,
+        replace_artifact_id=good["id"],
+    )
+    assert bad["status"] == "ERROR"
+    prior = session.query(DocumentArtifact).filter_by(id=good["id"]).first()
+    assert prior.is_current is True
+    assert prior.status != "SUPERSEDED"
+    failed = session.query(DocumentArtifact).filter_by(id=bad["id"]).first()
+    assert failed.is_current is False
+
+
 def test_project_shared_requires_project_id_for_retrieve(db):
     session, u1, u2 = db
     payload = b"# Shared\n\nsecret project material"
@@ -207,11 +228,8 @@ def test_project_shared_requires_project_id_for_retrieve(db):
         project_id=42,
         scope=PROJECT_SHARED,
     )
-    # Unscoped retrieve must not leak PROJECT_SHARED
     items_none, _ = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=None)
-    assert all(
-        not (getattr(i, "commit_sha", None) == a1["content_sha256"]) for i in items_none
-    ) or items_none == []
+    assert items_none == []
     items_wrong, _ = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=99)
     assert items_wrong == []
     items_ok, meta = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=42)

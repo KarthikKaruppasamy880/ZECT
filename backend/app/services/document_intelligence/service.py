@@ -77,11 +77,21 @@ def parse_document(filename: str, data: bytes, mime_type: str = "") -> ParseResu
 
 def _parse_docx(data: bytes) -> ParseResult:
     parts: list[str] = []
-    with zipfile.ZipFile(__import__("io").BytesIO(data)) as zf:
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        # Basic zip-bomb guard: reject oversized uncompressed members.
+        total_uncompressed = 0
+        for info in zf.infolist():
+            total_uncompressed += max(0, int(info.file_size or 0))
+            if info.file_size > MAX_UPLOAD_BYTES or total_uncompressed > MAX_UPLOAD_BYTES * 4:
+                raise ValueError("docx_too_large_or_suspicious")
         try:
             xml = zf.read("word/document.xml")
         except KeyError as e:
             raise ValueError("invalid_docx") from e
+        if len(xml) > MAX_UPLOAD_BYTES:
+            raise ValueError("docx_document_xml_too_large")
         root = ET.fromstring(xml)
         for node in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"):
             t = (node.text or "").strip()
@@ -302,26 +312,27 @@ def ingest_document(
     db.add(art)
     db.flush()
 
+    # Collect priors to supersede only after successful READY (never on parse ERROR).
+    to_supersede: list[DocumentArtifact] = []
     if replace_artifact_id:
         old = (
             db.query(DocumentArtifact)
-            .filter(DocumentArtifact.id == replace_artifact_id, DocumentArtifact.user_id == user_id)
+            .filter(
+                DocumentArtifact.id == replace_artifact_id,
+                DocumentArtifact.user_id == user_id,
+                DocumentArtifact.scope == scope,
+            )
             .first()
         )
-        if old:
-            old.is_current = False
-            old.status = "SUPERSEDED"
-            old.superseded_by_id = art.id
-            db.query(DocumentChunk).filter(DocumentChunk.document_artifact_id == old.id).update(
-                {"freshness": "stale"}
-            )
+        if old and old.id != art.id:
+            to_supersede.append(old)
 
-    # Same user/project current artifact with same sha: mark prior as superseded if different id
     prior_same = (
         db.query(DocumentArtifact)
         .filter(
             DocumentArtifact.user_id == user_id,
             DocumentArtifact.project_id == project_id,
+            DocumentArtifact.scope == scope,
             DocumentArtifact.filename == filename[:500],
             DocumentArtifact.is_current == True,  # noqa: E712
             DocumentArtifact.id != art.id,
@@ -329,12 +340,17 @@ def ingest_document(
         .all()
     )
     for old in prior_same:
-        old.is_current = False
-        old.status = "SUPERSEDED"
-        old.superseded_by_id = art.id
-        db.query(DocumentChunk).filter(DocumentChunk.document_artifact_id == old.id).update(
-            {"freshness": "stale"}
-        )
+        if old.id not in {a.id for a in to_supersede}:
+            to_supersede.append(old)
+
+    def _apply_supersede() -> None:
+        for old in to_supersede:
+            old.is_current = False
+            old.status = "SUPERSEDED"
+            old.superseded_by_id = art.id
+            db.query(DocumentChunk).filter(DocumentChunk.document_artifact_id == old.id).update(
+                {"freshness": "stale"}
+            )
 
     root = documents_root() / f"u{user_id}" / f"a{art.id}"
     root.mkdir(parents=True, exist_ok=True)
@@ -435,6 +451,7 @@ def ingest_document(
                 )
             art.source_map_json = json.dumps(source_map)
             art.status = "READY"
+            _apply_supersede()
             _index_knowledge(db, art, cv)
             db.commit()
             db.refresh(art)
@@ -473,6 +490,8 @@ def ingest_document(
                 }
             )
         art.source_map_json = json.dumps(source_map)
+        art.status = "READY"
+        _apply_supersede()
         _index_knowledge(db, art, cv)
         db.commit()
         db.refresh(art)
@@ -483,6 +502,7 @@ def ingest_document(
         parsed = parse_document(filename, data, mime_type)
     except Exception as e:
         art.status = "ERROR"
+        art.is_current = False
         art.error_message = str(e)[:500]
         db.commit()
         db.refresh(art)
@@ -548,6 +568,7 @@ def ingest_document(
         )
     art.source_map_json = json.dumps(source_map)
     art.status = "READY"
+    _apply_supersede()
     _index_knowledge(db, art, cv)
     db.commit()
     db.refresh(art)

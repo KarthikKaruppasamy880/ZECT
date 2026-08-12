@@ -105,23 +105,28 @@ class MentrixDeveloperService:
 
             actor_uid = self._resolve_user_id(getattr(wi, "created_by", "") or "")
             if actor_uid:
-                doc_items, _meta = retrieve_document_context(
-                    self.db,
-                    user_id=actor_uid,
-                    query=goal,
-                    project_id=wi.project_id,
-                    max_tokens=800,
-                )
-                web_items, _wmeta = retrieve_web_context(
-                    self.db,
-                    user_id=actor_uid,
-                    query=goal,
-                    project_id=wi.project_id,
-                    max_tokens=800,
-                )
+                try:
+                    doc_items, _meta = retrieve_document_context(
+                        self.db,
+                        user_id=actor_uid,
+                        query=goal,
+                        project_id=wi.project_id,
+                        max_tokens=800,
+                    )
+                except Exception:  # noqa: BLE001
+                    doc_items = []
+                try:
+                    web_items, _wmeta = retrieve_web_context(
+                        self.db,
+                        user_id=actor_uid,
+                        query=goal,
+                        project_id=wi.project_id,
+                        max_tokens=800,
+                    )
+                except Exception:  # noqa: BLE001
+                    web_items = []
         except Exception:  # noqa: BLE001
-            doc_items = []
-            web_items = []
+            pass
         pack = self.context_engine.build(
             work_item_id=wi.id,
             repository_id=wi.repository_id,

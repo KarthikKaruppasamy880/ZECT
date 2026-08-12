@@ -14,10 +14,16 @@ from app.core.scopes import PROJECT_SHARED, USER_PRIVATE
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.auth.rbac import require_authentication
 from app.infrastructure.database import get_db
-from app.models import ExternalContentArtifact, ExternalContentChunk, ExternalContentVersion, KnowledgeEntry
-from app.services.mentrix.permission_broker import check_tool_permission
+from app.models import ExternalContentArtifact, ExternalContentVersion
+from app.services.web_intelligence.access import (
+    ProjectAccessDenied,
+    assert_project_access,
+    require_web_tool_permission,
+    user_can_access_project,
+)
 from app.services.web_intelligence.service import (
     UNTRUSTED_TAG,
+    delete_external_artifact,
     get_accessible_artifact,
     ingest_external,
     retrieve_web_context,
@@ -54,10 +60,26 @@ def attach_url(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    tool = "web_browser_snapshot" if (body.adapter or "").lower() == "browser" else "web_fetch"
-    perm = check_tool_permission(db, tool, user_id=uid, project_id=body.project_id)
-    if not perm.get("allowed") and perm.get("level") == "never":
-        raise HTTPException(403, detail={"error": "permission_denied", **perm})
+    scope = (body.scope or USER_PRIVATE).upper()
+    project_id = None if scope == USER_PRIVATE else body.project_id
+    if scope == PROJECT_SHARED:
+        try:
+            project_id = assert_project_access(db, uid, project_id)
+        except ProjectAccessDenied as e:
+            raise HTTPException(403, detail={"error": str(e)}) from e
+
+    adapter = (body.adapter or "").lower()
+    if adapter in ("browser_snapshot", "snapshot"):
+        adapter = "browser"
+    tool = "web_browser_snapshot" if adapter == "browser" else "web_fetch"
+    # Fail-closed: denial / unknown / missing confirmation → STOP (no fetch / browser / Knowledge)
+    perm = require_web_tool_permission(
+        db,
+        tool,
+        user_id=uid,
+        project_id=project_id,
+        user_confirmed=bool(body.confirmed_browser) if tool == "web_browser_snapshot" else False,
+    )
     if tool == "web_browser_snapshot" and not body.confirmed_browser:
         raise HTTPException(400, detail="browser_snapshot_requires_confirmation")
     try:
@@ -65,17 +87,21 @@ def attach_url(
             db,
             user_id=uid,
             url=body.url,
-            project_id=body.project_id,
-            scope=body.scope,
+            project_id=project_id,
+            scope=scope,
             sensitivity=body.sensitivity,
-            adapter=body.adapter,
+            adapter=adapter or None,
             confirmed_browser=body.confirmed_browser,
             replace_artifact_id=body.replace_artifact_id,
         )
     except SsrfBlocked as e:
         raise HTTPException(400, detail={"error": "ssrf_blocked", "message": str(e)}) from e
+    except ProjectAccessDenied as e:
+        raise HTTPException(403, detail={"error": str(e)}) from e
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
+    if out.get("status") == "ERROR" and "ssrf" in (out.get("error_message") or "").lower():
+        raise HTTPException(400, detail={"error": "ssrf_blocked", "message": out.get("error_message")})
     return {"ok": True, "artifact": out, "permission": perm, "tag": UNTRUSTED_TAG}
 
 
@@ -97,6 +123,8 @@ def list_web(
             ExternalContentArtifact.user_id == uid,
         )
     else:
+        if not user_can_access_project(db, uid, project_id):
+            raise HTTPException(403, detail={"error": "project_access_denied"})
         q = db.query(ExternalContentArtifact).filter(
             or_(
                 and_(ExternalContentArtifact.scope == USER_PRIVATE, ExternalContentArtifact.user_id == uid),
@@ -191,9 +219,11 @@ def retrieve_for_context(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    perm = check_tool_permission(db, "web_retrieve", user_id=uid, project_id=body.project_id)
-    if not perm.get("allowed") and perm.get("level") == "never":
-        raise HTTPException(403, detail={"error": "permission_denied", **perm})
+    if body.project_id is not None and not user_can_access_project(db, uid, body.project_id):
+        raise HTTPException(403, detail={"error": "project_access_denied"})
+    perm = require_web_tool_permission(
+        db, "web_retrieve", user_id=uid, project_id=body.project_id, user_confirmed=False
+    )
     items, meta = retrieve_web_context(
         db,
         user_id=uid,
@@ -229,24 +259,11 @@ def remove_web(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    perm = check_tool_permission(db, "web_delete", user_id=uid, project_id=None)
-    if not perm.get("allowed") and perm.get("level") == "never":
-        raise HTTPException(403, detail={"error": "permission_denied", **perm})
-    art = (
-        db.query(ExternalContentArtifact)
-        .filter(ExternalContentArtifact.id == artifact_id, ExternalContentArtifact.user_id == uid)
-        .first()
-    )
-    if not art:
-        raise HTTPException(404, "web_artifact_not_found")
-    art.is_current = False
-    art.status = "SUPERSEDED"
-    db.query(ExternalContentChunk).filter(
-        ExternalContentChunk.external_artifact_id == art.id
-    ).update({"freshness": "stale"})
-    if art.knowledge_entry_id:
-        ke = db.query(KnowledgeEntry).filter(KnowledgeEntry.id == art.knowledge_entry_id).first()
-        if ke:
-            ke.is_active = False
-    db.commit()
-    return {"ok": True, "id": artifact_id, "status": "SUPERSEDED", "permission": perm}
+    perm = require_web_tool_permission(db, "web_delete", user_id=uid, project_id=None, user_confirmed=False)
+    try:
+        out = delete_external_artifact(db, artifact_id=artifact_id, user_id=uid)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(403, str(e)) from e
+    return {**out, "permission": perm}

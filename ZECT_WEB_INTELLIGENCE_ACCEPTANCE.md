@@ -2,9 +2,10 @@
 
 **Date:** 2026-08-12  
 **Branch:** `feat/zect-web-intelligence-c`  
+**PR:** https://github.com/KarthikKaruppasamy880/ZECT/pull/135  
 **Base:** `develop` @ `e06bb421b85131acc0681dd0e6b932ceed2803bf` (B MERGED/FROZEN)  
 **Prompt:** `prompts/Cursor Prompt — Execute C Web Intelligence.md`  
-**Plan:** `.cursor/plans/zect_web_intelligence_c_plan.md`  
+**Remediation:** `prompts/ZECT_WEB_INTELLIGENCE_PR135_SECURITY_REMEDIATION.md`  
 **Stop condition:** STOP after C — **D (Learning expand) not started.**
 
 ## Frozen baselines preserved
@@ -18,52 +19,63 @@
 
 ## Verdict
 
-**PASS (MVP)** with honest **PARTIAL** for general web search, YouTube transcripts, and Reddit/public discussions.
+**PASS (MVP + PR #135 security remediation)** with honest **PARTIAL** for general web search, YouTube transcripts, and Reddit/public discussions.
 
-All external content tagged **`UNTRUSTED_EXTERNAL_CONTEXT`** — data only, never system/tool instructions. SSRF/network-boundary protection enforced on generic URL/browser retrieval.
+All external content tagged **`UNTRUSTED_EXTERNAL_CONTEXT`** — data only, never system/tool instructions. SSRF/network-boundary protection enforced on generic URL/browser retrieval (DNS pin, redirect revalidation, port allowlist).
+
+## PR #135 CodeRabbit triage (15)
+
+| # | Sev | File | Claim | Classification | Action |
+|---|-----|------|-------|----------------|--------|
+| 1 | Critical | `web_intelligence.py` | Fail-open permission gate (`allowed`/`level==never`) | **VALID_FIX** | `require_web_tool_permission` fail-closed (ALLOW/CONFIRM/DENY/UNKNOWN/ERROR) |
+| 2 | Critical | `service.py` | Client `project_id` as membership proof | **VALID_FIX** | `user_can_access_project` (admin/team); applied to ingest/list/get/retrieve/delete |
+| 3 | Major | `ssrf.py` | DNS rebinding TOCTOU | **VALID_FIX** | Resolve → validate → `pinned_http_get` connects to validated IP + SNI Host |
+| 4 | Major | `ssrf.py` | Normalized URL drops port | **VALID_FIX** | Explicit port preserved; non-80/443 denied |
+| 5 | Major | `permission_broker` / attach | Broker denial not enforced on attach | **VALID_FIX** | Attach uses fail-closed gate before ingest; no browser/fetch on deny |
+| 6 | Major | `service.py` | SSRF failure falls through to browser | **VALID_FIX** | `SsrfBlocked` re-raised; no browser fallback after SSRF deny |
+| 7 | Major | `service.py` | Network failures escape error path | **VALID_FIX** | Broad catch → ERROR artifact; no uncaught escape |
+| 8 | Major | `service.py` | Version reuse vs UNIQUE conflict | **VALID_FIX** | USER_PRIVATE also reuses by (scope, project_id, owner, sha) |
+| 9 | Major | `models.py` / Alembic | Missing migration | **VALID_FIX** | `e9c4a1b2d3f0_external_content_web_intelligence.py` |
+| 10 | Major | `web_intelligence.py` | Delete leaves files on disk | **VALID_FIX** | `delete_external_artifact` unlinks files when version refcount=0; Knowledge deactivated |
+| 11 | Major | `service.py` | Title not sanitized | **VALID_FIX** | `sanitize_external_title` on title/author/Knowledge |
+| 12 | Major | `AttachedContextPanel` | UNTRUSTED tag lost in prompt construction | **VALID_FIX** | Wrap web content at attach; Ask/Plan/Build preserve tag |
+| 13 | Major | `developer_service.py` | Web failure clears doc_items | **VALID_FIX** | Separate try/except for doc vs web retrieve |
+| 14 | Minor | `gateway.py` | `browser_snapshot` not normalized | **VALID_FIX** | Normalize to `browser` in detect_adapter + gateway |
+| 15 | Minor | UI | USER_PRIVATE still sent project_id | **VALID_FIX** | `projectId: null` for USER_PRIVATE |
+
+## Critical / Major fixes summary
+
+- Fail-closed Permission Broker for all Web Intelligence tools
+- Independent project membership (never trust forged `project_id`)
+- SSRF: private/loopback/link-local/metadata/unsafe scheme/bad port; redirect revalidation; DNS pin connect
+- attach: deny → STOP (no fetch/browser/Knowledge/ContextPack)
+- Delete/detach: Knowledge off; files removed only when unreferenced
+- Re-ingest uniqueness aligned with reuse; Alembic migration added
+- Titles + prompt paths keep `UNTRUSTED_EXTERNAL_CONTEXT`
 
 ## Requirements coverage
 
-| Requirement | Implementation | Status |
-|-------------|----------------|--------|
-| WebIntelligenceConnector on Connector Gateway | `connectors/gateway.py` id=`web` | **PASS** |
-| ExternalContentArtifact / Version / Chunk | `models.py` | **PASS** |
-| Approved URL retrieval | `fetch_url` + SSRF | **PASS** |
-| RSS/Atom | `fetch_rss` | **PASS** |
-| GitHub via trusted path | `fetch_github` (raw/API hosts) | **PASS** |
-| Browser snapshot + confirm | adapter=browser + Permission Broker ALWAYS_CONFIRM | **PASS** |
-| SSRF deny localhost/private/metadata/unsafe schemes | `web_intelligence/ssrf.py` + redirect revalidation + size/timeout/content-type | **PASS** |
-| PROJECT_SHARED requires project_id | retrieve/list/get gates | **PASS** |
-| USER_PRIVATE owner isolation | per-owner content versions | **PASS** |
-| Provenance / freshness | sha, url, connector, adapter, heading/offset; stale excluded | **PASS** |
-| Knowledge + ContextEngine | `source=web_intelligence` excluded from generic dumps; `extra_items` in developer pack | **PASS** |
-| Attach URL UI | `AttachedContextPanel` | **PASS** |
-| Prompt-injection fixtures | malicious strings sanitized; fence neutralized | **PASS** |
-| General search / YouTube / Reddit | listed in `partial_capabilities` | **PARTIAL** |
-
-## API surface
-
-| Method | Path |
-|--------|------|
-| POST | `/api/web/attach` |
-| GET | `/api/web` |
-| GET | `/api/web/{id}` |
-| GET | `/api/web/{id}/markdown` |
-| POST | `/api/web/retrieve` |
-| DELETE | `/api/web/{id}` |
+| Requirement | Status |
+|-------------|--------|
+| WebIntelligenceConnector on Connector Gateway | **PASS** |
+| ExternalContentArtifact / Version / Chunk | **PASS** |
+| SSRF + redirect + DNS pin + ports | **PASS** |
+| PROJECT_SHARED membership + USER_PRIVATE isolation | **PASS** |
+| Knowledge + ContextEngine | **PASS** |
+| Attach URL UI + untrusted prompt wrap | **PASS** |
+| Prompt-injection fixtures | **PASS** |
+| General search / YouTube / Reddit | **PARTIAL** |
 
 ## Tests
 
 ```bash
 cd backend
 pytest -q tests/fixes_and_phases/test_web_intelligence.py
-# → 10 passed (SSRF, injection, shared/private, stale, browser confirm, connector, PARTIAL caps)
+# security + SSRF + isolation + delete + fail-closed + injection
 
-# Frozen + B:
 pytest -q tests/fixes_and_phases/test_document_intelligence.py \
   tests/fixes_and_phases/test_phase9_13_batch.py \
   tests/fixes_and_phases/test_companion_present_learning.py
-# Combined with C: 46 passed
 ```
 
 ## Explicit non-goals
@@ -77,6 +89,7 @@ pytest -q tests/fixes_and_phases/test_document_intelligence.py \
 | Area | Status |
 |------|--------|
 | Web Intelligence C MVP | **PASS** |
+| PR #135 security remediation | **PASS** (local); CI/CodeRabbit pending push |
 | SSRF / isolation / untrusted tag | **PASS** |
 | Search / YouTube / Reddit | **PARTIAL** |
 | D | **NOT STARTED** |

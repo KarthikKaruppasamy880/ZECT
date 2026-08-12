@@ -406,7 +406,10 @@ class WebIntelligenceConnector(_BaseConnector):
 
         args = arguments or {}
         url = str(args.get("url") or "")
-        adapter = str(args.get("adapter") or action.replace("fetch_", "") or "url")
+        raw_adapter = str(args.get("adapter") or action.replace("fetch_", "") or "url")
+        adapter = raw_adapter.strip().lower()
+        if adapter in ("browser_snapshot", "snapshot"):
+            adapter = "browser"
         confirmed = bool(args.get("confirmed_browser") or args.get("confirmed"))
         try:
             fr = fetch_external(url, adapter=adapter if adapter != "url" else None, confirmed_browser=confirmed)

@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
-from urllib.request import Request
 
 from sqlalchemy.orm import Session
 
@@ -28,13 +27,10 @@ from app.models import (
     KnowledgeEntry,
 )
 from app.services.mentrix.untrusted_content import sanitize_for_prompt, tag_untrusted
+from app.services.web_intelligence.access import assert_project_access, user_can_access_project
 from app.services.web_intelligence.ssrf import (
-    FETCH_TIMEOUT_SEC,
-    MAX_REDIRECTS,
-    MAX_RESPONSE_BYTES,
     SsrfBlocked,
-    content_type_allowed,
-    validate_redirect_target,
+    pinned_http_get,
     validate_url_for_fetch,
 )
 from app.services.work_items.context_engine import ProvenanceItem
@@ -144,49 +140,21 @@ class FetchResult:
 
 
 def _http_get(url: str, *, trusted_connector: str | None = None) -> tuple[str, bytes, str]:
-    """GET with SSRF checks, redirect revalidation, size/timeout/content-type limits."""
-    import urllib.error
-    import urllib.request
+    """GET with SSRF checks, DNS pin, redirect revalidation, size/timeout/content-type limits."""
+    return pinned_http_get(url, trusted_connector=trusted_connector)
 
-    class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-            return None  # force manual handling
 
-    current = validate_url_for_fetch(url, trusted_connector=trusted_connector)
-    opener = urllib.request.build_opener(_NoAutoRedirect)
-    redirects = 0
-    while True:
-        req = Request(
-            current,
-            headers={"User-Agent": "ZECT-WebIntelligence/1.0 (+untrusted-external-context)"},
-            method="GET",
-        )
-        try:
-            resp = opener.open(req, timeout=FETCH_TIMEOUT_SEC)
-        except urllib.error.HTTPError as e:
-            if e.code in (301, 302, 303, 307, 308):
-                loc = e.headers.get("Location") or ""
-                redirects += 1
-                if redirects > MAX_REDIRECTS:
-                    raise SsrfBlocked("too_many_redirects") from e
-                current = validate_redirect_target(current, loc)
-                continue
-            raise
-        with resp:
-            ct = resp.headers.get("Content-Type") or ""
-            if not content_type_allowed(ct):
-                raise ValueError(f"content_type_not_allowed:{ct}")
-            chunks = []
-            total = 0
-            while True:
-                block = resp.read(64 * 1024)
-                if not block:
-                    break
-                total += len(block)
-                if total > MAX_RESPONSE_BYTES:
-                    raise ValueError("response_too_large")
-                chunks.append(block)
-            return current, b"".join(chunks), ct
+def sanitize_external_title(title: str) -> str:
+    """Neutralize injection markers in titles — never treat as instructions."""
+    from app.security.redact import redact_text
+
+    t = (title or "").strip()
+    t = (
+        t.replace("[/UNTRUSTED_DATA]", "[/UNTRUSTED_DATA_LITERAL]")
+        .replace("[UNTRUSTED_DATA", "[UNTRUSTED_DATA_LITERAL")
+        .replace("UNTRUSTED_EXTERNAL_CONTEXT", "UNTRUSTED_EXTERNAL_CONTEXT_LITERAL")
+    )
+    return redact_text(t)[:500]
 
 
 def fetch_url(url: str) -> FetchResult:
@@ -197,7 +165,9 @@ def fetch_url(url: str) -> FetchResult:
     else:
         md = f"Source: {final}\n\n{text}"
     title_m = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
-    title = (title_m.group(1).strip() if title_m else urlparse(final).path.rsplit("/", 1)[-1])[:200]
+    title = sanitize_external_title(
+        (title_m.group(1).strip() if title_m else urlparse(final).path.rsplit("/", 1)[-1]) or final
+    )
     return FetchResult(
         url=final,
         markdown=md,
@@ -300,17 +270,26 @@ def fetch_browser_snapshot(url: str, *, confirmed: bool) -> FetchResult:
     ok, reason = host_allowed(url)
     if not ok:
         raise ValueError(f"browser_host_not_allowed:{reason}")
-    # Still apply SSRF (deny private even if allowlist has localhost from defaults —
-    # web intelligence tightens: strip localhost from browser path for WI)
+    # SSRF first — never fall through to browser runtime after SSRF denial
     safe = validate_url_for_fetch(url)
     host = (urlparse(safe).hostname or "").lower()
     if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost"):
         raise SsrfBlocked("browser_localhost_denied_for_web_intelligence")
-    # Prefer lightweight HTTP fetch when possible; browser runtime is optional
     try:
+        fr = fetch_url(safe)
         return FetchResult(
-            **{**fetch_url(safe).__dict__, "adapter": "browser", "connector_id": "browser"},
+            url=fr.url,
+            markdown=fr.markdown,
+            title=sanitize_external_title(fr.title or safe),
+            author=fr.author,
+            mime_type=fr.mime_type,
+            adapter="browser",
+            connector_id="browser",
+            partial=list(PARTIAL_CAPS),
+            raw_meta=fr.raw_meta,
         )
+    except SsrfBlocked:
+        raise
     except Exception:
         pass
     try:
@@ -326,17 +305,21 @@ def fetch_browser_snapshot(url: str, *, confirmed: bool) -> FetchResult:
         return FetchResult(
             url=safe,
             markdown=md or f"(empty browser snapshot for {safe})",
-            title=safe,
+            title=sanitize_external_title(safe),
             adapter="browser",
             connector_id="browser",
             partial=list(PARTIAL_CAPS) + (["browser_runtime_partial"] if not body else []),
         )
+    except SsrfBlocked:
+        raise
     except Exception as e:
         raise ValueError(f"browser_snapshot_failed:{e}") from e
 
 
 def detect_adapter(url: str, adapter: str | None = None) -> str:
     a = (adapter or "").strip().lower()
+    if a in ("browser_snapshot", "snapshot"):
+        a = "browser"
     if a in ("url", "rss", "github", "browser"):
         return a
     u = (url or "").lower()
@@ -395,8 +378,27 @@ def ingest_external(
     scope = (scope or USER_PRIVATE).upper()
     if scope not in (USER_PRIVATE, PROJECT_SHARED):
         scope = USER_PRIVATE
-    if scope == PROJECT_SHARED and project_id is None:
-        raise ValueError("project_required_for_project_shared")
+    # USER_PRIVATE never binds a client-supplied project_id
+    if scope == USER_PRIVATE:
+        project_id = None
+    if scope == PROJECT_SHARED:
+        project_id = assert_project_access(db, user_id, project_id)
+
+    kind = detect_adapter(url, adapter)
+    if kind == "browser" and not confirmed_browser:
+        raise ValueError("browser_snapshot_requires_confirmation")
+    # SSRF / adapter validation BEFORE creating DB rows or Knowledge entries
+    if kind in ("url", "rss", "browser"):
+        validate_url_for_fetch(url)
+    elif kind == "github":
+        parsed = urlparse(url if "://" in url else f"https://{url}")
+        host = (parsed.hostname or "").lower()
+        if host not in ("github.com", "raw.githubusercontent.com", "api.github.com"):
+            raise ValueError("github_host_required")
+        validate_url_for_fetch(
+            url if "://" in url else f"https://{url}",
+            trusted_connector="github",
+        )
 
     art = ExternalContentArtifact(
         user_id=user_id,
@@ -408,7 +410,7 @@ def ingest_external(
         status="FETCHING",
         is_current=True,
         confirmed_browser=bool(confirmed_browser),
-        adapter=detect_adapter(url, adapter),
+        adapter=kind,
     )
     db.add(art)
     db.flush()
@@ -452,7 +454,7 @@ def ingest_external(
             ).update({"freshness": "stale"})
 
     try:
-        fetched = fetch_external(url, adapter=adapter, confirmed_browser=confirmed_browser)
+        fetched = fetch_external(url, adapter=kind, confirmed_browser=confirmed_browser)
     except (SsrfBlocked, ValueError) as e:
         art.status = "ERROR"
         art.is_current = False
@@ -460,10 +462,17 @@ def ingest_external(
         db.commit()
         db.refresh(art)
         return serialize_artifact(art)
+    except Exception as e:  # noqa: BLE001 — network/timeout failures must not escape
+        art.status = "ERROR"
+        art.is_current = False
+        art.error_message = f"fetch_failed:{e}"[:500]
+        db.commit()
+        db.refresh(art)
+        return serialize_artifact(art)
 
     content_sha = sha256_bytes(fetched.markdown.encode("utf-8"))
     art.content_sha256 = content_sha
-    art.title = fetched.title[:500]
+    art.title = sanitize_external_title(fetched.title or fetched.url)
     art.adapter = fetched.adapter
     art.connector_id = fetched.connector_id
     art.source_url = fetched.url[:2000]
@@ -474,7 +483,8 @@ def ingest_external(
     root = web_root() / f"u{user_id}" / f"a{art.id}"
     root.mkdir(parents=True, exist_ok=True)
 
-    if cv and scope == PROJECT_SHARED:
+    # Reuse for both PROJECT_SHARED and USER_PRIVATE (unique constraint identity)
+    if cv:
         art.content_version_id = cv.id
         art.status = "READY"
         _clone_or_rebuild_chunks(db, art, cv, content_sha, sensitivity)
@@ -504,8 +514,8 @@ def ingest_external(
         connector_id=fetched.connector_id,
         adapter=fetched.adapter,
         mime_type=fetched.mime_type[:200],
-        title=fetched.title[:500],
-        author=fetched.author[:200],
+        title=sanitize_external_title(fetched.title or fetched.url),
+        author=sanitize_external_title(fetched.author or ""),
         markdown_path=str(md_path),
         json_path=str(js_path),
         partial_capabilities=list(dict.fromkeys(list(fetched.partial) + list(PARTIAL_CAPS))),
@@ -626,10 +636,11 @@ def _index_knowledge(db: Session, art: ExternalContentArtifact, cv: ExternalCont
     md = ""
     if cv.markdown_path and Path(cv.markdown_path).is_file():
         md = Path(cv.markdown_path).read_text(encoding="utf-8", errors="replace")[:8000]
+    safe_title = sanitize_external_title(art.title or art.source_url)
     entry = KnowledgeEntry(
         user_id=art.user_id if art.scope == USER_PRIVATE else None,
-        project_id=art.project_id,
-        title=f"Web: {art.title or art.source_url}",
+        project_id=art.project_id if art.scope == PROJECT_SHARED else None,
+        title=f"Web: {safe_title}",
         content=sanitize_for_prompt(md[:4000], source="web", max_chars=4000),
         category="web",
         tags=["web", art.content_sha256[:12], f"artifact:{art.id}", f"version:{cv.id}", UNTRUSTED_TAG],
@@ -639,6 +650,88 @@ def _index_knowledge(db: Session, art: ExternalContentArtifact, cv: ExternalCont
     db.add(entry)
     db.flush()
     art.knowledge_entry_id = entry.id
+
+
+def _refcount_content_version(db: Session, content_version_id: int | None) -> int:
+    if not content_version_id:
+        return 0
+    return (
+        db.query(ExternalContentArtifact)
+        .filter(ExternalContentArtifact.content_version_id == content_version_id)
+        .count()
+    )
+
+
+def _unlink_version_files(cv: ExternalContentVersion | None) -> None:
+    if not cv:
+        return
+    for p in (cv.markdown_path, cv.json_path):
+        if not p:
+            continue
+        try:
+            path = Path(p)
+            if path.is_file():
+                path.unlink()
+        except OSError:
+            pass
+
+
+def delete_external_artifact(
+    db: Session,
+    *,
+    artifact_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+    """Detach/supersede an artifact; cleanup files only when version has no remaining refs."""
+    art = db.query(ExternalContentArtifact).filter(ExternalContentArtifact.id == artifact_id).first()
+    if not art:
+        raise ValueError("web_artifact_not_found")
+    if art.scope == USER_PRIVATE:
+        if art.user_id != user_id:
+            raise PermissionError("web_artifact_forbidden")
+    elif art.scope == PROJECT_SHARED:
+        if art.user_id != user_id and not user_can_access_project(db, user_id, art.project_id):
+            raise PermissionError("web_artifact_forbidden")
+        if art.user_id != user_id:
+            # Non-uploader may only detach their view if they uploaded; shared delete is owner-or-member
+            # Members can supersede their own attachment rows only — require ownership of the row
+            raise PermissionError("web_artifact_forbidden")
+    else:
+        raise PermissionError("web_artifact_forbidden")
+
+    cv_id = art.content_version_id
+    cv = db.query(ExternalContentVersion).filter(ExternalContentVersion.id == cv_id).first() if cv_id else None
+
+    art.is_current = False
+    art.status = "SUPERSEDED"
+    db.query(ExternalContentChunk).filter(
+        ExternalContentChunk.external_artifact_id == art.id
+    ).update({"freshness": "stale"})
+    if art.knowledge_entry_id:
+        ke = db.query(KnowledgeEntry).filter(KnowledgeEntry.id == art.knowledge_entry_id).first()
+        if ke:
+            ke.is_active = False
+
+    # Detach version link before refcount so this row doesn't keep files alive incorrectly
+    art.content_version_id = None
+    db.flush()
+    remaining = _refcount_content_version(db, cv_id)
+    files_removed = False
+    if remaining == 0 and cv is not None:
+        _unlink_version_files(cv)
+        files_removed = True
+        # Keep version row for audit but clear paths
+        cv.markdown_path = ""
+        cv.json_path = ""
+
+    db.commit()
+    return {
+        "ok": True,
+        "id": artifact_id,
+        "status": "SUPERSEDED",
+        "files_removed": files_removed,
+        "version_refs_remaining": remaining,
+    }
 
 
 def serialize_artifact(
@@ -687,11 +780,16 @@ def get_accessible_artifact(
     if art.scope == USER_PRIVATE:
         return art if art.user_id == user_id else None
     if art.scope == PROJECT_SHARED:
-        if art.user_id == user_id:
-            return art
-        if project_id is not None and art.project_id is not None and int(art.project_id) == int(project_id):
-            return art
-        return None
+        # Never trust client project_id alone — verify membership independently
+        bound = art.project_id
+        if bound is None:
+            return None
+        if not user_can_access_project(db, user_id, bound):
+            return None
+        # Optional client project_id must match the artifact binding when provided
+        if project_id is not None and int(project_id) != int(bound):
+            return None
+        return art
     return None
 
 
@@ -710,14 +808,17 @@ def retrieve_web_context(
         ExternalContentArtifact.scope == USER_PRIVATE,
         ExternalContentArtifact.user_id == user_id,
     )
+    shared_pid: int | None = None
     if project_id is not None:
-        scope_filter = or_(
-            scope_filter,
-            and_(
-                ExternalContentArtifact.scope == PROJECT_SHARED,
-                ExternalContentArtifact.project_id == project_id,
-            ),
-        )
+        if user_can_access_project(db, user_id, project_id):
+            shared_pid = int(project_id)
+            scope_filter = or_(
+                scope_filter,
+                and_(
+                    ExternalContentArtifact.scope == PROJECT_SHARED,
+                    ExternalContentArtifact.project_id == shared_pid,
+                ),
+            )
 
     q = (
         db.query(ExternalContentChunk, ExternalContentArtifact)
@@ -758,8 +859,11 @@ def retrieve_web_context(
     for ch, art in rows:
         if art.scope == USER_PRIVATE and art.user_id != user_id:
             continue
-        if art.scope == PROJECT_SHARED and (project_id is None or art.project_id != project_id):
-            continue
+        if art.scope == PROJECT_SHARED:
+            if shared_pid is None or art.project_id != shared_pid:
+                continue
+            if not user_can_access_project(db, user_id, art.project_id):
+                continue
         if not art.is_current or ch.freshness != "current":
             continue
         if ch.content_sha256 != art.content_sha256:

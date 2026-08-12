@@ -14,6 +14,7 @@ const computer = require("./computer");
 const shortcuts = require("./shortcuts");
 const chatterbox = require("./chatterbox");
 const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
+const serviceLifecycle = require("./service-lifecycle");
 
 // Unpackaged `electron .` must hit Vite — otherwise loadFile(dist) uses file:// + absolute
 // /assets paths and the window stays blank (navy backgroundColor only).
@@ -787,7 +788,21 @@ const menuTemplate = [
   },
 ];
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Optional managed probes — PARTIAL packaging (backend not bundled in NSIS).
+  try {
+    const readiness = await serviceLifecycle.checkReadiness();
+    if (!readiness.api.ok && process.env.ZECT_MANAGE_SERVICES === "1") {
+      const repoRoot = app.isPackaged
+        ? path.join(process.resourcesPath, "..")
+        : path.join(__dirname, "..");
+      serviceLifecycle.tryStartLocalScript(repoRoot);
+    }
+    console.log("[zect] service readiness", JSON.stringify(readiness));
+  } catch (e) {
+    console.warn("[zect] service readiness probe failed", e);
+  }
+
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     if (permission === "media" || permission === "microphone" || permission === "audioCapture") {
       callback(true);

@@ -186,15 +186,17 @@ export default function DataLayer() {
             {dashboard.daily_trends.length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Daily Event Trend</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={dashboard.daily_trends}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#64748b" }} />
-                    <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={{ fill: "#6366f1" }} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div style={{ width: "100%", minHeight: 220 }}>
+                  <ResponsiveContainer width="100%" height={220} minHeight={220}>
+                    <LineChart data={dashboard.daily_trends} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#64748b" }} />
+                      <YAxis tick={{ fontSize: 10, fill: "#64748b" }} width={32} allowDecimals={false} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={{ fill: "#6366f1" }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             )}
 

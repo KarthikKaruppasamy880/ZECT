@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.database import get_db
 from app.models import (
     WorkingMemory, EpisodicMemory, Lesson, Decision,
@@ -17,8 +18,19 @@ from app.models import (
 )
 from app.security.redact import contains_raw_secret, redact_text
 
-router = APIRouter(prefix="/api/memory", tags=["memory"])
+router = APIRouter(prefix="/api/memory", tags=["memory"], dependencies=[Depends(get_current_user)])
 
+
+
+
+def _uid(user: CurrentUser) -> int | None:
+    return getattr(user, "user_id", None)
+
+
+def _require_self(user: CurrentUser, user_id: int) -> None:
+    uid = _uid(user)
+    if uid is not None and int(user_id) != int(uid):
+        raise HTTPException(403, "cross_user_memory_forbidden")
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -425,7 +437,12 @@ def supersede_decision(decision_id: int, new_decision_id: int, db: Session = Dep
 # ---------------------------------------------------------------------------
 
 @router.get("/preferences/{user_id}")
-def get_preferences(user_id: int, db: Session = Depends(get_db)):
+def get_preferences(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_self(current_user, user_id)
     pref = db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
     if not pref:
         return {"user_id": user_id, "code_style": {}, "workflow": {}, "constraints": {}, "communication": {}, "feature_flags": {}}
@@ -433,7 +450,13 @@ def get_preferences(user_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/preferences/{user_id}")
-def update_preferences(user_id: int, data: PreferenceUpdate, db: Session = Depends(get_db)):
+def update_preferences(
+    user_id: int,
+    data: PreferenceUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    _require_self(current_user, user_id)
     pref = db.query(UserPreference).filter(UserPreference.user_id == user_id).first()
     if not pref:
         pref = UserPreference(user_id=user_id, **data.model_dump())
@@ -673,14 +696,20 @@ def list_typed_memory(
     include_expired: bool = False,
     limit: int = 100,
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     q = db.query(TypedMemoryRecord)
     if memory_type:
         q = q.filter(TypedMemoryRecord.memory_type == memory_type)
     if project_id is not None:
         q = q.filter(TypedMemoryRecord.project_id == project_id)
+    # USER_PRIVATE default — never list another user's personal typed memory
+    me = _uid(current_user)
     if user_id is not None:
+        _require_self(current_user, user_id)
         q = q.filter(TypedMemoryRecord.user_id == user_id)
+    elif me is not None:
+        q = q.filter(TypedMemoryRecord.user_id == me)
     if not include_expired:
         now = datetime.now(timezone.utc)
         q = q.filter(
@@ -691,11 +720,20 @@ def list_typed_memory(
 
 
 @router.post("/typed")
-def create_typed_memory(data: TypedMemoryCreate, db: Session = Depends(get_db)):
+def create_typed_memory(
+    data: TypedMemoryCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     if data.memory_type not in MEMORY_TYPES:
         raise HTTPException(400, f"memory_type must be one of {list(MEMORY_TYPES)}")
     if contains_raw_secret(data.content) or contains_raw_secret(data.metadata):
         raise HTTPException(400, "Refusing to store raw secrets/tokens in memory")
+
+    owner = _uid(current_user)
+    if data.user_id is not None and owner is not None:
+        _require_self(current_user, data.user_id)
+    bind_uid = owner if owner is not None else data.user_id
 
     retention = data.retention_days
     if retention is None:
@@ -703,7 +741,7 @@ def create_typed_memory(data: TypedMemoryCreate, db: Session = Depends(get_db)):
             db.query(MemoryRetentionPolicy)
             .filter(
                 MemoryRetentionPolicy.memory_type == data.memory_type,
-                MemoryRetentionPolicy.user_id == data.user_id,
+                MemoryRetentionPolicy.user_id == bind_uid,
             )
             .first()
         )
@@ -720,7 +758,7 @@ def create_typed_memory(data: TypedMemoryCreate, db: Session = Depends(get_db)):
         source=data.source[:200],
         attribution=data.attribution[:500],
         project_id=data.project_id,
-        user_id=data.user_id,
+        user_id=bind_uid,
         retention_days=int(retention or 0),
         metadata_json=data.metadata or {},
         expires_at=expires_at,

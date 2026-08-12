@@ -32,6 +32,7 @@
       "preload.js",
       "computer.js",
       "chatterbox.js",
+      "service-lifecycle.js",
       "wake.js",
       "win-wake.js",
       "dictation.js",

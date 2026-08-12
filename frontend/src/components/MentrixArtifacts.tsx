@@ -88,12 +88,13 @@ function ChartBlock({ data }: { data?: Record<string, unknown> }) {
     { name: "B", value: 65 },
     { name: "C", value: 30 },
   ];
+  // Fixed pixel height (not % alone) avoids Recharts ResponsiveContainer / YAxis defaultProps warnings
   return (
-    <div className="h-40 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={series}>
+    <div className="w-full" style={{ width: "100%", minHeight: 160, height: 160 }}>
+      <ResponsiveContainer width="100%" height={160} minHeight={160}>
+        <BarChart data={series} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <XAxis dataKey="name" stroke="#94a3b8" fontSize={10} />
-          <YAxis stroke="#94a3b8" fontSize={10} />
+          <YAxis stroke="#94a3b8" fontSize={10} width={32} allowDecimals={false} />
           <Tooltip />
           <Bar dataKey="value" fill="#14b8a6" radius={[4, 4, 0, 0]} />
         </BarChart>

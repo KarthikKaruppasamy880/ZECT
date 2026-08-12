@@ -17,7 +17,23 @@ from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.auth.rbac import require_authentication, log_audit
 from app.infrastructure.database import get_db
 from app.models import LearningProject, LearningResource, LearningSource, WorkItem
+from app.services.learning.curriculum import (
+    get_lesson,
+    get_path,
+    list_path_summaries,
+    serialize_lesson_public,
+)
+from app.services.learning.handoff import graduate_skill_draft, handoff_to_developer
+from app.services.learning.mastery import collect_user_evidence
+from app.services.learning.mentor import progressive_hint, reject_guided_full_solution
+from app.services.learning.practice_fsm import (
+    mark_lesson_verified,
+    record_hint,
+    record_practice_attempt,
+    start_lesson,
+)
 from app.services.mentrix.untrusted_content import sanitize_for_prompt, tag_untrusted
+from app.services.mentrix.permission_broker import check_tool_permission
 
 router = APIRouter(prefix="/api/learning", tags=["zect-learning"])
 
@@ -230,15 +246,18 @@ def sync_pbl_catalog(db: Session, *, markdown: str | None = None) -> dict[str, A
 
 
 class StartProjectIn(BaseModel):
-    resource_id: int
+    resource_id: Optional[int] = None
+    path_key: str = ""
+    lesson_key: str = ""
     mode: str = "GUIDED"
     title: str = ""
     work_item_id: Optional[int] = None
 
 
 class ProgressIn(BaseModel):
-    event: str  # started | milestone | test_passed | user_confirmed | completed | practice_attempt
+    event: str  # started | lesson_started | milestone | test_passed | user_confirmed | completed | practice_attempt | hint_used
     milestone: str = ""
+    lesson_key: str = ""
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -246,6 +265,9 @@ class MentorAskIn(BaseModel):
     question: str
     project_id: Optional[int] = None
     mode: str = "GUIDED"
+    path_key: str = ""
+    lesson_key: str = ""
+    study_notes: str = ""  # optional B/C untrusted notes — never system instructions
 
 
 class PracticeVerifyIn(BaseModel):
@@ -256,6 +278,28 @@ class PracticeVerifyIn(BaseModel):
     passed: bool = False
     test_output: str = ""
     exit_code: int = 1
+    lesson_key: str = ""
+
+
+class StartLessonIn(BaseModel):
+    lesson_key: str
+    path_key: str = ""
+
+
+class HintIn(BaseModel):
+    lesson_key: str = ""
+    path_key: str = ""
+    question: str = ""
+    study_notes: str = ""
+
+
+class GraduateIn(BaseModel):
+    skill: str
+    project_id: Optional[int] = None
+
+
+class HandoffIn(BaseModel):
+    goal: str = ""
 
 
 @router.get("/languages")
@@ -275,8 +319,44 @@ def list_languages(current_user: CurrentUser = Depends(get_current_user)):
             "Retry",
             "Evidence",
             "Verified Progress",
+            "Project",
+            "Skills Graduation",
         ],
         "scope": "USER_PRIVATE",
+        "curriculum_paths": list_path_summaries(),
+    }
+
+
+@router.get("/paths")
+@require_authentication
+def list_paths(
+    language: str = "",
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    rows = list_path_summaries()
+    if language:
+        lang = language.strip().lower()
+        rows = [r for r in rows if (r.get("language") or "").lower() == lang or lang in (r.get("language") or "").lower()]
+    return {"paths": rows, "scope": "USER_PRIVATE"}
+
+
+@router.get("/paths/{path_key}")
+@require_authentication
+def get_path_detail(path_key: str, current_user: CurrentUser = Depends(get_current_user)):
+    path = get_path(path_key)
+    if not path:
+        raise HTTPException(404, "path_not_found")
+    return {
+        "path": {
+            "key": path["key"],
+            "language": path["language"],
+            "title": path["title"],
+            "difficulty": path["difficulty"],
+            "skills": path["skills"],
+            "attribution": path["attribution"],
+            "content_policy": path["content_policy"],
+            "lessons": [serialize_lesson_public({**les, "path_key": path["key"], "language": path["language"]}) for les in path["lessons"]],
+        }
     }
 
 
@@ -343,24 +423,60 @@ def start_project(
     mode = (body.mode or "GUIDED").upper()
     if mode not in MODES:
         raise HTTPException(400, f"mode must be one of {MODES}")
-    res = db.query(LearningResource).filter(LearningResource.id == body.resource_id).first()
-    if not res:
-        raise HTTPException(404, "resource_not_found")
+
+    path = get_path(body.path_key) if body.path_key else None
+    res = None
+    if body.resource_id:
+        res = db.query(LearningResource).filter(LearningResource.id == body.resource_id).first()
+        if not res:
+            raise HTTPException(404, "resource_not_found")
+    if not res and not path:
+        raise HTTPException(400, "resource_id_or_path_key_required")
+
+    title = (body.title or (path["title"] if path else "") or (res.title if res else "Learning"))[:300]
+    skills = list(path["skills"]) if path else _jload(res.skills_json if res else "[]", [])
+    first_lesson = ""
+    if path and path["lessons"]:
+        first_lesson = body.lesson_key or path["lessons"][0]["key"]
+        if body.lesson_key and not get_lesson(path["key"], body.lesson_key):
+            raise HTTPException(404, "lesson_not_found")
+
+    progress: dict[str, Any] = {"started": True, "milestones_done": [], "lessons": {}, "verified_lesson_keys": []}
+    if path:
+        progress = start_lesson(progress, path_key=path["key"], lesson_key=first_lesson)
+
     proj = LearningProject(
         user_id=getattr(current_user, "user_id", None),
-        resource_id=res.id,
-        title=(body.title or res.title)[:300],
+        resource_id=res.id if res else None,
+        title=title,
         mode=mode,
         status="active",
-        skills_json=res.skills_json,
+        skills_json=json.dumps(skills),
         work_item_id=body.work_item_id,
-        progress_json=json.dumps({"started": True, "milestones_done": []}),
-        evidence_json=json.dumps([{"event": "started", "at": datetime.now(timezone.utc).isoformat()}]),
+        milestones_json=json.dumps([les["key"] for les in path["lessons"]] if path else []),
+        progress_json=json.dumps(progress),
+        evidence_json=json.dumps(
+            [
+                {
+                    "event": "started",
+                    "at": datetime.now(timezone.utc).isoformat(),
+                    "path_key": path["key"] if path else "",
+                    "lesson_key": first_lesson,
+                    "verified": False,
+                    "scope": "USER_PRIVATE",
+                }
+            ]
+        ),
     )
     db.add(proj)
     db.commit()
     db.refresh(proj)
-    return serialize_project(proj)
+    out = serialize_project(proj)
+    out["curriculum"] = {
+        "path_key": path["key"] if path else "",
+        "lesson_key": first_lesson,
+    }
+    return out
 
 
 @router.get("/projects")
@@ -383,8 +499,8 @@ def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
 
     if body.event == "user_confirmed":
         return {"ok": True, "verified": False, "reason": "user_confirmed_not_verified"}
-    if body.event == "practice_attempt":
-        return {"ok": True, "verified": False, "reason": "attempt_logged"}
+    if body.event in ("practice_attempt", "hint_used", "lesson_started", "started"):
+        return {"ok": True, "verified": False, "reason": "attempt_or_informational"}
     if body.event not in ("test_passed", "milestone", "completed"):
         return {"ok": True, "verified": False, "reason": "informational"}
 
@@ -466,13 +582,7 @@ def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
     return {"ok": True, "verified": True, **result.to_dict()}
 
 
-def _apply_progress(
-    *,
-    project_id: int,
-    body: ProgressIn,
-    db: Session,
-    current_user: CurrentUser,
-) -> dict[str, Any]:
+def _owned_project(db: Session, project_id: int, current_user: CurrentUser) -> LearningProject:
     uid = getattr(current_user, "user_id", None)
     q = db.query(LearningProject).filter(LearningProject.id == project_id)
     if uid is not None:
@@ -480,13 +590,37 @@ def _apply_progress(
     proj = q.first()
     if not proj:
         raise HTTPException(404, "project_not_found")
+    return proj
+
+
+def _apply_progress(
+    *,
+    project_id: int,
+    body: ProgressIn,
+    db: Session,
+    current_user: CurrentUser,
+) -> dict[str, Any]:
+    proj = _owned_project(db, project_id, current_user)
     progress = _jload(proj.progress_json, {})
     evidence = _jload(proj.evidence_json, [])
     verification = _verify_learning_evidence(body)
     verified_event = bool(verification.get("verified"))
+    lesson_key = (body.lesson_key or progress.get("current_lesson_key") or "").strip()
+
+    if body.event == "lesson_started" and lesson_key:
+        path_key = str(progress.get("path_key") or body.evidence.get("path_key") or "")
+        progress = start_lesson(progress, path_key=path_key, lesson_key=lesson_key)
+    if body.event == "hint_used" and lesson_key:
+        progress = record_hint(progress, lesson_key=lesson_key, level=int((body.evidence or {}).get("hint_level") or 1))
+    if body.event == "practice_attempt" and lesson_key:
+        progress = record_practice_attempt(
+            progress, lesson_key=lesson_key, passed=bool((body.evidence or {}).get("passed"))
+        )
+
     ev = {
         "event": body.event,
         "milestone": body.milestone,
+        "lesson_key": lesson_key,
         "evidence": body.evidence,
         "at": datetime.now(timezone.utc).isoformat(),
         "verified": verified_event,
@@ -501,6 +635,13 @@ def _apply_progress(
         progress["milestones_done"] = done
     if body.event == "test_passed" and verified_event:
         progress["tests_passed"] = int(progress.get("tests_passed") or 0) + 1
+        if lesson_key:
+            progress = mark_lesson_verified(progress, lesson_key=lesson_key)
+            # lesson verified counts as milestone for path completion tracking
+            done = list(progress.get("milestones_done") or [])
+            if lesson_key not in done:
+                done.append(lesson_key)
+            progress["milestones_done"] = done
     if body.event == "user_confirmed":
         progress["user_confirmed"] = True
     if body.event == "completed":
@@ -518,7 +659,7 @@ def _apply_progress(
             progress["completed"] = True
             progress["verified_complete"] = True
     proj.progress_json = json.dumps(progress)
-    proj.evidence_json = json.dumps(evidence[-50:])
+    proj.evidence_json = json.dumps(evidence[-80:])
     db.commit()
     db.refresh(proj)
     out = serialize_project(proj)
@@ -546,13 +687,9 @@ def practice_verify(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Code → Run Tests bridge. Passes through EvidenceVerifier via progress update."""
-    uid = getattr(current_user, "user_id", None)
-    q = db.query(LearningProject).filter(LearningProject.id == project_id)
-    if uid is not None:
-        q = q.filter(LearningProject.user_id == uid)
-    proj = q.first()
-    if not proj:
-        raise HTTPException(404, "project_not_found")
+    proj = _owned_project(db, project_id, current_user)
+    progress = _jload(proj.progress_json, {})
+    lesson_key = (body.lesson_key or progress.get("current_lesson_key") or "").strip()
 
     lang = (body.language or "Python").strip()
     code = body.code or ""
@@ -569,6 +706,7 @@ def practice_verify(
     evidence = {
         "passed": passed,
         "language": lang,
+        "lesson_key": lesson_key,
         "exit_code": 0 if passed else (body.exit_code if body.exit_code else 1),
         "test_output": (body.test_output or syntax_error)[:4000],
         "code_chars": len(code),
@@ -584,7 +722,7 @@ def practice_verify(
                 "operation_id": "OP-LEARN-TEST",
                 "requirement_ids": ["REQ-LEARN-PASS"],
                 "acceptance_ids": ["AC-LEARN-PASS"],
-                "payload": {"exit_code": 0 if passed else 1, "language": lang},
+                "payload": {"exit_code": 0 if passed else 1, "language": lang, "lesson_key": lesson_key},
                 "llm_claim": False,
             },
             {
@@ -593,14 +731,18 @@ def practice_verify(
                 "operation_id": "OP-LEARN-TEST",
                 "requirement_ids": ["REQ-LEARN-PASS"],
                 "acceptance_ids": ["AC-LEARN-PASS"],
-                "payload": {"passed": passed, "output": (body.test_output or "")[:2000]},
+                "payload": {"passed": passed, "output": (body.test_output or "")[:2000], "lesson_key": lesson_key},
                 "llm_claim": False,
             },
         ],
     }
     attempt = _apply_progress(
         project_id=project_id,
-        body=ProgressIn(event="practice_attempt", evidence={"passed": False, "syntax_ok": syntax_ok, **evidence}),
+        body=ProgressIn(
+            event="practice_attempt",
+            lesson_key=lesson_key,
+            evidence={"passed": False, "syntax_ok": syntax_ok, **evidence},
+        ),
         db=db,
         current_user=current_user,
     )
@@ -611,15 +753,16 @@ def practice_verify(
             "syntax_ok": syntax_ok,
             "syntax_error": syntax_error,
             "project": attempt,
+            "lesson_key": lesson_key,
             "hint": "Fix failing tests or syntax, then retry. Ask Mentor for a GUIDED hint — not a full solution.",
         }
     verified = _apply_progress(
         project_id=project_id,
-        body=ProgressIn(event="test_passed", evidence=evidence),
+        body=ProgressIn(event="test_passed", lesson_key=lesson_key, evidence=evidence),
         db=db,
         current_user=current_user,
     )
-    return {"ok": True, "passed": True, "syntax_ok": True, "project": verified}
+    return {"ok": True, "passed": True, "syntax_ok": True, "project": verified, "lesson_key": lesson_key}
 
 
 @router.post("/mentor/ask")
@@ -633,20 +776,26 @@ def mentor_ask(
     mode = (body.mode or "GUIDED").upper()
     if mode not in MODES:
         mode = "GUIDED"
+
+    blocked = reject_guided_full_solution(mode, body.question or "")
+    if blocked:
+        raise HTTPException(400, detail={"error": blocked, "mode": mode})
+
     project = None
     resource = None
+    progress: dict[str, Any] = {}
     if body.project_id:
-        uid = getattr(current_user, "user_id", None)
-        pq = db.query(LearningProject).filter(LearningProject.id == body.project_id)
-        if uid is not None:
-            pq = pq.filter(LearningProject.user_id == uid)
-        project = pq.first()
-        if body.project_id and not project:
-            raise HTTPException(404, "project_not_found")
-        if project and project.resource_id:
+        project = _owned_project(db, body.project_id, current_user)
+        progress = _jload(project.progress_json, {})
+        if project.resource_id:
             resource = db.query(LearningResource).filter(LearningResource.id == project.resource_id).first()
 
-    # External catalog text is untrusted
+    path_key = (body.path_key or progress.get("path_key") or "").strip()
+    lesson_key = (body.lesson_key or progress.get("current_lesson_key") or "").strip()
+    hint_level = 0
+    if lesson_key and progress.get("lessons"):
+        hint_level = int(((progress.get("lessons") or {}).get(lesson_key) or {}).get("hint_level") or 0)
+
     catalog_ctx = ""
     if resource:
         catalog_ctx = sanitize_for_prompt(
@@ -654,6 +803,44 @@ def mentor_ask(
             source="learning_catalog",
         )
 
+    if path_key and lesson_key:
+        hint_out = progressive_hint(
+            path_key=path_key,
+            lesson_key=lesson_key,
+            mode=mode,
+            question=body.question,
+            current_hint_level=hint_level,
+            study_notes=body.study_notes or "",
+        )
+        if not hint_out.get("ok"):
+            raise HTTPException(404, hint_out.get("error") or "lesson_not_found")
+        if project:
+            _apply_progress(
+                project_id=project.id,
+                body=ProgressIn(
+                    event="hint_used",
+                    lesson_key=lesson_key,
+                    evidence={"hint_level": hint_out.get("hint_level"), "path_key": path_key},
+                ),
+                db=db,
+                current_user=current_user,
+            )
+            project = _owned_project(db, project.id, current_user)
+        return {
+            "ok": True,
+            "answer": hint_out["hint"],
+            "route": hint_out.get("route"),
+            "hint_level": hint_out.get("hint_level"),
+            "hint_max": hint_out.get("hint_max"),
+            "auto_complete_forbidden": hint_out.get("auto_complete_forbidden"),
+            "catalog_context": tag_untrusted(catalog_ctx, source="learning_catalog") if catalog_ctx else None,
+            "study_notes": hint_out.get("study_notes"),
+            "project": serialize_project(project) if project else None,
+            "resource": serialize_resource(resource) if resource else None,
+            "lesson": hint_out.get("lesson"),
+        }
+
+    # Fallback (catalog-only project without curriculum path)
     if mode == "GUIDED":
         answer = (
             "Mentrix Learning Advisor (GUIDED): I will explain concepts and ask questions, "
@@ -685,14 +872,135 @@ def mentor_ask(
         )
         route = {"mode": "AUTONOMOUS", "coding_agent": True, "navigate": "/workspace"}
 
+    notes = None
+    if body.study_notes.strip():
+        notes = tag_untrusted(
+            sanitize_for_prompt(body.study_notes[:2000], source="learning_study_notes", max_chars=2000),
+            source="learning_study_notes",
+        )
+
     return {
         "ok": True,
         "answer": answer,
         "route": route,
         "catalog_context": tag_untrusted(catalog_ctx, source="learning_catalog") if catalog_ctx else None,
+        "study_notes": notes,
         "project": serialize_project(project) if project else None,
         "resource": serialize_resource(resource) if resource else None,
+        "auto_complete_forbidden": mode == "GUIDED",
     }
+
+
+@router.post("/projects/{project_id}/lessons/start")
+@require_authentication
+def start_lesson_endpoint(
+    project_id: int,
+    body: StartLessonIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    proj = _owned_project(db, project_id, current_user)
+    progress = _jload(proj.progress_json, {})
+    path_key = (body.path_key or progress.get("path_key") or "").strip()
+    if not path_key or not get_path(path_key):
+        raise HTTPException(400, "path_key_required")
+    if not get_lesson(path_key, body.lesson_key):
+        raise HTTPException(404, "lesson_not_found")
+    return _apply_progress(
+        project_id=project_id,
+        body=ProgressIn(
+            event="lesson_started",
+            lesson_key=body.lesson_key,
+            evidence={"path_key": path_key},
+        ),
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/projects/{project_id}/hint")
+@require_authentication
+def lesson_hint(
+    project_id: int,
+    body: HintIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    proj = _owned_project(db, project_id, current_user)
+    return mentor_ask(
+        MentorAskIn(
+            question=body.question or " progressive hint for my next step — do not solve the whole exercise.",
+            project_id=project_id,
+            mode=proj.mode or "GUIDED",
+            path_key=body.path_key,
+            lesson_key=body.lesson_key,
+            study_notes=body.study_notes,
+        ),
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.get("/mastery")
+@require_authentication
+def mastery_summary(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    uid = getattr(current_user, "user_id", None)
+    if uid is None:
+        raise HTTPException(401, "user_required")
+    return collect_user_evidence(db, int(uid))
+
+
+@router.post("/projects/{project_id}/handoff/developer")
+@require_authentication
+def handoff_developer(
+    project_id: int,
+    body: HandoffIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    proj = _owned_project(db, project_id, current_user)
+    email = getattr(current_user, "email", None) or getattr(current_user, "username", None) or ""
+    out = handoff_to_developer(db, project=proj, user_email=str(email), goal=body.goal)
+    return out
+
+
+@router.post("/skills/graduate")
+@require_authentication
+def graduate_skill(
+    body: GraduateIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Skill draft only when accumulated verified evidence meets mastery threshold."""
+    uid = getattr(current_user, "user_id", None)
+    if uid is None:
+        raise HTTPException(401, "user_required")
+    # Only hard-deny; drafts already require approval on SkillDefinition
+    perm = check_tool_permission(db, "docs_draft", user_id=int(uid), user_confirmed=True)
+    level = str(perm.get("permission_level") or "").lower()
+    result = str(perm.get("result") or "").lower()
+    if result in ("denied", "deny", "error") or level in ("never", "deny", "denied"):
+        raise HTTPException(
+            403,
+            detail={
+                "error": "permission_denied",
+                "result": result or "denied",
+                "permission_level": level or "never",
+                "audit_id": perm.get("audit_id"),
+            },
+        )
+
+    proj = None
+    if body.project_id:
+        proj = _owned_project(db, body.project_id, current_user)
+    out = graduate_skill_draft(db, user_id=int(uid), skill=body.skill, project=proj)
+    if not out.get("ok"):
+        raise HTTPException(400, detail=out)
+    out["permission"] = {"result": result or "granted", "permission_level": level or "allow", "approval_required": True}
+    return out
 
 
 @router.get("/recommend/work-item/{work_item_id}")

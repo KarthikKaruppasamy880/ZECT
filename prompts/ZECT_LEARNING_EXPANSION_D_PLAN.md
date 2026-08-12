@@ -2,7 +2,7 @@
 
 **Branch:** `feat/zect-learning-expansion-d`  
 **Base:** `develop` @ `d466660168cfc7e4e4d13816c1a920c985b672a9` (C MERGED/FROZEN)  
-**Status:** **PLANNING ONLY — STOP before implementation**  
+**Status:** **EXECUTED (D1–D7)** — see `ZECT_LEARNING_EXPANSION_ACCEPTANCE.md`  
 **Date:** 2026-08-12
 
 ## Purpose
@@ -158,11 +158,12 @@ Preserve Present smoke via `test_companion_present_learning.py`.
 | Code practice host? | Existing practice verify → later Developer/Coding Agent |
 | Docs/Web role? | Optional untrusted study context via B/C |
 | Skills role? | Graduation target, not new platform |
-| Start coding now? | **NO — STOP after this plan** |
+| Start coding now? | **DONE** — D1–D7 executed after approval |
 
 ---
 
 ## Stop condition
 
-Planning complete on `feat/zect-learning-expansion-d`.  
-**Do not implement D until explicitly approved.**
+D1–D7 implemented on `feat/zect-learning-expansion-d`.  
+Acceptance: `ZECT_LEARNING_EXPANSION_ACCEPTANCE.md`.  
+**STOP after D** — do not auto-start Ultra Review, packaging, Graphify, OCR/XLSX, or other roadmap work.

@@ -50,4 +50,4 @@ pytest -q tests/fixes_and_phases/test_web_intelligence.py \
 | Web Intelligence C | **PASS / MERGED / FROZEN** (`d466660`) |
 | PR #135 security remediation | **PASS** |
 | Search / YouTube / Reddit | **PARTIAL** |
-| D | **PLANNING** (not implemented) |
+| D | **IMPLEMENTED** on `feat/zect-learning-expansion-d` — see `ZECT_LEARNING_EXPANSION_ACCEPTANCE.md` |

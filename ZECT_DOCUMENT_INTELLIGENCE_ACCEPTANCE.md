@@ -6,7 +6,7 @@
 **Status:** **MERGED / FROZEN** — do not reopen without regression evidence.  
 **Prompt:** Document Intelligence §B (+ SHA-256 dedupe/versioning + provenance freshness additions)  
 **Master plan:** `.cursor/plans/master_live_product_fix_a8c0797d.plan.md`  
-**Stop condition:** STOP after B — **C (Web Intelligence) and D (Learning expand) deferred to separate branches.**
+**Stop condition:** STOP after B — **C MERGED/FROZEN (`d466660`); D deferred to Learning Expansion branch.**
 
 ## Frozen baselines preserved
 
@@ -98,8 +98,8 @@ pytest -q tests/fixes_and_phases/test_phase9_13_batch.py tests/fixes_and_phases/
 
 ## Explicit non-goals (this tranche)
 
-- C Web Intelligence — **not started**
-- D Learning expand — **not started**
+- C Web Intelligence — **MERGED / FROZEN** (`d466660` / PR #135)
+- D Learning expand — **not started** (planning on `feat/zect-learning-expansion-d`)
 - Second vector DB / parallel memory store — **not added**
 - Production OCR / XLSX / full layout fidelity — **PARTIAL only**
 
@@ -110,4 +110,4 @@ pytest -q tests/fixes_and_phases/test_phase9_13_batch.py tests/fixes_and_phases/
 | Document Intelligence B core | **PASS / MERGED / FROZEN** (`e06bb42`) |
 | Dedupe / versioning / freshness | **PASS** |
 | OCR / XLSX / layout-table-formula | **PARTIAL** |
-| C / D | C on `feat/zect-web-intelligence-c` (separate PR); D **NOT STARTED** |
+| C / D | C **MERGED / FROZEN** (`d466660`); D **NOT STARTED** |

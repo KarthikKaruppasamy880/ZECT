@@ -1891,3 +1891,91 @@ class DocumentChunk(Base):
     sensitivity = Column(String, default="INTERNAL")
     freshness = Column(String, default="current", index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Web Intelligence — external content artifacts (Connector Gateway; UNTRUSTED_EXTERNAL_CONTEXT)
+# ---------------------------------------------------------------------------
+
+
+class ExternalContentVersion(Base):
+    """Fetched content identity by SHA-256. PROJECT_SHARED may reuse; USER_PRIVATE is per-owner."""
+
+    __tablename__ = "external_content_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "project_id",
+            "owner_user_id",
+            "content_sha256",
+            name="uq_ext_content_version_identity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    owner_user_id = Column(Integer, nullable=True, index=True)  # 0 sentinel for PROJECT_SHARED
+    source_url = Column(String, default="")
+    connector_id = Column(String, default="web")
+    adapter = Column(String, default="url")  # url | rss | github | browser
+    mime_type = Column(String, default="")
+    title = Column(String, default="")
+    author = Column(String, default="")
+    markdown_path = Column(String, default="")
+    json_path = Column(String, default="")
+    partial_capabilities = Column(JSON, default=list)
+    fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ExternalContentArtifact(Base):
+    """User/project-visible external content artifact bound to a content version."""
+
+    __tablename__ = "external_content_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    source_url = Column(String, nullable=False)
+    title = Column(String, default="")
+    connector_id = Column(String, default="web")
+    adapter = Column(String, default="url")
+    content_sha256 = Column(String(64), nullable=False, default="", index=True)
+    content_version_id = Column(Integer, ForeignKey("external_content_versions.id"), nullable=True, index=True)
+    sensitivity = Column(String, default="INTERNAL")
+    status = Column(String, default="FETCHING", index=True)
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    knowledge_entry_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True)
+    source_map_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    confirmed_browser = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class ExternalContentChunk(Base):
+    """Chunk with full provenance — stale/replaced versions never enter ContextPack."""
+
+    __tablename__ = "external_content_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    external_artifact_id = Column(Integer, ForeignKey("external_content_artifacts.id"), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("external_content_versions.id"), nullable=False, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    heading_path = Column(String, default="")
+    source_offset = Column(Integer, default=0)
+    token_count = Column(Integer, default=0)
+    chunk_hash = Column(String(64), default="")
+    text = Column(Text, default="")
+    sensitivity = Column(String, default="INTERNAL")
+    freshness = Column(String, default="current", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

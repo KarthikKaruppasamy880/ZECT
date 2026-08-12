@@ -373,6 +373,59 @@ class BrowserFallbackConnector(_BaseConnector):
         }
 
 
+class WebIntelligenceConnector(_BaseConnector):
+    id = "web"
+    name = "Web Intelligence"
+    permission_requirement = "web:read"
+
+    def health(self) -> ConnectorHealth:
+        return ConnectorHealth(
+            id=self.id,
+            name=self.name,
+            status="configured",
+            transport="native",
+            detail="URL/RSS/GitHub fetch with SSRF boundary + UNTRUSTED_EXTERNAL_CONTEXT",
+            permission_requirement=self.permission_requirement,
+            capabilities=[
+                ConnectorCapability("fetch_url", "Fetch approved URL", "web:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("fetch_rss", "Ingest RSS/Atom", "web:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability("fetch_github", "GitHub content via trusted path", "repository:read", kind="read", permission_policy="ALLOW"),
+                ConnectorCapability(
+                    "browser_snapshot",
+                    "Allowlisted browser snapshot (confirm required)",
+                    "desktop:view",
+                    kind="read",
+                    permission_policy="CONFIRM",
+                ),
+            ],
+            auth_status="configured",
+        )
+
+    def invoke(self, action: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        from app.services.web_intelligence.service import fetch_external
+
+        args = arguments or {}
+        url = str(args.get("url") or "")
+        raw_adapter = str(args.get("adapter") or action.replace("fetch_", "") or "url")
+        adapter = raw_adapter.strip().lower()
+        if adapter in ("browser_snapshot", "snapshot"):
+            adapter = "browser"
+        confirmed = bool(args.get("confirmed_browser") or args.get("confirmed"))
+        try:
+            fr = fetch_external(url, adapter=adapter if adapter != "url" else None, confirmed_browser=confirmed)
+            return {
+                "ok": True,
+                "via": "web_intelligence",
+                "url": fr.url,
+                "title": fr.title,
+                "adapter": fr.adapter,
+                "markdown_preview": (fr.markdown or "")[:2000],
+                "tag": "UNTRUSTED_EXTERNAL_CONTEXT",
+            }
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e), "tag": "UNTRUSTED_EXTERNAL_CONTEXT"}
+
+
 _REGISTRY: dict[str, MentrixConnector] = {
     "m365": M365Connector(),
     "email_imap_smtp": EmailImapSmtpConnector(),
@@ -382,6 +435,7 @@ _REGISTRY: dict[str, MentrixConnector] = {
     "zoom": ZoomConnector(),
     "filesystem": FilesystemConnector(),
     "browser": BrowserFallbackConnector(),
+    "web": WebIntelligenceConnector(),
 }
 
 

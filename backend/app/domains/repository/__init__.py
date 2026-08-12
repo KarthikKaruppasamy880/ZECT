@@ -10,6 +10,7 @@ from app.domains.repository import code_index
 from app.domains.repository import lattice
 from app.domains.repository import knowledge_base
 from app.domains.repository import document_intelligence
+from app.domains.repository import web_intelligence
 from app.domains.repository import build_intel
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     'lattice',
     'knowledge_base',
     'document_intelligence',
+    'web_intelligence',
     'build_intel',
 ]

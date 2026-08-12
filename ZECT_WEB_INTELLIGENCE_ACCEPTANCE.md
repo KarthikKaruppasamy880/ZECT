@@ -89,7 +89,10 @@ pytest -q tests/fixes_and_phases/test_document_intelligence.py \
 | Area | Status |
 |------|--------|
 | Web Intelligence C MVP | **PASS** |
-| PR #135 security remediation | **PASS** (local); CI/CodeRabbit pending push |
+| PR #135 security remediation | **PASS** |
+| CI (backend / frontend / e2e) | **GREEN** on `62d152b` (e2e flake rerun passed; prior fail was Mentrix voice timeout unrelated to C) |
+| CodeRabbit | **pass** (re-review after `f267b5c`; latest push rate-limited — prior Critical/Major addressed) |
 | SSRF / isolation / untrusted tag | **PASS** |
 | Search / YouTube / Reddit | **PARTIAL** |
 | D | **NOT STARTED** |
+| Merge gate | **READY_TO_MERGE** (do not auto-merge) |

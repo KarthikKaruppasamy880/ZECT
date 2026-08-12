@@ -1,13 +1,16 @@
 import { useRef, useState } from "react";
 import { Eye, FileCode, FileText, FolderGit2, Plus, Upload, X } from "lucide-react";
 import {
+  attachWebUrl,
   getDocumentMarkdown,
+  getWebMarkdown,
   uploadDocument,
   type DocumentArtifactInfo,
+  type WebArtifactInfo,
 } from "@/lib/api";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
-export type AttachedFileType = "file" | "repo" | "snippet" | "document";
+export type AttachedFileType = "file" | "repo" | "snippet" | "document" | "web";
 
 export interface AttachedFile {
   id: string;
@@ -16,11 +19,15 @@ export interface AttachedFile {
   content: string;
   /** Document Intelligence provenance (when type === document) */
   documentArtifactId?: number;
+  /** Web Intelligence provenance (when type === web) */
+  webArtifactId?: number;
+  sourceUrl?: string;
   contentSha256?: string;
   contentVersionId?: number | null;
   freshness?: string;
   scope?: string;
   partialCapabilities?: string[];
+  tag?: string;
 }
 
 type Accent = "blue" | "indigo" | "amber";
@@ -80,6 +87,9 @@ export default function AttachedContextPanel({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [previewMd, setPreviewMd] = useState<{ name: string; text: string; meta: string } | null>(null);
+  const [webUrl, setWebUrl] = useState("");
+  const [webAdapter, setWebAdapter] = useState<"url" | "rss" | "github" | "browser">("url");
+  const [confirmBrowser, setConfirmBrowser] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const { activeProjectId } = useActiveProject();
@@ -178,15 +188,86 @@ export default function AttachedContextPanel({
     onChange((prev) => prev.filter((f) => f.id !== file.id));
   };
 
-  const handlePreviewDocument = async (file: AttachedFile) => {
-    if (!file.documentArtifactId) return;
+  const attachWebArtifact = (art: WebArtifactInfo, markdownPreview: string) => {
+    onChange((prev) => [
+      ...prev.filter((f) => f.webArtifactId !== art.id),
+      {
+        id: `web-${art.id}`,
+        name: art.title || art.source_url,
+        type: "web",
+        content:
+          markdownPreview.slice(0, 4000) ||
+          `[Web ${art.source_url} sha=${(art.content_sha256 || "").slice(0, 12)}]`,
+        webArtifactId: art.id,
+        sourceUrl: art.source_url,
+        contentSha256: art.content_sha256,
+        contentVersionId: art.content_version_id,
+        freshness: art.is_current ? "current" : "stale",
+        scope: art.scope,
+        partialCapabilities: art.partial_capabilities || [],
+        tag: art.tag || "UNTRUSTED_EXTERNAL_CONTEXT",
+      },
+    ]);
+  };
+
+  const handleAttachUrl = async () => {
+    if (!webUrl.trim()) return;
+    if (docScope === "PROJECT_SHARED" && activeProjectId == null) {
+      setUploadError("Select an active project before attaching PROJECT_SHARED URLs.");
+      return;
+    }
+    if (webAdapter === "browser" && !confirmBrowser) {
+      setUploadError("Browser snapshot requires explicit confirmation.");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
     try {
-      const m = await getDocumentMarkdown(file.documentArtifactId);
-      setPreviewMd({
-        name: file.name,
-        text: m.markdown,
-        meta: `sha=${(m.content_sha256 || "").slice(0, 12)} · ${m.freshness} · v${m.content_version_id ?? "?"} · ${m.tag}`,
+      const res = await attachWebUrl({
+        url: webUrl.trim(),
+        projectId: docScope === "PROJECT_SHARED" ? activeProjectId : activeProjectId,
+        scope: docScope,
+        adapter: webAdapter,
+        confirmedBrowser: confirmBrowser,
       });
+      const art = res.artifact;
+      let md = "";
+      try {
+        const m = await getWebMarkdown(art.id);
+        md = m.markdown || "";
+      } catch {
+        md = "";
+      }
+      attachWebArtifact(art, md);
+      setWebUrl("");
+      setConfirmBrowser(false);
+      setShowAddPanel(false);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Attach URL failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handlePreviewDocument = async (file: AttachedFile) => {
+    try {
+      if (file.type === "document" && file.documentArtifactId) {
+        const m = await getDocumentMarkdown(file.documentArtifactId);
+        setPreviewMd({
+          name: file.name,
+          text: m.markdown,
+          meta: `sha=${(m.content_sha256 || "").slice(0, 12)} · ${m.freshness} · v${m.content_version_id ?? "?"} · ${m.tag}`,
+        });
+        return;
+      }
+      if (file.type === "web" && file.webArtifactId) {
+        const m = await getWebMarkdown(file.webArtifactId);
+        setPreviewMd({
+          name: file.name,
+          text: m.markdown,
+          meta: `url=${m.source_url} · sha=${(m.content_sha256 || "").slice(0, 12)} · ${m.freshness} · ${m.tag}`,
+        });
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Preview failed");
     }
@@ -201,15 +282,15 @@ export default function AttachedContextPanel({
           className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg transition ${styles.chipBtn}`}
         >
           <Plus size={12} />
-          Add files, repos, snippets, documents
+          Add files, repos, snippets, documents, URLs
         </button>
         {files.map((file) => (
           <div
             key={file.id}
             className="flex items-center gap-1 px-2 py-1 bg-slate-100 border border-slate-200 rounded-lg text-xs"
             title={
-              file.type === "document"
-                ? `${file.freshness || "current"} · ${(file.contentSha256 || "").slice(0, 12)} · ${file.scope || ""}`
+              file.type === "document" || file.type === "web"
+                ? `${file.freshness || "current"} · ${(file.contentSha256 || "").slice(0, 12)} · ${file.sourceUrl || file.scope || ""}`
                 : undefined
             }
           >
@@ -217,8 +298,9 @@ export default function AttachedContextPanel({
             {file.type === "repo" && <FolderGit2 className="h-3 w-3 text-green-500" />}
             {file.type === "snippet" && <FileCode className="h-3 w-3 text-purple-500" />}
             {file.type === "document" && <FileText className="h-3 w-3 text-teal-600" />}
+            {file.type === "web" && <FileText className="h-3 w-3 text-orange-600" />}
             <span className="text-slate-700 max-w-[100px] truncate">{file.name}</span>
-            {file.type === "document" && (
+            {(file.type === "document" || file.type === "web") && (
               <>
                 <span className="text-[10px] text-teal-700">{file.freshness || "current"}</span>
                 <button
@@ -310,6 +392,53 @@ export default function AttachedContextPanel({
               <option value="PROJECT_SHARED">PROJECT_SHARED</option>
             </select>
             <span className="text-[11px] text-slate-500">Parsed docs reuse Knowledge + ContextPack provenance</span>
+          </div>
+
+          <div className="flex flex-col gap-2 pb-3 border-b border-slate-200">
+            <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">
+              Attach URL (UNTRUSTED_EXTERNAL_CONTEXT)
+            </p>
+            <div className="flex flex-wrap gap-2 items-center">
+              <input
+                type="url"
+                value={webUrl}
+                onChange={(e) => setWebUrl(e.target.value)}
+                placeholder="https://…"
+                className={`flex-1 min-w-[200px] p-2 border border-slate-300 rounded-lg text-xs focus:ring-2 ${styles.focusRing}`}
+                data-testid="web-url-input"
+              />
+              <select
+                value={webAdapter}
+                onChange={(e) => setWebAdapter(e.target.value as typeof webAdapter)}
+                className="text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+                data-testid="web-adapter-select"
+              >
+                <option value="url">URL</option>
+                <option value="rss">RSS/Atom</option>
+                <option value="github">GitHub</option>
+                <option value="browser">Browser snapshot</option>
+              </select>
+              {webAdapter === "browser" && (
+                <label className="text-[11px] text-slate-600 flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={confirmBrowser}
+                    onChange={(e) => setConfirmBrowser(e.target.checked)}
+                    data-testid="web-browser-confirm"
+                  />
+                  Confirm browser fetch
+                </label>
+              )}
+              <button
+                type="button"
+                disabled={uploading || !webUrl.trim()}
+                onClick={handleAttachUrl}
+                className="flex items-center gap-2 px-4 py-2 text-xs rounded-lg font-medium border border-orange-300 bg-orange-50 text-orange-900 hover:bg-orange-100 disabled:opacity-50"
+                data-testid="web-attach-button"
+              >
+                {uploading ? "Fetching…" : "Attach URL"}
+              </button>
+            </div>
           </div>
 
           <p className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">

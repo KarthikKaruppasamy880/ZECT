@@ -1,10 +1,12 @@
 # ZECT Document Intelligence (B) — Acceptance
 
 **Date:** 2026-08-12  
-**Branch:** `feat/zect-document-intelligence-b`  
+**Branch:** `feat/zect-document-intelligence-b` → **MERGED to `develop`**  
+**Merge SHA:** `e06bb421b85131acc0681dd0e6b932ceed2803bf` (PR #134)  
+**Status:** **MERGED / FROZEN** — do not reopen without regression evidence.  
 **Prompt:** Document Intelligence §B (+ SHA-256 dedupe/versioning + provenance freshness additions)  
 **Master plan:** `.cursor/plans/master_live_product_fix_a8c0797d.plan.md`  
-**Stop condition:** STOP after B — **C (Web Intelligence) and D (Learning expand) not started.**
+**Stop condition:** STOP after B — **C (Web Intelligence) and D (Learning expand) deferred to separate branches.**
 
 ## Frozen baselines preserved
 
@@ -105,7 +107,7 @@ pytest -q tests/fixes_and_phases/test_phase9_13_batch.py tests/fixes_and_phases/
 
 | Area | Status |
 |------|--------|
-| Document Intelligence B core | **PASS** |
+| Document Intelligence B core | **PASS / MERGED / FROZEN** (`e06bb42`) |
 | Dedupe / versioning / freshness | **PASS** |
 | OCR / XLSX / layout-table-formula | **PARTIAL** |
-| C / D | **NOT STARTED** (stop condition honored) |
+| C / D | C on `feat/zect-web-intelligence-c` (separate PR); D **NOT STARTED** |

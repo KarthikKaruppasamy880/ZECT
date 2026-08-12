@@ -98,8 +98,10 @@ class MentrixDeveloperService:
             query=goal,
         )
         doc_items: list = []
+        web_items: list = []
         try:
             from app.services.document_intelligence.service import retrieve_document_context
+            from app.services.web_intelligence.service import retrieve_web_context
 
             actor_uid = self._resolve_user_id(getattr(wi, "created_by", "") or "")
             if actor_uid:
@@ -108,10 +110,18 @@ class MentrixDeveloperService:
                     user_id=actor_uid,
                     query=goal,
                     project_id=wi.project_id,
-                    max_tokens=1000,
+                    max_tokens=800,
+                )
+                web_items, _wmeta = retrieve_web_context(
+                    self.db,
+                    user_id=actor_uid,
+                    query=goal,
+                    project_id=wi.project_id,
+                    max_tokens=800,
                 )
         except Exception:  # noqa: BLE001
             doc_items = []
+            web_items = []
         pack = self.context_engine.build(
             work_item_id=wi.id,
             repository_id=wi.repository_id,
@@ -122,7 +132,7 @@ class MentrixDeveloperService:
             memory_hits=snap.memory,
             lattice_hits=list((snap.lattice or {}).get("hits") or []),
             blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
-            extra_items=doc_items,
+            extra_items=list(doc_items) + list(web_items),
         )
         return {"pack": pack.to_dict(), "pi": snap.to_dict(), "pack_obj": pack}
 

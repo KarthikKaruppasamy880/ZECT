@@ -61,7 +61,10 @@ def retrieve_knowledge_for_context(
     q = db.query(KnowledgeEntry).filter(KnowledgeEntry.is_active == True)  # noqa: E712
     # Document Intelligence entries enter prompts only via DI retrieve + provenance —
     # never through the generic Knowledge dump (avoids unscoped/stale injection).
-    q = q.filter(KnowledgeEntry.source != "document_intelligence")
+    q = q.filter(
+        KnowledgeEntry.source != "document_intelligence",
+        KnowledgeEntry.source != "web_intelligence",
+    )
     if project_id is not None:
         q = q.filter(
             (KnowledgeEntry.project_id == project_id) | (KnowledgeEntry.project_id == None)  # noqa: E711

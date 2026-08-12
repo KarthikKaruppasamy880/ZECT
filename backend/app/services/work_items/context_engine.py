@@ -193,10 +193,10 @@ class MentrixContextEngine:
             )
 
         for item in extra_items or []:
-            # Never inject stale/replaced document (or other) versions into ContextPack.
+            # Never inject stale/replaced document/web versions into ContextPack.
             if str(getattr(item, "freshness", "") or "").lower() == "stale":
                 continue
-            if getattr(item, "source_type", "") == "document" and str(
+            if getattr(item, "source_type", "") in ("document", "web") and str(
                 getattr(item, "freshness", "") or ""
             ).lower() not in ("current",):
                 continue

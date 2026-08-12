@@ -1851,3 +1851,71 @@ export const retrieveDocumentContext = (data: {
     method: "POST",
     body: JSON.stringify(data),
   });
+
+// Web Intelligence
+export type WebArtifactInfo = {
+  id: number;
+  source_url: string;
+  title?: string;
+  scope: string;
+  project_id?: number | null;
+  content_sha256: string;
+  content_version_id?: number | null;
+  status: string;
+  is_current: boolean;
+  adapter?: string;
+  connector_id?: string;
+  reused_shared_version?: boolean;
+  partial_capabilities?: string[];
+  tag?: string;
+};
+
+export const attachWebUrl = (opts: {
+  url: string;
+  projectId?: number | null;
+  scope?: "USER_PRIVATE" | "PROJECT_SHARED";
+  adapter?: string;
+  confirmedBrowser?: boolean;
+  replaceArtifactId?: number | null;
+}) =>
+  request<{ ok: boolean; artifact: WebArtifactInfo; tag: string }>("/api/web/attach", {
+    method: "POST",
+    body: JSON.stringify({
+      url: opts.url,
+      project_id: opts.projectId ?? null,
+      scope: opts.scope || "USER_PRIVATE",
+      adapter: opts.adapter || "url",
+      confirmed_browser: !!opts.confirmedBrowser,
+      replace_artifact_id: opts.replaceArtifactId ?? null,
+    }),
+  });
+
+export const getWebMarkdown = (artifactId: number) =>
+  request<{
+    artifact_id: number;
+    content_version_id?: number | null;
+    content_sha256: string;
+    source_url: string;
+    is_current: boolean;
+    freshness: string;
+    markdown: string;
+    tag: string;
+  }>(`/api/web/${artifactId}/markdown`);
+
+export const retrieveWebContext = (data: {
+  query?: string;
+  project_id?: number | null;
+  artifact_ids?: number[];
+  max_tokens?: number;
+  build_context_pack?: boolean;
+}) =>
+  request<{
+    ok: boolean;
+    meta: Record<string, unknown>;
+    items: Array<Record<string, unknown>>;
+    context_pack?: Record<string, unknown>;
+    tag: string;
+  }>("/api/web/retrieve", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });

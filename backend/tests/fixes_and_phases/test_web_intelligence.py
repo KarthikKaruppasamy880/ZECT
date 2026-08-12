@@ -388,3 +388,58 @@ def test_delete_cleans_knowledge_and_files_when_unref(db, monkeypatch, tmp_path)
     assert ke is not None and ke.is_active is False
     items, _ = retrieve_web_context(session, user_id=u1.id, artifact_ids=[out["id"]])
     assert items == []
+
+
+def test_delete_preserves_shared_version_files(db, monkeypatch):
+    session, u1, *_ = db
+
+    def _fake_fetch(url, *, adapter=None, confirmed_browser=False):
+        return FetchResult(url=url, markdown="shared identical body xyz", title="s")
+
+    monkeypatch.setattr("app.services.web_intelligence.service.fetch_external", _fake_fetch)
+    a1 = ingest_external(session, user_id=u1.id, url="https://example.com/s1", scope=USER_PRIVATE)
+    a2 = ingest_external(session, user_id=u1.id, url="https://example.com/s2", scope=USER_PRIVATE)
+    assert a1["content_version_id"] == a2["content_version_id"]
+    art1 = session.query(ExternalContentArtifact).filter_by(id=a1["id"]).first()
+    cv = session.query(ExternalContentVersion).filter_by(id=art1.content_version_id).first()
+    md_path = Path(cv.markdown_path)
+    assert md_path.is_file()
+    result = delete_external_artifact(session, artifact_id=a1["id"], user_id=u1.id)
+    assert result["files_removed"] is False
+    assert md_path.is_file()
+    items, _ = retrieve_web_context(session, user_id=u1.id, artifact_ids=[a2["id"]])
+    assert items
+
+
+def test_attach_endpoint_denies_without_permission(db, monkeypatch):
+    """Attach path must fail-closed before ingest when broker denies web_fetch."""
+    from app.domains.repository import web_intelligence as wi_api
+
+    session, u1, *_ = db
+    session.add(PermissionRule(action_pattern="companion_web_read", permission_level="never", is_active=True))
+    session.commit()
+    called = {"n": 0}
+
+    def _boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("ingest must not run after denial")
+
+    monkeypatch.setattr(wi_api, "ingest_external", _boom)
+    user = MagicMock(user_id=u1.id)
+    body = wi_api.AttachIn(url="https://example.com/x", scope=USER_PRIVATE)
+
+    import inspect
+
+    fn = wi_api.attach_url
+    # require_authentication may wrap as coroutine
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+
+    with pytest.raises(HTTPException) as ei:
+        result = fn(body, db=session, current_user=user)
+        if inspect.isawaitable(result):
+            import asyncio
+
+            asyncio.get_event_loop().run_until_complete(result)
+    assert ei.value.status_code == 403
+    assert called["n"] == 0

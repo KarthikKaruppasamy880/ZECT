@@ -99,7 +99,13 @@ def require_web_tool_permission(
     if result in ("denied", "deny", "error") or level in ("never", "deny", "denied"):
         raise HTTPException(
             403,
-            detail={"error": "permission_denied", "tool": tool_name, "result": result or "denied", **perm},
+            detail={
+                "error": "permission_denied",
+                "tool": tool_name,
+                "result": result or "denied",
+                "permission_level": level or "never",
+                "audit_id": perm.get("audit_id"),
+            },
         )
     if result in ("pending_approval", "confirm") or needs_confirm:
         if not user_confirmed:
@@ -109,11 +115,11 @@ def require_web_tool_permission(
                     "error": "confirmation_required",
                     "tool": tool_name,
                     "result": result or "pending_approval",
-                    **perm,
+                    "permission_level": level or "require_approval",
+                    "audit_id": perm.get("audit_id"),
                 },
             )
     if result != "granted":
-        # UNKNOWN / MISSING / unexpected → fail closed
         raise HTTPException(
             403,
             detail={
@@ -121,11 +127,18 @@ def require_web_tool_permission(
                 "tool": tool_name,
                 "result": result or "unknown",
                 "permission_level": level or "unknown",
-                **perm,
+                "audit_id": perm.get("audit_id"),
             },
         )
 
-    out = dict(perm)
-    out["allowed"] = True
-    out["level"] = level or "allow"
-    return out
+    return {
+        "tool": perm.get("tool") or tool_name,
+        "action": perm.get("action"),
+        "result": result,
+        "permission_level": level or "allow",
+        "needs_confirm": False,
+        "audit_id": perm.get("audit_id"),
+        "grant_id": perm.get("grant_id"),
+        "allowed": True,
+        "level": level or "allow",
+    }

@@ -59,7 +59,7 @@ All external content tagged **`UNTRUSTED_EXTERNAL_CONTEXT`** — data only, neve
 |-------------|--------|
 | WebIntelligenceConnector on Connector Gateway | **PASS** |
 | ExternalContentArtifact / Version / Chunk | **PASS** |
-| SSRF + redirect + DNS pin + ports | **PASS** |
+| SSRF + redirect + DNS pin + ports | **PASS** (pinned IP connect via `_PinnedHTTP(S)Connection`; ports 80/443 only; redirect revalidated) |
 | PROJECT_SHARED membership + USER_PRIVATE isolation | **PASS** |
 | Knowledge + ContextEngine | **PASS** |
 | Attach URL UI + untrusted prompt wrap | **PASS** |

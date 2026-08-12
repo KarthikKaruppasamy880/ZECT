@@ -100,8 +100,10 @@ def attach_url(
         raise HTTPException(403, detail={"error": str(e)}) from e
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
-    if out.get("status") == "ERROR" and "ssrf" in (out.get("error_message") or "").lower():
-        raise HTTPException(400, detail={"error": "ssrf_blocked", "message": out.get("error_message")})
+    if out.get("status") == "ERROR":
+        err = (out.get("error_message") or "").lower()
+        if err.startswith("blocked_") or "ssrf" in err or err.startswith("dns_failed") or err.startswith("port_denied") or err.startswith("unsafe_scheme"):
+            raise HTTPException(400, detail={"error": "ssrf_blocked", "message": out.get("error_message")})
     return {"ok": True, "artifact": out, "permission": perm, "tag": UNTRUSTED_TAG}
 
 
@@ -259,7 +261,9 @@ def remove_web(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = _uid(current_user)
-    perm = require_web_tool_permission(db, "web_delete", user_id=uid, project_id=None, user_confirmed=False)
+    art_probe = db.query(ExternalContentArtifact).filter(ExternalContentArtifact.id == artifact_id).first()
+    project_id = art_probe.project_id if art_probe else None
+    perm = require_web_tool_permission(db, "web_delete", user_id=uid, project_id=project_id, user_confirmed=False)
     try:
         out = delete_external_artifact(db, artifact_id=artifact_id, user_id=uid)
     except ValueError as e:

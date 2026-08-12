@@ -690,11 +690,10 @@ def delete_external_artifact(
         if art.user_id != user_id:
             raise PermissionError("web_artifact_forbidden")
     elif art.scope == PROJECT_SHARED:
-        if art.user_id != user_id and not user_can_access_project(db, user_id, art.project_id):
-            raise PermissionError("web_artifact_forbidden")
+        # Owner-only delete of the attachment row; members cannot destroy others' rows
         if art.user_id != user_id:
-            # Non-uploader may only detach their view if they uploaded; shared delete is owner-or-member
-            # Members can supersede their own attachment rows only — require ownership of the row
+            raise PermissionError("web_artifact_forbidden")
+        if not user_can_access_project(db, user_id, art.project_id):
             raise PermissionError("web_artifact_forbidden")
     else:
         raise PermissionError("web_artifact_forbidden")
@@ -712,15 +711,22 @@ def delete_external_artifact(
         if ke:
             ke.is_active = False
 
-    # Detach version link before refcount so this row doesn't keep files alive incorrectly
+    # Count other live refs before clearing — avoid TOCTOU zero-window vs concurrent attach
+    remaining = 0
+    if cv_id:
+        remaining = (
+            db.query(ExternalContentArtifact)
+            .filter(
+                ExternalContentArtifact.content_version_id == cv_id,
+                ExternalContentArtifact.id != art.id,
+            )
+            .count()
+        )
     art.content_version_id = None
-    db.flush()
-    remaining = _refcount_content_version(db, cv_id)
     files_removed = False
     if remaining == 0 and cv is not None:
         _unlink_version_files(cv)
         files_removed = True
-        # Keep version row for audit but clear paths
         cv.markdown_path = ""
         cv.json_path = ""
 

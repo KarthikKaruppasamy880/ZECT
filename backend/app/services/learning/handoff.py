@@ -19,8 +19,12 @@ def handoff_to_developer(
     project: LearningProject,
     user_email: str = "",
     goal: str = "",
+    current_user: Any = None,
 ) -> dict[str, Any]:
-    """Create/link a WorkItem for Developer Workspace — does not start a parallel agent runtime."""
+    """Create/link a WorkItem for Developer Workspace — does not start a parallel agent runtime.
+
+    M2: existing work_item_id is only reused after independent ownership verification.
+    """
     progress = {}
     try:
         progress = json.loads(project.progress_json or "{}")
@@ -28,15 +32,31 @@ def handoff_to_developer(
         progress = {}
 
     if project.work_item_id:
-        wi = db.query(WorkItem).filter(WorkItem.id == project.work_item_id).first()
-        if wi:
-            return {
-                "ok": True,
-                "work_item_id": wi.id,
-                "navigate": "/workspace",
-                "reused": True,
-                "title": wi.title,
-            }
+        if current_user is None:
+            # Fail closed — never return foreign WorkItem metadata without auth context
+            project.work_item_id = None
+            progress.pop("work_item_id", None)
+            project.progress_json = json.dumps(progress)
+            db.commit()
+        else:
+            from app.services.learning.work_item_access import resolve_owned_work_item
+
+            try:
+                wi = resolve_owned_work_item(db, int(project.work_item_id), current_user)
+            except Exception:
+                # Stale/forged link — clear and create a fresh owned WorkItem
+                project.work_item_id = None
+                progress.pop("work_item_id", None)
+                project.progress_json = json.dumps(progress)
+                db.commit()
+            else:
+                return {
+                    "ok": True,
+                    "work_item_id": wi.id,
+                    "navigate": "/workspace",
+                    "reused": True,
+                    "title": wi.title,
+                }
 
     title = f"Learning: {project.title}"[:200]
     description = (

@@ -21,7 +21,7 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                 "title": "Write a pure function",
                 "objective": "Return True from a named function without side effects.",
                 "practice_prompt": "Implement `def ok() -> bool` that returns True. Include an assert.",
-                "starter_code": "def ok():\n    # TODO: return True\n    pass\n\n# assert ok() is True\n",
+                "starter_code": "def ok():\n    # TODO: return True\n    pass\n",
                 "skill_tags": ["Python", "functions"],
                 "difficulty": "beginner",
                 "hint_ladder": [
@@ -29,6 +29,12 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                     "A function body that only `return True` satisfies this exercise.",
                     "Add `assert ok() is True` after the function to self-check.",
                 ],
+                # Server-only — never exposed via serialize_lesson_public
+                "hidden_tests": (
+                    "assert callable(ok), 'ok must be a function'\n"
+                    "assert ok() is True, 'ok() must return True'\n"
+                    "print('PASS')\n"
+                ),
             },
             {
                 "key": "py-sum-list",
@@ -36,7 +42,7 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                 "title": "Sum a list",
                 "objective": "Write `total(nums)` that sums integers.",
                 "practice_prompt": "Implement `total(nums: list[int]) -> int`. Assert total([1,2,3]) == 6.",
-                "starter_code": "def total(nums):\n    # TODO\n    pass\n\n# assert total([1, 2, 3]) == 6\n",
+                "starter_code": "def total(nums):\n    # TODO\n    pass\n",
                 "skill_tags": ["Python", "functions", "lists"],
                 "difficulty": "beginner",
                 "hint_ladder": [
@@ -44,6 +50,12 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                     "Keep a running sum starting at 0, add each element.",
                     "Return the accumulator; assert against [1,2,3].",
                 ],
+                "hidden_tests": (
+                    "assert total([1, 2, 3]) == 6\n"
+                    "assert total([]) == 0\n"
+                    "assert total([-1, 1]) == 0\n"
+                    "print('PASS')\n"
+                ),
             },
             {
                 "key": "py-filter-even",
@@ -51,7 +63,7 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                 "title": "Filter even numbers",
                 "objective": "Return only even ints from a list.",
                 "practice_prompt": "Implement `evens(nums)` returning a new list of even numbers.",
-                "starter_code": "def evens(nums):\n    # TODO\n    pass\n\n# assert evens([1,2,3,4]) == [2, 4]\n",
+                "starter_code": "def evens(nums):\n    # TODO\n    pass\n",
                 "skill_tags": ["Python", "lists", "testing"],
                 "difficulty": "beginner",
                 "hint_ladder": [
@@ -59,6 +71,12 @@ CURRICULUM_PATHS: list[dict[str, Any]] = [
                     "Build a new list with a comprehension or append loop.",
                     "Return the filtered list; do not mutate the input in place.",
                 ],
+                "hidden_tests": (
+                    "assert evens([1, 2, 3, 4]) == [2, 4]\n"
+                    "assert evens([]) == []\n"
+                    "assert evens([1, 3]) == []\n"
+                    "print('PASS')\n"
+                ),
             },
         ],
     },

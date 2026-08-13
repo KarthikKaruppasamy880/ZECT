@@ -32,6 +32,8 @@ from app.services.learning.practice_fsm import (
     record_practice_attempt,
     start_lesson,
 )
+from app.services.learning.practice_runner import evidence_from_run, run_server_practice
+from app.services.learning.work_item_access import resolve_owned_work_item
 from app.services.mentrix.untrusted_content import sanitize_for_prompt, tag_untrusted
 from app.services.mentrix.permission_broker import check_tool_permission
 
@@ -271,14 +273,15 @@ class MentorAskIn(BaseModel):
 
 
 class PracticeVerifyIn(BaseModel):
-    """Practice → Code → Tests path. LLM claims alone cannot verify progress."""
+    """Practice → Code → Tests path. Client passed/exit_code are ignored (M1)."""
 
     code: str = ""
     language: str = "Python"
-    passed: bool = False
-    test_output: str = ""
-    exit_code: int = 1
+    passed: bool = False  # IGNORED — client claim
+    test_output: str = ""  # IGNORED — client claim
+    exit_code: int = 1  # IGNORED — client claim
     lesson_key: str = ""
+    path_key: str = ""
 
 
 class StartLessonIn(BaseModel):
@@ -441,6 +444,12 @@ def start_project(
         if body.lesson_key and not get_lesson(path["key"], body.lesson_key):
             raise HTTPException(404, "lesson_not_found")
 
+    # M2: never trust client work_item_id without independent ownership check
+    linked_wi: int | None = None
+    if body.work_item_id is not None:
+        wi = resolve_owned_work_item(db, int(body.work_item_id), current_user)
+        linked_wi = wi.id
+
     progress: dict[str, Any] = {"started": True, "milestones_done": [], "lessons": {}, "verified_lesson_keys": []}
     if path:
         progress = start_lesson(progress, path_key=path["key"], lesson_key=first_lesson)
@@ -452,7 +461,7 @@ def start_project(
         mode=mode,
         status="active",
         skills_json=json.dumps(skills),
-        work_item_id=body.work_item_id,
+        work_item_id=linked_wi,
         milestones_json=json.dumps([les["key"] for les in path["lessons"]] if path else []),
         progress_json=json.dumps(progress),
         evidence_json=json.dumps(
@@ -486,15 +495,28 @@ def my_projects(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     uid = getattr(current_user, "user_id", None)
-    q = db.query(LearningProject)
-    if uid:
-        q = q.filter(LearningProject.user_id == uid)
-    rows = q.order_by(LearningProject.id.desc()).limit(100).all()
+    if uid is None:
+        raise HTTPException(401, "user_required")
+    rows = (
+        db.query(LearningProject)
+        .filter(LearningProject.user_id == uid)
+        .order_by(LearningProject.id.desc())
+        .limit(100)
+        .all()
+    )
     return {"projects": [serialize_project(p) for p in rows]}
 
 
-def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
-    """EvidenceVerifier is authority — user_confirmed / LLM claims never grant verified progress."""
+def _verify_learning_evidence(
+    body: ProgressIn,
+    *,
+    server_attested: bool = False,
+) -> dict[str, Any]:
+    """EvidenceVerifier is authority — client claims never grant verified progress (M1/M3).
+
+    Verifying events (test_passed / milestone / completed) require server_attested=True,
+    which only practice_verify (and other server runners) may set — never from HTTP body.
+    """
     from app.services.work_items.evidence_verifier import EvidenceVerifier
 
     if body.event == "user_confirmed":
@@ -504,34 +526,42 @@ def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
     if body.event not in ("test_passed", "milestone", "completed"):
         return {"ok": True, "verified": False, "reason": "informational"}
 
+    # M3: refuse client-manufactured verification via /progress
+    if not server_attested:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "client_forged_evidence_rejected",
+                "verified": False,
+                "hint": "Use POST /api/learning/projects/{id}/practice/verify — server runs hidden tests.",
+                "event": body.event,
+            },
+        )
+
     raw = body.evidence or {}
+    if not raw.get("server_controlled") or not raw.get("run_id"):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "server_run_required", "verified": False},
+        )
+
     items = list(raw.get("items") or [])
-    if not items and raw.get("type"):
-        items = [raw]
-    if not items and raw.get("passed") is True:
-        items = [
-            {
-                "id": "learn-test-1",
-                "type": "TEST_RESULT",
-                "operation_id": "OP-LEARN-TEST",
-                "requirement_ids": ["REQ-LEARN-PASS"],
-                "acceptance_ids": ["AC-LEARN-PASS"],
-                "payload": raw,
-                "llm_claim": False,
-            }
-        ]
-    if body.event == "milestone" and not items:
-        items = [
-            {
-                "id": f"learn-ms-{body.milestone or 'x'}",
-                "type": "HUMAN_APPROVAL",
-                "operation_id": "OP-LEARN-MILESTONE",
-                "requirement_ids": ["REQ-LEARN-MILESTONE"],
-                "acceptance_ids": ["AC-LEARN-MILESTONE"],
-                "payload": {"milestone": body.milestone, **raw},
-                "llm_claim": False,
-            }
-        ]
+    if not items:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "server_evidence_items_required", "verified": False},
+        )
+    # Reject items that look client-forged (missing server_controlled on payloads)
+    for i in items:
+        if not isinstance(i, dict):
+            continue
+        payload = i.get("payload") or {}
+        if not payload.get("server_controlled") and not raw.get("server_controlled"):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "server_controlled_flag_required", "verified": False},
+            )
+
     if any(bool(i.get("llm_claim")) for i in items if isinstance(i, dict)) and not any(
         (i.get("type") in ("TEST_RESULT", "COMMAND_EXIT", "HUMAN_APPROVAL", "FILE_CHANGED"))
         and not i.get("llm_claim")
@@ -544,50 +574,64 @@ def _verify_learning_evidence(body: ProgressIn) -> dict[str, Any]:
         )
 
     result = EvidenceVerifier().verify(
-        mandatory_operation_ids=["OP-LEARN-TEST"] if body.event == "test_passed" else (
-            ["OP-LEARN-MILESTONE"] if body.event == "milestone" else ["OP-LEARN-TEST", "OP-LEARN-COMPLETE"]
+        mandatory_operation_ids=["OP-LEARN-TEST"]
+        if body.event == "test_passed"
+        else (
+            ["OP-LEARN-MILESTONE"]
+            if body.event == "milestone"
+            else ["OP-LEARN-TEST", "OP-LEARN-COMPLETE"]
         ),
         requirement_ids=(
             ["REQ-LEARN-PASS"]
             if body.event == "test_passed"
-            else (["REQ-LEARN-MILESTONE"] if body.event == "milestone" else ["REQ-LEARN-PASS", "REQ-LEARN-COMPLETE"])
+            else (
+                ["REQ-LEARN-MILESTONE"]
+                if body.event == "milestone"
+                else ["REQ-LEARN-PASS", "REQ-LEARN-COMPLETE"]
+            )
         ),
         acceptance_ids=(
             ["AC-LEARN-PASS"]
             if body.event == "test_passed"
-            else (["AC-LEARN-MILESTONE"] if body.event == "milestone" else ["AC-LEARN-PASS", "AC-LEARN-COMPLETE"])
+            else (
+                ["AC-LEARN-MILESTONE"]
+                if body.event == "milestone"
+                else ["AC-LEARN-PASS", "AC-LEARN-COMPLETE"]
+            )
         ),
         evidence=items
         if body.event != "completed"
         else items
         + [
             {
-                "id": "learn-complete-1",
+                "id": f"learn-complete-{raw.get('run_id')}",
                 "type": "TEST_RESULT",
                 "operation_id": "OP-LEARN-COMPLETE",
                 "requirement_ids": ["REQ-LEARN-COMPLETE"],
                 "acceptance_ids": ["AC-LEARN-COMPLETE"],
-                "payload": raw,
+                "payload": {**raw, "server_controlled": True},
                 "llm_claim": False,
             }
-        ]
-        if items
-        else [],
+        ],
     )
     if not result.ok:
         raise HTTPException(
             status_code=400,
             detail={"error": "evidence_required", "verified": False, **result.to_dict()},
         )
-    return {"ok": True, "verified": True, **result.to_dict()}
+    return {"ok": True, "verified": True, "server_attested": True, **result.to_dict()}
 
 
 def _owned_project(db: Session, project_id: int, current_user: CurrentUser) -> LearningProject:
     uid = getattr(current_user, "user_id", None)
-    q = db.query(LearningProject).filter(LearningProject.id == project_id)
-    if uid is not None:
-        q = q.filter(LearningProject.user_id == uid)
-    proj = q.first()
+    if uid is None:
+        # Fail closed — never skip ownership filter (defense-in-depth)
+        raise HTTPException(401, "user_required")
+    proj = (
+        db.query(LearningProject)
+        .filter(LearningProject.id == project_id, LearningProject.user_id == uid)
+        .first()
+    )
     if not proj:
         raise HTTPException(404, "project_not_found")
     return proj
@@ -599,11 +643,12 @@ def _apply_progress(
     body: ProgressIn,
     db: Session,
     current_user: CurrentUser,
+    server_attested: bool = False,
 ) -> dict[str, Any]:
     proj = _owned_project(db, project_id, current_user)
     progress = _jload(proj.progress_json, {})
     evidence = _jload(proj.evidence_json, [])
-    verification = _verify_learning_evidence(body)
+    verification = _verify_learning_evidence(body, server_attested=server_attested)
     verified_event = bool(verification.get("verified"))
     lesson_key = (body.lesson_key or progress.get("current_lesson_key") or "").strip()
 
@@ -613,19 +658,26 @@ def _apply_progress(
     if body.event == "hint_used" and lesson_key:
         progress = record_hint(progress, lesson_key=lesson_key, level=int((body.evidence or {}).get("hint_level") or 1))
     if body.event == "practice_attempt" and lesson_key:
-        progress = record_practice_attempt(
-            progress, lesson_key=lesson_key, passed=bool((body.evidence or {}).get("passed"))
-        )
+        # Only record pass state from server-attested evidence
+        attempt_passed = bool(server_attested and (body.evidence or {}).get("passed"))
+        progress = record_practice_attempt(progress, lesson_key=lesson_key, passed=attempt_passed)
+
+    # Strip client authority flags from stored evidence blob
+    safe_evidence = dict(body.evidence or {})
+    for k in ("passed", "exit_code", "verified", "completed", "test_passed"):
+        if k in safe_evidence and not server_attested:
+            safe_evidence[f"client_claim_{k}"] = safe_evidence.pop(k)
 
     ev = {
         "event": body.event,
         "milestone": body.milestone,
         "lesson_key": lesson_key,
-        "evidence": body.evidence,
+        "evidence": safe_evidence if not server_attested else body.evidence,
         "at": datetime.now(timezone.utc).isoformat(),
         "verified": verified_event,
         "verification": verification,
         "scope": "USER_PRIVATE",
+        "server_attested": bool(server_attested and verified_event),
     }
     evidence.append(ev)
     if body.event == "milestone" and body.milestone and verified_event:
@@ -637,17 +689,23 @@ def _apply_progress(
         progress["tests_passed"] = int(progress.get("tests_passed") or 0) + 1
         if lesson_key:
             progress = mark_lesson_verified(progress, lesson_key=lesson_key)
-            # lesson verified counts as milestone for path completion tracking
             done = list(progress.get("milestones_done") or [])
             if lesson_key not in done:
                 done.append(lesson_key)
             progress["milestones_done"] = done
     if body.event == "user_confirmed":
         progress["user_confirmed"] = True
+        # Explicitly never completes from confirmation alone
+        progress["verified_complete"] = bool(progress.get("verified_complete"))
     if body.event == "completed":
         prior_verified = any(
             isinstance(x, dict) and x.get("verified") and x.get("event") == "test_passed" for x in evidence[:-1]
         )
+        if not server_attested:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "client_forged_evidence_rejected", "verified": False},
+            )
         if not prior_verified and not verified_event:
             raise HTTPException(
                 status_code=400,
@@ -675,7 +733,14 @@ def update_progress(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    return _apply_progress(project_id=project_id, body=body, db=db, current_user=current_user)
+    """User state only unless server-attested (M3). Verifying events must use practice/verify."""
+    return _apply_progress(
+        project_id=project_id,
+        body=body,
+        db=db,
+        current_user=current_user,
+        server_attested=False,
+    )
 
 
 @router.post("/projects/{project_id}/practice/verify")
@@ -686,83 +751,90 @@ def practice_verify(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Code → Run Tests bridge. Passes through EvidenceVerifier via progress update."""
+    """Submission → server hidden tests → EvidenceVerifier (M1). Client passed/exit_code ignored."""
     proj = _owned_project(db, project_id, current_user)
     progress = _jload(proj.progress_json, {})
     lesson_key = (body.lesson_key or progress.get("current_lesson_key") or "").strip()
+    path_key = (body.path_key or progress.get("path_key") or "").strip()
+    if not lesson_key or not path_key:
+        raise HTTPException(400, detail={"error": "path_and_lesson_required", "verified": False})
 
-    lang = (body.language or "Python").strip()
-    code = body.code or ""
-    syntax_ok = True
-    syntax_error = ""
-    if lang.lower() == "python" and code.strip():
-        try:
-            compile(code, "<practice>", "exec")
-        except SyntaxError as e:
-            syntax_ok = False
-            syntax_error = str(e)
+    uid = getattr(current_user, "user_id", None)
+    # Intentionally ignore body.passed / body.exit_code / body.test_output
+    _ = (body.passed, body.exit_code, body.test_output)
 
-    passed = bool(body.passed) and syntax_ok and int(body.exit_code) == 0
-    evidence = {
-        "passed": passed,
-        "language": lang,
-        "lesson_key": lesson_key,
-        "exit_code": 0 if passed else (body.exit_code if body.exit_code else 1),
-        "test_output": (body.test_output or syntax_error)[:4000],
-        "code_chars": len(code),
-        "type": "TEST_RESULT",
-        "operation_id": "OP-LEARN-TEST",
-        "requirement_ids": ["REQ-LEARN-PASS"],
-        "acceptance_ids": ["AC-LEARN-PASS"],
-        "llm_claim": False,
-        "items": [
-            {
-                "id": "practice-cmd",
-                "type": "COMMAND_EXIT",
-                "operation_id": "OP-LEARN-TEST",
-                "requirement_ids": ["REQ-LEARN-PASS"],
-                "acceptance_ids": ["AC-LEARN-PASS"],
-                "payload": {"exit_code": 0 if passed else 1, "language": lang, "lesson_key": lesson_key},
-                "llm_claim": False,
-            },
-            {
-                "id": "practice-test",
-                "type": "TEST_RESULT",
-                "operation_id": "OP-LEARN-TEST",
-                "requirement_ids": ["REQ-LEARN-PASS"],
-                "acceptance_ids": ["AC-LEARN-PASS"],
-                "payload": {"passed": passed, "output": (body.test_output or "")[:2000], "lesson_key": lesson_key},
-                "llm_claim": False,
-            },
-        ],
-    }
+    run = run_server_practice(
+        code=body.code or "",
+        path_key=path_key,
+        lesson_key=lesson_key,
+        language=body.language or "Python",
+        user_id=int(uid) if uid is not None else None,
+        project_id=project_id,
+    )
+    evidence = evidence_from_run(run)
+    syntax_ok = bool(run.get("syntax_ok", True))
+    passed = bool(run.get("passed"))
+
     attempt = _apply_progress(
         project_id=project_id,
         body=ProgressIn(
             event="practice_attempt",
             lesson_key=lesson_key,
-            evidence={"passed": False, "syntax_ok": syntax_ok, **evidence},
+            evidence={
+                "passed": passed,
+                "syntax_ok": syntax_ok,
+                "run_id": run.get("run_id"),
+                "submission_id": run.get("submission_id"),
+                "client_claims_ignored": True,
+                "server_controlled": True,
+            },
         ),
         db=db,
         current_user=current_user,
+        server_attested=False,
     )
     if not passed:
         return {
             "ok": False,
             "passed": False,
             "syntax_ok": syntax_ok,
-            "syntax_error": syntax_error,
+            "syntax_error": run.get("stderr") if not syntax_ok else "",
+            "run": {
+                "run_id": run.get("run_id"),
+                "submission_id": run.get("submission_id"),
+                "exit_code": run.get("exit_code"),
+                "stderr": (run.get("stderr") or "")[:1000],
+                "stdout": (run.get("stdout") or "")[:1000],
+                "error": run.get("error"),
+                "server_controlled": True,
+            },
             "project": attempt,
             "lesson_key": lesson_key,
+            "client_claims_ignored": True,
             "hint": "Fix failing tests or syntax, then retry. Ask Mentor for a GUIDED hint — not a full solution.",
         }
+
     verified = _apply_progress(
         project_id=project_id,
         body=ProgressIn(event="test_passed", lesson_key=lesson_key, evidence=evidence),
         db=db,
         current_user=current_user,
+        server_attested=True,
     )
-    return {"ok": True, "passed": True, "syntax_ok": True, "project": verified, "lesson_key": lesson_key}
+    return {
+        "ok": True,
+        "passed": True,
+        "syntax_ok": True,
+        "project": verified,
+        "lesson_key": lesson_key,
+        "run": {
+            "run_id": run.get("run_id"),
+            "submission_id": run.get("submission_id"),
+            "exit_code": run.get("exit_code"),
+            "server_controlled": True,
+        },
+        "client_claims_ignored": True,
+    }
 
 
 @router.post("/mentor/ask")
@@ -963,7 +1035,9 @@ def handoff_developer(
 ):
     proj = _owned_project(db, project_id, current_user)
     email = getattr(current_user, "email", None) or getattr(current_user, "username", None) or ""
-    out = handoff_to_developer(db, project=proj, user_email=str(email), goal=body.goal)
+    out = handoff_to_developer(
+        db, project=proj, user_email=str(email), goal=body.goal, current_user=current_user
+    )
     return out
 
 

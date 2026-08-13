@@ -79,40 +79,70 @@ def test_learning_languages_and_practice_verify(authed_client, db):
 
     start = authed_client.post(
         "/api/learning/projects",
-        json={"resource_id": res.id, "mode": "GUIDED", "title": "Py practice"},
+        json={
+            "resource_id": res.id,
+            "path_key": "python-fundamentals",
+            "lesson_key": "py-hello-fn",
+            "mode": "GUIDED",
+            "title": "Py practice",
+        },
     )
     assert start.status_code == 200, start.text
     pid = start.json()["id"]
 
-    # LLM claim alone cannot verify
+    # Client-forged test_passed via /progress rejected (M3)
     bad = authed_client.post(
         f"/api/learning/projects/{pid}/progress",
         json={
             "event": "test_passed",
-            "evidence": {"items": [{"id": "x", "type": "TEST_RESULT", "llm_claim": True, "operation_id": "OP-LEARN-TEST"}]},
+            "evidence": {
+                "passed": True,
+                "items": [
+                    {
+                        "id": "x",
+                        "type": "TEST_RESULT",
+                        "llm_claim": False,
+                        "operation_id": "OP-LEARN-TEST",
+                        "requirement_ids": ["REQ-LEARN-PASS"],
+                        "acceptance_ids": ["AC-LEARN-PASS"],
+                    }
+                ],
+            },
         },
     )
     assert bad.status_code == 400
+    assert bad.json()["detail"]["error"] == "client_forged_evidence_rejected"
 
+    # Client passed=true with failing code → still FAIL (M1)
     fail = authed_client.post(
         f"/api/learning/projects/{pid}/practice/verify",
-        json={"code": "def ok():\n    return True\n", "language": "Python", "passed": False, "exit_code": 1},
+        json={
+            "code": "def ok():\n    return False\n",
+            "language": "Python",
+            "passed": True,
+            "exit_code": 0,
+            "path_key": "python-fundamentals",
+            "lesson_key": "py-hello-fn",
+        },
     )
     assert fail.status_code == 200
     assert fail.json()["passed"] is False
+    assert fail.json().get("client_claims_ignored") is True
 
     ok = authed_client.post(
         f"/api/learning/projects/{pid}/practice/verify",
         json={
             "code": "def ok():\n    return True\n",
             "language": "Python",
-            "passed": True,
-            "exit_code": 0,
-            "test_output": "PASS",
+            "passed": False,
+            "exit_code": 1,
+            "path_key": "python-fundamentals",
+            "lesson_key": "py-hello-fn",
         },
     )
     assert ok.status_code == 200, ok.text
     assert ok.json()["passed"] is True
+    assert ok.json().get("run", {}).get("server_controlled") is True
     proj = ok.json()["project"]
     assert any(e.get("verified") for e in proj.get("evidence") or [])
 

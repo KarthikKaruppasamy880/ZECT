@@ -105,7 +105,7 @@ export default function ZectLearning() {
   const [studyNotes, setStudyNotes] = useState("");
   const [mastery, setMastery] = useState<Record<string, { proficient?: boolean; verified_lessons?: number; verified_tests?: number }>>({});
   const [practiceCode, setPracticeCode] = useState(
-    "# Practice: write a function that returns True\ndef ok():\n    return True\n\nassert ok() is True\nprint(\"PASS\")\n",
+    "# Practice: write a function that returns True\ndef ok():\n    return True\n",
   );
   const [practiceResult, setPracticeResult] = useState("");
   const busy = op !== "";
@@ -154,7 +154,10 @@ export default function ZectLearning() {
     const nextLesson = list.find((l) => l.key === savedLesson)?.key || list[0]?.key || "";
     setActiveLessonKey(nextLesson);
     const lesson = list.find((l) => l.key === nextLesson);
-    if (lesson?.starter_code) setPracticeCode(lesson.starter_code);
+    // Seed starter only when empty — Mentor/load refresh must not wipe learner edits (live E2E).
+    if (lesson?.starter_code) {
+      setPracticeCode((prev) => ((prev || "").trim() ? prev : lesson.starter_code));
+    }
   };
 
   const load = async () => {
@@ -326,7 +329,7 @@ export default function ZectLearning() {
     }
   };
 
-  const runPracticeTests = async (forcePass: boolean) => {
+  const runPracticeTests = async () => {
     if (!activeProjectId) {
       setStatus("Select or start a LearningProject first");
       return;
@@ -334,26 +337,32 @@ export default function ZectLearning() {
     setOp("verify");
     setPracticeResult("");
     try {
+      const domCode =
+        (document.querySelector('[data-testid="learning-practice-code"]') as HTMLTextAreaElement | null)
+          ?.value ?? practiceCode;
       const res = await fetch(`${API}/api/learning/projects/${activeProjectId}/practice/verify`, {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
-          code: practiceCode,
-          language: language || activeLesson?.skill_tags?.[0] || "Python",
-          passed: forcePass,
-          exit_code: forcePass ? 0 : 1,
-          test_output: forcePass ? "PASS" : "FAIL: assertion or tests failed",
+          code: domCode,
+          language: language || activeLesson?.language || "Python",
+          // Client pass/fail claims are ignored by the server (M1)
           lesson_key: activeLessonKey || undefined,
+          path_key: activePathKey || undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(errMsg(data, `Verify failed (${res.status})`));
       setPracticeResult(
         data.passed
-          ? "Verified: tests passed — EvidenceVerifier accepted progress"
-          : data.hint || "Not verified — fix code and retry",
+          ? `Verified: server hidden tests passed (run ${data.run?.run_id || ""})`
+          : data.hint || data.run?.stderr || "Not verified — fix code and retry",
       );
-      setStatus(data.passed ? "Verified progress recorded" : "Practice attempt logged (not verified)");
+      setStatus(
+        data.passed
+          ? "Verified progress recorded (server-controlled)"
+          : "Practice attempt logged — client claims ignored",
+      );
       await load();
       await loadMastery();
     } catch (e) {
@@ -612,19 +621,10 @@ export default function ZectLearning() {
             type="button"
             data-testid="learning-run-tests"
             disabled={busy || !activeProjectId}
-            onClick={() => void runPracticeTests(true)}
+            onClick={() => void runPracticeTests()}
             className="rounded bg-teal-700 px-3 py-1.5 text-sm text-white disabled:opacity-40"
           >
-            {op === "verify" ? "…" : "Run Tests (pass)"}
-          </button>
-          <button
-            type="button"
-            data-testid="learning-run-tests-fail"
-            disabled={busy || !activeProjectId}
-            onClick={() => void runPracticeTests(false)}
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40"
-          >
-            Simulate Fail
+            {op === "verify" ? "…" : "Run Server Tests"}
           </button>
           <button
             type="button"

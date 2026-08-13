@@ -117,13 +117,32 @@ class AcceptanceVerifier:
                 if o.get("mandatory")
                 and str(o.get("status") or "pending").lower() not in ("done", "completed", "verified")
             ]
-            if pending_mandatory:
-                for oid in pending_mandatory:
-                    if oid not in result.missing_operations:
-                        result.missing_operations.append(oid)
+        if pending_mandatory:
+            for oid in pending_mandatory:
+                if oid not in result.missing_operations:
+                    result.missing_operations.append(oid)
+            result.ok = False
+            result.ready_to_ship = False
+            errors.append("incomplete_manifest_operations")
+
+        # Multi-repo: mandatory repo with failed/pending status blocks aggregate READY_TO_SHIP
+        for repo in manifest.get("affected_repos") or []:
+            if not repo.get("mandatory"):
+                continue
+            st = str(repo.get("status") or "").lower()
+            if st in ("failed", "blocked", "stale"):
+                rid = repo.get("repository_id")
+                errors.append(f"mandatory_repo_blocked:{rid}")
                 result.ok = False
                 result.ready_to_ship = False
-                errors.append("incomplete_manifest_operations")
+        for op in ops:
+            if not op.get("mandatory"):
+                continue
+            if str(op.get("status") or "").lower() == "failed":
+                oid = op.get("id") or op.get("repository_id")
+                errors.append(f"mandatory_repo_op_failed:{oid}")
+                result.ok = False
+                result.ready_to_ship = False
 
         out = result.to_dict()
         out["errors"] = errors

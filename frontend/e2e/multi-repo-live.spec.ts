@@ -138,6 +138,31 @@ test.describe("multi-repo live", () => {
     }
     await page.screenshot({ path: path.join(ART, "05-developer.png"), fullPage: false });
 
+    const repoIds = (listed.data?.repos || [])
+      .slice(0, 2)
+      .map((r: { id?: number }) => r.id)
+      .filter(Boolean);
+    let askPlan: Record<string, unknown> = { skipped: true, reason: "need_two_repos" };
+    if (repoIds.length >= 2) {
+      const ask = await api(page, "POST", "/api/mentrix/developer/ask", {
+        question: "What repos are in scope?",
+        project_id: projectId,
+        repository_ids: repoIds,
+      });
+      const plan = await api(page, "POST", "/api/mentrix/developer/plan", {
+        goal: "Cross-repo coordination test",
+        project_id: projectId,
+        repository_ids: repoIds,
+      });
+      askPlan = {
+        ask_status: ask.status,
+        ask_repos: ask.data?.context_by_repository?.length ?? 0,
+        plan_status: plan.status,
+        plan_affected: plan.data?.affected_repos?.length ?? 0,
+        manifest_ops: plan.data?.execution_manifest?.operations?.length ?? 0,
+      };
+    }
+
     fs.writeFileSync(
       path.join(ART, "evidence.json"),
       JSON.stringify(
@@ -146,8 +171,9 @@ test.describe("multi-repo live", () => {
           project_id: projectId,
           fixtures: { a: a.branch, b: b.branch, c: c.branch },
           identities,
+          ask_plan: askPlan,
           notes: {
-            ask_plan_agent_cross_repo: "PARTIAL — identity/switch proven; full ASK/PLAN/AGENT aggregate deferred",
+            ask_plan_agent_cross_repo: "LIVE_E2E API when 2+ repos attached; multi-PR ship PARTIAL",
             detach_not_delete: "API attach dedupe covered; detach UI not forced in this run",
           },
         },

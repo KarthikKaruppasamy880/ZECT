@@ -20,6 +20,15 @@ export type WorkItemLite = {
   base_commit_sha?: string;
 };
 
+export type RepoContextLite = {
+  repository_id?: number;
+  label?: string;
+  repository_ref?: string;
+  base_commit_sha?: string;
+  freshness?: string;
+  authorized?: boolean;
+};
+
 export type ProjectIntelligenceLite = {
   lattice?: { status?: string; freshness?: string; hits?: unknown[] };
   blueprint?: { snippet?: string; freshness?: string };
@@ -29,6 +38,8 @@ export type ProjectIntelligenceLite = {
   skill_selection?: Array<{ name?: string; reason?: string }>;
   playbook_selection?: Array<{ name?: string; reason?: string }>;
   freshness?: Record<string, string>;
+  repositories?: RepoContextLite[];
+  multi_repo?: boolean;
 };
 
 export type ModelReadinessLite = {
@@ -53,8 +64,9 @@ export function buildContextUsedRows(input: {
   pi?: ProjectIntelligenceLite | null;
   model?: ModelReadinessLite | null;
   activeRepoLabel?: string;
+  repoContexts?: RepoContextLite[];
 }): ContextUsedRow[] {
-  const { workItem, pi, model, activeRepoLabel } = input;
+  const { workItem, pi, model, activeRepoLabel, repoContexts } = input;
   const rows: ContextUsedRow[] = [];
 
   if (workItem?.id) {
@@ -75,28 +87,56 @@ export function buildContextUsedRows(input: {
     });
   }
 
-  const ref = workItem?.repository_ref || "";
-  const sha = workItem?.base_commit_sha || "";
-  const repoId = workItem?.repository_id;
-  if (repoId || ref || sha || activeRepoLabel) {
-    const parts = [
-      activeRepoLabel || (repoId != null ? `repo_id=${repoId}` : ""),
-      ref ? `ref=${ref}` : "",
-      sha ? `commit=${sha.slice(0, 12)}` : "commit=missing",
-    ].filter(Boolean);
-    rows.push({
-      id: "repo",
-      label: "Repository + commit",
-      status: sha ? "used" : "stale",
-      detail: parts.join(" · ") || "Repository identity incomplete",
-    });
+  const multiRepos = repoContexts?.length ? repoContexts : pi?.repositories;
+  if (multiRepos && multiRepos.length > 1) {
+    for (const r of multiRepos) {
+      const sha = r.base_commit_sha || "";
+      const fr = String(r.freshness || "unknown");
+      const status: ContextUsedStatus =
+        r.authorized === false
+          ? "missing"
+          : fr === "ready"
+            ? "used"
+            : fr === "stale" || !sha
+              ? "stale"
+              : "used";
+      rows.push({
+        id: `repo-${r.repository_id ?? r.label}`,
+        label: `Repo · ${r.label || r.repository_id}`,
+        status,
+        detail: [
+          r.repository_ref ? `ref=${r.repository_ref}` : "",
+          sha ? `commit=${sha.slice(0, 12)}` : "commit=missing",
+          fr ? `freshness=${fr}` : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      });
+    }
   } else {
-    rows.push({
-      id: "repo",
-      label: "Repository + commit",
-      status: "missing",
-      detail: "No repository_id / ref / base_commit_sha",
-    });
+    const ref = workItem?.repository_ref || "";
+    const sha = workItem?.base_commit_sha || "";
+    const repoId = workItem?.repository_id;
+    if (repoId || ref || sha || activeRepoLabel) {
+      const parts = [
+        activeRepoLabel || (repoId != null ? `repo_id=${repoId}` : ""),
+        ref ? `ref=${ref}` : "",
+        sha ? `commit=${sha.slice(0, 12)}` : "commit=missing",
+      ].filter(Boolean);
+      rows.push({
+        id: "repo",
+        label: "Repository + commit",
+        status: sha ? "used" : "stale",
+        detail: parts.join(" · ") || "Repository identity incomplete",
+      });
+    } else {
+      rows.push({
+        id: "repo",
+        label: "Repository + commit",
+        status: "missing",
+        detail: "No repository_id / ref / base_commit_sha",
+      });
+    }
   }
 
   const lattice = pi?.lattice;

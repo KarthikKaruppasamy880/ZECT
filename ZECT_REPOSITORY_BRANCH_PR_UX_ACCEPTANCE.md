@@ -120,7 +120,7 @@ Smoke: real `/healthz` OK; headed Flows A–F PASS.
 | Live GitHub PR list for private repos | BLOCKED_EXTERNAL without token/network |
 | Automatic Lattice re-index after every checkout | PARTIAL — STALE/Not indexed signaled; user/agent re-index via existing PI |
 | LRR auto-bind from PR button | PARTIAL — workspace path set; LRR start still takes explicit `worktree_path` |
-| ASK/PLAN/AGENT cross-repo aggregate EvidenceVerifier | PARTIAL — multi-repo attach/switch LIVE_E2E proven; full cross-repo agent aggregate not claimed |
+| ASK/PLAN/AGENT cross-repo aggregate | **PARTIAL (advanced)** — `repository_ids` ASK/PLAN + manifest + AcceptanceVerifier block; multi-PR ship not claimed |
 
 ## 9. Multi-Repo LIVE_E2E (2026-08-13)
 

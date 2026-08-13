@@ -4,6 +4,27 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 vi.mock("@/lib/api", () => ({
   mentrixCompanionIntegrations: vi.fn(async () => ({ presenton: false })),
   mentrixPresentonGenerate: vi.fn(),
+  mentrixPresentonStatus: vi.fn(async () => ({
+    configured: false,
+    reachable: false,
+    base_url: "",
+    lifecycle: "PROVIDER_UNAVAILABLE",
+  })),
+  mentrixPresentationAudiences: vi.fn(async () => ({ audiences: [] })),
+  mentrixPresentationTemplates: vi.fn(async () => ({
+    ok: true,
+    zinnia: [],
+    organization: [],
+    my_templates: [],
+  })),
+  mentrixPreparePromptDeck: vi.fn(async (data: { prompt: string }) => ({
+    ok: true,
+    adapted_prompt: data.prompt,
+    claims: [],
+    requires_user_approval: false,
+    sensitivity: { sensitivity: "PUBLIC" },
+  })),
+  mentrixAnalyzeDeck: vi.fn(),
   mentrixPresentonTemplates: vi.fn(async () => ({
     ok: true,
     source: "builtin",
@@ -37,6 +58,7 @@ vi.mock("@/mentrix/speak", () => ({
 import {
   mentrixCompanionIntegrations,
   mentrixPresentonGenerate,
+  mentrixPresentonStatus,
   mentrixVoiceEngineStatus,
 } from "@/lib/api";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
@@ -46,6 +68,12 @@ describe("PresentDeckPanel clone narrate gate", () => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockReset();
     (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockReset();
     (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
+    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: false,
+      reachable: false,
+      base_url: "",
+      lifecycle: "PROVIDER_UNAVAILABLE",
+    });
   });
 
   afterEach(() => {
@@ -110,6 +138,12 @@ describe("PresentDeckPanel clone narrate gate", () => {
       hint: "online",
     });
     (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: true });
+    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: true,
+      reachable: true,
+      base_url: "http://127.0.0.1:5000",
+      lifecycle: "READY",
+    });
     (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       path: "C:\\Users\\me\\Documents\\mentrix-deck.pptx",

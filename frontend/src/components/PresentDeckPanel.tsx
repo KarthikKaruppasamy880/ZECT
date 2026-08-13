@@ -12,6 +12,7 @@ import {
   mentrixPresentonTemplates,
   mentrixParsePptx,
   mentrixPresentationAudiences,
+  mentrixPresentationTemplates,
   mentrixAnalyzeDeck,
   mentrixPreparePromptDeck,
   listMyClonedVoices,
@@ -40,19 +41,39 @@ const BUILTIN_TEMPLATES: PresentonTemplate[] = [
   { id: "modern", name: "Modern" },
   { id: "standard", name: "Standard" },
   { id: "swift", name: "Swift" },
-  { id: "zinnia-exec", name: "Zinnia — Executive brief" },
-  { id: "zinnia-delivery", name: "Zinnia — Delivery status" },
-  { id: "zinnia-risk", name: "Zinnia — Risk & next actions" },
+  { id: "zinnia-executive-v1", name: "Zinnia — Executive brief" },
+  { id: "zinnia-delivery-v1", name: "Zinnia — Delivery status" },
+  { id: "zinnia-risk-v1", name: "Zinnia — Risk & next actions" },
 ];
 
 const ZINNIA_PROMPT_PRESETS: Record<string, string> = {
+  "zinnia-executive-v1":
+    "Zinnia executive brief: title slide, status snapshot, decisions needed, owners, next 7 days.",
   "zinnia-exec":
     "Zinnia executive brief: title slide, status snapshot, decisions needed, owners, next 7 days.",
+  "zinnia-delivery-v1":
+    "Zinnia delivery status: workstream health, milestones, blockers, dependencies, ask for leadership.",
   "zinnia-delivery":
     "Zinnia delivery status: workstream health, milestones, blockers, dependencies, ask for leadership.",
+  "zinnia-risk-v1":
+    "Zinnia risk review: top risks, mitigations, owners, timeline impact, recommended actions.",
   "zinnia-risk":
     "Zinnia risk review: top risks, mitigations, owners, timeline impact, recommended actions.",
 };
+
+type ProviderLifecycle =
+  | "STARTING"
+  | "READY"
+  | "TEMPLATE_NOT_READY"
+  | "PROVIDER_UNAVAILABLE"
+  | "GENERATION_FAILED";
+
+function migrateTemplateId(id: string): string {
+  if (id === "zinnia-exec" || id === "zinnia-executive") return "zinnia-executive-v1";
+  if (id === "zinnia-delivery") return "zinnia-delivery-v1";
+  if (id === "zinnia-risk") return "zinnia-risk-v1";
+  return id;
+}
 
 const STOCK_VOICES: { id: string; label: string }[] = [
   { id: "alloy", label: "OpenAI — Alloy (neutral)" },
@@ -65,7 +86,7 @@ const STOCK_VOICES: { id: string; label: string }[] = [
 
 type Props = {
   variant?: "dark" | "light";
-  /** Prefill ZECT template id (e.g. zinnia-exec) when mounted from product Present. */
+  /** Prefill ZECT template id (e.g. zinnia-executive-v1) when mounted from product Present. */
   initialTemplateId?: string;
 };
 
@@ -106,7 +127,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const [presentonReady, setPresentonReady] = useState(false);
   const [templates, setTemplates] = useState<PresentonTemplate[]>(BUILTIN_TEMPLATES);
   const [templateChoice, setTemplateChoice] = useState(
-    () => initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general",
+    () => migrateTemplateId(initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general"),
   );
   const [customTemplateId, setCustomTemplateId] = useState("");
   const [nSlides, setNSlides] = useState(6);
@@ -128,8 +149,8 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
   const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
-  const [zinniaMasterId, setZinniaMasterId] = useState("");
   const [lastTemplateSent, setLastTemplateSent] = useState("");
+  const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
   const usingStock = voiceChoice.startsWith("stock:");
   const cloneNarrateBlocked = !usingStock && engineStatus !== null && !engineStatus.online;
 
@@ -142,12 +163,13 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
       setAudienceId(localStorage.getItem(AUDIENCE_KEY) || "general");
       setSensitivityHint(localStorage.getItem(SENS_KEY) || "");
-      const savedTemplate =
-        initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general";
+      const savedTemplate = migrateTemplateId(
+        initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general",
+      );
       setTemplateChoice(savedTemplate);
       if (initialTemplateId) {
         try {
-          localStorage.setItem(TEMPLATE_KEY, initialTemplateId);
+          localStorage.setItem(TEMPLATE_KEY, migrateTemplateId(initialTemplateId));
         } catch {
           /* ignore */
         }
@@ -159,36 +181,74 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       /* ignore */
     }
     mentrixPresentonStatus()
-      .then((s) => setPresentonReady(!!s.configured && !!s.reachable))
-      .catch(() => setPresentonReady(false));
+      .then((s) => {
+        setPresentonReady(!!s.configured && !!s.reachable);
+        const life = String(s.lifecycle || "") as ProviderLifecycle;
+        if (
+          life === "READY" ||
+          life === "TEMPLATE_NOT_READY" ||
+          life === "PROVIDER_UNAVAILABLE" ||
+          life === "STARTING" ||
+          life === "GENERATION_FAILED"
+        ) {
+          setLifecycle(life);
+        } else {
+          setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+        }
+      })
+      .catch(() => {
+        setPresentonReady(false);
+        setLifecycle("PROVIDER_UNAVAILABLE");
+      });
     mentrixCompanionIntegrations()
       .then((s) => {
-        if (s.zinnia_presenton_template_id) setZinniaMasterId(s.zinnia_presenton_template_id);
         // Prefer status endpoint for ready; integrations is backup if status fails earlier
         if (s.presenton_reachable != null) {
-          setPresentonReady(!!s.presenton_configured && !!s.presenton_reachable);
+          setPresentonReady((prev) => prev || (!!s.presenton_configured && !!s.presenton_reachable));
         } else if (s.presenton != null) {
-          setPresentonReady(!!s.presenton);
+          setPresentonReady((prev) => prev || !!s.presenton);
         }
       })
       .catch(() => {});
     mentrixPresentonTemplates()
       .then((res) => {
-        if (res.reachable === false) setPresentonReady(false);
+        if (res.reachable === false) {
+          setPresentonReady(false);
+          setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
+        }
         const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
         const byId = new Map<string, PresentonTemplate>();
-        for (const t of [...BUILTIN_TEMPLATES, ...remote]) {
+        for (const t of BUILTIN_TEMPLATES) {
           if (t?.id) byId.set(t.id, t);
+        }
+        for (const t of remote) {
+          if (!t?.id) continue;
+          if (/^(zinnia-|org-|user-)/.test(t.id)) continue;
+          byId.set(t.id, t);
         }
         const list = Array.from(byId.values());
         setTemplates(list);
         setTemplateChoice((prev) => {
-          if (prev === CUSTOM_TEMPLATE_OPTION) return prev;
-          if (list.some((t) => t.id === prev)) return prev;
+          const migrated = migrateTemplateId(prev);
+          if (migrated === CUSTOM_TEMPLATE_OPTION) return migrated;
+          if (list.some((t) => t.id === migrated)) return migrated;
+          if (/^(zinnia-|org-|user-)/.test(migrated)) return migrated;
           return list[0]?.id || "general";
         });
       })
       .catch(() => setTemplates(BUILTIN_TEMPLATES));
+    mentrixPresentationTemplates()
+      .then((r) => {
+        const extra = [...(r.zinnia || []), ...(r.organization || []), ...(r.my_templates || [])];
+        setTemplates((prev) => {
+          const byId = new Map(prev.map((t) => [t.id, t]));
+          for (const t of extra) {
+            if (t?.id) byId.set(t.id, { id: t.id, name: t.name });
+          }
+          return Array.from(byId.values());
+        });
+      })
+      .catch(() => {});
     listMyClonedVoices()
       .then((v) => setMyVoices(Array.isArray(v) ? v : []))
       .catch(() => setMyVoices([]));
@@ -312,7 +372,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
 
   const resolveTemplateId = () => {
     if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
-      return customTemplateId.trim() || zinniaMasterId || "general";
+      return customTemplateId.trim() || "general";
     }
     // Send UI gallery id (zinnia-*/org-*/user-*) to API for honest resolve + zinnia_verified.
     return (templateChoice || "general").trim() || "general";
@@ -384,7 +444,8 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     setStatus("");
     try {
       if (!presentonReady) {
-        setStatus("Presenton not configured — set PRESENTON_BASE_URL and run Presenton Docker (see Integrations).");
+        setLifecycle("PROVIDER_UNAVAILABLE");
+        setStatus("Presentation provider unavailable — BLOCKED_EXTERNAL until Presenton is configured and reachable.");
         return;
       }
       const content = prompt.trim();
@@ -437,32 +498,45 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       setFlowBApproved(false);
       const sent = out?.template_sent || template;
       setLastTemplateSent(sent);
+      if (out?.lifecycle === "READY" || out?.lifecycle === "GENERATION_FAILED" || out?.lifecycle === "TEMPLATE_NOT_READY") {
+        setLifecycle(out.lifecycle);
+      }
       if (out?.path) {
         persistPath(out.path);
         const zinniaNote =
           templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
-            ? ` Zinnia NOT verified (wire template=${sent}; set ZINNIA_PRESENTON_TEMPLATE_ID or Custom master id).`
+            ? ` Zinnia NOT verified (wire template=${sent}; map zinnia-executive-v1 in the ZECT registry).`
             : out.zinnia_verified
-              ? ` Zinnia verified (wire template=${sent}).`
+              ? ` zinnia_verified=true (registry mapping, wire template=${sent}).`
               : ` Presenton template_sent=${sent}.`;
         setStatus(
           `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${slidesHint} slides).${zinniaNote} Review claims, then Open → Zoom → share approve → Narrate.`,
         );
       } else {
-        setStatus("Presenton returned no path — check PRESENTON_BASE_URL and that Presenton Docker is running.");
+        setLifecycle("GENERATION_FAILED");
+        setStatus("Presenton returned no path — BLOCKED_EXTERNAL or GENERATION_FAILED.");
       }
     } catch (e) {
       const detail = (e as Error & { detail?: Record<string, unknown> })?.detail;
       if (detail && typeof detail === "object") {
         const sent = String(detail.template_sent || "");
         if (sent) setLastTemplateSent(sent);
+        const life = String(detail.lifecycle || "");
+        if (life === "TEMPLATE_NOT_READY" || life === "GENERATION_FAILED" || life === "PROVIDER_UNAVAILABLE") {
+          setLifecycle(life);
+        } else if (detail.blocked_external) {
+          setLifecycle("PROVIDER_UNAVAILABLE");
+        } else {
+          setLifecycle("GENERATION_FAILED");
+        }
         const blocked = detail.blocked_external ? " [BLOCKED_EXTERNAL]" : "";
         const zinnia =
           detail.zinnia_verified === false && String(detail.ui_template_choice || "").startsWith("zinnia-")
-            ? ` zinnia_verified=false template_sent=${sent || "?"}.`
+            ? ` zinnia_verified=false template_sent=${sent || "none"}.`
             : "";
         setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}`);
       } else {
+        setLifecycle("GENERATION_FAILED");
         setStatus(e instanceof Error ? e.message : "Generate deck failed");
       }
     } finally {
@@ -774,6 +848,18 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         >
           Present Deck — PPTX + Zoom
         </p>
+        <span
+          data-testid={variant === "light" ? undefined : "present-lifecycle-state"}
+          className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+            lifecycle === "READY"
+              ? "border-emerald-600 text-emerald-700"
+              : lifecycle === "TEMPLATE_NOT_READY"
+                ? "border-amber-500 text-amber-800"
+                : "border-slate-400 text-slate-600"
+          }`}
+        >
+          {lifecycle}
+        </span>
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
         {isDesktop
@@ -992,7 +1078,6 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       {lastTemplateSent && (
         <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
           Last Presenton template_sent: {lastTemplateSent}
-          {zinniaMasterId ? ` · ZINNIA_PRESENTON_TEMPLATE_ID=${zinniaMasterId}` : ""}
         </p>
       )}
       <button

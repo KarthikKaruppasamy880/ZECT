@@ -249,86 +249,150 @@ def presenton_reachable() -> bool:
     return bool(result.get("reachable"))
 
 
-def resolve_presenton_template_id(choice: str | None, *, custom_id: str | None = None) -> dict[str, Any]:
+def resolve_presenton_template_id(
+    choice: str | None,
+    *,
+    custom_id: str | None = None,
+    user_id: str | int | None = None,
+) -> dict[str, Any]:
     """Map UI template choice to the Presenton template id actually sent on generate.
 
-    Zinnia UI presets are prompt-side only unless ZINNIA_PRESENTON_TEMPLATE_ID is set
-    (or a custom master id is provided). Silently mapping zinnia-* → modern is not a
-    Zinnia PASS for live acceptance.
+    Canonical ZECT ids (zinnia-executive-v1, …) resolve through the ZECT template
+    registry. Env ZINNIA_PRESENTON_TEMPLATE_ID may seed that registry once; it is
+    not a normal-user mapping path. Silently mapping zinnia-* → modern is not a
+    Zinnia PASS.
     """
+    from app.services.mentrix.presentation import template_registry as tmpl
+
     raw = (choice or "general").strip() or "general"
     custom = (custom_id or "").strip()
-    zinnia_master = (os.getenv("ZINNIA_PRESENTON_TEMPLATE_ID") or "").strip()
+    canon = tmpl.canonical_id(raw) or raw
 
     if raw == "__custom__" or raw.lower() == "custom":
-        tid = custom or zinnia_master or "general"
+        tid = custom or "general"
+        verified = tmpl.is_verified_provider_id(tid)
         return {
             "template_id": tid,
             "ui_choice": raw,
-            "zinnia_verified": bool(custom or zinnia_master) and tid not in ("modern", "general"),
-            "note": "custom_template_id" if custom else ("zinnia_env" if zinnia_master else "fallback_general"),
+            "canonical_id": canon,
+            "zinnia_verified": verified,
+            "mapping_source": "custom" if custom else "none",
+            "note": "custom_template_id" if custom else "fallback_general",
+            "lifecycle": tmpl.LIFECYCLE_READY if verified else tmpl.LIFECYCLE_TEMPLATE_NOT_READY,
         }
 
-    if raw.startswith("zinnia-"):
-        if custom:
+    if canon.startswith("zinnia-") or raw.startswith("zinnia-"):
+        if custom and tmpl.is_verified_provider_id(custom):
             return {
                 "template_id": custom,
                 "ui_choice": raw,
+                "canonical_id": canon,
                 "zinnia_verified": True,
+                "mapping_source": "custom",
                 "note": "zinnia_preset_with_custom_master",
+                "lifecycle": tmpl.LIFECYCLE_READY,
             }
-        if zinnia_master:
+        mapped = tmpl.get_provider_mapping(canon)
+        pid = str((mapped or {}).get("provider_template_id") or "")
+        if tmpl.is_verified_provider_id(pid) and str((mapped or {}).get("source") or "") == "registry":
             return {
-                "template_id": zinnia_master,
+                "template_id": pid,
                 "ui_choice": raw,
+                "canonical_id": canon,
                 "zinnia_verified": True,
-                "note": "zinnia_env_ZINNIA_PRESENTON_TEMPLATE_ID",
+                "mapping_source": "registry",
+                "note": "zinnia_registry_mapping",
+                "lifecycle": tmpl.LIFECYCLE_READY,
             }
         return {
             "template_id": "modern",
             "ui_choice": raw,
+            "canonical_id": canon,
             "zinnia_verified": False,
-            "note": "zinnia_prompt_preset_only_maps_to_modern_not_a_zinnia_master_PASS",
+            "mapping_source": "none",
+            "note": "zinnia_unmapped_not_a_master_PASS",
+            "lifecycle": tmpl.LIFECYCLE_TEMPLATE_NOT_READY,
         }
 
-    if raw.startswith("org-"):
-        if custom:
+    if canon.startswith("org-") or raw.startswith("org-"):
+        if custom and tmpl.is_verified_provider_id(custom):
             return {
                 "template_id": custom,
                 "ui_choice": raw,
+                "canonical_id": canon,
                 "zinnia_verified": False,
+                "mapping_source": "custom",
                 "note": "org_with_custom_master",
+                "lifecycle": tmpl.LIFECYCLE_READY,
             }
-        if zinnia_master:
+        mapped = tmpl.get_provider_mapping(canon)
+        pid = str((mapped or {}).get("provider_template_id") or "")
+        if tmpl.is_verified_provider_id(pid):
             return {
-                "template_id": zinnia_master,
+                "template_id": pid,
                 "ui_choice": raw,
+                "canonical_id": canon,
                 "zinnia_verified": False,
-                "note": "org_uses_env_master",
+                "mapping_source": "registry",
+                "note": "org_registry_mapping",
+                "lifecycle": tmpl.LIFECYCLE_READY,
+            }
+        upload = tmpl.get_template(user_id or "anon", raw) if user_id is not None else None
+        upid = str((upload or {}).get("presenton_template_id") or "")
+        if tmpl.is_verified_provider_id(upid):
+            return {
+                "template_id": upid,
+                "ui_choice": raw,
+                "canonical_id": canon,
+                "zinnia_verified": False,
+                "mapping_source": "org_upload",
+                "note": "org_uploaded_pptx_bound",
+                "lifecycle": tmpl.LIFECYCLE_READY,
             }
         return {
             "template_id": "standard",
             "ui_choice": raw,
+            "canonical_id": canon,
             "zinnia_verified": False,
-            "note": "org_preset_maps_to_standard_without_master",
+            "mapping_source": "none",
+            "note": "org_preset_unmapped",
+            "lifecycle": tmpl.LIFECYCLE_TEMPLATE_NOT_READY,
         }
 
     if raw.startswith("user-"):
-        # Local registry PPTX is not a Presenton id until uploaded to Presenton.
-        tid = custom or zinnia_master or "general"
+        upload = tmpl.get_template(user_id or "anon", raw) if user_id is not None else None
+        upid = str((upload or {}).get("presenton_template_id") or "")
+        if custom and tmpl.is_verified_provider_id(custom):
+            upid = custom
+        if tmpl.is_verified_provider_id(upid):
+            return {
+                "template_id": upid,
+                "ui_choice": raw,
+                "canonical_id": canon,
+                "zinnia_verified": False,
+                "mapping_source": "user_upload",
+                "note": "user_pptx_bound_to_provider",
+                "lifecycle": tmpl.LIFECYCLE_READY,
+            }
         return {
-            "template_id": tid,
+            "template_id": "general",
             "ui_choice": raw,
+            "canonical_id": canon,
             "zinnia_verified": False,
-            "note": "user_pptx_local_only_needs_presenton_master_or_custom_id",
-            "blocked_external": not bool(custom or zinnia_master),
+            "mapping_source": "none",
+            "note": "user_pptx_local_only_needs_provider_bind",
+            "blocked_external": True,
+            "lifecycle": tmpl.LIFECYCLE_TEMPLATE_NOT_READY,
         }
 
     return {
         "template_id": raw,
         "ui_choice": raw,
+        "canonical_id": canon,
         "zinnia_verified": False,
+        "mapping_source": "direct",
         "note": "direct_template_id",
+        "lifecycle": tmpl.LIFECYCLE_READY,
     }
 
 

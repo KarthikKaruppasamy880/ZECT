@@ -27,15 +27,20 @@ def test_upsert_promotes_configured_local_user_to_admin(monkeypatch):
     db.commit.assert_called()
 
 
-def test_resolve_zinnia_without_master_is_not_verified(monkeypatch):
+def test_resolve_zinnia_without_master_is_not_verified(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
     monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
     resolved = resolve_presenton_template_id("zinnia-exec")
     assert resolved["template_id"] == "modern"
     assert resolved["zinnia_verified"] is False
 
 
-def test_resolve_zinnia_with_env_master_is_verified(monkeypatch):
+def test_resolve_zinnia_env_seeds_executive_registry_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
     monkeypatch.setenv("ZINNIA_PRESENTON_TEMPLATE_ID", "zinnia-brand-master")
-    resolved = resolve_presenton_template_id("zinnia-delivery")
+    resolved = resolve_presenton_template_id("zinnia-executive-v1")
     assert resolved["template_id"] == "zinnia-brand-master"
     assert resolved["zinnia_verified"] is True
+    assert resolved["mapping_source"] == "registry"
+    delivery = resolve_presenton_template_id("zinnia-delivery")
+    assert delivery["zinnia_verified"] is False

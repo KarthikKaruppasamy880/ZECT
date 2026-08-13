@@ -1391,7 +1391,7 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         "presenton_configured": presenton_configured(),
         "presenton_reachable": presenton_reachable(),
         "presenton_base_url": (os.getenv("PRESENTON_BASE_URL") or "").strip() or "",
-        "zinnia_presenton_template_id": (os.getenv("ZINNIA_PRESENTON_TEMPLATE_ID") or "").strip(),
+        "zinnia_presenton_template_id": "",
         "zoom_join_url_configured": bool(zoom_join),
         "zoom_desktop_path_configured": bool((os.getenv("ZOOM_DESKTOP_PATH") or "").strip()),
         "slack_channel": (os.getenv("SLACK_DEFAULT_CHANNEL") or "#engineering") if slack else "",
@@ -1411,6 +1411,7 @@ class PresentonGenerateRequest(BaseModel):
 
 @router.get("/presenton/status")
 def presenton_status(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation import template_registry as tmpl
     from app.services.presenton_client import (
         list_templates,
         presenton_base_url,
@@ -1422,16 +1423,28 @@ def presenton_status(_user: CurrentUser = Depends(get_current_user)):
     hint = ""
     blocked_external = False
     block_code = ""
+    listed: dict = {}
     if configured:
         listed = list_templates()
         reachable = bool(listed.get("reachable"))
         hint = str(listed.get("hint") or "")
         blocked_external = bool(listed.get("blocked_external"))
         block_code = str(listed.get("block_code") or "")
+        if reachable:
+            tmpl.maybe_bind_from_provider_templates(list(listed.get("templates") or []))
     else:
         hint = "Set PRESENTON_BASE_URL (e.g. http://127.0.0.1:5000) and run Presenton Docker"
         blocked_external = True
         block_code = "presenton_not_configured"
+    uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
+    lifecycle = tmpl.provider_lifecycle(
+        configured=configured,
+        reachable=reachable,
+        template_id="zinnia-executive-v1",
+        user_id=uid,
+    )
+    mapped = tmpl.get_provider_mapping("zinnia-executive-v1")
+    zinnia_ready = tmpl.is_verified_provider_id(str((mapped or {}).get("provider_template_id") or ""))
     return {
         "configured": configured,
         "reachable": reachable,
@@ -1439,6 +1452,9 @@ def presenton_status(_user: CurrentUser = Depends(get_current_user)):
         "hint": hint,
         "blocked_external": blocked_external,
         "block_code": block_code,
+        "lifecycle": lifecycle,
+        "zinnia_ready": zinnia_ready,
+        "canonical_template_id": "zinnia-executive-v1",
     }
 
 
@@ -1456,11 +1472,29 @@ def presenton_generate(
     _user: CurrentUser = Depends(get_current_user),
 ):
     """Proxy Presenton generate → save PPTX under Documents/Desktop for Present Deck."""
+    from app.services.mentrix.presentation import template_registry as tmpl
     from app.services.presenton_client import generate_presentation, resolve_presenton_template_id
 
     ui_choice = (req.ui_template_choice or req.template or "general").strip() or "general"
     custom = (req.custom_id or "").strip() or None
-    resolved = resolve_presenton_template_id(ui_choice, custom_id=custom)
+    uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
+    resolved = resolve_presenton_template_id(ui_choice, custom_id=custom, user_id=uid)
+    if str(resolved.get("lifecycle") or "") == tmpl.LIFECYCLE_TEMPLATE_NOT_READY:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "template_not_ready",
+                "hint": resolved.get("note") or "Register a provider mapping in the ZECT template registry",
+                "template_sent": None,
+                "ui_template_choice": resolved.get("ui_choice") or ui_choice,
+                "canonical_id": resolved.get("canonical_id"),
+                "zinnia_verified": False,
+                "lifecycle": tmpl.LIFECYCLE_TEMPLATE_NOT_READY,
+                "mapping_source": resolved.get("mapping_source"),
+                "blocked_external": bool(resolved.get("blocked_external")),
+                "block_code": "template_not_ready",
+            },
+        )
     # Always send the resolved Presenton wire id — not a pre-mapped client guess alone.
     template_id = str(resolved.get("template_id") or "general").strip() or "general"
     out = generate_presentation(
@@ -1471,20 +1505,38 @@ def presenton_generate(
         filename=req.filename or None,
     )
     out["ui_template_choice"] = resolved.get("ui_choice") or ui_choice
+    out["canonical_id"] = resolved.get("canonical_id")
     out["template_sent"] = out.get("template_sent") or template_id
     out["resolve_note"] = resolved.get("note")
-    zinnia_ui = str(out["ui_template_choice"]).startswith("zinnia-")
+    out["mapping_source"] = resolved.get("mapping_source")
+    zinnia_ui = str(out["ui_template_choice"]).startswith("zinnia-") or str(
+        resolved.get("canonical_id") or ""
+    ).startswith("zinnia-")
     out["zinnia_verified"] = bool(resolved.get("zinnia_verified")) and (
         str(out["template_sent"]) == str(resolved.get("template_id"))
-    )
-    if zinnia_ui and str(out["template_sent"]) in ("modern", "general"):
+    ) and str(resolved.get("mapping_source") or "") in ("registry", "custom")
+    if zinnia_ui and str(out["template_sent"]) in ("modern", "general", "standard", "swift"):
         out["zinnia_verified"] = False
         out["zinnia_note"] = (
-            "Zinnia UI preset only — set ZINNIA_PRESENTON_TEMPLATE_ID or Custom template id "
-            "to the Presenton master for a Zinnia PASS"
+            "Zinnia template is not mapped in the ZECT registry — TEMPLATE_NOT_READY "
+            "(admin/setup must register a real provider master; do not use env as the user path)"
         )
     elif zinnia_ui and out["zinnia_verified"]:
-        out["zinnia_note"] = f"Zinnia verified via {resolved.get('note')}"
+        out["zinnia_note"] = f"Zinnia verified via registry ({resolved.get('note')})"
+    lifecycle = str(resolved.get("lifecycle") or "")
+    if not out.get("ok"):
+        lifecycle = tmpl.LIFECYCLE_GENERATION_FAILED
+    elif not out.get("path"):
+        lifecycle = tmpl.LIFECYCLE_GENERATION_FAILED
+        out["ok"] = False
+        out["error"] = out.get("error") or "missing_pptx_output"
+    out["lifecycle"] = lifecycle or tmpl.provider_lifecycle(
+        configured=True,
+        reachable=True,
+        template_id=ui_choice,
+        user_id=uid,
+        generation_failed=not out.get("ok"),
+    )
 
     if not out.get("ok"):
         # Structured failure — keep template_sent / blocked_external for UI honesty
@@ -1498,6 +1550,9 @@ def presenton_generate(
                 "ui_template_choice": out.get("ui_template_choice"),
                 "zinnia_verified": out.get("zinnia_verified"),
                 "zinnia_note": out.get("zinnia_note"),
+                "lifecycle": out.get("lifecycle"),
+                "canonical_id": out.get("canonical_id"),
+                "mapping_source": out.get("mapping_source"),
                 "blocked_external": bool(out.get("blocked_external")),
                 "block_code": out.get("block_code") or out.get("error") or "",
                 "retries": out.get("retries"),

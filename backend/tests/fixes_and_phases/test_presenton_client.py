@@ -155,9 +155,10 @@ def test_generate_retries_on_502_then_succeeds(monkeypatch, tmp_path):
     assert mock_client.post.call_count == 2
 
 
-def test_resolve_org_and_user_templates(monkeypatch):
+def test_resolve_org_and_user_templates(tmp_path, monkeypatch):
     from app.services.presenton_client import resolve_presenton_template_id
 
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
     monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
     org = resolve_presenton_template_id("org-standard")
     assert org["template_id"] == "standard"
@@ -167,8 +168,9 @@ def test_resolve_org_and_user_templates(monkeypatch):
     assert user["template_id"] == "general"
     assert user.get("blocked_external") is True
 
+    # Env must not impersonate a user PPTX master.
     monkeypatch.setenv("ZINNIA_PRESENTON_TEMPLATE_ID", "zinnia-brand-master")
     user2 = resolve_presenton_template_id("user-abc123")
-    assert user2["template_id"] == "zinnia-brand-master"
-    assert user2.get("blocked_external") is not True
+    assert user2["template_id"] == "general"
+    assert user2.get("blocked_external") is True
 

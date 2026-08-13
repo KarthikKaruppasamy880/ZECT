@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
@@ -15,6 +15,7 @@ from app.services.mentrix.presentation import (
     prepare_prompt_deck,
     verify_claim,
 )
+from app.services.mentrix.presentation import template_registry as tmpl
 
 router = APIRouter(prefix="/api/mentrix/presentation", tags=["mentrix-presentation"])
 
@@ -38,6 +39,10 @@ class VerifyClaimIn(BaseModel):
     claims: list[dict[str, Any]]
     source: str
     status: str = "VERIFIED"
+
+
+class PreviewIn(BaseModel):
+    template_id: str
 
 
 @router.get("/audiences")
@@ -73,3 +78,28 @@ def prepare_prompt(body: PreparePromptIn, current_user: CurrentUser = Depends(ge
 def verify_claim_endpoint(body: VerifyClaimIn, current_user: CurrentUser = Depends(get_current_user)):
     claims = verify_claim(body.claim_id, body.claims, source=body.source, status=body.status)
     return {"claims": claims}
+
+
+@router.get("/templates")
+@require_authentication
+def presentation_templates(current_user: CurrentUser = Depends(get_current_user)):
+    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
+    return tmpl.list_templates(uid)
+
+
+@router.post("/templates/preview")
+@require_authentication
+def presentation_template_preview(body: PreviewIn, current_user: CurrentUser = Depends(get_current_user)):
+    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
+    return tmpl.preview_template(uid, body.template_id)
+
+
+@router.post("/templates/upload")
+@require_authentication
+async def presentation_template_upload(
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
+    return await tmpl.register_user_pptx(uid, file, name=name)

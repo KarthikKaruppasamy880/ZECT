@@ -65,6 +65,8 @@ const STOCK_VOICES: { id: string; label: string }[] = [
 
 type Props = {
   variant?: "dark" | "light";
+  /** Prefill ZECT template id (e.g. zinnia-exec) when mounted from product Present. */
+  initialTemplateId?: string;
 };
 
 type SlideParsed = { index: number; notes?: string; text?: string };
@@ -93,7 +95,7 @@ function friendlyDesktopError(code: string): string {
   return c;
 }
 
-export default function PresentDeckPanel({ variant = "dark" }: Props) {
+export default function PresentDeckPanel({ variant = "dark", initialTemplateId }: Props) {
   const [path, setPath] = useState("");
   const [notes, setNotes] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -103,7 +105,9 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
   const [presenting, setPresenting] = useState(false);
   const [presentonReady, setPresentonReady] = useState(false);
   const [templates, setTemplates] = useState<PresentonTemplate[]>(BUILTIN_TEMPLATES);
-  const [templateChoice, setTemplateChoice] = useState("general");
+  const [templateChoice, setTemplateChoice] = useState(
+    () => initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general",
+  );
   const [customTemplateId, setCustomTemplateId] = useState("");
   const [nSlides, setNSlides] = useState(6);
   const [myVoices, setMyVoices] = useState<ClonedVoiceInfo[]>([]);
@@ -138,8 +142,16 @@ export default function PresentDeckPanel({ variant = "dark" }: Props) {
       setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
       setAudienceId(localStorage.getItem(AUDIENCE_KEY) || "general");
       setSensitivityHint(localStorage.getItem(SENS_KEY) || "");
-      const savedTemplate = localStorage.getItem(TEMPLATE_KEY) || "general";
+      const savedTemplate =
+        initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general";
       setTemplateChoice(savedTemplate);
+      if (initialTemplateId) {
+        try {
+          localStorage.setItem(TEMPLATE_KEY, initialTemplateId);
+        } catch {
+          /* ignore */
+        }
+      }
       setCustomTemplateId(localStorage.getItem(CUSTOM_TEMPLATE_KEY) || "");
       const savedSlides = Number(localStorage.getItem(N_SLIDES_KEY) || "6");
       setNSlides(Number.isFinite(savedSlides) ? Math.max(3, Math.min(20, savedSlides)) : 6);

@@ -34,6 +34,7 @@ import {
   Network,
   FlaskConical,
   Box,
+  Presentation,
 } from "lucide-react";
 import { isAgentModeEnabled } from "@/lib/featureFlags";
 
@@ -42,6 +43,7 @@ type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 /** P2 target navigation — routes kept; internals moved into composite sections. */
 const mentrixItems: NavItem[] = [
   { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
+  { href: "/present", label: "Present", icon: Presentation },
   { href: "/workspace", label: "Developer", icon: PanelLeft },
   { href: "/ask", label: "Agent Workspace", icon: Bot },
 ];

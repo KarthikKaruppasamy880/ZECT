@@ -1,7 +1,5 @@
 """ZECT Document Intelligence API — upload/parse/retrieve with provenance."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Optional
@@ -34,7 +32,7 @@ def _uid(user: CurrentUser) -> int:
     return int(uid)
 
 
-@router.post("/upload")
+@router.post("/upload", response_model=None)
 @require_authentication
 async def upload_document(
     file: UploadFile = File(...),

@@ -7,6 +7,7 @@
 
 const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut, session, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { matchesWakePhrase } = require("./wake");
 const { startWindowsWake } = require("./win-wake");
 const { startDictation } = require("./dictation");
@@ -15,6 +16,12 @@ const shortcuts = require("./shortcuts");
 const chatterbox = require("./chatterbox");
 const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
 const serviceLifecycle = require("./service-lifecycle");
+
+// Single-instance lock (A7) — second launch focuses the existing window.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 // Unpackaged `electron .` must hit Vite — otherwise loadFile(dist) uses file:// + absolute
 // /assets paths and the window stays blank (navy backgroundColor only).
@@ -27,6 +34,37 @@ const isDev =
     !app.isPackaged);
 const DEV_URL = process.env.ZECT_DEV_URL || "http://127.0.0.1:5173";
 const WAKE_PHRASE = process.env.WAKE_PHRASE || "Hey Mentrix";
+
+/** Canonical packaged UI index candidates (asar + unpacked layouts). */
+function resolvePackagedIndexHtml() {
+  const candidates = [
+    path.join(__dirname, "frontend", "dist", "index.html"),
+    path.join(__dirname, "..", "frontend", "dist", "index.html"),
+    path.join(process.resourcesPath || "", "frontend", "dist", "index.html"),
+    path.join(process.resourcesPath || "", "app.asar.unpacked", "frontend", "dist", "index.html"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return p;
+    } catch {
+      /* ignore */
+    }
+  }
+  return candidates[0];
+}
+
+function ensureUserDataDirs() {
+  try {
+    const base = app.getPath("userData");
+    for (const sub of ["logs", "config", "data"]) {
+      const dir = path.join(base, sub);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    }
+    return base;
+  } catch {
+    return null;
+  }
+}
 
 let mainWindow;
 let wakeEnabled = true;
@@ -254,7 +292,10 @@ function createWindow() {
       mainWindow.webContents.openDevTools({ mode: "detach" });
     }
   } else {
-    mainWindow.loadFile(path.join(__dirname, "..", "frontend", "dist", "index.html"));
+    const indexHtml = resolvePackagedIndexHtml();
+    mainWindow.loadFile(indexHtml).catch((err) => {
+      console.error("[zect] failed to load packaged UI", indexHtml, err);
+    });
   }
 
   mainWindow.once("ready-to-show", () => {
@@ -799,15 +840,32 @@ const menuTemplate = [
   },
 ];
 
+app.on("second-instance", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
+
+  const userData = ensureUserDataDirs();
+  if (userData) {
+    console.log("[zect] userData", userData);
+  }
+
   // Optional managed probes — PARTIAL packaging (backend not bundled in NSIS).
   try {
-    const readiness = await serviceLifecycle.checkReadiness();
+    const readiness = await serviceLifecycle.checkReadiness({
+      resourcesPath: app.isPackaged ? process.resourcesPath : null,
+    });
     if (!readiness.api.ok && process.env.ZECT_MANAGE_SERVICES === "1") {
       const repoRoot = app.isPackaged
         ? path.join(process.resourcesPath, "..")
         : path.join(__dirname, "..");
-      serviceLifecycle.tryStartLocalScript(repoRoot);
+      const started = serviceLifecycle.tryStartLocalScript(repoRoot);
+      console.log("[zect] manage services start", JSON.stringify(started));
     }
     console.log("[zect] service readiness", JSON.stringify(readiness));
   } catch (e) {
@@ -852,6 +910,11 @@ app.on("will-quit", () => {
     winWakeHandle = null;
   }
   stopDictation();
+  try {
+    serviceLifecycle.stopManagedChildren();
+  } catch {
+    /* ignore */
+  }
   try {
     chatterbox.stop();
   } catch {

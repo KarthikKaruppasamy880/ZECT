@@ -39,12 +39,25 @@
       "voice-filter.js",
       "shortcuts.js",
       "icons/**/*",
-      "../frontend/dist/**/*"
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "extraResources": [
       {
         "from": "resources/chatterbox",
         "to": "chatterbox",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/backend",
+        "to": "backend",
         "filter": [
           "**/*"
         ]

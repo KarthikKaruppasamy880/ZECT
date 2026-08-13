@@ -12,6 +12,7 @@ from app.services.mentrix.engineering_agents.roles import ROLE_ACCEPTANCE, role_
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.work_items.checkpoints import record_checkpoint
 from app.services.work_items.evidence_verifier import EvidenceItem, EvidenceVerifier
+from app.services.work_items.multi_repo_agent import READY_OP_STATUSES, READY_REPO_STATUSES, collect_current_heads
 
 
 class AcceptanceVerifier:
@@ -42,7 +43,11 @@ class AcceptanceVerifier:
         reqs = list(manifest.get("requirement_ids") or [])
         acs = list(manifest.get("acceptance_ids") or [])
 
-        ev_list: list[Any] = list(evidence or self.store.read_json("EVIDENCE.json", default=[]) or [])
+        raw_ev = evidence if evidence is not None else self.store.read_json("EVIDENCE.json", default=[])
+        if isinstance(raw_ev, dict):
+            ev_list = list(raw_ev.get("evidence") or [])
+        else:
+            ev_list = list(raw_ev or [])
 
         ops = list(manifest.get("operations") or [])
         linked_reqs: list[str] = []
@@ -91,11 +96,13 @@ class AcceptanceVerifier:
                     }
                 )
 
+        current_heads = collect_current_heads(self.store)
         result = self.verifier.verify(
             mandatory_operation_ids=mandatory,
             requirement_ids=reqs,
             acceptance_ids=acs,
             evidence=ev_list,
+            current_heads=current_heads,
         )
         errors = list(result.errors)
         if has_simulated:
@@ -110,12 +117,13 @@ class AcceptanceVerifier:
             errors.append("blocking_review_findings")
             result.ok = False
             result.ready_to_ship = False
+        pending_mandatory: list[str] = []
         if ops:
             pending_mandatory = [
                 o["id"]
                 for o in ops
-                if o.get("mandatory")
-                and str(o.get("status") or "pending").lower() not in ("done", "completed", "verified")
+                if o.get("mandatory", True)
+                and str(o.get("status") or "pending").lower() not in READY_OP_STATUSES
             ]
         if pending_mandatory:
             for oid in pending_mandatory:
@@ -125,24 +133,39 @@ class AcceptanceVerifier:
             result.ready_to_ship = False
             errors.append("incomplete_manifest_operations")
 
-        # Multi-repo: mandatory repo with failed/pending status blocks aggregate READY_TO_SHIP
+        # Multi-repo: mandatory repo not in pass/passed/completed/verified/ready_to_ship blocks
         for repo in manifest.get("affected_repos") or []:
-            if not repo.get("mandatory"):
+            if not repo.get("mandatory", True):
                 continue
-            st = str(repo.get("status") or "").lower()
-            if st in ("failed", "blocked", "stale"):
-                rid = repo.get("repository_id")
-                errors.append(f"mandatory_repo_blocked:{rid}")
+            st = str(repo.get("status") or "pending").lower()
+            rid = repo.get("repository_id")
+            live = ""
+            wt = str(repo.get("worktree_path") or "")
+            if wt:
+                from app.services.work_items.multi_repo_context import git_head_sha
+
+                live = git_head_sha(wt)
+            recorded = str(repo.get("head_sha") or "")
+            if recorded and live and recorded != live:
+                st = "stale"
+                repo["status"] = "stale"
+                errors.append(f"stale_evidence:{rid}")
+            if st not in READY_REPO_STATUSES:
+                errors.append(f"mandatory_repo_blocked:{rid}:{st or 'pending'}")
                 result.ok = False
                 result.ready_to_ship = False
         for op in ops:
-            if not op.get("mandatory"):
+            if not op.get("mandatory", True):
                 continue
-            if str(op.get("status") or "").lower() == "failed":
+            ost = str(op.get("status") or "pending").lower()
+            if ost in ("failed", "blocked", "stale"):
                 oid = op.get("id") or op.get("repository_id")
                 errors.append(f"mandatory_repo_op_failed:{oid}")
                 result.ok = False
                 result.ready_to_ship = False
+        if any(e.startswith("stale_evidence:") for e in errors):
+            result.ok = False
+            result.ready_to_ship = False
 
         out = result.to_dict()
         out["errors"] = errors

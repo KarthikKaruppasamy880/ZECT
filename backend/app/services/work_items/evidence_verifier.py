@@ -63,6 +63,7 @@ class EvidenceVerifier:
         requirement_ids: list[str],
         acceptance_ids: list[str],
         evidence: list[EvidenceItem] | list[dict[str, Any]],
+        current_heads: dict[str, str] | None = None,
     ) -> VerificationResult:
         items: list[EvidenceItem] = []
         for e in evidence:
@@ -98,6 +99,9 @@ class EvidenceVerifier:
         missing_reqs = [r for r in requirement_ids if r not in covered_reqs]
         missing_acs = [a for a in acceptance_ids if a not in covered_acs]
 
+        if current_heads:
+            errors.extend(self.stale_head_errors(typed, current_heads))
+
         ok = not missing_ops and not missing_reqs and not missing_acs and not errors
         return VerificationResult(
             ok=ok,
@@ -107,3 +111,30 @@ class EvidenceVerifier:
             missing_acceptance=missing_acs,
             errors=errors,
         )
+
+    @staticmethod
+    def stale_head_errors(
+        items: list[EvidenceItem],
+        current_heads: dict[str, str],
+    ) -> list[str]:
+        """Recorded evidence head_sha must match current PR/worktree HEAD."""
+        errors: list[str] = []
+        heads = {str(k): str(v) for k, v in (current_heads or {}).items() if v}
+        if not heads:
+            return errors
+        seen: set[str] = set()
+        for item in items:
+            recorded = str((item.payload or {}).get("head_sha") or "")
+            if not recorded:
+                continue
+            rid = str((item.payload or {}).get("repository_id") or "")
+            keys = [k for k in (rid, item.operation_id, item.id) if k]
+            current = next((heads[k] for k in keys if k in heads), "")
+            if not current:
+                continue
+            if recorded != current:
+                tag = f"stale_evidence:{rid or item.operation_id or item.id}"
+                if tag not in seen:
+                    seen.add(tag)
+                    errors.append(tag)
+        return errors

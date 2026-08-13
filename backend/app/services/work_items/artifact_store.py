@@ -19,6 +19,7 @@ ARTIFACT_NAMES = (
     "EVIDENCE.json",
     "TEST_RESULTS.json",
     "REVIEW.json",
+    "PULL_REQUESTS.json",
 )
 
 

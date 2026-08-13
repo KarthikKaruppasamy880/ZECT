@@ -5,7 +5,7 @@
  * BrowserRouter uses pathname navigation (not hash).
  */
 
-const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut, session } = require("electron");
+const { app, BrowserWindow, Menu, shell, ipcMain, globalShortcut, session, dialog } = require("electron");
 const path = require("path");
 const { matchesWakePhrase } = require("./wake");
 const { startWindowsWake } = require("./win-wake");
@@ -343,6 +343,17 @@ function startNativeWake() {
 }
 
 ipcMain.handle("get-app-path", () => app.getAppPath());
+ipcMain.handle("zect-select-directory", async (_e, opts = {}) => {
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: opts.title || "Select local Git repository folder",
+    defaultPath: opts.defaultPath || app.getPath("desktop"),
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: false, canceled: true };
+  }
+  return { ok: true, path: result.filePaths[0] };
+});
 ipcMain.handle("zect-shortcut-status", () => shortcuts.getDesktopShortcutStatus());
 ipcMain.handle("zect-shortcut-create", () => shortcuts.createOrUpdateDesktopShortcut());
 ipcMain.handle("zect-relaunch", () => shortcuts.relaunchApp());

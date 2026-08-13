@@ -37,6 +37,36 @@ class CloneRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     branch: str
+    # require_clean (default) | stash | force_discard
+    dirty_action: str = "require_clean"
+
+
+class RegisterLocalRequest(BaseModel):
+    project_id: int
+    local_path: str
+    role: str = ""
+
+
+class DiscoverRequest(BaseModel):
+    root: str
+    max_depth: int = 3
+
+
+class CloneUrlRequest(BaseModel):
+    project_id: int
+    git_url: str
+    destination: str = ""
+    branch: str = ""
+
+
+class AttachRepoRequest(BaseModel):
+    repo_id: int
+
+
+class PrWorktreeRequest(BaseModel):
+    pr_number: int
+    head_branch: str
+    head_sha: str = ""
 
 
 class CloneStatusResponse(BaseModel):
@@ -112,10 +142,15 @@ def branches(repo_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{repo_id}/checkout")
 def checkout(repo_id: int, req: CheckoutRequest, db: Session = Depends(get_db)):
-    """Checkout a specific branch in the cloned repo."""
-    result = checkout_branch(db, repo_id, req.branch)
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
+    """Checkout a branch with dirty-working-tree protection (default: require_clean)."""
+    from app.services.repo_onboarding import safe_checkout
+
+    result = safe_checkout(
+        db, repo_id=repo_id, branch=req.branch, action=req.dirty_action or "require_clean"
+    )
+    if not result.get("ok"):
+        status = 409 if result.get("error") == "dirty_working_tree" else 400
+        raise HTTPException(status_code=status, detail=result)
     return result
 
 
@@ -165,3 +200,84 @@ def list_cloned(db: Session = Depends(get_db)):
         }
         for r in repos
     ]
+
+
+@router.post("/register-local")
+def register_local(req: RegisterLocalRequest, db: Session = Depends(get_db)):
+    """Open existing local Git folder and bind to a Project (no duplicate)."""
+    from app.services.repo_onboarding import register_local_repo
+
+    try:
+        out = register_local_repo(
+            db, project_id=req.project_id, local_path=req.local_path, role=req.role
+        )
+    except ValueError as e:
+        raise HTTPException(403, detail=str(e)) from e
+    if not out.get("ok"):
+        code = 403 if "denied" in str(out.get("error") or "").lower() else 400
+        raise HTTPException(code, detail=out)
+    return out
+
+
+@router.post("/discover")
+def discover(req: DiscoverRequest, db: Session = Depends(get_db)):
+    """Discover Git repos under an explicit user-approved root."""
+    from app.services.repo_onboarding import discover_local_repos
+
+    try:
+        out = discover_local_repos(db, root=req.root, max_depth=min(max(req.max_depth, 1), 5))
+    except ValueError as e:
+        raise HTTPException(403, detail=str(e)) from e
+    if not out.get("ok"):
+        raise HTTPException(400, detail=out)
+    return out
+
+
+@router.post("/clone-url")
+def clone_url(req: CloneUrlRequest, db: Session = Depends(get_db)):
+    """Clone from a Git URL into Project (optional destination under allowed roots)."""
+    from app.services.repo_onboarding import clone_from_url
+
+    token = _get_github_token(db)
+    try:
+        out = clone_from_url(
+            db,
+            project_id=req.project_id,
+            git_url=req.git_url,
+            destination=req.destination,
+            branch=req.branch,
+            token=token,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    if not out.get("ok"):
+        raise HTTPException(400, detail=out)
+    return out
+
+
+@router.get("/{repo_id}/identity")
+def repo_identity(repo_id: int, db: Session = Depends(get_db)):
+    """Current branch, HEAD SHA, dirty/clean for a registered repo."""
+    from app.services.repo_onboarding import repo_git_identity
+
+    out = repo_git_identity(db, repo_id)
+    if not out.get("ok"):
+        raise HTTPException(404 if out.get("error") == "repo_not_found" else 400, detail=out)
+    return out
+
+
+@router.post("/{repo_id}/pr-worktree")
+def pr_worktree(repo_id: int, req: PrWorktreeRequest, db: Session = Depends(get_db)):
+    """Create/reuse isolated worktree for a PR without modifying main checkout."""
+    from app.services.repo_onboarding import ensure_pr_worktree
+
+    out = ensure_pr_worktree(
+        db,
+        repo_id=repo_id,
+        pr_number=req.pr_number,
+        head_branch=req.head_branch,
+        head_sha=req.head_sha,
+    )
+    if not out.get("ok"):
+        raise HTTPException(400, detail=out)
+    return out

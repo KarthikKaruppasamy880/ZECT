@@ -73,10 +73,35 @@ def add_repo_to_project(project_id: int, repo_data: dict, db: Session = Depends(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Attach existing registered repo without duplication
+    if repo_data.get("repo_id"):
+        from app.services.repo_onboarding import attach_existing_repo
+
+        out = attach_existing_repo(db, project_id=project_id, repo_id=int(repo_data["repo_id"]))
+        if not out.get("ok"):
+            raise HTTPException(400, detail=out)
+        db.refresh(project)
+        return project
+
+    owner = repo_data.get("owner", "")
+    repo_name = repo_data.get("repo_name", "")
+    if owner and repo_name:
+        from app.services.repo_onboarding import find_existing_repo
+
+        existing = find_existing_repo(db, owner=owner, repo_name=repo_name)
+        if existing and existing.project_id == project_id:
+            return project
+        if existing:
+            existing.project_id = project_id
+            db.commit()
+            db.refresh(project)
+            return project
+
     repo = Repo(
         project_id=project_id,
-        owner=repo_data.get("owner", ""),
-        repo_name=repo_data.get("repo_name", ""),
+        owner=owner,
+        repo_name=repo_name,
         default_branch=repo_data.get("default_branch", "main"),
     )
     db.add(repo)

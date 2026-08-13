@@ -67,7 +67,7 @@ export const deleteProject = (id: number) =>
   request<void>(`/api/projects/${id}`, { method: "DELETE" });
 export const addProjectRepo = (
   projectId: number,
-  data: { owner: string; repo_name: string; default_branch?: string },
+  data: { owner?: string; repo_name?: string; default_branch?: string; repo_id?: number },
 ) =>
   request<Project>(`/api/projects/${projectId}/repos`, {
     method: "POST",
@@ -1705,15 +1705,96 @@ export const getRepoCloneStatus = (repoId: number) =>
   request<any>(`/api/repos/${repoId}/status`);
 export const getRepoBranches = (repoId: number) =>
   request<any>(`/api/repos/${repoId}/branches`);
-export const checkoutRepoBranch = (repoId: number, branch: string) =>
-  request<any>(`/api/repos/${repoId}/checkout`, {
+export class CheckoutBlockedError extends Error {
+  status: number;
+  detail: Record<string, unknown>;
+  constructor(status: number, detail: Record<string, unknown>) {
+    super(
+      typeof detail?.error === "string"
+        ? String(detail.error)
+        : "Checkout blocked",
+    );
+    this.name = "CheckoutBlockedError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+export const checkoutRepoBranch = async (
+  repoId: number,
+  branch: string,
+  dirtyAction: "require_clean" | "stash" | "force_discard" = "require_clean",
+) => {
+  const res = await apiFetch(`/api/repos/${repoId}/checkout`, {
     method: "POST",
-    body: JSON.stringify({ branch }),
+    body: JSON.stringify({ branch, dirty_action: dirtyAction }),
   });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail =
+      body && typeof body.detail === "object" && body.detail
+        ? (body.detail as Record<string, unknown>)
+        : { error: typeof body.detail === "string" ? body.detail : res.statusText };
+    throw new CheckoutBlockedError(res.status, detail);
+  }
+  return body;
+};
 export const deleteRepoClone = (repoId: number) =>
   request<any>(`/api/repos/${repoId}/clone`, { method: "DELETE" });
 export const getClonedRepos = () =>
   request<any[]>("/api/repos/cloned");
+
+export const registerLocalRepo = (projectId: number, localPath: string, role = "") =>
+  request<any>("/api/repos/register-local", {
+    method: "POST",
+    body: JSON.stringify({ project_id: projectId, local_path: localPath, role }),
+  });
+
+export const discoverLocalRepos = (root: string, maxDepth = 3) =>
+  request<{ ok: boolean; root: string; repos: any[]; count: number }>(
+    "/api/repos/discover",
+    { method: "POST", body: JSON.stringify({ root, max_depth: maxDepth }) },
+  );
+
+export const cloneRepoFromUrl = (
+  projectId: number,
+  gitUrl: string,
+  destination = "",
+  branch = "",
+) =>
+  request<any>("/api/repos/clone-url", {
+    method: "POST",
+    body: JSON.stringify({
+      project_id: projectId,
+      git_url: gitUrl,
+      destination,
+      branch,
+    }),
+  });
+
+export const getRepoIdentity = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/identity`);
+
+export const openPrWorktree = (
+  repoId: number,
+  prNumber: number,
+  headBranch: string,
+  headSha = "",
+) =>
+  request<any>(`/api/repos/${repoId}/pr-worktree`, {
+    method: "POST",
+    body: JSON.stringify({
+      pr_number: prNumber,
+      head_branch: headBranch,
+      head_sha: headSha,
+    }),
+  });
+
+export const attachProjectRepoById = (projectId: number, repoId: number) =>
+  request<Project>(`/api/projects/${projectId}/repos`, {
+    method: "POST",
+    body: JSON.stringify({ repo_id: repoId }),
+  });
 
 // Repo Browser
 export const getRepoTree = (repoId: number, path = "", depth = 3) =>

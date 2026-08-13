@@ -203,12 +203,12 @@ def test_desktop_packaging_honest_partial():
     assert d["packaging"]["classification"]["voicebox"] == "OPTIONAL"
     assert d["packaging"]["classification"]["presentation_provider"] == "OPTIONAL"
     if d["packaging"]["backend_runtime_present"]:
-        assert d["packaging"]["status"] == "PASS"
         assert d["packaging"]["backend_bundled"] is True
     else:
-        assert d["packaging"]["status"] == "PARTIAL"
         assert d["packaging"]["backend_bundled"] is False
         assert "backend_runtime_not_in_source_tree" in d["packaging"]["blockers"]
+    assert d["packaging"]["status"] == "PARTIAL"
+    assert "clean_machine_nsis_unproven" in d["packaging"]["blockers"]
 
 
 def test_service_lifecycle_exports_stop_and_single_instance_docs():

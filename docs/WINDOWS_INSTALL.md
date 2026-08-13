@@ -56,7 +56,7 @@ Artifacts land in `electron/dist-electron/`.
 
 Create `%APPDATA%\ZECT\config\.env` on the user machine (or Electron `userData/config/.env`):
 
-```
+```dotenv
 ZECT_USERNAME=you@company.com
 ZECT_PASSWORD=choose-locally
 ```

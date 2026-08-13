@@ -99,7 +99,7 @@ async function checkReadiness(opts = {}) {
     api: apiAlt,
     ui,
     manage_services: process.env.ZECT_MANAGE_SERVICES === "1" || Boolean(opts.packaged),
-    packaging_status: backendBundled ? "PASS" : launcher ? "PARTIAL" : "PARTIAL",
+    packaging_status: backendBundled ? "PARTIAL" : launcher ? "PARTIAL" : "PARTIAL",
     backend_bundled: backendBundled,
     backend_launcher_present: launcher,
     backend_runtime_present: runtime,

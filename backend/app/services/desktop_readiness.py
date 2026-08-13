@@ -51,12 +51,13 @@ def build_desktop_readiness() -> dict[str, Any]:
     launcher = _detect_backend_launcher(root)
     runtime = _detect_backend_runtime(root)
     backend_bundled = runtime
-    packaging_status = "PASS" if runtime else "PARTIAL"
+    # Runtime in the source/build tree is not clean-machine NSIS proof.
+    packaging_status = "PARTIAL"
     single_instance = _main_js_has_single_instance(main_js)
     blockers = []
     if not runtime:
         blockers.append("backend_runtime_not_in_source_tree")
-        blockers.append("clean_machine_nsis_unproven")
+    blockers.append("clean_machine_nsis_unproven")
     if not launcher:
         blockers.append("backend_launcher_missing")
     if not lifecycle_js.is_file():

@@ -30,8 +30,10 @@
 ## Proofs
 
 ```text
+cd backend
 pytest tests/fixes_and_phases/test_packaging_sidecar.py --noconftest
 pytest tests/fixes_and_phases/test_phase9_13_batch.py::test_desktop_packaging_honest_partial --noconftest
+cd ..
 node electron/service-lifecycle.node-test.js
 ```
 

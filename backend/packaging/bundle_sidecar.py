@@ -26,10 +26,10 @@ def _copy_app(src: Path, dest: Path) -> None:
             shutil.copytree(
                 item,
                 target,
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".env", "test_*.db"),
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".env", "*.db", "*.sqlite3"),
             )
         else:
-            if item.name in {".env", "test_zect.db", "e2e_zect.db"}:
+            if item.name in {".env"} or item.suffix in {".db", ".sqlite3"}:
                 continue
             shutil.copy2(item, target)
 
@@ -57,6 +57,10 @@ def main() -> int:
     print(f"copied backend sources -> {src_out}")
 
     if args.skip_venv:
+        return 0
+
+    if sys.platform != "win32":
+        print("Windows python-runtime is produced on win32 only; skipping venv on this host")
         return 0
 
     if runtime.exists():

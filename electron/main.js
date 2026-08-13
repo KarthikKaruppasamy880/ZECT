@@ -855,15 +855,33 @@ app.whenReady().then(async () => {
     console.log("[zect] userData", userData);
   }
 
-  // Optional managed probes — PARTIAL packaging (backend not bundled in NSIS).
+  // Packaged: auto-start bundled API sidecar into userData. Voicebox/Presenton optional.
   try {
+    const packaged = Boolean(app.isPackaged);
+    const resourcesPath = packaged ? process.resourcesPath : path.join(__dirname, "resources");
     const readiness = await serviceLifecycle.checkReadiness({
-      resourcesPath: app.isPackaged ? process.resourcesPath : null,
+      resourcesPath,
+      packaged,
     });
-    if (!readiness.api.ok && process.env.ZECT_MANAGE_SERVICES === "1") {
-      const repoRoot = app.isPackaged
-        ? path.join(process.resourcesPath, "..")
-        : path.join(__dirname, "..");
+    const shouldManage =
+      packaged ||
+      process.env.ZECT_MANAGE_SERVICES === "1" ||
+      process.env.ZECT_START_SIDECAR === "1";
+    if (!readiness.api.ok && shouldManage) {
+      const started = serviceLifecycle.startBackendSidecar({
+        resourcesPath,
+        userData,
+        packaged,
+      });
+      console.log("[zect] backend sidecar", JSON.stringify(started));
+      if (started.started) {
+        const waited = await serviceLifecycle.waitForApi(45000);
+        console.log("[zect] api wait", JSON.stringify(waited));
+      } else if (!started.started && packaged) {
+        console.warn("[zect] packaged backend sidecar unavailable", started.reason || "");
+      }
+    } else if (!readiness.api.ok && process.env.ZECT_MANAGE_SERVICES === "1") {
+      const repoRoot = packaged ? path.join(process.resourcesPath, "..") : path.join(__dirname, "..");
       const started = serviceLifecycle.tryStartLocalScript(repoRoot);
       console.log("[zect] manage services start", JSON.stringify(started));
     }

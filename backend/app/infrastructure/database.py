@@ -7,12 +7,25 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 # Load backend/.env before DATABASE_URL is read (matches main.py; works when importing database alone).
+# Packaged sidecar: skip installer .env; honor ZECT_USER_DATA sqlite path.
 _backend_root = Path(__file__).resolve().parents[1]
-load_dotenv(_backend_root / ".env")
+_packaged = (os.getenv("ZECT_PACKAGED") or "").strip().lower() in ("1", "true", "yes")
+_user_data = (os.getenv("ZECT_USER_DATA") or "").strip()
+if _packaged and _user_data:
+    user_env = Path(_user_data) / "config" / ".env"
+    if user_env.is_file():
+        load_dotenv(user_env, override=False)
+elif not _packaged:
+    load_dotenv(_backend_root / ".env")
 
 # Default to SQLite for zero-config local development.
 # Set DATABASE_URL in .env to use PostgreSQL in production.
-_default_db = "sqlite:///./zect.db"
+if _user_data:
+    data_dir = Path(_user_data) / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    _default_db = f"sqlite:///{(data_dir / 'zect.db').as_posix()}"
+else:
+    _default_db = "sqlite:///./zect.db"
 DATABASE_URL = os.getenv("DATABASE_URL", _default_db)
 # Ensure the psycopg (v3) driver prefix is present for PostgreSQL URLs
 if DATABASE_URL.startswith("postgresql://"):

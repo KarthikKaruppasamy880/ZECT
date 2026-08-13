@@ -12,6 +12,7 @@ import {
   Save,
   AlertCircle,
   Sparkles,
+  Code2,
   FolderOpen,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";

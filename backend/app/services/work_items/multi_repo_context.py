@@ -61,6 +61,11 @@ def repo_binding(db: Session, repository_id: int) -> dict[str, Any]:
     }
 
 
+def git_head_sha(local_path: str | None) -> str:
+    """Public alias for live git HEAD (no allowlist; used by evidence freshness)."""
+    return _head_sha(local_path)
+
+
 def _head_sha(local_path: str | None) -> str:
     if not local_path:
         return ""

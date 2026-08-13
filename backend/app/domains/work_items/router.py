@@ -154,6 +154,7 @@ class AgentIn(BaseModel):
     work_item_id: int
     goal: str = ""
     workspace: str = ""
+    deterministic: bool = False
 
 
 @developer_router.post("/ask")
@@ -224,7 +225,22 @@ def developer_start_agent(
         goal=body.goal,
         workspace=body.workspace,
         actor=getattr(user, "email", "") or "",
+        deterministic=body.deterministic,
     )
+
+
+@developer_router.get("/work-items/{work_item_id}/multi-repo-status")
+def developer_multi_repo_status(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.work_items.artifact_store import ArtifactStore
+    from app.services.work_items.multi_repo_agent import read_multi_repo_status
+
+    wi = wi_svc.get_work_item(db, work_item_id)
+    store = ArtifactStore(wi.id)
+    return read_multi_repo_status(store, work_item_id=wi.id, wi_status=wi.status or "")
 
 
 @developer_router.post("/agent/continue")

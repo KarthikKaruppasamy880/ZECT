@@ -31,6 +31,28 @@ class RequiresAuthentication(HTTPException):
         )
 
 
+def _resolve_pep563_annotations(func: Callable) -> None:
+    """Replace string annotations with live objects from the handler module.
+
+    FastAPI evaluates PEP 563 annotations using the wrapper's globals (this file),
+    which does not contain handler-local models (PlanRequest, etc.).
+    """
+    raw = getattr(func, "__annotations__", None)
+    if not raw:
+        return
+    ns = getattr(func, "__globals__", {}) or {}
+    resolved: dict = {}
+    for key, val in raw.items():
+        if isinstance(val, str):
+            try:
+                resolved[key] = eval(val, ns, ns)  # noqa: S307
+            except Exception:  # noqa: BLE001
+                resolved[key] = val
+        else:
+            resolved[key] = val
+    func.__annotations__ = resolved
+
+
 async def _call_maybe_async(func: Callable, *args, **kwargs):
     """Both @require_role and @require_authentication unconditionally did
     `return await func(*args, **kwargs)` — every single route handler either
@@ -63,6 +85,8 @@ def require_role(*allowed_roles: str):
     """
 
     def decorator(func: Callable) -> Callable:
+        _resolve_pep563_annotations(func)
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
             # Extract current_user from kwargs
@@ -101,6 +125,7 @@ def require_authentication(func: Callable) -> Callable:
         async def list_projects(current_user: CurrentUser = Depends(get_current_user)):
             ...
     """
+    _resolve_pep563_annotations(func)
 
     @wraps(func)
     async def wrapper(*args, **kwargs):

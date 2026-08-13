@@ -448,6 +448,33 @@ class MentrixDeveloperService:
                 raise HTTPException(status_code=409, detail="plan_not_approved")
         store = self._store(wi.id)
         record_checkpoint(store, checkpoint_type="op_start", operation_id="agent")
+        manifest = store.read_json("EXECUTION_MANIFEST.json", default={}) or {}
+        from app.services.work_items.multi_repo_agent import is_multi_repo_manifest, run_multi_repo_agent
+
+        if is_multi_repo_manifest(manifest):
+            wi.status = STATUS_EXECUTING
+            append_event(
+                self.db,
+                work_item_id=wi.id,
+                event_type="agent_started",
+                payload={"goal": (goal or store.read_plan()[:500] or wi.title)[:500], "actor": actor, "multi_repo": True},
+            )
+            self.db.commit()
+            use_det = deterministic or (os.getenv("ZECT_CODING_AGENT_DETERMINISTIC_SMOKE") or "").strip() in (
+                "1",
+                "true",
+                "yes",
+            )
+            agent_goal = goal or store.read_plan()[:1500] or wi.title
+            return run_multi_repo_agent(
+                self.db,
+                wi,
+                store,
+                goal=agent_goal,
+                actor=actor,
+                deterministic=use_det,
+            )
+
         ws = (workspace or wi.worktree_path or "").strip()
         if not ws:
             # default worktree under artifact store
@@ -603,11 +630,14 @@ class MentrixDeveloperService:
         wi.status = STATUS_VERIFYING
         self.db.commit()
         record_checkpoint(store, checkpoint_type="verification", operation_id="verify")
+        from app.services.work_items.multi_repo_agent import collect_current_heads
+
         result = self.verifier.verify(
             mandatory_operation_ids=mandatory_operation_ids,
             requirement_ids=requirement_ids,
             acceptance_ids=acceptance_ids,
             evidence=evidence,
+            current_heads=collect_current_heads(store),
         )
         store.write_json(
             "EVIDENCE.json",

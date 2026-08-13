@@ -24,6 +24,7 @@ import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/Works
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
+import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
@@ -565,6 +566,8 @@ export default function DeveloperWorkspace() {
           </span>
         </span>
       </div>
+
+      <DeveloperMultiRepoStatus workItemId={workItemId} projectId={activeProjectId} />
 
       <PhaseErrorBanner error={error} testId="workspace-error" density="compact" />
 

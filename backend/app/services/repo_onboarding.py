@@ -501,3 +501,118 @@ def ensure_pr_worktree(
         "main_branch": main_after.get("branch"),
         "main_unchanged": True,
     }
+
+
+def ensure_agent_worktree(
+    db: Session,
+    *,
+    repo_id: int,
+    work_item_id: int,
+    head_branch: str = "",
+    head_sha: str = "",
+    worktree_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Create or reuse an isolated AGENT worktree without switching the main checkout.
+
+    Prefers a sibling of the clone: ``{clone}-worktrees/wi-{work_item_id}``.
+    Callers may pass ``worktree_path`` (e.g. artifact ``store.root/worktrees/repo-{id}``)
+    which is still added via ``git worktree add`` from the clone HEAD SHA.
+    Dirty files on the main checkout are left untouched.
+    """
+    repo = db.query(Repo).filter(Repo.id == repo_id).first()
+    if not repo or not repo.local_path:
+        return {"ok": False, "error": "repo_not_cloned"}
+    try:
+        main = path_under_allowed_roots(repo.local_path)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)[:300]}
+
+    if worktree_path:
+        wt_path = Path(worktree_path)
+        wt_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        wt_root = main.parent / f"{main.name}-worktrees"
+        wt_root.mkdir(parents=True, exist_ok=True)
+        wt_path = wt_root / f"wi-{int(work_item_id)}"
+
+    main_before = inspect_git_repo(str(main))
+    _git(main, ["fetch", "--all"], timeout=90)
+    _git(main, ["worktree", "prune"], timeout=30)
+
+    if wt_path.exists() and (wt_path / ".git").exists():
+        info = inspect_git_repo(str(wt_path))
+        main_after = inspect_git_repo(str(main))
+        return {
+            "ok": True,
+            "reused": True,
+            "worktree_path": str(wt_path.resolve()),
+            "branch": info.get("branch"),
+            "head_sha": info.get("head_sha"),
+            "base_commit_sha": head_sha or main_before.get("head_sha") or "",
+            "work_item_id": work_item_id,
+            "repository_id": repo_id,
+            "main_path": str(main),
+            "main_branch": main_after.get("branch"),
+            "main_head_sha": main_after.get("head_sha"),
+            "main_unchanged": True,
+        }
+
+    resolve_order = [
+        x
+        for x in [
+            head_sha,
+            "HEAD",
+            head_branch,
+            f"origin/{head_branch}" if head_branch else "",
+        ]
+        if x
+    ]
+    start_sha = ""
+    for ref in resolve_order:
+        rev = _git(main, ["rev-parse", "--verify", ref])
+        if rev["exit_code"] == 0 and rev["stdout"]:
+            start_sha = rev["stdout"]
+            break
+    if not start_sha:
+        return {"ok": False, "error": f"cannot_resolve_ref:{'|'.join(resolve_order)}"}
+
+    wt_branch = f"zect-wi-{int(work_item_id)}-repo-{int(repo_id)}"
+    if wt_path.exists():
+        import shutil
+
+        shutil.rmtree(wt_path, ignore_errors=True)
+
+    add = _git(
+        main,
+        ["worktree", "add", "-B", wt_branch, str(wt_path), start_sha],
+        timeout=60,
+    )
+    if add["exit_code"] != 0:
+        if wt_path.exists():
+            import shutil
+
+            shutil.rmtree(wt_path, ignore_errors=True)
+        add = _git(
+            main,
+            ["worktree", "add", "--detach", str(wt_path), start_sha],
+            timeout=60,
+        )
+        if add["exit_code"] != 0:
+            return {"ok": False, "error": (add["stderr"] or add["stdout"] or "worktree_add_failed")[:500]}
+
+    info = inspect_git_repo(str(wt_path))
+    main_after = inspect_git_repo(str(main))
+    return {
+        "ok": True,
+        "reused": False,
+        "worktree_path": str(wt_path.resolve()),
+        "branch": info.get("branch") or wt_branch,
+        "head_sha": info.get("head_sha") or start_sha,
+        "base_commit_sha": start_sha,
+        "work_item_id": work_item_id,
+        "repository_id": repo_id,
+        "main_path": str(main),
+        "main_branch": main_after.get("branch"),
+        "main_head_sha": main_after.get("head_sha"),
+        "main_unchanged": main_after.get("head_sha") == main_before.get("head_sha"),
+    }

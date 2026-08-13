@@ -120,9 +120,24 @@ Smoke: real `/healthz` OK; headed Flows A–F PASS.
 | Live GitHub PR list for private repos | BLOCKED_EXTERNAL without token/network |
 | Automatic Lattice re-index after every checkout | PARTIAL — STALE/Not indexed signaled; user/agent re-index via existing PI |
 | LRR auto-bind from PR button | PARTIAL — workspace path set; LRR start still takes explicit `worktree_path` |
+| ASK/PLAN/AGENT cross-repo aggregate EvidenceVerifier | PARTIAL — multi-repo attach/switch LIVE_E2E proven; full cross-repo agent aggregate not claimed |
 
-## 9. Stop condition
+## 9. Multi-Repo LIVE_E2E (2026-08-13)
 
-STOP after this acceptance.  
-**Do not merge.**  
-Do not start Graphify / OCR / packaging / Ultra Review redesign / new agents / RAG.
+**Command:** `npx playwright test e2e/multi-repo-live.spec.ts --headed`
+
+**Result:** PASS — attach A/B/C disposable fixtures to one Project, UI repo count ≥2, switch selector to second repo with distinct identity; Developer route smoke.
+
+**Artifacts:** `frontend/test-results/multi-repo-live/`
+
+| Proof | Status |
+|---|---|
+| Project → Repo A+B+C attach | LIVE_E2E |
+| Select/switch repos | LIVE_E2E |
+| Independent branch labels visible | LIVE_E2E (fixture branches) |
+| Duplicate attach safe | API covered |
+| ASK/PLAN/AGENT multi-PR aggregate | PARTIAL (not fully headed in this tranche) |
+
+## 10. Stop condition
+
+STOP after multi-repo LIVE_E2E acceptance update. Remaining ASK/PLAN/AGENT aggregate stays PARTIAL until a dedicated agent tranche.

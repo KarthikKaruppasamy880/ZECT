@@ -72,6 +72,7 @@ type Lesson = {
   starter_code: string;
   skill_tags: string[];
   difficulty: string;
+  language?: string;
 };
 
 function errMsg(data: unknown, fallback: string): string {

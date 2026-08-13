@@ -118,3 +118,57 @@ def test_generate_payload_includes_template(monkeypatch, tmp_path):
     assert payload["n_slides"] == 8
     assert payload["content"] == "Q2 delivery brief"
     assert out.get("template_sent") == "modern"
+
+
+def test_generate_retries_on_502_then_succeeds(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRESENTON_BASE_URL", "http://127.0.0.1:5000")
+    monkeypatch.setenv("PRESENTON_GENERATE_RETRIES", "2")
+    monkeypatch.delenv("PRESENTON_USERNAME", raising=False)
+    monkeypatch.delenv("PRESENTON_PASSWORD", raising=False)
+    monkeypatch.delenv("PRESENTON_API_KEY", raising=False)
+    monkeypatch.setattr("app.services.presenton_client.default_save_dir", lambda: tmp_path)
+
+    fail = MagicMock()
+    fail.status_code = 502
+    fail.text = "cold"
+
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.json.return_value = {"path": "/static/deck.pptx", "presentation_id": "abc"}
+
+    file_res = MagicMock()
+    file_res.status_code = 200
+    file_res.content = b"PK-fake-pptx"
+
+    mock_client = MagicMock()
+    mock_client.__enter__.return_value = mock_client
+    mock_client.__exit__.return_value = False
+    mock_client.post.side_effect = [fail, ok]
+    mock_client.get.return_value = file_res
+
+    with patch("app.services.presenton_client.httpx.Client", return_value=mock_client):
+        with patch("time.sleep", return_value=None):
+            out = generate_presentation("brief", template="modern")
+
+    assert out["ok"] is True
+    assert out.get("retries") == 2
+    assert mock_client.post.call_count == 2
+
+
+def test_resolve_org_and_user_templates(monkeypatch):
+    from app.services.presenton_client import resolve_presenton_template_id
+
+    monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
+    org = resolve_presenton_template_id("org-standard")
+    assert org["template_id"] == "standard"
+    assert org["zinnia_verified"] is False
+
+    user = resolve_presenton_template_id("user-abc123")
+    assert user["template_id"] == "general"
+    assert user.get("blocked_external") is True
+
+    monkeypatch.setenv("ZINNIA_PRESENTON_TEMPLATE_ID", "zinnia-brand-master")
+    user2 = resolve_presenton_template_id("user-abc123")
+    assert user2["template_id"] == "zinnia-brand-master"
+    assert user2.get("blocked_external") is not True
+

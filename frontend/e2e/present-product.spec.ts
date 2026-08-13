@@ -79,10 +79,25 @@ test.describe("ZECT Present product", () => {
     const gen = page.getByTestId("present-deck-generate");
     await expect(gen).toBeVisible();
     let generateAttempted = false;
+    let templateSent: string | null = null;
+    let zinniaVerified: boolean | null = null;
+    let blockedExternal = false;
+    page.on("response", async (res) => {
+      if (!res.url().includes("/api/mentrix/presenton/generate")) return;
+      try {
+        const body = await res.json();
+        const detail = body?.detail && typeof body.detail === "object" ? body.detail : body;
+        if (detail?.template_sent) templateSent = String(detail.template_sent);
+        if (typeof detail?.zinnia_verified === "boolean") zinniaVerified = detail.zinnia_verified;
+        if (detail?.blocked_external) blockedExternal = true;
+      } catch {
+        /* ignore non-json */
+      }
+    });
     if (await gen.isEnabled()) {
       generateAttempted = true;
       await gen.click();
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(3500);
     }
     await expect(page.getByTestId("present-deck-notes")).toBeVisible();
     await expect(page.getByTestId("present-deck-analyze")).toBeVisible();
@@ -96,7 +111,11 @@ test.describe("ZECT Present product", () => {
           zinnia_visible: true,
           workspace: true,
           generate_attempted: generateAttempted,
+          template_sent: templateSent,
+          zinnia_verified: zinniaVerified,
+          blocked_external: blockedExternal,
           presenton_required_for_pptx: true,
+          note: "Full PPTX PASS requires Presenton + ZINNIA_PRESENTON_TEMPLATE_ID for zinnia_verified",
         },
         null,
         2,

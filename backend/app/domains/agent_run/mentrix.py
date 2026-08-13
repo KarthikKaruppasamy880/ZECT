@@ -1402,6 +1402,9 @@ class PresentonGenerateRequest(BaseModel):
     content: str
     n_slides: int = 6
     template: str = "general"
+    # UI gallery id (e.g. zinnia-exec) — preferred for honest zinnia_verified resolution
+    ui_template_choice: str = ""
+    custom_id: str = ""
     instructions: str = ""
     filename: str = ""
 
@@ -1417,17 +1420,25 @@ def presenton_status(_user: CurrentUser = Depends(get_current_user)):
     configured = presenton_configured()
     reachable = False
     hint = ""
+    blocked_external = False
+    block_code = ""
     if configured:
         listed = list_templates()
         reachable = bool(listed.get("reachable"))
         hint = str(listed.get("hint") or "")
+        blocked_external = bool(listed.get("blocked_external"))
+        block_code = str(listed.get("block_code") or "")
     else:
         hint = "Set PRESENTON_BASE_URL (e.g. http://127.0.0.1:5000) and run Presenton Docker"
+        blocked_external = True
+        block_code = "presenton_not_configured"
     return {
         "configured": configured,
         "reachable": reachable,
         "base_url": presenton_base_url() or "",
         "hint": hint,
+        "blocked_external": blocked_external,
+        "block_code": block_code,
     }
 
 
@@ -1447,9 +1458,11 @@ def presenton_generate(
     """Proxy Presenton generate → save PPTX under Documents/Desktop for Present Deck."""
     from app.services.presenton_client import generate_presentation, resolve_presenton_template_id
 
-    resolved = resolve_presenton_template_id(req.template, custom_id=None)
-    # Client may already send the resolved Presenton id; still echo evidence fields.
-    template_id = (req.template or resolved["template_id"] or "general").strip() or "general"
+    ui_choice = (req.ui_template_choice or req.template or "general").strip() or "general"
+    custom = (req.custom_id or "").strip() or None
+    resolved = resolve_presenton_template_id(ui_choice, custom_id=custom)
+    # Always send the resolved Presenton wire id — not a pre-mapped client guess alone.
+    template_id = str(resolved.get("template_id") or "general").strip() or "general"
     out = generate_presentation(
         req.content,
         n_slides=req.n_slides,
@@ -1457,23 +1470,38 @@ def presenton_generate(
         instructions=req.instructions or None,
         filename=req.filename or None,
     )
-    if not out.get("ok"):
-        raise HTTPException(
-            status_code=502,
-            detail=out.get("detail") or out.get("hint") or out.get("error") or "presenton_failed",
-        )
+    out["ui_template_choice"] = resolved.get("ui_choice") or ui_choice
     out["template_sent"] = out.get("template_sent") or template_id
-    out["ui_template_choice"] = resolved.get("ui_choice")
+    out["resolve_note"] = resolved.get("note")
+    zinnia_ui = str(out["ui_template_choice"]).startswith("zinnia-")
     out["zinnia_verified"] = bool(resolved.get("zinnia_verified")) and (
         str(out["template_sent"]) == str(resolved.get("template_id"))
-        or not str(resolved.get("ui_choice") or "").startswith("zinnia-")
     )
-    # Honest: if UI chose zinnia-* but wire id is generic modern/general without env master → not verified
-    if str(req.template or "").startswith("zinnia-") and str(out["template_sent"]) in ("modern", "general"):
+    if zinnia_ui and str(out["template_sent"]) in ("modern", "general"):
         out["zinnia_verified"] = False
         out["zinnia_note"] = (
             "Zinnia UI preset only — set ZINNIA_PRESENTON_TEMPLATE_ID or Custom template id "
             "to the Presenton master for a Zinnia PASS"
+        )
+    elif zinnia_ui and out["zinnia_verified"]:
+        out["zinnia_note"] = f"Zinnia verified via {resolved.get('note')}"
+
+    if not out.get("ok"):
+        # Structured failure — keep template_sent / blocked_external for UI honesty
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": out.get("error") or "presenton_failed",
+                "hint": out.get("hint") or "",
+                "detail": out.get("detail") or "",
+                "template_sent": out.get("template_sent"),
+                "ui_template_choice": out.get("ui_template_choice"),
+                "zinnia_verified": out.get("zinnia_verified"),
+                "zinnia_note": out.get("zinnia_note"),
+                "blocked_external": bool(out.get("blocked_external")),
+                "block_code": out.get("block_code") or out.get("error") or "",
+                "retries": out.get("retries"),
+            },
         )
     return out
 

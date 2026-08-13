@@ -77,13 +77,40 @@ def list_builtin_zinnia() -> list[dict[str, Any]]:
     ]
 
 
+def list_org_masters() -> list[dict[str, Any]]:
+    """Org-scoped masters — distinct from Zinnia prompt presets (no silent clone)."""
+    import os
+
+    master = (os.getenv("ZINNIA_PRESENTON_TEMPLATE_ID") or "").strip()
+    rows = [
+        {
+            "id": "org-standard",
+            "name": "Org — Standard brief",
+            "scope": "ORG",
+            "kind": "org_master",
+            "preview": "Organization-standard deck shell (maps via Presenton when configured).",
+            "presenton_template_id": master or None,
+        },
+        {
+            "id": "org-delivery",
+            "name": "Org — Delivery review",
+            "scope": "ORG",
+            "kind": "org_master",
+            "preview": "Delivery health for leadership forums.",
+            "presenton_template_id": master or None,
+        },
+    ]
+    return rows
+
+
 def list_templates(user_id: str | int) -> dict[str, Any]:
     mine = _load(user_id)
     return {
         "ok": True,
         "zinnia": list_builtin_zinnia(),
-        "organization": list_builtin_zinnia(),
+        "organization": list_org_masters(),
         "my_templates": mine,
+        "template_root": str(_root()),
     }
 
 

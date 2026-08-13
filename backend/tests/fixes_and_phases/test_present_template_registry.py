@@ -15,7 +15,11 @@ def test_list_includes_zinnia(tmp_path, monkeypatch):
     assert out["ok"] is True
     ids = {t["id"] for t in out["zinnia"]}
     assert "zinnia-exec" in ids
+    org_ids = {t["id"] for t in out["organization"]}
+    assert "org-standard" in org_ids
+    assert org_ids.isdisjoint(ids)
     assert out["my_templates"] == []
+    assert "template_root" in out
 
 
 def test_register_and_preview_user_pptx(tmp_path, monkeypatch):

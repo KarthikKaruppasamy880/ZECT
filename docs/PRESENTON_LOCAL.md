@@ -32,11 +32,12 @@ PRESENTON_USERNAME=zect-presenton
 PRESENTON_PASSWORD=change-me-local
 # Optional API key instead of username/password:
 PRESENTON_API_KEY=
-# Optional real brand master id for Zinnia presets (UI alone is not a Zinnia PASS):
+# Admin bootstrap only — seeds the ZECT registry once for canonical zinnia-executive-v1.
+# Not the normal-user path. Users resolve templates via the ZECT registry mapping.
 # ZINNIA_PRESENTON_TEMPLATE_ID=your-presenton-master-id
 ```
 
-Restart the ZECT backend. Integrations → Zoom + Presenton card shows readiness. Companion → Voice → Present Deck → pick **Template** + **Slides** → **Generate deck**.
+Restart the ZECT backend. Integrations → Zoom + Presenton card shows readiness. Companion → Voice → Present Deck → pick **Template** + **Slides** → **Generate deck**. Product Present (`/present`) defaults to canonical **`zinnia-executive-v1`**.
 
 ## Templates
 
@@ -53,9 +54,13 @@ When Presenton is reachable, ZECT also loads remote templates via `GET /api/v1/p
 
 ### Custom masters (Zinnia / team)
 
-1. Upload masters in the Presenton UI (“bring your design”).
-2. Note the template id Presenton assigns.
-3. In Present Deck → Template → **Custom template id…** → paste that id → Generate.
+Canonical ZECT id: **`zinnia-executive-v1`** (aliases `zinnia-exec`, `zinnia-executive`). Delivery/risk use `zinnia-delivery-v1` / `zinnia-risk-v1`.
+
+`ZINNIA_PRESENTON_TEMPLATE_ID` is **admin seed into the ZECT registry only** (executive-v1). After seed, `.zect/present-templates/canonical-mapping.json` (or `ZECT_PRESENT_TEMPLATE_ROOT`) is the source of truth. Normal users never read the env var; unmapped Zinnia cards stay `TEMPLATE_NOT_READY` / `zinnia_verified=false`.
+
+1. Upload a real master in Presenton (“bring your design”) and note the provider template id.
+2. Admin: `POST /api/mentrix/presentation/templates/mapping` with `zect_id=zinnia-executive-v1` and that provider id (or set the env once so ZECT copies it into the registry).
+3. Optional: Present Deck → Template → **Custom template id…** for a one-off generate. Do not treat Presenton built-ins (`modern` / `general` / `standard` / `swift`) as a Zinnia PASS.
 
 ## Present Deck after generate
 

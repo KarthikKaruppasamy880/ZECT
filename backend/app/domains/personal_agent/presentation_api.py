@@ -45,6 +45,16 @@ class PreviewIn(BaseModel):
     template_id: str
 
 
+class MappingIn(BaseModel):
+    zect_id: str
+    provider_template_id: str
+
+
+class BindUploadIn(BaseModel):
+    template_id: str
+    provider_template_id: str
+
+
 @router.get("/audiences")
 @require_authentication
 def audiences(current_user: CurrentUser = Depends(get_current_user)):
@@ -83,14 +93,14 @@ def verify_claim_endpoint(body: VerifyClaimIn, current_user: CurrentUser = Depen
 @router.get("/templates")
 @require_authentication
 def presentation_templates(current_user: CurrentUser = Depends(get_current_user)):
-    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
     return tmpl.list_templates(uid)
 
 
 @router.post("/templates/preview")
 @require_authentication
 def presentation_template_preview(body: PreviewIn, current_user: CurrentUser = Depends(get_current_user)):
-    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
     return tmpl.preview_template(uid, body.template_id)
 
 
@@ -99,7 +109,33 @@ def presentation_template_preview(body: PreviewIn, current_user: CurrentUser = D
 async def presentation_template_upload(
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
+    scope: Optional[str] = Form("USER"),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    uid = getattr(current_user, "id", None) or getattr(current_user, "username", "anon")
-    return await tmpl.register_user_pptx(uid, file, name=name)
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
+    want_org = (scope or "USER").strip().upper() in {"ORG", "ORGANIZATION", "ORG_SHARED"}
+    if want_org and (current_user.role or "").lower() != "admin":
+        return {"ok": False, "error": "org_scope_requires_admin"}
+    return await tmpl.register_user_pptx(uid, file, name=name, scope=scope or "USER")
+
+
+@router.post("/templates/mapping")
+@require_authentication
+def presentation_template_mapping(body: MappingIn, current_user: CurrentUser = Depends(get_current_user)):
+    """Admin/setup: bind a canonical ZECT template id to a real provider master id."""
+    if (current_user.role or "").lower() != "admin":
+        return {"ok": False, "error": "admin_required"}
+    actor = getattr(current_user, "email", None) or getattr(current_user, "username", "") or ""
+    return tmpl.register_provider_mapping(
+        body.zect_id,
+        body.provider_template_id,
+        actor=str(actor),
+        source="admin",
+    )
+
+
+@router.post("/templates/bind")
+@require_authentication
+def presentation_template_bind(body: BindUploadIn, current_user: CurrentUser = Depends(get_current_user)):
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
+    return tmpl.bind_uploaded_template_provider(uid, body.template_id, body.provider_template_id)

@@ -583,9 +583,17 @@ export const mentrixCompanionIntegrations = () =>
     slack_channel?: string;
   }>("/api/mentrix/companion/integrations");
 export const mentrixPresentonStatus = () =>
-  request<{ configured: boolean; reachable?: boolean; base_url: string; hint?: string }>(
-    "/api/mentrix/presenton/status",
-  );
+  request<{
+    configured: boolean;
+    reachable?: boolean;
+    base_url: string;
+    hint?: string;
+    lifecycle?: string;
+    zinnia_ready?: boolean;
+    canonical_template_id?: string;
+    blocked_external?: boolean;
+    block_code?: string;
+  }>("/api/mentrix/presenton/status");
 export type PresentonTemplate = { id: string; name: string };
 export const mentrixPresentonTemplates = () =>
   request<{
@@ -615,6 +623,9 @@ export const mentrixPresentonGenerate = (data: {
     zinnia_verified?: boolean;
     zinnia_note?: string;
     resolve_note?: string;
+    lifecycle?: string;
+    canonical_id?: string;
+    mapping_source?: string;
     blocked_external?: boolean;
     presenton_request?: { template?: string; n_slides?: number };
   }>(
@@ -676,6 +687,9 @@ export const mentrixPresentationTemplates = () =>
     zinnia: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
     organization: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
     my_templates: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
+    lifecycle?: string;
+    mappings_ready?: Record<string, boolean>;
+    canonical_ids?: string[];
   }>("/api/mentrix/presentation/templates");
 
 export const mentrixPresentationTemplatePreview = (template_id: string) =>
@@ -686,15 +700,23 @@ export const mentrixPresentationTemplatePreview = (template_id: string) =>
     preview?: string;
     error?: string;
     provider_uuid_hidden?: boolean;
+    mapped?: boolean;
+    lifecycle?: string;
+    canonical_id?: string;
   }>("/api/mentrix/presentation/templates/preview", {
     method: "POST",
     body: JSON.stringify({ template_id }),
   });
 
-export async function mentrixPresentationTemplateUpload(file: File, name?: string) {
+export async function mentrixPresentationTemplateUpload(
+  file: File,
+  name?: string,
+  scope: "USER" | "ORG" = "USER",
+) {
   const form = new FormData();
   form.append("file", file);
   if (name) form.append("name", name);
+  form.append("scope", scope);
   const token =
     typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const res = await fetch(`${API}/api/mentrix/presentation/templates/upload`, {
@@ -704,10 +726,16 @@ export async function mentrixPresentationTemplateUpload(file: File, name?: strin
   });
   return (await res.json()) as {
     ok: boolean;
-    template?: { id: string; name: string; preview?: string };
+    template?: { id: string; name: string; preview?: string; scope?: string };
     error?: string;
   };
 }
+
+export const mentrixPresentationTemplateMapping = (zect_id: string, provider_template_id: string) =>
+  request<{ ok: boolean; zect_id?: string; mapping?: Record<string, unknown>; error?: string }>(
+    "/api/mentrix/presentation/templates/mapping",
+    { method: "POST", body: JSON.stringify({ zect_id, provider_template_id }) },
+  );
 
 /** Upload .pptx → slide text + speaker notes (browser Present narration). */
 export const mentrixParsePptx = async (

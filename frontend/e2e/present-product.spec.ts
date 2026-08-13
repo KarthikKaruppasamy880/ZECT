@@ -55,17 +55,26 @@ test.describe("ZECT Present product", () => {
     await page.goto("/present");
     await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("link", { name: "Present" })).toBeVisible();
-    await expect(page.getByTestId("zect-present-template-zinnia-exec")).toBeVisible();
+    await expect(page.getByTestId("zect-present-template-zinnia-executive-v1")).toBeVisible();
     await expect(page.getByTestId("zect-present-upload-template")).toBeAttached();
+    await expect(page.getByTestId("zect-present-upload-org-scope")).toBeAttached();
     await page.screenshot({ path: path.join(ART, "01-gallery.png") });
 
-    await page.getByTestId("zect-present-template-zinnia-exec").click();
+    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
+    await expect(page.getByTestId("present-lifecycle-state")).toBeVisible();
     await expect(page.getByTestId("zect-present-template-preview")).toBeVisible();
+
+    await page.getByTestId("zect-present-upload-template").setInputFiles({
+      name: "tiny.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      buffer: Buffer.from("PK\x03\x04fake-pptx"),
+    });
+    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
     await page.getByTestId("zect-present-continue-generate").click();
     await expect(page.getByTestId("zect-present-workspace")).toBeVisible();
-    await expect(page.getByTestId("zect-present-selected")).toContainText("zinnia-exec");
+    await expect(page.getByTestId("zect-present-selected")).toContainText("zinnia-executive-v1");
     await expect(page.getByTestId("present-deck-panel")).toBeVisible();
-    await expect(page.getByTestId("present-deck-template")).toHaveValue("zinnia-exec");
+    await expect(page.getByTestId("present-deck-template")).toHaveValue("zinnia-executive-v1");
 
     await page.getByTestId("present-deck-prompt").fill(
       "Zinnia executive brief: Q3 delivery status, top risks, decisions needed.",
@@ -115,7 +124,7 @@ test.describe("ZECT Present product", () => {
           zinnia_verified: zinniaVerified,
           blocked_external: blockedExternal,
           presenton_required_for_pptx: true,
-          note: "Full PPTX PASS requires Presenton + ZINNIA_PRESENTON_TEMPLATE_ID for zinnia_verified",
+          note: "PPTX PASS requires Presenton + registry mapping, not env",
         },
         null,
         2,

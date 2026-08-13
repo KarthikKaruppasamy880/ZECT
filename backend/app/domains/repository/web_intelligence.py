@@ -1,7 +1,5 @@
 """ZECT Web Intelligence API — attach/fetch/retrieve external content with provenance."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Optional

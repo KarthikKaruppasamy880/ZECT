@@ -1,6 +1,7 @@
 // Prefer 127.0.0.1 — Electron/Windows can hang on localhost → IPv6 (::1)
-// Local Mentrix TTS-fixed stack often runs on :8020 when :8000 is occupied by a stale process.
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8020";
+// Canonical packaged/default API port is :8000. Dev stacks may override via VITE_API_URL
+// (e.g. scripts/start-local.ps1 writes :8020 into frontend/.env.local).
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 /** Bearer + JSON headers for authenticated API calls. */
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {

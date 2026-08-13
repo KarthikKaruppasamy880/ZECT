@@ -96,6 +96,11 @@ function tryStartLocalScript(repoRoot) {
       { detached: false, stdio: "ignore", windowsHide: true },
     );
     managedChildren.push(child);
+    child.on("error", (err) => {
+      const i = managedChildren.indexOf(child);
+      if (i >= 0) managedChildren.splice(i, 1);
+      console.warn("[zect] managed service launch failed", err && err.message ? err.message : err);
+    });
     child.on("exit", () => {
       const i = managedChildren.indexOf(child);
       if (i >= 0) managedChildren.splice(i, 1);

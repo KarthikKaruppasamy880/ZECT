@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -290,6 +291,39 @@ def resolve_presenton_template_id(choice: str | None, *, custom_id: str | None =
             "note": "zinnia_prompt_preset_only_maps_to_modern_not_a_zinnia_master_PASS",
         }
 
+    if raw.startswith("org-"):
+        if custom:
+            return {
+                "template_id": custom,
+                "ui_choice": raw,
+                "zinnia_verified": False,
+                "note": "org_with_custom_master",
+            }
+        if zinnia_master:
+            return {
+                "template_id": zinnia_master,
+                "ui_choice": raw,
+                "zinnia_verified": False,
+                "note": "org_uses_env_master",
+            }
+        return {
+            "template_id": "standard",
+            "ui_choice": raw,
+            "zinnia_verified": False,
+            "note": "org_preset_maps_to_standard_without_master",
+        }
+
+    if raw.startswith("user-"):
+        # Local registry PPTX is not a Presenton id until uploaded to Presenton.
+        tid = custom or zinnia_master or "general"
+        return {
+            "template_id": tid,
+            "ui_choice": raw,
+            "zinnia_verified": False,
+            "note": "user_pptx_local_only_needs_presenton_master_or_custom_id",
+            "blocked_external": not bool(custom or zinnia_master),
+        }
+
     return {
         "template_id": raw,
         "ui_choice": raw,
@@ -306,7 +340,10 @@ def generate_presentation(
     instructions: str | None = None,
     filename: str | None = None,
 ) -> dict[str, Any]:
-    """Call Presenton generate API and download PPTX into Documents/Desktop."""
+    """Call Presenton generate API and download PPTX into Documents/Desktop.
+
+    Bounded cold-start retries on ConnectError / 502 / ReadTimeout (PRESENTON_GENERATE_RETRIES, default 2).
+    """
     base = presenton_base_url()
     if not base:
         return {
@@ -314,6 +351,7 @@ def generate_presentation(
             "error": "presenton_not_configured",
             "hint": "Set PRESENTON_BASE_URL (e.g. http://127.0.0.1:5000) and run Presenton Docker",
             "blocked_external": True,
+            "block_code": "presenton_not_configured",
         }
     prompt = (content or "").strip()
     if not prompt:
@@ -332,75 +370,130 @@ def generate_presentation(
     template_sent = str(payload["template"])
     url = f"{base}/api/v1/ppt/presentation/generate"
     try:
-        kwargs = _client_kwargs()
-        # Presenton LLM generate + export is often >3m on first run
-        kwargs["timeout"] = float(os.getenv("PRESENTON_GENERATE_TIMEOUT", "600") or "600")
-        with httpx.Client(**kwargs) as client:
-            headers = {"Content-Type": "application/json", **_session_headers(client)}
-            res = client.post(url, json=payload, headers=headers)
-            if res.status_code in (401, 403, 428):
-                return {
-                    "ok": False,
-                    "error": "presenton_auth_or_setup",
-                    "status": res.status_code,
-                    "detail": (res.text or "")[:800],
-                    "template_sent": template_sent,
-                    "blocked_external": True,
-                    "hint": "Presenton auth/setup required — set PRESENTON_USERNAME/PASSWORD and complete admin login",
-                }
-            if res.status_code >= 400:
-                return {
-                    "ok": False,
-                    "error": "presenton_generate_failed",
-                    "status": res.status_code,
-                    "detail": (res.text or "")[:800],
-                    "template_sent": template_sent,
-                }
-            data = res.json()
-            rel = data.get("path") or data.get("edit_path") or ""
-            if not rel:
-                return {
-                    "ok": False,
-                    "error": "presenton_missing_path",
-                    "response": data,
-                    "template_sent": template_sent,
-                }
+        max_attempts = max(1, min(int(os.getenv("PRESENTON_GENERATE_RETRIES", "2") or "2"), 4))
+    except ValueError:
+        max_attempts = 2
+    last_err: dict[str, Any] | None = None
 
-            download_url = rel if str(rel).startswith("http") else urljoin(base + "/", str(rel).lstrip("/"))
-            file_res = client.get(download_url, headers=_session_headers(client), follow_redirects=True)
-            if file_res.status_code >= 400 or not file_res.content:
-                return {
-                    "ok": False,
-                    "error": "presenton_download_failed",
-                    "status": file_res.status_code,
-                    "url": download_url,
-                    "template_sent": template_sent,
-                }
+    for attempt in range(1, max_attempts + 1):
+        try:
+            kwargs = _client_kwargs()
+            # Presenton LLM generate + export is often >3m on first run
+            kwargs["timeout"] = float(os.getenv("PRESENTON_GENERATE_TIMEOUT", "600") or "600")
+            with httpx.Client(**kwargs) as client:
+                headers = {"Content-Type": "application/json", **_session_headers(client)}
+                res = client.post(url, json=payload, headers=headers)
+                if res.status_code in (401, 403, 428):
+                    return {
+                        "ok": False,
+                        "error": "presenton_auth_or_setup",
+                        "status": res.status_code,
+                        "detail": (res.text or "")[:800],
+                        "template_sent": template_sent,
+                        "blocked_external": True,
+                        "block_code": "presenton_auth_or_setup",
+                        "hint": "Presenton auth/setup required — set PRESENTON_USERNAME/PASSWORD and complete admin login",
+                        "retries": attempt,
+                    }
+                if res.status_code in (502, 503, 504) and attempt < max_attempts:
+                    last_err = {
+                        "ok": False,
+                        "error": "presenton_generate_failed",
+                        "status": res.status_code,
+                        "detail": (res.text or "")[:800],
+                        "template_sent": template_sent,
+                        "blocked_external": True,
+                        "block_code": "presenton_cold_start",
+                        "retries": attempt,
+                    }
+                    time.sleep(min(2.0 * attempt, 6.0))
+                    continue
+                if res.status_code >= 400:
+                    return {
+                        "ok": False,
+                        "error": "presenton_generate_failed",
+                        "status": res.status_code,
+                        "detail": (res.text or "")[:800],
+                        "template_sent": template_sent,
+                        "blocked_external": res.status_code >= 500,
+                        "block_code": "presenton_generate_failed",
+                        "retries": attempt,
+                    }
+                data = res.json()
+                rel = data.get("path") or data.get("edit_path") or ""
+                if not rel:
+                    return {
+                        "ok": False,
+                        "error": "presenton_missing_path",
+                        "response": data,
+                        "template_sent": template_sent,
+                        "retries": attempt,
+                    }
 
-            out_name = _safe_filename(filename or Path(str(rel)).name or "mentrix-deck.pptx")
-            out_path = default_save_dir() / out_name
-            out_path.write_bytes(file_res.content)
-            return {
-                "ok": True,
-                "path": str(out_path.resolve()),
-                "presentation_id": data.get("presentation_id"),
-                "presenton_path": rel,
-                "bytes": len(file_res.content),
+                download_url = rel if str(rel).startswith("http") else urljoin(base + "/", str(rel).lstrip("/"))
+                file_res = client.get(download_url, headers=_session_headers(client), follow_redirects=True)
+                if file_res.status_code >= 400 or not file_res.content:
+                    return {
+                        "ok": False,
+                        "error": "presenton_download_failed",
+                        "status": file_res.status_code,
+                        "url": download_url,
+                        "template_sent": template_sent,
+                        "retries": attempt,
+                    }
+
+                out_name = _safe_filename(filename or Path(str(rel)).name or "mentrix-deck.pptx")
+                out_path = default_save_dir() / out_name
+                out_path.write_bytes(file_res.content)
+                return {
+                    "ok": True,
+                    "path": str(out_path.resolve()),
+                    "presentation_id": data.get("presentation_id"),
+                    "presenton_path": rel,
+                    "bytes": len(file_res.content),
+                    "template_sent": template_sent,
+                    "presenton_request": {"template": template_sent, "n_slides": payload["n_slides"]},
+                    "retries": attempt,
+                }
+        except httpx.ConnectError:
+            last_err = {
+                "ok": False,
+                "error": "presenton_unreachable",
+                "hint": f"Cannot reach {base} — start Presenton Docker or fix PRESENTON_BASE_URL",
+                "blocked_external": True,
+                "block_code": "presenton_unreachable",
                 "template_sent": template_sent,
-                "presenton_request": {"template": template_sent, "n_slides": payload["n_slides"]},
+                "retries": attempt,
             }
-    except httpx.ConnectError:
-        return {
-            "ok": False,
-            "error": "presenton_unreachable",
-            "hint": f"Cannot reach {base} — start Presenton Docker or fix PRESENTON_BASE_URL",
-            "blocked_external": True,
-            "template_sent": template_sent,
-        }
-    except Exception as exc:  # noqa: BLE001
-        return {
-            "ok": False,
-            "error": "presenton_error",
-            "detail": str(exc)[:500],
-            "template_sent": template_sent,
-        }
+            if attempt < max_attempts:
+                time.sleep(min(1.5 * attempt, 4.0))
+                continue
+            return last_err
+        except httpx.ReadTimeout:
+            last_err = {
+                "ok": False,
+                "error": "presenton_timeout",
+                "hint": "Presenton generate timed out — raise PRESENTON_GENERATE_TIMEOUT or retry when warm",
+                "blocked_external": True,
+                "block_code": "presenton_timeout",
+                "template_sent": template_sent,
+                "retries": attempt,
+            }
+            if attempt < max_attempts:
+                continue
+            return last_err
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error": "presenton_error",
+                "detail": str(exc)[:500],
+                "template_sent": template_sent,
+                "retries": attempt,
+            }
+
+    return last_err or {
+        "ok": False,
+        "error": "presenton_failed",
+        "template_sent": template_sent,
+        "blocked_external": True,
+    }

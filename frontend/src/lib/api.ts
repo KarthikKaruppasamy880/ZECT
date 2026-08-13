@@ -27,6 +27,19 @@ export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const detail = err.detail;
+    if (detail && typeof detail === "object") {
+      const msg =
+        detail.hint ||
+        detail.error ||
+        detail.message ||
+        detail.detail ||
+        res.statusText;
+      const e = new Error(typeof msg === "string" ? msg : res.statusText) as Error & {
+        detail?: unknown;
+      };
+      e.detail = detail;
+      throw e;
+    }
     throw new Error(typeof detail === "string" ? detail : detail?.message || res.statusText);
   }
   if (res.status === 204) return undefined as T;
@@ -587,6 +600,8 @@ export const mentrixPresentonGenerate = (data: {
   content: string;
   n_slides?: number;
   template?: string;
+  ui_template_choice?: string;
+  custom_id?: string;
   instructions?: string;
   filename?: string;
 }) =>
@@ -596,8 +611,11 @@ export const mentrixPresentonGenerate = (data: {
     bytes?: number;
     presentation_id?: string;
     template_sent?: string;
+    ui_template_choice?: string;
     zinnia_verified?: boolean;
     zinnia_note?: string;
+    resolve_note?: string;
+    blocked_external?: boolean;
     presenton_request?: { template?: string; n_slides?: number };
   }>(
     "/api/mentrix/presenton/generate",

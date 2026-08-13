@@ -314,13 +314,8 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
       return customTemplateId.trim() || zinniaMasterId || "general";
     }
-    const raw = (templateChoice || "general").trim() || "general";
-    // Zinnia presets: use env master or custom id — never claim Zinnia PASS when silently mapping to modern.
-    if (raw.startsWith("zinnia-")) {
-      const master = customTemplateId.trim() || zinniaMasterId;
-      return master || "modern";
-    }
-    return raw;
+    // Send UI gallery id (zinnia-*/org-*/user-*) to API for honest resolve + zinnia_verified.
+    return (templateChoice || "general").trim() || "general";
   };
 
   const persistTemplateChoice = (value: string) => {
@@ -435,6 +430,8 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         content: adapted,
         n_slides: slidesHint,
         template,
+        ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
+        custom_id: customTemplateId.trim() || undefined,
         filename: "mentrix-deck.pptx",
       });
       setFlowBApproved(false);
@@ -455,7 +452,19 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         setStatus("Presenton returned no path — check PRESENTON_BASE_URL and that Presenton Docker is running.");
       }
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Generate deck failed");
+      const detail = (e as Error & { detail?: Record<string, unknown> })?.detail;
+      if (detail && typeof detail === "object") {
+        const sent = String(detail.template_sent || "");
+        if (sent) setLastTemplateSent(sent);
+        const blocked = detail.blocked_external ? " [BLOCKED_EXTERNAL]" : "";
+        const zinnia =
+          detail.zinnia_verified === false && String(detail.ui_template_choice || "").startsWith("zinnia-")
+            ? ` zinnia_verified=false template_sent=${sent || "?"}.`
+            : "";
+        setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}`);
+      } else {
+        setStatus(e instanceof Error ? e.message : "Generate deck failed");
+      }
     } finally {
       setBusy(false);
     }

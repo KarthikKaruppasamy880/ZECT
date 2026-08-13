@@ -9,6 +9,10 @@ declare global {
   interface Window {
     zectDesktop?: {
       isDesktopApp?: boolean;
+      selectDirectory?: (opts?: {
+        title?: string;
+        defaultPath?: string;
+      }) => Promise<{ ok?: boolean; canceled?: boolean; path?: string; error?: string }>;
       launcher?: {
         getShortcutStatus?: () => Promise<{
           ok?: boolean;

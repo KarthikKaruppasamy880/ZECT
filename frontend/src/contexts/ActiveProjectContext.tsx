@@ -110,21 +110,37 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
     refresh();
   }, [refresh]);
 
-  // Fetch branches when active repo changes
+  // Fetch branches when active repo changes — never keep another repo's branch list
   useEffect(() => {
-    if (activeRepoId) {
-      getRepoBranches(activeRepoId)
-        .then((data) => {
-          const all = [...(data.local || []), ...(data.remote || [])];
-          setBranches([...new Set(all)]);
-          if (data.current && !activeBranch) {
-            setActiveBranch(data.current);
-          }
-        })
-        .catch(() => setBranches([]));
-    } else {
+    let cancelled = false;
+    if (!activeRepoId) {
       setBranches([]);
+      return;
     }
+    setBranches([]);
+    getRepoBranches(activeRepoId)
+      .then((data) => {
+        if (cancelled) return;
+        const all = [...(data.local || []), ...(data.remote || [])].filter(Boolean);
+        const unique = [...new Set(all)];
+        setBranches(unique);
+        const current = data.current || null;
+        // Always align displayed branch to THIS repo's HEAD (drop stale Mentrix/etc branch names)
+        setActiveBranch((prev) => {
+          if (current && unique.includes(current)) return current;
+          if (prev && unique.includes(prev)) return prev;
+          return current || unique[0] || null;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBranches([]);
+          setActiveBranch(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeRepoId]);
 
   // Persist to localStorage
@@ -133,15 +149,19 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
   }, [activeProjectId, activeRepoId, activeBranch]);
 
   const setActiveProject = useCallback((id: number | null) => {
-    setActiveProjectId(id);
-    // Reset repo when project changes
-    setActiveRepoId(null);
-    setActiveBranch(null);
+    setActiveProjectId((prev) => {
+      if (prev === id) return prev;
+      // Only clear repo when switching to a different project
+      setActiveRepoId(null);
+      setActiveBranch(null);
+      return id;
+    });
   }, []);
 
   const setActiveRepo = useCallback((id: number | null) => {
     setActiveRepoId(id);
     setActiveBranch(null);
+    setBranches([]);
   }, []);
 
   const activeRepo = repos.find((r) => r.repo_id === activeRepoId) || null;

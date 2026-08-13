@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("zectDesktop", {
   platform: process.platform,
   version: process.env.npm_package_version || "3.0.0",
   getAppPath: () => ipcRenderer.invoke("get-app-path"),
+  selectDirectory: (opts) => ipcRenderer.invoke("zect-select-directory", opts || {}),
   launcher: {
     getShortcutStatus: () => ipcRenderer.invoke("zect-shortcut-status"),
     createShortcut: () => ipcRenderer.invoke("zect-shortcut-create"),

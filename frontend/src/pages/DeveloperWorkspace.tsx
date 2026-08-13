@@ -12,7 +12,7 @@ import {
   Save,
   AlertCircle,
   Sparkles,
-  Code2,
+  FolderOpen,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
@@ -23,6 +23,7 @@ import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/Works
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
+import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   fileList,
@@ -126,6 +127,7 @@ export default function DeveloperWorkspace() {
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
+  const [showImport, setShowImport] = useState(true);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
@@ -470,16 +472,42 @@ export default function DeveloperWorkspace() {
             Mentrix Coding Agent edits here — Delivery owns ship (plan → batches → Approve → PR).
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadTree()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
-          data-testid="workspace-refresh"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loadingTree ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="workspace-import-local"
+            onClick={() => setShowImport((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            {showImport ? "Hide import" : "Import local clone"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadTree()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+            data-testid="workspace-refresh"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loadingTree ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
+
+      {(showImport || !rootPath) && (
+        <div data-testid="workspace-import-panel">
+          <RepoOnboardingPanel
+            projectId={activeProjectId}
+            compact
+            preferOpenLocal
+            navigateTo={null}
+            onActivated={() => {
+              setShowImport(false);
+              void loadTree();
+            }}
+          />
+        </div>
+      )}
 
       <div
         className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
@@ -539,9 +567,18 @@ export default function DeveloperWorkspace() {
       <div className="flex flex-1 min-h-0 gap-3">
         <div className="flex flex-1 min-h-0 flex-col gap-3 min-w-0">
       {!rootPath ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 flex items-start gap-2">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          Select an Active Project with a local clone, or set Mentrix workspace, then refresh.
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">No workspace root yet</p>
+              <p className="text-xs mt-1">
+                If you already cloned a repo on your Desktop, use{" "}
+                <strong>Import Already-Cloned Local Repo</strong> above — paste the folder path and activate it here.
+                You can also pick an Active Project from the top bar, then refresh.
+              </p>
+            </div>
+          </div>
         </div>
       ) : (
             <>

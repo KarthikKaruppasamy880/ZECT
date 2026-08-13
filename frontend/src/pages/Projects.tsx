@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { getProjects } from "@/lib/api";
 import type { Project } from "@/types";
 import { STAGES } from "@/types";
+import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import {
   Plus,
   Layers,
@@ -74,6 +75,10 @@ export default function Projects() {
         >
           <Plus className="h-4 w-4" /> New Project
         </Link>
+      </div>
+
+      <div className="mb-6">
+        <RepoOnboardingPanel />
       </div>
 
       <div className="flex gap-2 mb-6">

@@ -429,3 +429,106 @@ def ultrareview_three_lanes(
             for f in rows
         ]
     return merge_ultrareview_lanes(findings)
+
+
+# ---------------------------------------------------------------------------
+# Closed-loop PR engineering (same-PR remediation)
+# ---------------------------------------------------------------------------
+
+class ClosedLoopRunRequest(BaseModel):
+    findings: list[dict] = []
+    session_id: int | None = None
+    work_item_id: int | None = None
+    pr_id: str | None = None
+    repository_id: int | None = None
+    old_head_sha: str = ""
+    repo_path: str | None = None
+    apply_local_fix: bool = False
+    fix_file: str | None = None
+    fix_content: str | None = None
+    test_command: list[str] | None = None
+    dry_run: bool = True
+    max_review_cycles: int = 5
+
+
+class CodeRabbitCompareRequest(BaseModel):
+    mentrix_findings: list[dict] = []
+    coderabbit_findings: list[dict] = []
+    mentrix_ran_first: bool = True
+
+
+@router.post("/closed-loop/run")
+def closed_loop_run(
+    body: ClosedLoopRunRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Classify findings, route, optionally remediate same-PR, re-gate. Never auto-merges."""
+    from app.services.ultra_review.closed_loop import ClosedLoopOrchestrator, persist_cycle_artifact
+
+    findings = list(body.findings or [])
+    if body.session_id is not None and not findings:
+        rows = db.query(ReviewFinding).filter(ReviewFinding.review_session_id == body.session_id).all()
+        findings = [
+            {
+                "id": f.id,
+                "category": getattr(f, "category", "") or "",
+                "severity": getattr(f, "severity", "") or "",
+                "title": getattr(f, "title", "") or "",
+                "description": getattr(f, "description", "") or "",
+                "file": getattr(f, "file_path", "") or "",
+                "line": getattr(f, "line_start", None),
+                "is_verified": bool(getattr(f, "is_verified", False)),
+                "evidence": getattr(f, "code_snippet", "") or "",
+            }
+            for f in rows
+        ]
+    orch = ClosedLoopOrchestrator(max_review_cycles=max(1, min(body.max_review_cycles, 10)))
+    result = orch.run_until_clean_or_budget(
+        raw_findings=findings,
+        old_head_sha=body.old_head_sha or "",
+        work_item_id=body.work_item_id,
+        pr_id=body.pr_id,
+        repository_id=body.repository_id,
+        repo_path=body.repo_path,
+        apply_local_fix=body.apply_local_fix,
+        fix_file=body.fix_file,
+        fix_content=body.fix_content,
+        test_command=body.test_command,
+        dry_run=body.dry_run,
+        db=db if body.work_item_id else None,
+    )
+    if body.work_item_id:
+        persist_cycle_artifact(body.work_item_id, result)
+    return result
+
+
+@router.post("/closed-loop/classify")
+def closed_loop_classify(
+    body: LaneMergeRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Normalize + classify findings without running remediation."""
+    from app.services.ultra_review.finding_router import gate_from_findings, normalize_closed_loop_finding
+
+    findings = [normalize_closed_loop_finding(f) for f in (body.findings or [])]
+    return {
+        "findings": [f.model_dump() for f in findings],
+        "gates": gate_from_findings(findings),
+        "auto_merge": False,
+    }
+
+
+@router.post("/closed-loop/coderabbit-compare")
+def closed_loop_coderabbit_compare(
+    body: CodeRabbitCompareRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Blind comparison harness — Mentrix must run first."""
+    from app.services.ultra_review.coderabbit_benchmark import compare_blind
+
+    return compare_blind(
+        body.mentrix_findings,
+        body.coderabbit_findings,
+        mentrix_ran_first=body.mentrix_ran_first,
+    )

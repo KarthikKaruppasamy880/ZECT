@@ -45,7 +45,18 @@ _saved_env = {
     for k in _PRESERVE_ENV_KEYS
     if _UNDER_PYTEST and k in _os_for_dotenv.environ
 }
-load_dotenv(_backend_root / ".env", override=True)
+_PACKAGED = (_os_for_dotenv.getenv("ZECT_PACKAGED") or "").strip() in ("1", "true", "yes")
+_user_data = (_os_for_dotenv.getenv("ZECT_USER_DATA") or "").strip()
+if _PACKAGED:
+    # Never load installer-tree .env (secrets). Optional per-user config only.
+    if _user_data:
+        from pathlib import Path as _P
+
+        _user_env = _P(_user_data) / "config" / ".env"
+        if _user_env.is_file():
+            load_dotenv(_user_env, override=False)
+else:
+    load_dotenv(_backend_root / ".env", override=True)
 if _saved_env:
     _os_for_dotenv.environ.update(_saved_env)
 _auth_user = (_os_for_dotenv.getenv("ZECT_USERNAME") or "").strip()

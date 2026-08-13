@@ -1,11 +1,14 @@
-# Backend sidecar slot (packaging)
+# Backend sidecar (packaging)
 
-Place a bundled API binary or launcher here before claiming packaging **PASS**:
+Committed:
 
-- `zect-api.exe` — preferred Windows sidecar entrypoint
-- `run-api.ps1` — alternate managed launcher
-- `uvicorn.exe` — optional embedded runner
+- `run-api.ps1` — managed launcher (requires `-UserData`)
+- `zect_api_entry.py` — production uvicorn entry (no reload)
 
-Until one of these files exists, `desktop_readiness` and `service-lifecycle` report `backend_bundled: false` and packaging status **PARTIAL**.
+Produced at installer build (`python backend/packaging/bundle_sidecar.py`), gitignored:
 
-Do not commit secrets or a full Python venv into this folder.
+- `python-runtime/` — venv with pinned `requirements.txt`
+- `src/` — copy of `backend/` without `.env` / tests / data
+- `zect-api.exe` — optional frozen binary
+
+Do not commit secrets, `.env`, or a full venv.

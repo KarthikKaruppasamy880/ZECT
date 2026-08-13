@@ -194,14 +194,21 @@ def test_memory_preferences_cross_user_forbidden(authed_client):
 
 def test_desktop_packaging_honest_partial():
     d = build_desktop_readiness()
-    assert d["packaging"]["status"] == "PARTIAL"
-    assert d["packaging"]["backend_bundled"] is False
+    assert d["packaging"]["backend_launcher_present"] is True
     assert d["service_lifecycle_present"] is True
     assert d["windows_install_doc_present"] is True
     assert d["single_instance_lock"] is True
     assert d["packaging"]["single_instance"] is True
-    assert "backend_not_bundled_in_installer" in d["packaging"]["blockers"]
     assert d["canonical_api_port"] == 8000
+    assert d["packaging"]["classification"]["voicebox"] == "OPTIONAL"
+    assert d["packaging"]["classification"]["presentation_provider"] == "OPTIONAL"
+    if d["packaging"]["backend_runtime_present"]:
+        assert d["packaging"]["backend_bundled"] is True
+    else:
+        assert d["packaging"]["backend_bundled"] is False
+        assert "backend_runtime_not_in_source_tree" in d["packaging"]["blockers"]
+    assert d["packaging"]["status"] == "PARTIAL"
+    assert "clean_machine_nsis_unproven" in d["packaging"]["blockers"]
 
 
 def test_service_lifecycle_exports_stop_and_single_instance_docs():
@@ -210,9 +217,14 @@ def test_service_lifecycle_exports_stop_and_single_instance_docs():
     lifecycle = (root / "electron" / "service-lifecycle.js").read_text(encoding="utf-8")
     main = (root / "electron" / "main.js").read_text(encoding="utf-8")
     docs = (root / "docs" / "WINDOWS_INSTALL.md").read_text(encoding="utf-8")
+    launcher = (root / "electron" / "resources" / "backend" / "run-api.ps1").read_text(encoding="utf-8")
     assert "stopManagedChildren" in lifecycle
+    assert "startBackendSidecar" in lifecycle
     assert "requestSingleInstanceLock" in main
     assert "second-instance" in main
-    assert "PARTIAL" in docs
+    assert "run-api.ps1" in docs
+    assert "ZECT_PASSWORD" in launcher  # loads user config keys by name only
+    assert "change-me" not in launcher.lower()
+    assert "zect-dev-local" not in launcher
     assert "backend" in docs.lower()
 

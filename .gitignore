@@ -56,6 +56,12 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 
+# Packaged backend sidecar runtime (built by backend/packaging/bundle_sidecar.py)
+electron/resources/backend/python-runtime/
+electron/resources/backend/src/
+electron/resources/backend/zect-api.exe
+electron/dist-electron/
+
 # Upstream Voicebox checkout (cloned by services/zect-voicebox/scripts)
 third_party/
 

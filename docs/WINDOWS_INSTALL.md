@@ -1,41 +1,45 @@
 # Windows install & launch (ZECT desktop)
 
-Status: **PARTIAL** — NSIS/portable Electron targets exist; single-instance lock is implemented; the FastAPI backend is **not** fully bundled inside the installer yet.
+Status: **PARTIAL** — NSIS/portable targets, single-instance lock, and backend sidecar **launcher** ship. Bundled Python runtime is produced at installer build time. Voicebox/Presenton remain optional external. Clean-machine NSIS proof is a separate gate.
 
 ## Target flow
 
 ```text
 Install ZECT
 → Launch ZECT
-→ required local services managed automatically
-→ ZECT ready
+→ bundled API sidecar starts (userData sqlite + encryption key)
+→ Login
+→ Companion / Projects / Developer / Learning / Present
+→ Quit (managed processes stop)
+→ Relaunch (userData preserved)
 ```
+
+## Runtime classification
+
+| Piece | Classification |
+|-------|----------------|
+| Electron shell | **PACKAGED** |
+| Frontend `dist` | **PACKAGED** (build before `npm run build:win`) |
+| Backend API sidecar | **PACKAGED** launcher (`run-api.ps1`); runtime via `bundle_sidecar.py` at build |
+| SQLite + encryption key | **PACKAGED** under Electron `userData` (`data/`, `config/`) |
+| Voicebox / Chatterbox | **OPTIONAL** (extraResources slot; not required for login) |
+| Presenton | **OPTIONAL** / external Docker |
+| Local model runtime | **NOT_REQUIRED** for baseline login |
+| `start-local.ps1` / Vite | Dev-only; not used in packaged launch |
 
 ## What works today
 
 | Piece | Status |
 |-------|--------|
-| Electron single-instance lock | Implemented (`requestSingleInstanceLock` + focus existing window) |
-| `electron-builder` NSIS + portable | Configured in `electron/package.json` |
-| Frontend `dist` packaged into app | When `frontend/dist` built before `npm run build:win` (asar path `frontend/dist`) |
-| userData `logs` / `config` / `data` | Created under Electron `userData` on launch |
-| Managed child shutdown | `service-lifecycle.stopManagedChildren()` on `will-quit` |
-| Chatterbox extraResources | Slot present under `electron/resources/chatterbox` |
-| Backend extraResources slot | `electron/resources/backend/` (empty until sidecar shipped) |
-| API on `:8000` | Canonical default; must be running until sidecar exists |
-| Vite `:5173` | Dev only; packaged builds use `frontend/dist` |
-| Voicebox / Presenton | Optional external services; do not fake PASS |
-| Managed service probe | `electron/service-lifecycle.js` when `ZECT_MANAGE_SERVICES=1` |
-
-## Developer install (current)
-
-1. Clone repo; create `backend/.env` from `.env.example` (never commit secrets).
-2. Start API: Python 3.12+ with `uvicorn` on `127.0.0.1:8000` (or set `VITE_API_URL` / `ZECT_API_URL`).
-3. Start UI: `frontend` Vite on `:5173` **or** build `frontend/dist` and set `ZECT_USE_DIST=1`.
-4. Launch desktop: `cd electron && npm start`.
-5. Optional: set `ZECT_MANAGE_SERVICES=1` so Electron can probe and attempt `start-local.ps1`.
-
-`scripts/start-local.ps1` may still use `:8020` for local convenience; it writes `frontend/.env.local` accordingly. Packaging readiness and desktop probes default to `:8000`.
+| Electron single-instance lock | Implemented |
+| `electron-builder` NSIS + portable | Configured |
+| Sidecar launcher | `electron/resources/backend/run-api.ps1` |
+| Sidecar entry | `zect_api_entry.py` (no reload) |
+| Auto-start when packaged | `startBackendSidecar` + `waitForApi` |
+| userData `logs` / `config` / `data` | Created on launch |
+| Managed child shutdown | `stopManagedChildren` on `will-quit` |
+| Secrets in installer | Forbidden — per-user `userData/config/.env` only |
+| API on `:8000` | Canonical packaged port |
 
 ## Packaged Windows build
 
@@ -44,19 +48,28 @@ cd frontend; npm run build
 cd ..\electron; npm run build:win
 ```
 
+`build:win` runs `backend/packaging/bundle_sidecar.py` (copies sources, creates `python-runtime` venv, pip-installs pinned `requirements.txt`) then electron-builder. Runtime is gitignored.
+
 Artifacts land in `electron/dist-electron/`.
 
-## Blockers for full one-click
+## First-run config (not in installer)
 
-- Backend runtime (Python deps / embedded uvicorn / `zect-api.exe`) not inside NSIS `extraResources/backend`.
-- Voicebox + Presenton remain external; ordinary Present/Voice flows need them separately.
-- Secrets/config must live under user data, not baked into the installer.
-- Clean-machine install → Login → Companion/Projects/Developer/Learning/Present not yet proven without an external API.
+Create `%APPDATA%\ZECT\config\.env` on the user machine (or Electron `userData/config/.env`):
 
-## Shutdown / health / upgrades
+```dotenv
+ZECT_USERNAME=you@company.com
+ZECT_PASSWORD=choose-locally
+```
 
-- Prefer quitting via the app window; second launch focuses the existing process (single-instance).
-- System Health UI → `/api/system/desktop-readiness` reports packaging honesty fields (`single_instance_lock`, `backend_bundled`, blockers).
-- Upgrades: replace NSIS install; preserve user DB/secrets outside the install tree under `userData`.
+`ENCRYPTION_KEY` is generated into `userData/config/encryption.key` on first sidecar start. Never commit it.
 
-Do **not** claim installer-ready / one-click PASS until backend lifecycle is bundled and verified on a clean Windows machine.
+## Remaining gates
+
+- Clean-machine NSIS install on a machine with **no** system Python / repo checkout — prove separately; do not fabricate PASS.
+- Voicebox + Presenton remain optional; Present/Voice features need them when used.
+
+## Shutdown / upgrades
+
+- Quit via the app window; second launch focuses the existing process.
+- `/api/system/desktop-readiness` reports launcher/runtime/classification.
+- Replace NSIS install; preserve `userData`.

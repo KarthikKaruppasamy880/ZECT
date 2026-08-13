@@ -53,8 +53,29 @@ class VaultManager:
             )
 
     def _get_key_from_env(self) -> bytes:
-        """Fetch encryption key from environment variable."""
+        """Fetch encryption key from environment or generate a per-user key under ZECT_USER_DATA."""
         key_str = os.getenv("ENCRYPTION_KEY")
+        if not key_str:
+            user_data = (os.getenv("ZECT_USER_DATA") or "").strip()
+            if user_data:
+                from pathlib import Path
+
+                cfg = Path(user_data) / "config"
+                cfg.mkdir(parents=True, exist_ok=True)
+                key_path = cfg / "encryption.key"
+                if key_path.is_file():
+                    key_str = key_path.read_text(encoding="utf-8").strip()
+                else:
+                    from cryptography.fernet import Fernet
+
+                    generated = Fernet.generate_key().decode("utf-8")
+                    key_path.write_text(generated, encoding="utf-8")
+                    try:
+                        key_path.chmod(0o600)
+                    except OSError:
+                        pass
+                    key_str = generated
+                    os.environ["ENCRYPTION_KEY"] = generated
         if not key_str:
             raise ValueError(
                 "ENCRYPTION_KEY not set in environment. "

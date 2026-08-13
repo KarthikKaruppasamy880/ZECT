@@ -17,12 +17,21 @@ def _main_js_has_single_instance(main_js: Path) -> bool:
     return "requestSingleInstanceLock" in text
 
 
-def _detect_backend_sidecar(root: Path) -> bool:
-    resources = root / "electron" / "resources" / "backend"
+def _backend_dir(root: Path) -> Path:
+    return root / "electron" / "resources" / "backend"
+
+
+def _detect_backend_launcher(root: Path) -> bool:
+    return (_backend_dir(root) / "run-api.ps1").is_file()
+
+
+def _detect_backend_runtime(root: Path) -> bool:
+    resources = _backend_dir(root)
     candidates = [
         resources / "zect-api.exe",
-        resources / "run-api.ps1",
-        resources / "uvicorn.exe",
+        resources / "python-runtime" / "python.exe",
+        resources / "python-runtime" / "Scripts" / "python.exe",
+        resources / "python-runtime" / "bin" / "python",
     ]
     return any(p.is_file() for p in candidates)
 
@@ -39,12 +48,18 @@ def build_desktop_readiness() -> dict[str, Any]:
     if not start_local.is_file():
         start_local = root / "start-local.ps1"
 
-    backend_bundled = _detect_backend_sidecar(root)
-    packaging_status = "PASS" if backend_bundled else "PARTIAL"
+    launcher = _detect_backend_launcher(root)
+    runtime = _detect_backend_runtime(root)
+    backend_bundled = runtime
+    # Runtime in the source/build tree is not clean-machine NSIS proof.
+    packaging_status = "PARTIAL"
     single_instance = _main_js_has_single_instance(main_js)
     blockers = []
-    if not backend_bundled:
-        blockers.append("backend_not_bundled_in_installer")
+    if not runtime:
+        blockers.append("backend_runtime_not_in_source_tree")
+    blockers.append("clean_machine_nsis_unproven")
+    if not launcher:
+        blockers.append("backend_launcher_missing")
     if not lifecycle_js.is_file():
         blockers.append("service_lifecycle_module_missing")
     if not single_instance:
@@ -66,10 +81,22 @@ def build_desktop_readiness() -> dict[str, Any]:
         "packaging": {
             "status": packaging_status,
             "backend_bundled": backend_bundled,
+            "backend_launcher_present": launcher,
+            "backend_runtime_present": runtime,
             "nsis_configured": True,
             "managed_lifecycle": lifecycle_js.is_file(),
             "single_instance": single_instance,
             "user_data_dirs": ["logs", "config", "data"],
+            "classification": {
+                "electron": "PACKAGED",
+                "frontend": "PACKAGED",
+                "backend": "PACKAGED" if runtime else "MANAGED_EXTERNAL",
+                "storage_database": "PACKAGED",
+                "voicebox": "OPTIONAL",
+                "presentation_provider": "OPTIONAL",
+                "local_model_runtime": "NOT_REQUIRED",
+                "helpers": "MANAGED_EXTERNAL",
+            },
             "target_flow": [
                 "Install ZECT",
                 "Launch ZECT",
@@ -78,11 +105,10 @@ def build_desktop_readiness() -> dict[str, Any]:
             ],
             "blockers": blockers,
             "note": (
-                "Windows NSIS/portable targets exist; single-instance lock is implemented. "
-                "Ordinary users still need a running API (:8000) until a backend sidecar is "
-                "placed under electron/resources/backend/. Voicebox/Presenton remain external. "
-                "service-lifecycle probes/starts helpers when ZECT_MANAGE_SERVICES=1 — not a "
-                "full one-click appliance yet."
+                "NSIS/portable targets + sidecar launcher (run-api.ps1) ship in-tree. "
+                "python-runtime / zect-api.exe are produced by backend/packaging/bundle_sidecar.py "
+                "at installer build time (gitignored). Voicebox and Presenton remain OPTIONAL external. "
+                "Clean-machine NSIS install is a separate gate — never claim PASS without that proof."
             ),
         },
         "capabilities": [
@@ -92,6 +118,7 @@ def build_desktop_readiness() -> dict[str, Any]:
             "companion_computer_mode",
             "service_health_probe",
             "single_instance_lock",
+            "backend_sidecar_launch",
         ],
         "note": "Uses existing Electron Computer Mode / companion tools — not a parallel desktop agent.",
     }

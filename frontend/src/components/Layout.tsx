@@ -14,14 +14,11 @@ interface LayoutProps {
 export default function Layout({ onLogout }: LayoutProps) {
   const location = useLocation();
   const mentrixHud = location.pathname === "/mentrix-home";
+  // User owns desktop collapse/expand; Companion HUD must not force-collapse.
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem("sidebar-collapsed") === "true";
   });
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    if (mentrixHud) setCollapsed(true);
-  }, [mentrixHud]);
 
   const handleToggle = useCallback(() => {
     if (window.innerWidth < 768) {
@@ -55,14 +52,14 @@ export default function Layout({ onLogout }: LayoutProps) {
       <div className={`min-h-screen ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
         <Sidebar
           onLogout={onLogout}
-          collapsed={collapsed || mentrixHud}
+          collapsed={collapsed}
           onToggle={handleToggle}
           mobileOpen={mobileOpen}
           onMobileClose={handleMobileClose}
         />
         <div
           className={`transition-all duration-200 ease-in-out ${
-            collapsed || mentrixHud ? "md:ml-16" : "md:ml-56"
+            collapsed ? "md:ml-16" : "md:ml-56"
           }`}
         >
           {!mentrixHud && (

@@ -266,6 +266,7 @@ export default function Sidebar({
           )}
           <button
             onClick={onToggle}
+            data-testid="sidebar-toggle"
             className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
             title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
           >
@@ -327,6 +328,7 @@ export default function Sidebar({
       <div className="hidden md:block border-t border-slate-700 p-2">
         <button
           onClick={onToggle}
+          data-testid="sidebar-toggle-footer"
           className="w-full flex items-center justify-center gap-1.5 p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-xs"
           title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >

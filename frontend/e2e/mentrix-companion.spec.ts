@@ -6,7 +6,9 @@ test.describe("Mentrix Companion", () => {
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-avatar")).toBeVisible();
     await expect(page.getByTestId("mentrix-board")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /MENTRIX/i })).toBeVisible();
+    await expect(
+      page.getByTestId("mentrix-companion-page").getByRole("heading", { name: /MENTRIX/i }),
+    ).toBeVisible();
     await expect(page.getByTestId("mentrix-connect-voice")).toBeVisible();
     await expect(page.getByTestId("mentrix-live-log")).toBeVisible();
   });

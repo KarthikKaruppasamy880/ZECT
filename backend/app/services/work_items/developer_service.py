@@ -26,6 +26,12 @@ from app.services.work_items.context_engine import MentrixContextEngine
 from app.services.work_items.evidence_verifier import EvidenceVerifier
 from app.services.work_items.fallback_policy import resolve_model_route
 from app.services.work_items.project_intelligence import ProjectIntelligenceService
+from app.services.work_items.multi_repo_context import (
+    build_affected_repos_manifest,
+    merge_context_packs,
+    repo_binding,
+    resolve_authorized_repository_ids,
+)
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
 
 
@@ -80,7 +86,18 @@ class MentrixDeveloperService:
         except Exception:  # noqa: BLE001
             return None
 
-    def _build_pack(self, wi: WorkItem, goal: str) -> dict[str, Any]:
+    def _build_pack(
+        self,
+        wi: WorkItem,
+        goal: str,
+        *,
+        repository_id: int | None = None,
+        repository_ref: str = "",
+        base_commit_sha: str = "",
+    ) -> dict[str, Any]:
+        rid = repository_id if repository_id is not None else wi.repository_id
+        ref = repository_ref or wi.repository_ref or ""
+        sha = base_commit_sha or wi.base_commit_sha or ""
         project_key = ""
         try:
             if wi.project_id and self.db is not None:
@@ -93,7 +110,7 @@ class MentrixDeveloperService:
         snap = self.pi.snapshot(
             project_id=wi.project_id,
             project_key=str(project_key or ""),
-            repository_id=wi.repository_id,
+            repository_id=rid,
             db=self.db,
             query=goal,
         )
@@ -129,9 +146,9 @@ class MentrixDeveloperService:
             pass
         pack = self.context_engine.build(
             work_item_id=wi.id,
-            repository_id=wi.repository_id,
-            repository_ref=wi.repository_ref or "",
-            base_commit_sha=wi.base_commit_sha or "",
+            repository_id=rid,
+            repository_ref=ref,
+            base_commit_sha=sha,
             goal=goal,
             knowledge_hits=snap.knowledge,
             memory_hits=snap.memory,
@@ -141,6 +158,46 @@ class MentrixDeveloperService:
         )
         return {"pack": pack.to_dict(), "pi": snap.to_dict(), "pack_obj": pack}
 
+    def _build_multi_repo(
+        self,
+        wi: WorkItem,
+        goal: str,
+        repository_ids: list[int],
+    ) -> dict[str, Any]:
+        per_repo: list[dict[str, Any]] = []
+        packs = []
+        pi_by_repo: dict[str, Any] = {}
+        for rid in repository_ids:
+            binding = repo_binding(self.db, rid)
+            if not binding.get("authorized"):
+                continue
+            built = self._build_pack(
+                wi,
+                goal,
+                repository_id=rid,
+                repository_ref=str(binding.get("repository_ref") or ""),
+                base_commit_sha=str(binding.get("base_commit_sha") or ""),
+            )
+            pack_obj = built.get("pack_obj")
+            if pack_obj:
+                packs.append(pack_obj)
+            per_repo.append(
+                {
+                    **binding,
+                    "context_pack": built.get("pack"),
+                    "project_intelligence": built.get("pi"),
+                }
+            )
+            pi_by_repo[str(rid)] = built.get("pi")
+        merged = merge_context_packs(packs) if packs else self.context_engine.build(goal=goal)
+        return {
+            "pack": merged.to_dict(),
+            "pi": pi_by_repo.get(str(repository_ids[0])) if repository_ids else {},
+            "pack_obj": merged,
+            "context_by_repository": per_repo,
+            "affected_repos": [b for b in per_repo],
+        }
+
     def ask(
         self,
         *,
@@ -148,6 +205,7 @@ class MentrixDeveloperService:
         work_item_id: int | None = None,
         project_id: int | None = None,
         repository_id: int | None = None,
+        repository_ids: list[int] | None = None,
         repository_ref: str = "",
         base_commit_sha: str = "",
         actor: str = "",
@@ -161,7 +219,21 @@ class MentrixDeveloperService:
             base_commit_sha=base_commit_sha,
             actor=actor,
         )
-        built = self._build_pack(wi, question)
+        authorized = resolve_authorized_repository_ids(
+            self.db,
+            project_id=project_id or wi.project_id,
+            repository_ids=repository_ids,
+            repository_id=repository_id or wi.repository_id,
+        )
+        if len(authorized) > 1:
+            built = self._build_multi_repo(wi, question, authorized)
+        else:
+            built = self._build_pack(wi, question)
+            if authorized:
+                built["affected_repos"] = [repo_binding(self.db, authorized[0])]
+            else:
+                built["affected_repos"] = []
+            built["context_by_repository"] = []
         timer = TelemetryTimer()
         from app.adapters.llm.openai_compat import (
             mentrix_llm_chat_model,
@@ -206,6 +278,8 @@ class MentrixDeveloperService:
             "work_item_id": wi.id,
             "answer": result.get("answer"),
             "context_pack": built["pack"],
+            "context_by_repository": built.get("context_by_repository") or [],
+            "affected_repos": built.get("affected_repos") or [],
             "project_intelligence": built["pi"],
             "telemetry": tel,
             "result": result,
@@ -218,6 +292,7 @@ class MentrixDeveloperService:
         work_item_id: int | None = None,
         project_id: int | None = None,
         repository_id: int | None = None,
+        repository_ids: list[int] | None = None,
         repository_ref: str = "",
         base_commit_sha: str = "",
         constraints: str = "",
@@ -234,7 +309,25 @@ class MentrixDeveloperService:
         )
         store = self._store(wi.id)
         record_checkpoint(store, checkpoint_type="op_start", operation_id="plan")
-        built = self._build_pack(wi, goal)
+        authorized = resolve_authorized_repository_ids(
+            self.db,
+            project_id=project_id or wi.project_id,
+            repository_ids=repository_ids,
+            repository_id=repository_id or wi.repository_id,
+        )
+        if len(authorized) > 1:
+            built = self._build_multi_repo(wi, goal, authorized)
+        else:
+            built = self._build_pack(wi, goal)
+            if authorized:
+                built["affected_repos"] = [repo_binding(self.db, authorized[0])]
+            else:
+                built["affected_repos"] = []
+            built["context_by_repository"] = []
+        affected = list(built.get("affected_repos") or [])
+        manifest = build_affected_repos_manifest(affected, worktree_root=str(store.root / "worktrees"))
+        store.write_json("EXECUTION_MANIFEST.json", manifest)
+        store.write_json("AFFECTED_REPOS.json", {"affected_repos": affected})
         from app.services.phases import llm_phase
 
         result = llm_phase.run_plan(
@@ -246,6 +339,17 @@ class MentrixDeveloperService:
             upgrade=True,
         )
         plan_text = str(result.get("plan") or "")
+        if len(affected) > 1:
+            repo_lines = "\n".join(
+                f"- {r.get('label')} (repo_id={r.get('repository_id')}, ref={r.get('repository_ref')}, "
+                f"commit={(r.get('base_commit_sha') or '')[:12] or 'missing'})"
+                for r in affected
+            )
+            plan_text = (
+                f"## Affected repositories\n{repo_lines}\n\n"
+                f"Each execution operation is bound to repo_id + worktree under artifacts/worktrees/.\n\n"
+                f"{plan_text}"
+            )
         written = store.write_plan(plan_text)
         new_hash = written["plan_hash"]
         material_change = bool(wi.approved_plan_hash and wi.approved_plan_hash != new_hash)
@@ -297,6 +401,9 @@ class MentrixDeveloperService:
             "reapproval_required": material_change,
             "artifact_path": written["path"],
             "context_pack": built["pack"],
+            "context_by_repository": built.get("context_by_repository") or [],
+            "affected_repos": affected,
+            "execution_manifest": manifest,
             "project_intelligence": built["pi"],
             "mentrix_run_id": run.id,
         }

@@ -124,7 +124,10 @@ export default function DeveloperWorkspace() {
   const deepGoal = searchParams.get("goal") || "";
   const deepWorkItem = searchParams.get("work_item_id");
   const workItemId = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
-  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey } = useActiveProject();
+  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos } = useActiveProject();
+  const projectRepoIds = repos
+    .filter((r) => activeProjectId != null && r.project_id === activeProjectId)
+    .map((r) => r.repo_id);
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
@@ -784,6 +787,7 @@ export default function DeveloperWorkspace() {
           projectId={activeProjectId}
           projectKey={activeProjectKey || ""}
           repositoryId={activeRepoId}
+          repositoryIds={projectRepoIds}
           activeRepoLabel={
             activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
           }

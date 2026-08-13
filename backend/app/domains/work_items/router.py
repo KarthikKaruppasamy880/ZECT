@@ -130,6 +130,7 @@ class AskIn(BaseModel):
     work_item_id: Optional[int] = None
     project_id: Optional[int] = None
     repository_id: Optional[int] = None
+    repository_ids: list[int] = Field(default_factory=list)
     repository_ref: str = ""
     base_commit_sha: str = ""
 
@@ -139,6 +140,7 @@ class PlanIn(BaseModel):
     work_item_id: Optional[int] = None
     project_id: Optional[int] = None
     repository_id: Optional[int] = None
+    repository_ids: list[int] = Field(default_factory=list)
     repository_ref: str = ""
     base_commit_sha: str = ""
     constraints: str = ""
@@ -167,6 +169,7 @@ def developer_ask(
         work_item_id=body.work_item_id,
         project_id=body.project_id,
         repository_id=body.repository_id,
+        repository_ids=body.repository_ids or None,
         repository_ref=body.repository_ref,
         base_commit_sha=body.base_commit_sha,
         actor=getattr(user, "email", "") or "",
@@ -186,6 +189,7 @@ def developer_plan(
         work_item_id=body.work_item_id,
         project_id=body.project_id,
         repository_id=body.repository_id,
+        repository_ids=body.repository_ids or None,
         repository_ref=body.repository_ref,
         base_commit_sha=body.base_commit_sha,
         constraints=body.constraints,
@@ -354,13 +358,47 @@ def project_intelligence(
     project_id: Optional[int] = None,
     project_key: str = "",
     repository_id: Optional[int] = None,
+    repository_ids: str = "",
     query: str = "",
     db: Session = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ):
+    from app.services.work_items.multi_repo_context import repo_binding, resolve_authorized_repository_ids
     from app.services.work_items.project_intelligence import ProjectIntelligenceService
 
-    snap = ProjectIntelligenceService().snapshot(
+    pi = ProjectIntelligenceService()
+    ids_raw = [int(x) for x in repository_ids.split(",") if x.strip().isdigit()]
+    authorized = resolve_authorized_repository_ids(
+        db,
+        project_id=project_id,
+        repository_ids=ids_raw or None,
+        repository_id=repository_id,
+    )
+    if len(authorized) > 1:
+        repos_out = []
+        for rid in authorized:
+            binding = repo_binding(db, rid)
+            snap = pi.snapshot(
+                project_id=project_id,
+                project_key=project_key,
+                repository_id=rid,
+                db=db,
+                query=query,
+            )
+            repos_out.append({**binding, "project_intelligence": snap.to_dict()})
+        primary = pi.snapshot(
+            project_id=project_id,
+            project_key=project_key,
+            repository_id=authorized[0],
+            db=db,
+            query=query,
+        )
+        out = primary.to_dict()
+        out["repositories"] = repos_out
+        out["multi_repo"] = True
+        return out
+
+    snap = pi.snapshot(
         project_id=project_id,
         project_key=project_key,
         repository_id=repository_id,

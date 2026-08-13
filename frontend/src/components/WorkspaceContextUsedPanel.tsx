@@ -15,6 +15,7 @@ type Props = {
   projectId?: number | null;
   projectKey?: string;
   repositoryId?: number | null;
+  repositoryIds?: number[];
   activeRepoLabel?: string;
   workItemId?: number | null;
 };
@@ -35,6 +36,7 @@ export default function WorkspaceContextUsedPanel({
   projectId,
   projectKey = "",
   repositoryId,
+  repositoryIds = [],
   activeRepoLabel = "",
   workItemId,
 }: Props) {
@@ -67,6 +69,9 @@ export default function WorkspaceContextUsedPanel({
       if (projectId != null) piQs.set("project_id", String(projectId));
       if (projectKey) piQs.set("project_key", projectKey);
       if (repositoryId != null) piQs.set("repository_id", String(repositoryId));
+      if (repositoryIds.length > 1) {
+        piQs.set("repository_ids", repositoryIds.join(","));
+      }
       const [piRes, modelRes] = await Promise.all([
         apiFetch(`/api/mentrix/developer/project-intelligence?${piQs}`),
         apiFetch(`/api/system/model-readiness`),
@@ -82,6 +87,7 @@ export default function WorkspaceContextUsedPanel({
           pi,
           model,
           activeRepoLabel,
+          repoContexts: pi?.repositories,
         }),
       );
     } catch (e: unknown) {
@@ -92,12 +98,13 @@ export default function WorkspaceContextUsedPanel({
           pi: null,
           model: null,
           activeRepoLabel,
+          repoContexts: repositoryIds.map((id) => ({ repository_id: id })),
         }),
       );
     } finally {
       setLoading(false);
     }
-  }, [projectId, projectKey, repositoryId, activeRepoLabel, workItemId]);
+  }, [projectId, projectKey, repositoryId, repositoryIds, activeRepoLabel, workItemId]);
 
   useEffect(() => {
     void load();

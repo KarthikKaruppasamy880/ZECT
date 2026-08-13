@@ -651,6 +651,45 @@ export const mentrixPreparePromptDeck = (data: {
     presenton_ready?: boolean;
   }>("/api/mentrix/presentation/prepare-prompt", { method: "POST", body: JSON.stringify(data) });
 
+export const mentrixPresentationTemplates = () =>
+  request<{
+    ok: boolean;
+    zinnia: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
+    organization: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
+    my_templates: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
+  }>("/api/mentrix/presentation/templates");
+
+export const mentrixPresentationTemplatePreview = (template_id: string) =>
+  request<{
+    ok: boolean;
+    template_id?: string;
+    name?: string;
+    preview?: string;
+    error?: string;
+    provider_uuid_hidden?: boolean;
+  }>("/api/mentrix/presentation/templates/preview", {
+    method: "POST",
+    body: JSON.stringify({ template_id }),
+  });
+
+export async function mentrixPresentationTemplateUpload(file: File, name?: string) {
+  const form = new FormData();
+  form.append("file", file);
+  if (name) form.append("name", name);
+  const token =
+    typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const res = await fetch(`${API}/api/mentrix/presentation/templates/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  return (await res.json()) as {
+    ok: boolean;
+    template?: { id: string; name: string; preview?: string };
+    error?: string;
+  };
+}
+
 /** Upload .pptx → slide text + speaker notes (browser Present narration). */
 export const mentrixParsePptx = async (
   file: File,

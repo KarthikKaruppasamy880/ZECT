@@ -6,7 +6,6 @@ Does not auto-merge. Reuses AcceptanceVerifier / EvidenceVerifier when a work_it
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import uuid

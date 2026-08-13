@@ -217,3 +217,36 @@ def test_coderabbit_blind_protocol():
     assert ok["claim"].startswith("No superiority")
     assert ok["counts"]["shared"] == 1
     assert ok["counts"]["coderabbit_only"] == 1
+
+
+def test_mutating_fix_requires_allowlist_env(monkeypatch):
+    """API-level mutating fix must stay fail-closed without ZECT_UR_ALLOW_MUTATING_FIX."""
+    from fastapi import HTTPException
+    from app.domains.agent_run import ultrareview as ur
+
+    class Body:
+        findings = [{"id": "1", "title": "bug", "severity": "low"}]
+        session_id = None
+        work_item_id = None
+        pr_id = None
+        repository_id = None
+        old_head_sha = "abc"
+        repo_path = "/tmp/x"
+        apply_local_fix = True
+        fix_file = "a.py"
+        fix_content = "x"
+        test_command = None
+        dry_run = False
+        max_review_cycles = 2
+
+    monkeypatch.delenv("ZECT_UR_ALLOW_MUTATING_FIX", raising=False)
+
+    class DummyDB:
+        pass
+
+    class DummyUser:
+        email = "t@t.com"
+
+    with pytest.raises(HTTPException) as ei:
+        ur.closed_loop_run(Body(), db=DummyDB(), _user=DummyUser())  # type: ignore[arg-type]
+    assert ei.value.status_code == 403

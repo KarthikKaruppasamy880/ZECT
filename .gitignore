@@ -56,7 +56,9 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 
-# Packaged backend sidecar runtime (built by backend/packaging/bundle_sidecar.py)
+# Local Present assets / template worktrees (never commit user images)
+.zect/present-assets/
+test-results/
 electron/resources/backend/python-runtime/
 electron/resources/backend/src/
 electron/resources/backend/zect-api.exe

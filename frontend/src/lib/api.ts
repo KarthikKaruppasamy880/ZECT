@@ -640,6 +640,7 @@ export const mentrixPresentonGenerate = (data: {
   custom_id?: string;
   instructions?: string;
   filename?: string;
+  asset_ids?: string[];
 }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 600_000);
@@ -664,22 +665,38 @@ export const mentrixPresentonGenerate = (data: {
   ).finally(() => clearTimeout(timer));
 };
 
+export type PresentBlock = {
+  id?: string;
+  kind: string;
+  slide_index?: number;
+  layout_intent?: string;
+  geometry?: { x?: number; y?: number; cx?: number; cy?: number } | null;
+  content?: Record<string, unknown>;
+  provenance?: { source?: string; generated?: boolean; note?: string };
+  validation?: { ok?: boolean; errors?: string[] };
+};
+
+export type PresentSlide = {
+  index: number;
+  notes?: string;
+  text?: string;
+  blocks?: PresentBlock[];
+};
+
 export const mentrixParsePptxFromPath = (path: string) =>
   request<{
     ok: boolean;
     count: number;
-    slides: { index: number; notes?: string; text?: string }[];
+    slides: PresentSlide[];
     filename: string;
     path?: string;
+    visuals?: { has_image?: boolean; has_chart?: boolean; has_table?: boolean };
   }>("/api/mentrix/present/parse-pptx-path", {
     method: "POST",
     body: JSON.stringify({ path }),
   });
 
-export const mentrixPresentSaveNotes = (
-  path: string,
-  slides: Array<{ index: number; notes?: string; text?: string }>,
-) =>
+export const mentrixPresentSaveNotes = (path: string, slides: PresentSlide[]) =>
   request<{ ok: boolean; notes_path?: string; count?: number }>("/api/mentrix/present/save-notes", {
     method: "POST",
     body: JSON.stringify({ path, slides }),
@@ -795,6 +812,35 @@ export async function mentrixPresentationTemplateUpload(
     template?: { id: string; name: string; preview?: string; scope?: string };
     error?: string;
   };
+}
+
+export async function mentrixPresentationAssetUpload(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const res = await fetch(`${API}/api/mentrix/presentation/assets`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  return (await res.json()) as {
+    ok?: boolean;
+    asset_id?: string;
+    error?: string;
+    mime?: string;
+    width?: number;
+    height?: number;
+  };
+}
+
+export async function mentrixPresentationAssetBlob(assetId: string): Promise<string> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const res = await fetch(`${API}/api/mentrix/presentation/assets/${encodeURIComponent(assetId)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("asset_not_found");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export const mentrixPresentationTemplateMapping = (zect_id: string, provider_template_id: string) =>

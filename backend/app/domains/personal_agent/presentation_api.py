@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
@@ -62,6 +62,7 @@ class PresentationPlanIn(BaseModel):
     audience_id: str = "general"
     sensitivity_hint: Optional[str] = None
     documents: list[str] = Field(default_factory=list)
+    asset_ids: list[str] = Field(default_factory=list)
 
 
 @router.get("/audiences")
@@ -196,5 +197,45 @@ def presentation_plan(body: PresentationPlanIn, current_user: CurrentUser = Depe
             sensitivity_hint=body.sensitivity_hint or "",
             context_items=context_items,
             user_id=str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")),
+            asset_ids=list(body.asset_ids or []),
         )
     )
+
+
+@router.post("/assets")
+@require_authentication
+async def presentation_asset_upload(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Store an authorized PNG/JPEG/GIF/WEBP for ImageBlocks. No URL fetch. SVG rejected."""
+    from app.services.mentrix.presentation.asset_resolver import MAX_BYTES, UnsafeImageError, store_image
+
+    uid = str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon"))
+    raw = await file.read(MAX_BYTES + 1)
+    if not raw:
+        return {"ok": False, "error": "image_empty"}
+    if len(raw) > MAX_BYTES:
+        return {"ok": False, "error": "image_too_large"}
+    try:
+        meta = store_image(raw, user_id=uid, filename=file.filename or "", mime=file.content_type or "")
+    except UnsafeImageError as exc:
+        return {"ok": False, "error": str(exc)}
+    return meta
+
+
+@router.get("/assets/{asset_id}")
+@require_authentication
+def presentation_asset_get(asset_id: str, current_user: CurrentUser = Depends(get_current_user)):
+    from fastapi.responses import FileResponse
+
+    from app.services.mentrix.presentation.asset_resolver import UnsafeImageError, load_image
+
+    uid = str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon"))
+    try:
+        asset = load_image(asset_id, user_id=uid)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="asset_not_found") from exc
+    except UnsafeImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return FileResponse(path=str(asset["path"]), media_type=str(asset["mime"]), filename=f"{asset['asset_id']}{asset['path'].suffix}")

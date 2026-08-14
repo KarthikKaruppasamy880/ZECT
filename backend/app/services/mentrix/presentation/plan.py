@@ -4,13 +4,37 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.mentrix.presentation.blocks import (
+    TEXT_KINDS,
+    ensure_visual_blocks,
+    normalize_block,
+    normalize_blocks,
+    text_lines,
+)
+
 PLAN_SCHEMA_VERSION = 1
 MIN_SLIDES = 3
 MAX_SLIDES = 20
 MAX_TITLE = 160
 MAX_TEXT = 4000
-ALLOWED_VISUAL = frozenset({"none", "chart", "table", "image", "quote"})
-ALLOWED_LAYOUT = frozenset({"title", "title_body", "two_column", "section", "closing"})
+ALLOWED_VISUAL = frozenset({"none", "chart", "table", "image", "quote", "metric", "diagram"})
+ALLOWED_LAYOUT = frozenset(
+    {
+        "title",
+        "title_body",
+        "two_column",
+        "section",
+        "closing",
+        "text_image",
+        "full_image",
+        "chart_commentary",
+        "table",
+        "comparison",
+        "metrics",
+        "quote",
+        "diagram",
+    }
+)
 
 
 def clamp_slide_count(n: int | None, *, default: int = 6) -> int:
@@ -42,21 +66,28 @@ def empty_plan(*, n_slides: int = 6, template_id: str = "", audience_id: str = "
 
 def normalize_slide(raw: Any, *, index: int) -> dict[str, Any]:
     row = raw if isinstance(raw, dict) else {}
-    blocks_in = row.get("content_blocks") or row.get("blocks") or []
-    blocks: list[dict[str, Any]] = []
+    typed = normalize_blocks(row.get("blocks") or [], slide_index=index)
+    blocks_in = row.get("content_blocks") or []
+    content_blocks: list[dict[str, Any]] = []
     if isinstance(blocks_in, list):
         for item in blocks_in[:12]:
             if isinstance(item, str) and item.strip():
-                blocks.append({"kind": "bullet", "text": item.strip()[:800]})
+                content_blocks.append({"kind": "bullet", "text": item.strip()[:800]})
             elif isinstance(item, dict):
+                kind = _str(item.get("kind") or "bullet", limit=24).lower() or "bullet"
+                if kind in {"image", "chart", "table", "metric", "quote", "diagram"}:
+                    block = normalize_block(item, slide_index=index, ordinal=len(typed))
+                    if block:
+                        typed.append(block)
+                    continue
                 text = _str(item.get("text") or item.get("content"), limit=800)
                 if text:
-                    blocks.append(
-                        {
-                            "kind": _str(item.get("kind") or "bullet", limit=24) or "bullet",
-                            "text": text,
-                        }
-                    )
+                    content_blocks.append({"kind": "bullet" if kind in TEXT_KINDS else kind, "text": text})
+    if not typed:
+        for i, item in enumerate(content_blocks):
+            block = normalize_block({"kind": "text", "text": item.get("text")}, slide_index=index, ordinal=i)
+            if block:
+                typed.append(block)
     evidence: list[dict[str, Any]] = []
     for item in list(row.get("evidence") or [])[:8]:
         if isinstance(item, dict):
@@ -83,15 +114,20 @@ def normalize_slide(raw: Any, *, index: int) -> dict[str, Any]:
     layout = _str(row.get("layout_intent"), limit=32).lower() or "title_body"
     if layout not in ALLOWED_LAYOUT:
         layout = "title_body"
-    return {
+    if not content_blocks:
+        lines = text_lines(typed)
+        content_blocks = [{"kind": "bullet", "text": line} for line in lines[:12]] or [{"kind": "bullet", "text": "Key point"}]
+    slide = {
         "index": index,
         "title": _str(row.get("title"), limit=MAX_TITLE) or f"Slide {index + 1}",
-        "content_blocks": blocks or [{"kind": "bullet", "text": "Key point"}],
+        "content_blocks": content_blocks,
+        "blocks": typed,
         "evidence": evidence,
         "visual_intent": visual,
         "layout_intent": layout,
         "notes_intent": _str(row.get("notes_intent") or row.get("notes"), limit=MAX_TEXT),
     }
+    return ensure_visual_blocks(slide)
 
 
 def validate_plan(raw: Any, *, n_slides: int, template_id: str, audience_id: str) -> dict[str, Any]:

@@ -19,6 +19,7 @@ class PresentationGenerateRequest:
     audience_id: str = "general"
     sensitivity_hint: str = ""
     context_items: list[dict[str, Any]] = field(default_factory=list)
+    asset_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

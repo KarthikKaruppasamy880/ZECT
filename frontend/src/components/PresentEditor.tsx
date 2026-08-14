@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { FileDown, Save, Sparkles } from "lucide-react";
 import SplitPane from "@/components/SplitPane";
+import PresentVisualBlocks from "@/components/PresentVisualBlocks";
 import {
   mentrixAnalyzeDeck,
   mentrixParsePptxFromPath,
   mentrixPresentPptxDownload,
   mentrixPresentSaveNotes,
+  mentrixPresentationAssetUpload,
+  type PresentBlock,
+  type PresentSlide,
 } from "@/lib/api";
 
-type Slide = { index: number; notes?: string; text?: string };
+type Slide = PresentSlide;
 type SlideCache = { sourceFp: string; slides: Slide[] };
 
 type PresentEditorProps = {
@@ -18,7 +22,9 @@ type PresentEditorProps = {
 const storageKey = (path: string) => `zect_present_editor:${path}`;
 
 const fingerprint = (rows: Slide[]) =>
-  rows.map((s) => `${s.index}:${s.text || ""}:${s.notes || ""}`).join("|");
+  rows
+    .map((s) => `${s.index}:${s.text || ""}:${s.notes || ""}:${JSON.stringify(s.blocks || [])}`)
+    .join("|");
 
 export default function PresentEditor({ pptxPath }: PresentEditorProps) {
   const [slides, setSlides] = useState<Slide[]>([]);
@@ -290,9 +296,46 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                 className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900"
               />
             </label>
-            <p className="text-[10px] text-slate-400">
-              Charts, images, tables, and layout blocks stay in the generated PPTX (not edited here).
-            </p>
+            <PresentVisualBlocks
+              blocks={current.blocks || []}
+              busy={busy}
+              onChange={(next) => patchSlide(current.index, { blocks: next })}
+            />
+            <label className="text-[11px] font-medium text-slate-600">
+              Add / replace image
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                data-testid="present-editor-add-image"
+                disabled={busy}
+                className="mt-1 block w-full text-[11px]"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file || file.name.toLowerCase().endsWith(".svg")) return;
+                  try {
+                    const out = await mentrixPresentationAssetUpload(file);
+                    if (!out.asset_id) {
+                      setStatus(out.error || "Image rejected");
+                      return;
+                    }
+                    const nextBlock: PresentBlock = {
+                      id: `blk_${current.index}_image_upload`,
+                      kind: "image",
+                      slide_index: current.index,
+                      content: { asset_id: out.asset_id, alt: file.name },
+                      provenance: { source: "upload", generated: false },
+                      validation: { ok: true, errors: [] },
+                    };
+                    const without = (current.blocks || []).filter((b) => b.kind !== "image");
+                    patchSlide(current.index, { blocks: [...without, nextBlock] });
+                    setStatus("Image attached to this slide.");
+                  } catch (err) {
+                    setStatus(err instanceof Error ? err.message : "Image upload failed");
+                  }
+                }}
+              />
+            </label>
           </div>
         ) : (
           <p className="p-4 text-sm text-slate-500">Generate a deck to edit slides.</p>

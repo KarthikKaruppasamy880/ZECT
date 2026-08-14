@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from app.services.mentrix.presentation import template_registry as tmpl
+from app.services.mentrix.presentation.blocks import ensure_visual_blocks, visual_inventory
+from app.services.mentrix.presentation.document import document_from_plan
 from app.services.mentrix.presentation.planner import build_presentation_plan
 from app.services.mentrix.presentation.provider import PresentationGenerateRequest, PresentationStatus
 from app.services.mentrix.presentation.renderer import (
@@ -102,11 +105,16 @@ class ZectNativePresentationProvider:
         definition = load_definition(canon) if canon else None
         source = tmpl.source_pptx_path(canon, user_id=req.user_id) if canon else None
         used_master = bool(source and Path(source).is_file() and definition and definition.get("ready"))
+        plan = planned["plan"]
+        asset_ids = [str(a).strip() for a in list(req.asset_ids or []) if str(a).strip()]
+        for slide in list(plan.get("slides") or []):
+            ensure_visual_blocks(slide, asset_ids=asset_ids)
         try:
             data = render_plan_to_pptx(
-                planned["plan"],
+                plan,
                 template_path=source if used_master else None,
                 definition=definition,
+                user_id=req.user_id or "anon",
             )
         except UnsafePptxError as exc:
             return {
@@ -136,6 +144,19 @@ class ZectNativePresentationProvider:
             req.filename or planned["plan"].get("objective") or "zect-native-deck",
         )
         write_pptx(data, dest)
+        try:
+            from app.services.pptx_paths import notes_sidecar_for_pptx, write_notes_sidecar
+
+            doc = document_from_plan(plan, path=str(dest), provider=self.name)
+            write_notes_sidecar(notes_sidecar_for_pptx(dest), json.dumps(doc, indent=2))
+        except (PermissionError, OSError, ValueError, TypeError):
+            pass
+        inventory = visual_inventory(plan)
+        visual_status = (
+            "present"
+            if inventory.get("chart") and inventory.get("image") and inventory.get("table")
+            else "partial"
+        )
         zinnia_ui = canon.startswith("zinnia-")
         zinnia_verified = bool(zinnia_ui and used_master and not is_fallback_template_id(canon))
         if zinnia_ui and is_fallback_template_id(canon):
@@ -158,7 +179,8 @@ class ZectNativePresentationProvider:
             "lifecycle": tmpl.LIFECYCLE_READY,
             "planner_source": planned["plan"].get("planner_source"),
             "n_slides": planned["plan"].get("n_slides"),
-            "charts_images_tables": "partial",
+            "charts_images_tables": visual_status,
+            "visual_inventory": inventory,
             "blocked_external": False,
-            "telemetry": {"provider": self.name, "opt_in": True, "used_master": used_master},
+            "telemetry": {"provider": self.name, "opt_in": True, "used_master": used_master, "visuals": inventory},
         }

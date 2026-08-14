@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 from app.services.mentrix.presentation.native_provider import ZectNativePresentationProvider
@@ -32,6 +33,10 @@ def test_native_env_selects_stub(monkeypatch):
 def test_native_generate_does_not_call_presenton(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
     monkeypatch.setenv("ZECT_PRESENTATION_PROVIDER", "zect_native")
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.native_provider.default_pptx_save_dir",
+        lambda: tmp_path,
+    )
     import_pptx_bytes(
         make_master_pptx_bytes(),
         zect_id="zinnia-executive-v1",
@@ -39,20 +44,19 @@ def test_native_generate_does_not_call_presenton(tmp_path, monkeypatch):
         name="Zinnia Executive",
     )
     with patch("app.services.presenton_client.generate_presentation") as gen:
-        out = PresentationService().generate(
-            PresentationGenerateRequest(
-                content="Q3 delivery status",
-                n_slides=6,
-                ui_template_choice="zinnia-executive-v1",
-                user_id="u1",
+        with patch("app.services.phases.llm_phase._chat", return_value={"ok": False, "error": "offline", "content": ""}):
+            out = PresentationService().generate(
+                PresentationGenerateRequest(
+                    content="Q3 delivery status",
+                    n_slides=6,
+                    ui_template_choice="zinnia-executive-v1",
+                    user_id="u1",
+                )
             )
-        )
         gen.assert_not_called()
-    assert out["ok"] is False
-    assert out["error"] == "native_generate_not_implemented"
-    assert out["http_status"] == 501
+    assert out["ok"] is True
     assert out["provider"] == "zect_native"
-    assert out["zinnia_verified"] is False
+    assert Path(out["path"]).is_file()
 
 
 def test_native_status_does_not_call_presenton(monkeypatch):

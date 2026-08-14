@@ -43,6 +43,20 @@ def resolve_allowlisted_pptx(path_str: str) -> Path:
     return path
 
 
+def default_pptx_save_dir() -> Path:
+    """Allowlisted user folder for generated PPTX (Documents/Desktop)."""
+    home = Path.home()
+    for candidate in (
+        home / "Documents",
+        home / "OneDrive" / "Documents",
+        home / "Desktop",
+        home / "OneDrive" / "Desktop",
+    ):
+        if candidate.is_dir():
+            return candidate.resolve()
+    return home.resolve()
+
+
 def notes_sidecar_for_pptx(pptx: Path) -> Path:
     """Sidecar next to an allowlisted PPTX. Never follow a symlink out of the allowlist."""
     sidecar = pptx.parent / f"{pptx.stem}.notes.json"

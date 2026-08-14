@@ -72,6 +72,41 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
     });
   };
 
+  const reindex = (rows: Slide[]) => rows.map((s, i) => ({ ...s, index: i }));
+
+  const addSlide = () => {
+    setSlides((prev) => {
+      const next = reindex([...prev, { index: prev.length, text: "New slide", notes: "" }]);
+      persist(pptxPath, next);
+      setSelected(next.length - 1);
+      return next;
+    });
+  };
+
+  const deleteSlide = (index: number) => {
+    setSlides((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = reindex(prev.filter((s) => s.index !== index));
+      persist(pptxPath, next);
+      setSelected((cur) => Math.min(cur, next.length - 1));
+      return next;
+    });
+  };
+
+  const moveSlide = (index: number, dir: -1 | 1) => {
+    setSlides((prev) => {
+      const j = index + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const copy = [...prev];
+      const [row] = copy.splice(index, 1);
+      copy.splice(j, 0, row);
+      const next = reindex(copy);
+      persist(pptxPath, next);
+      setSelected(j);
+      return next;
+    });
+  };
+
   const save = async () => {
     setBusy(true);
     try {
@@ -188,8 +223,29 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                 <div className="font-medium">Slide {s.index + 1}</div>
                 <div className="line-clamp-3 text-slate-500">{s.text || s.notes || "(empty)"}</div>
               </button>
+              <div className="mb-1 flex gap-1 px-1">
+                <button type="button" data-testid={`present-editor-up-${s.index}`} className="text-[10px] text-slate-500" onClick={() => moveSlide(i, -1)}>
+                  Up
+                </button>
+                <button type="button" data-testid={`present-editor-down-${s.index}`} className="text-[10px] text-slate-500" onClick={() => moveSlide(i, 1)}>
+                  Down
+                </button>
+                <button type="button" data-testid={`present-editor-delete-${s.index}`} className="text-[10px] text-rose-700" onClick={() => deleteSlide(s.index)}>
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
+          <li>
+            <button
+              type="button"
+              data-testid="present-editor-add-slide"
+              onClick={addSlide}
+              className="mb-1 w-full rounded-md border border-dashed border-slate-300 px-2 py-2 text-left text-[11px] text-slate-600 hover:bg-slate-50"
+            >
+              Add slide
+            </button>
+          </li>
         </ul>
         {current ? (
           <div className="flex h-full min-w-0 flex-col gap-2 overflow-auto p-3">

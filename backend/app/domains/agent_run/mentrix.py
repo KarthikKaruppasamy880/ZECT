@@ -1564,7 +1564,7 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
 
 @router.post("/present/save-notes")
 def present_save_notes(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
-    """Persist speaker notes sidecar next to an allowlisted PPTX (does not rewrite slide XML)."""
+    """Persist speaker notes sidecar and round-trip notes/text into OOXML when possible."""
     pptx = _pptx_from_request(body.path)
     from app.services.pptx_paths import notes_sidecar_for_pptx, write_notes_sidecar
 
@@ -1575,7 +1575,22 @@ def present_save_notes(body: PresentPathIn, _user: CurrentUser = Depends(get_cur
             "slides": body.slides or [],
         }
         write_notes_sidecar(sidecar, json.dumps(payload, indent=2))
-        return {"ok": True, "notes_path": str(sidecar), "count": len(body.slides or [])}
+        ooxml = False
+        ooxml_error = ""
+        try:
+            from app.services.mentrix.presentation.document_io import apply_document_to_pptx
+
+            apply_document_to_pptx(pptx, body.slides or [])
+            ooxml = True
+        except Exception as exc:  # noqa: BLE001 — sidecar already saved
+            ooxml_error = str(exc)[:200]
+        return {
+            "ok": True,
+            "notes_path": str(sidecar),
+            "count": len(body.slides or []),
+            "ooxml_roundtrip": ooxml,
+            "ooxml_error": ooxml_error,
+        }
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc) or "sidecar_rejected") from exc
 

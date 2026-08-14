@@ -1,12 +1,32 @@
-"""Minimal OOXML PPTX bytes for template importer tests (no python-pptx)."""
+"""OOXML PPTX bytes for template importer / native renderer tests."""
 
 from __future__ import annotations
 
 import io
 import zipfile
 
+from pptx import Presentation
+from pptx.util import Emu, Inches
+
 _NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+
+def make_master_pptx_bytes() -> bytes:
+    """Valid python-pptx package with theme/master/layouts (not a Presenton file)."""
+    prs = Presentation()
+    prs.slide_width = Emu(9144000)
+    prs.slide_height = Emu(6858000)
+    layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(layout)
+    if slide.shapes.title is not None:
+        slide.shapes.title.text = "Zinnia master"
+    box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(8), Inches(1))
+    box.text_frame.text = "Template body"
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
 
 THEME = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="{_NS_A}" name="ZECT">
@@ -79,7 +99,8 @@ CT = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def make_master_pptx_bytes() -> bytes:
+def make_theme_pptx_bytes() -> bytes:
+    """Minimal zip with theme/master/layout for importer XML tests (not python-pptx-openable)."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("[Content_Types].xml", CT)

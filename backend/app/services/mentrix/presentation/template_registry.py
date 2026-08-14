@@ -463,6 +463,28 @@ def import_canonical_master(
     }
 
 
+def source_pptx_path(zect_id: str, user_id: str | int | None = None) -> Path | None:
+    """Local master PPTX for native generate — never a Presenton UUID."""
+    zid = canonical_id(zect_id) or (zect_id or "").strip()
+    if not zid:
+        return None
+    master = _root() / "masters" / f"{_SAFE.sub('_', zid)[:80]}.pptx"
+    if master.is_file():
+        return master
+    for row in _load_org():
+        if str(row.get("id") or "") == zid:
+            p = Path(str(row.get("path") or ""))
+            if p.is_file():
+                return p
+    if user_id is not None:
+        for row in _load_list(_meta_path(user_id)):
+            if str(row.get("id") or "") == zid:
+                p = Path(str(row.get("path") or ""))
+                if p.is_file():
+                    return p
+    return None
+
+
 def bind_uploaded_template_provider(
     user_id: str | int,
     template_id: str,

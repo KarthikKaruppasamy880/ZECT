@@ -9,13 +9,13 @@ import pytest
 
 from app.services.mentrix.presentation.template_definition import load_definition, native_ready, public_definition
 from app.services.mentrix.presentation.template_importer import UnsafePptxError, import_pptx_bytes, inspect_pptx_archive
-from tests.fixes_and_phases.pptx_fixtures import make_master_pptx_bytes
+from tests.fixes_and_phases.pptx_fixtures import make_theme_pptx_bytes
 
 
 def test_import_master_pptx_ready(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
     out = import_pptx_bytes(
-        make_master_pptx_bytes(),
+        make_theme_pptx_bytes(),
         zect_id="zinnia-executive-v1",
         scope="ZINNIA",
         name="Zinnia Executive",

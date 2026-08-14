@@ -4,11 +4,11 @@
  * clone PASS requires /speak through the Present page with non-empty clone audio.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
+import { runPythonScript } from "./helpers/python";
 import { cloneTranscript, tmpCloneWav } from "./helpers/wav";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -45,9 +45,7 @@ async function ensureLoggedIn(page: Page) {
 
 function tinyPptxPath(): string {
   const dest = path.join(ART, "tiny-deck.pptx");
-  execSync(`py -3.12 "${path.join(ROOT, "frontend/e2e/fixtures/make_tiny_pptx.py")}" "${dest}"`, {
-    stdio: "pipe",
-  });
+  runPythonScript(path.join(ROOT, "frontend/e2e/fixtures/make_tiny_pptx.py"), [dest]);
   return dest;
 }
 
@@ -210,15 +208,22 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       speakMeta.push(row);
     });
     await page.addInitScript(() => {
-      const plays: Array<{ concurrent: number }> = [];
+      const plays: Array<{ concurrent: number; ended?: boolean }> = [];
       (window as unknown as { __zectAudioPlays?: typeof plays }).__zectAudioPlays = plays;
       const Orig = window.Audio;
       window.Audio = function Audio(src?: string) {
         const a = new Orig(src);
         const origPlay = a.play.bind(a);
         a.play = () => {
-          const open = plays.filter((p) => !("ended" in p)).length;
-          plays.push({ concurrent: open + 1 });
+          const rec: { concurrent: number; ended?: boolean } = {
+            concurrent: plays.filter((p) => !p.ended).length + 1,
+          };
+          plays.push(rec);
+          const markEnded = () => {
+            rec.ended = true;
+          };
+          a.addEventListener("ended", markEnded, { once: true });
+          a.addEventListener("pause", markEnded, { once: true });
           return origPlay();
         };
         return a;

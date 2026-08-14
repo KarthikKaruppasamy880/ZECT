@@ -1647,13 +1647,18 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
 def present_save_notes(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
     """Persist speaker notes sidecar next to an allowlisted PPTX (does not rewrite slide XML)."""
     pptx = _pptx_from_request(body.path)
-    sidecar = pptx.with_suffix(".notes.json")
-    payload = {
-        "path": str(pptx),
-        "slides": body.slides or [],
-    }
-    sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return {"ok": True, "notes_path": str(sidecar), "count": len(body.slides or [])}
+    from app.services.pptx_paths import notes_sidecar_for_pptx, write_notes_sidecar
+
+    try:
+        sidecar = notes_sidecar_for_pptx(pptx)
+        payload = {
+            "path": str(pptx),
+            "slides": body.slides or [],
+        }
+        write_notes_sidecar(sidecar, json.dumps(payload, indent=2))
+        return {"ok": True, "notes_path": str(sidecar), "count": len(body.slides or [])}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "sidecar_rejected") from exc
 
 
 @router.post("/companion/realtime/session")

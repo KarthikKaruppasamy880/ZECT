@@ -57,16 +57,22 @@ export default function SplitPane({
     const up = () => {
       dragging.current = false;
     };
-    const move = (e: MouseEvent) => onMove(e.clientX, e.clientY);
-    window.addEventListener("mouseup", up);
-    window.addEventListener("mousemove", move);
+    const move = (e: PointerEvent) => onMove(e.clientX, e.clientY);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointermove", move);
     return () => {
-      window.removeEventListener("mouseup", up);
-      window.removeEventListener("mousemove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointermove", move);
     };
   }, [onMove]);
 
   const horizontal = axis === "horizontal";
+  const nudge = (delta: number) => {
+    setPct((prev) => Math.min(max, Math.max(min, prev + delta)));
+  };
+
   return (
     <div
       ref={wrap}
@@ -78,6 +84,11 @@ export default function SplitPane({
       </div>
       <button
         type="button"
+        role="separator"
+        aria-orientation={horizontal ? "vertical" : "horizontal"}
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={min}
+        aria-valuemax={max}
         aria-label="Resize panels"
         data-testid={`${testId || "split"}-handle`}
         className={
@@ -85,9 +96,27 @@ export default function SplitPane({
             ? "w-1.5 shrink-0 cursor-col-resize bg-slate-200 hover:bg-teal-400"
             : "h-1.5 shrink-0 cursor-row-resize bg-slate-200 hover:bg-teal-400"
         }
-        onMouseDown={(e) => {
+        style={{ touchAction: "none" }}
+        onPointerDown={(e) => {
           e.preventDefault();
           dragging.current = true;
+          e.currentTarget.setPointerCapture(e.pointerId);
+        }}
+        onKeyDown={(e) => {
+          const step = e.shiftKey ? 5 : 2;
+          if (horizontal && e.key === "ArrowLeft") {
+            e.preventDefault();
+            nudge(-step);
+          } else if (horizontal && e.key === "ArrowRight") {
+            e.preventDefault();
+            nudge(step);
+          } else if (!horizontal && e.key === "ArrowUp") {
+            e.preventDefault();
+            nudge(-step);
+          } else if (!horizontal && e.key === "ArrowDown") {
+            e.preventDefault();
+            nudge(step);
+          }
         }}
       />
       <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children[1]}</div>

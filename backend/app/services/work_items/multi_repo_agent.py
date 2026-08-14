@@ -735,14 +735,14 @@ def _git_push_github(worktree: Path, *, origin: str, branch: str, token: str) ->
     https = f"https://github.com/{owner}/{repo_name}.git"
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    header = f"AUTHORIZATION: bearer {token}"
+    env["GIT_CONFIG_COUNT"] = "2"
+    env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_0"] = ""
+    env["GIT_CONFIG_KEY_1"] = "http.extraHeader"
+    env["GIT_CONFIG_VALUE_1"] = f"AUTHORIZATION: bearer {token}"
     proc = subprocess.run(
         [
             "git",
-            "-c",
-            "credential.helper=",
-            "-c",
-            f"http.extraHeader={header}",
             "push",
             "-u",
             https,

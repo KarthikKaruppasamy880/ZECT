@@ -367,7 +367,7 @@ def test_git_push_github_uses_extraheader_not_origin_rewrite(tmp_path, monkeypat
         stderr = ""
 
     def fake_run(cmd, **kwargs):
-        calls.append(cmd)
+        calls.append((cmd, kwargs.get("env") or {}))
         return Fake()
 
     monkeypatch.setattr("app.services.work_items.multi_repo_agent.subprocess.run", fake_run)
@@ -378,10 +378,11 @@ def test_git_push_github_uses_extraheader_not_origin_rewrite(tmp_path, monkeypat
         token="gho_NotARealToken123",
     )
     assert out["ok"] is True
-    cmd = calls[0]
+    cmd, env = calls[0]
     joined = " ".join(cmd)
-    assert "http.extraHeader=" in joined
-    assert "gho_NotARealToken123" in joined  # passed to git, not stored in origin
+    assert "gho_NotARealToken123" not in joined
+    assert env.get("GIT_CONFIG_KEY_1") == "http.extraHeader"
+    assert env.get("GIT_CONFIG_VALUE_1") == "AUTHORIZATION: bearer gho_NotARealToken123"
     assert "x-access-token" not in joined
     assert "https://github.com/acme/widget.git" in joined
 

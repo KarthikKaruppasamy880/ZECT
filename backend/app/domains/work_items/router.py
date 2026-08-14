@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.domains.work_items import service as wi_svc
@@ -81,48 +82,76 @@ def create_sample_process(
     user: CurrentUser = Depends(get_current_user),
 ):
     """Isolated SAMPLE Camunda-style process → WorkItem. Never completes a live engine task."""
-    project = db.query(Project).filter(Project.name == "ZECT Sample Processes").first()
-    if not project:
-        project = Project(
-            name="ZECT Sample Processes",
-            description="Isolated SAMPLE fixtures for Process → WorkItem demos. Not production Camunda.",
-            team="ZECT",
-            status="active",
-            current_stage="plan",
+    try:
+        project = db.query(Project).filter(Project.name == "ZECT Sample Processes").first()
+        if not project:
+            project = Project(
+                name="ZECT Sample Processes",
+                description="Isolated SAMPLE fixtures for Process → WorkItem demos. Not production Camunda.",
+                team="ZECT",
+                status="active",
+                current_stage="plan",
+            )
+            db.add(project)
+            db.flush()
+        existing = (
+            db.query(WorkItem)
+            .filter(
+                WorkItem.external_id == SAMPLE_PROCESS_EXTERNAL,
+                WorkItem.source == "camunda",
+            )
+            .first()
         )
-        db.add(project)
-        db.flush()
-    existing = db.query(WorkItem).filter(WorkItem.external_id == SAMPLE_PROCESS_EXTERNAL).first()
-    if existing:
+        if existing:
+            return {
+                "ok": True,
+                "created": False,
+                "project_id": project.id,
+                "work_item": wi_svc.serialize_work_item(existing),
+                "note": "Existing SAMPLE process WorkItem reused. External task text is untrusted.",
+            }
+        wi = wi_svc.create_work_item(
+            db,
+            title=SAMPLE_PROCESS_TITLE,
+            description=(
+                "[untrusted-external] SAMPLE incident: order validation failed in checkout. "
+                "Review → investigate → plan → human approval → agent → tests → review → evidence. "
+                "Do not complete production Camunda tasks."
+            ),
+            source="camunda",
+            external_id=SAMPLE_PROCESS_EXTERNAL,
+            project_id=project.id,
+            created_by=getattr(user, "email", "") or getattr(user, "username", "") or "",
+            requirements=["Investigate failing validation", "Propose fix", "Human approval before AGENT"],
+            acceptance=["Tests pass", "Evidence recorded", "WorkItem READY_TO_SHIP only after verifiers"],
+        )
         return {
             "ok": True,
-            "created": False,
+            "created": True,
             "project_id": project.id,
-            "work_item": wi_svc.serialize_work_item(existing),
-            "note": "Existing SAMPLE process WorkItem reused. External task text is untrusted.",
+            "work_item": wi_svc.serialize_work_item(wi),
+            "note": "SAMPLE fixture only. Ticket text is untrusted external context.",
         }
-    wi = wi_svc.create_work_item(
-        db,
-        title=SAMPLE_PROCESS_TITLE,
-        description=(
-            "[untrusted-external] SAMPLE incident: order validation failed in checkout. "
-            "Review → investigate → plan → human approval → agent → tests → review → evidence. "
-            "Do not complete production Camunda tasks."
-        ),
-        source="camunda",
-        external_id=SAMPLE_PROCESS_EXTERNAL,
-        project_id=project.id,
-        created_by=getattr(user, "email", "") or getattr(user, "username", "") or "",
-        requirements=["Investigate failing validation", "Propose fix", "Human approval before AGENT"],
-        acceptance=["Tests pass", "Evidence recorded", "WorkItem READY_TO_SHIP only after verifiers"],
-    )
-    return {
-        "ok": True,
-        "created": True,
-        "project_id": project.id,
-        "work_item": wi_svc.serialize_work_item(wi),
-        "note": "SAMPLE fixture only. Ticket text is untrusted external context.",
-    }
+    except IntegrityError:
+        db.rollback()
+        project = db.query(Project).filter(Project.name == "ZECT Sample Processes").first()
+        existing = (
+            db.query(WorkItem)
+            .filter(
+                WorkItem.external_id == SAMPLE_PROCESS_EXTERNAL,
+                WorkItem.source == "camunda",
+            )
+            .first()
+        )
+        if project and existing:
+            return {
+                "ok": True,
+                "created": False,
+                "project_id": project.id,
+                "work_item": wi_svc.serialize_work_item(existing),
+                "note": "Existing SAMPLE process WorkItem reused. External task text is untrusted.",
+            }
+        raise
 
 
 @router.get("/{work_item_id}")

@@ -42,6 +42,25 @@ def test_allowlisted_pptx_roundtrip(tmp_path, monkeypatch):
         resolve_allowlisted_pptx(str(outsider))
 
 
+def test_notes_sidecar_rejects_symlink(tmp_path, monkeypatch):
+    from app.services.pptx_paths import notes_sidecar_for_pptx
+
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    deck = docs / "deck.pptx"
+    deck.write_bytes(b"PK")
+    outside = tmp_path / "secret.notes.json"
+    outside.write_text("nope", encoding="utf-8")
+    sidecar = docs / "deck.notes.json"
+    try:
+        sidecar.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink not permitted")
+    monkeypatch.setattr("app.services.pptx_paths.pptx_output_roots", lambda: [docs.resolve()])
+    with pytest.raises(PermissionError):
+        notes_sidecar_for_pptx(deck.resolve())
+
+
 class _Run:
     def __getattr__(self, _name: str):
         return None

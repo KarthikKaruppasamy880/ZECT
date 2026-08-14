@@ -2,12 +2,12 @@
  * Present editor + UI export from an allowlisted PPTX (ZECT UI, not Presenton).
  */
 import { test, expect, type Page } from "@playwright/test";
-import { execSync } from "child_process";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
+import { runPythonScript } from "./helpers/python";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(FRONTEND, "..");
@@ -31,7 +31,7 @@ test.describe("Present editor export", () => {
   test("open generated-style PPTX in ZECT editor, edit notes, export", async ({ page }) => {
     fs.mkdirSync(ART, { recursive: true });
     const dest = path.join(os.homedir(), "Documents", "zect-closure-editor.pptx");
-    execSync(`py -3.12 "${path.join(FRONTEND, "e2e/fixtures/make_tiny_pptx.py")}" "${dest}"`, { stdio: "pipe" });
+    runPythonScript(path.join(FRONTEND, "e2e/fixtures/make_tiny_pptx.py"), [dest]);
     expect(fs.existsSync(dest)).toBeTruthy();
 
     await ensureLoggedIn(page);

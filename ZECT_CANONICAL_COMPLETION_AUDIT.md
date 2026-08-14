@@ -1,8 +1,9 @@
 # ZECT Canonical Completion Audit
 
-**Date:** 2026-08-13 (R4.5 re-acceptance after R1.5–R3.5)  
-**Mode:** Final develop truth after baseline remediation + R1–R4 + blocker closure R1.5–R3.5  
-**Authoritative baseline:** `develop` @ `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c`
+**Date:** 2026-08-13 (R1.6 / R2.6 / R3.6 live proof after R4.5)  
+**Mode:** Final truth: origin/develop + local unpushed feature proof  
+**Authoritative origin/develop:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
+**Local feature (unpushed):** `feat/r16-r26-r36-final-proof` @ `92e206e30b06b64bcdf576fe37e3147d27fca136`
 
 Statuses: `MERGED_FROZEN | PASS | PARTIAL | NOT_STARTED | BLOCKED | BLOCKED_EXTERNAL | REGRESSION`
 
@@ -10,9 +11,9 @@ Statuses: `MERGED_FROZEN | PASS | PARTIAL | NOT_STARTED | BLOCKED | BLOCKED_EXTE
 
 ## 0. Executive verdict
 
-`develop` is **RELEASE_CANDIDATE_PARTIAL**: baseline user-visible features merged; R1.5 packaging sidecar improved (still PARTIAL — clean-machine NSIS unproven); R2.5 Present registry/lifecycle shipped (Presenton external); R3.5 multi-repo AGENT worktrees + aggregate gate live (GitHub PR create unproven). **Not** one-click complete. **R5–R9 not started.**
+origin/develop is **RELEASE_CANDIDATE_PARTIAL**. Local R1.6–R3.6 proof (not on origin): cloned Narrate PASS, Zinnia PPTX via ZECT API PASS, two live GitHub PRs PASS; clean-machine NSIS **BLOCKED_EXTERNAL**; product branch push **BLOCKED_EXTERNAL**. **R5–R9 not started.**
 
-See: `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_RELEASE_CANDIDATE_R4_ACCEPTANCE.md`, `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`.
+See: `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`, `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_RELEASE_CANDIDATE_R4_ACCEPTANCE.md`, `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`.
 
 ---
 
@@ -20,9 +21,10 @@ See: `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_RELEASE_CANDIDATE_R4_ACC
 
 | Field | Value |
 |------|--------|
-| local `develop` SHA | `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c` |
-| `origin/develop` SHA | `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c` |
-| match? | **YES** (verified before branching `docs/r4.5-release-blocker-closure`) |
+| local `develop` SHA | `45f4407fc2c5603db572e7b23b88289226557aeb` |
+| `origin/develop` SHA | `45f4407fc2c5603db572e7b23b88289226557aeb` |
+| match? | **YES** for develop; R1.6–R3.6 commit `92e206e` is local-only |
+| feature SHA | `92e206e30b06b64bcdf576fe37e3147d27fca136` (unpushed) |
 
 ### PR ancestry (recent)
 
@@ -52,9 +54,12 @@ See: `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_RELEASE_CANDIDATE_R4_ACC
 | R2 Present | **PARTIAL** | `ZECT_PRESENT_R2_ACCEPTANCE.md`, #143 |
 | R2.5 Registry | **PARTIAL / BLOCKED_EXTERNAL** | `ZECT_PRESENT_R2_5_ACCEPTANCE.md`, #147 |
 | R3 Multi-repo ASK/PLAN | **PARTIAL (advanced)** | `ZECT_MULTI_REPO_R3_ACCEPTANCE.md`, #144 |
-| R3.5 AGENT | **PARTIAL** | `ZECT_MULTI_REPO_R3_5_ACCEPTANCE.md`, #148 — GitHub PR `local_branch_only` |
+| R3.5 AGENT | **PARTIAL** | `ZECT_MULTI_REPO_R3_5_ACCEPTANCE.md`, #148 — GitHub PR was `local_branch_only` on that SHA |
 | R4 Release E2E | **PASS (CI)** | `ZECT_RELEASE_CANDIDATE_R4_ACCEPTANCE.md` (then `2724fef`) |
-| R4.5 Re-acceptance | **RELEASE_CANDIDATE_PARTIAL** | `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, develop `94ddf31` |
+| R4.5 Re-acceptance | **RELEASE_CANDIDATE_PARTIAL** | `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, develop `45f4407` |
+| R1.6 packaging | **BLOCKED_EXTERNAL** | no clean-machine NSIS |
+| R2.6 Present/clone | **PARTIAL** | cloned Narrate + Zinnia API PPTX PASS; UI 502 / Present-all / export PARTIAL |
+| R3.6 GitHub PRs | **PASS (live, local)** | two `github.com` PRs; not merged to origin/develop |
 
 ---
 
@@ -65,12 +70,12 @@ See: `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_RELEASE_CANDIDATE_R4_ACC
 | Companion sidebar | MERGED_FROZEN / PASS |
 | Learning D | MERGED_FROZEN / PASS |
 | Present product + provider | PARTIAL (UI PASS; PPTX Presenton) |
-| Present registry / zinnia_verified | PARTIAL / BLOCKED_EXTERNAL (#147) |
+| Present registry / zinnia_verified | PASS (live API this campaign); UI first generate 502 |
 | Repo UX | MERGED_FROZEN / PASS |
 | Multi-repo attach/switch | MERGED_FROZEN / PASS |
 | Multi-repo ASK/PLAN | PARTIAL (advanced) |
-| Multi-repo AGENT multi-PR | PARTIAL (#148 worktrees live; GitHub PR unproven) |
-| Packaging | PARTIAL (#146 sidecar; NSIS unproven) |
+| Multi-repo AGENT multi-PR | PARTIAL on origin (#148); R3.6 live GitHub PRs proven locally, unpushed |
+| Packaging | PARTIAL (#146 sidecar; R1.6 NSIS BLOCKED_EXTERNAL) |
 | Document B / Web C | MERGED_FROZEN + PARTIAL depth |
 | Ultra Review closed-loop | MERGED_FROZEN + PARTIAL UI |
 | PI / LRR | MERGED_FROZEN / PASS (R4 truth; not re-run R4.5) |
@@ -88,17 +93,18 @@ Headed Present (`present-product.spec.ts`) and multi-repo AGENT (`multi-repo-age
 
 ---
 
-## 5. Remaining work (post-R4.5, not started)
+## 5. Remaining work (post-R1.6/R2.6/R3.6)
 
 1. Clean-machine NSIS with no system Python  
-2. Presenton + ZECT registry master for full PPTX PASS (`zinnia_verified=true` in all envs)  
-3. Live GitHub PR/repo create (token + github origin)  
-4. R5–R9 evidence-driven improvements only after explicit scope  
+2. Push/merge `feat/r16-r26-r36-final-proof` when ZECT.git credentials exist  
+3. Present UI generate 502, Present-all clone, export/editor, Disconnect live, packaged Present/Voicebox  
+4. R3.6 remediate→READY_TO_SHIP; delete leftover `zect-r36-mss82cce-*` repos (DELETE 403)  
+5. R5–R9 evidence-driven improvements only after explicit scope  
 
-Security: no new full live campaign in R4.5; residual NSIS / Presenton / GitHub-token paths remain.
+Security: no new full live security campaign this session. Residual: NSIS, Presenton, GitHub token path, leftover disposable private repos.
 
 ---
 
 ## 6. Stop
 
-Canonical audit updated to `develop` @ `94ddf31`. R1.5–R4.5 documented. **No R5+ implementation.**
+Canonical audit updated. **No R5+ implementation.**

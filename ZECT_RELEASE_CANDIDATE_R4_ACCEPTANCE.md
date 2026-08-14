@@ -1,16 +1,17 @@
 # ZECT Release Candidate R4 — Full Baseline E2E Acceptance
 
-**Date:** 2026-08-13 (R4.5 addendum: develop @ `94ddf31`)  
-**Spec:** Next roadmap §R4 then `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 (stop before R5+)  
-**Final `develop` SHA:** `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c`  
-**local == origin/develop:** YES (post-sync before R4.5 docs branch)
+**Date:** 2026-08-13 (R1.6 / R2.6 / R3.6 addendum; origin/develop @ `45f4407`)  
+**Spec:** Next roadmap §R4 then `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`  
+**origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
+**local feature (unpushed):** `92e206e30b06b64bcdf576fe37e3147d27fca136`  
+**local == origin/develop:** YES for develop; R1.6–R3.6 code is local-only
 
 ## Verdict
 
 **RELEASE_CANDIDATE_PARTIAL**  
-R1–R4 (#142–#144) plus blocker-closure R1.5–R3.5 (#146–#148) merged via CI. Not one-click / not full Presenton / not live GitHub multi-PR complete.
+R1–R4 (#142–#144) plus blocker-closure R1.5–R3.5 (#146–#148) remain on origin. Local live proof closed GitHub PR create and cloned Narrate; clean-machine NSIS and product-repo push remain blocked. Not one-click complete.
 
-R4 historical SHA `2724fef` remains the R4 merge point (#144). Current canonical `develop` is `94ddf31` (merge of #148). Full R4.5 matrix: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`.
+Full matrices: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`.
 
 ## R1–R4.5 tranche summary
 
@@ -21,9 +22,10 @@ R4 historical SHA `2724fef` remains the R4 merge point (#144). Current canonical
 | R2 Present PPTX reliability | #143 | **PARTIAL** | ui_template_choice, zinnia_verified honesty, 502 retry |
 | R2.5 Present/Zinnia registry | #147 | **PARTIAL / BLOCKED_EXTERNAL** | registry mapping + lifecycle; PPTX PASS needs Presenton + mapped master |
 | R3 Multi-repo ASK/PLAN | #144 | **PARTIAL (advanced)** | context_by_repository, manifest, verifier block |
-| R3.5 Multi-repo AGENT | #148 | **PARTIAL** | isolated worktrees + aggregate gate; GitHub PR `local_branch_only` |
-| R4 Full release E2E | — | **PASS (CI)** at `2724fef`; still green on `94ddf31` | GitHub CI; not a new security campaign |
-| R4.5 Re-acceptance | docs | **RELEASE_CANDIDATE_PARTIAL** | this file + blocker-closure acceptance |
+| R3.5 Multi-repo AGENT | #148 | **PARTIAL** | isolated worktrees + aggregate gate; GitHub PR `local_branch_only` on that SHA |
+| R4 Full release E2E | — | **PASS (CI)** at `2724fef`; still green on `45f4407` | GitHub CI; not a new security campaign |
+| R4.5 Re-acceptance | docs | **RELEASE_CANDIDATE_PARTIAL** | blocker-closure acceptance |
+| R1.6 / R2.6 / R3.6 | unpushed `92e206e` | **PARTIAL** | cloned Narrate + 2 live GitHub PRs; NSIS BLOCKED_EXTERNAL; not on origin |
 
 ## Prior baseline (remediation)
 
@@ -55,8 +57,8 @@ test_multi_repo_developer
 | Item | Status |
 |------|--------|
 | Windows one-click Install→Ready | PARTIAL — sidecar exists; clean-machine NSIS unproven |
-| Presenton full PPTX + zinnia_verified in all envs | BLOCKED_EXTERNAL without Presenton + registry master |
-| Multi-repo live GitHub PR create | PARTIAL — `local_branch_only` without token+remote |
+| Presenton full PPTX + zinnia_verified in all envs | **PASS (live API)** on this workstation with Presenton+registry; UI first generate 502; packaged Present **BLOCKED_EXTERNAL** |
+| Multi-repo live GitHub PR create | **PASS (live, local)** — two `github.com` PRs on disposable repos; product branch not merged |
 | OCR/XLSX, Search/YT/Reddit, Graphify, KV cache | NOT_STARTED (R5+) |
 
 ## Security negatives (unchanged merged coverage)
@@ -66,4 +68,4 @@ test_multi_repo_developer
 
 ## Stop
 
-R4.5 complete. **Do not start R5–R9** (KV cache, advanced Doc Intel, Web Intel expansion, Graphify, new agents).
+R1.6–R3.6 live proof recorded locally. **Do not start R5–R9** (KV cache, advanced Doc Intel, Web Intel expansion, Graphify, new agents).

@@ -1,6 +1,8 @@
 # ZECT Product Acceptance
 
-**Verdict: RELEASE_READY**
+**Historical verdict (2026-08-09, PR #128):** RELEASE_READY at `f80fda4`.
+
+**Current release-candidate (2026-08-13):** **RELEASE_CANDIDATE_PARTIAL** — see `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md` and `ZECT_CORE_PRODUCT_UX_RECONCILIATION_ACCEPTANCE.md` (`CORE_UX_PARTIAL`). Origin/develop remains `45f4407`. Do not treat this 2026-08-09 matrix as NSIS/Present-editor/origin-merge PASS.
 
 Generated: 2026-08-09
 

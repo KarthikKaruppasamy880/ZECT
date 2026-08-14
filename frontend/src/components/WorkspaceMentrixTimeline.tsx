@@ -87,7 +87,9 @@ export default function WorkspaceMentrixTimeline({ workspaceRoot }: WorkspaceMen
     return () => window.clearInterval(t);
   }, [active?.id, active?.status]);
 
-  const events = active?.events || [];
+          const events = Array.isArray(active?.events)
+            ? active.events.filter((ev): ev is MentrixEvent => !!ev && typeof ev === "object")
+            : [];
 
   return (
     <div

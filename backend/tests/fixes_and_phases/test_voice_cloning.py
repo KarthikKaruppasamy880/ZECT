@@ -789,3 +789,27 @@ class TestMintRealtimeSessionSurfacesClonedVoice:
         result = mint_realtime_session(db=db, user_id=5)
 
         assert result["cloned_voice"] is None
+
+
+class TestCrossUserCloneDenied:
+    def test_speak_rejects_another_users_voice_id(self, monkeypatch):
+        from app.domains.voice.voice_clone import SpeakRequest, speak
+
+        db = _session()
+        db.add(
+            ClonedVoice(
+                user_id=99,
+                voice_id="victim-voice",
+                name="Victim",
+                provider="chatterbox",
+                is_default=True,
+                sample_path="",
+                reference_text="hello",
+            )
+        )
+        db.commit()
+        monkeypatch.setattr("app.adapters.llm.chatterbox_client.chatterbox_available", lambda: True)
+        with pytest.raises(HTTPException) as exc:
+            speak(SpeakRequest(text="hello", voice_id="victim-voice"), current_user=USER, db=db)
+        assert exc.value.status_code == 404
+

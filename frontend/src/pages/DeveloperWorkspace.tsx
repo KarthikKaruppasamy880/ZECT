@@ -24,8 +24,9 @@ import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/Works
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
-import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
+import SplitPane, { resetSplitLayout } from "@/components/SplitPane";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
+import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import {
   fileList,
@@ -132,7 +133,10 @@ export default function DeveloperWorkspace() {
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
-  const [showImport, setShowImport] = useState(true);
+  const [showImport, setShowImport] = useState(() => !rootPath);
+  const [showExplorer, setShowExplorer] = useState(true);
+  const [showAgent, setShowAgent] = useState(true);
+  const [showBottom, setShowBottom] = useState(true);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
@@ -489,6 +493,41 @@ export default function DeveloperWorkspace() {
           </button>
           <button
             type="button"
+            data-testid="workspace-toggle-explorer"
+            onClick={() => setShowExplorer((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+          >
+            {showExplorer ? "Hide explorer" : "Show explorer"}
+          </button>
+          <button
+            type="button"
+            data-testid="workspace-toggle-agent"
+            onClick={() => setShowAgent((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+          >
+            {showAgent ? "Hide agent" : "Show agent"}
+          </button>
+          <button
+            type="button"
+            data-testid="workspace-toggle-bottom"
+            onClick={() => setShowBottom((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+          >
+            {showBottom ? "Hide tools" : "Show tools"}
+          </button>
+          <button
+            type="button"
+            data-testid="workspace-reset-layout"
+            onClick={() => {
+              resetSplitLayout(["zect_ws_h", "zect_ws_agent", "zect_ws_v"]);
+              window.location.reload();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+          >
+            Reset layout
+          </button>
+          <button
+            type="button"
             onClick={() => void loadTree()}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
             data-testid="workspace-refresh"
@@ -572,7 +611,7 @@ export default function DeveloperWorkspace() {
       <PhaseErrorBanner error={error} testId="workspace-error" density="compact" />
 
       <div className="flex flex-1 min-h-0 gap-3">
-        <div className="flex flex-1 min-h-0 flex-col gap-3 min-w-0">
+        <div className="flex flex-1 min-h-0 flex-col min-w-0">
       {!rootPath ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
           <div className="flex items-start gap-2">
@@ -588,9 +627,9 @@ export default function DeveloperWorkspace() {
           </div>
         </div>
       ) : (
-            <>
-          <div className="flex flex-1 min-h-0 gap-3">
-            <aside className="w-64 shrink-0 flex flex-col gap-2 min-h-0">
+        (() => {
+          const explorerPane = (
+            <aside className="h-full flex flex-col gap-2 min-h-0 min-w-0">
               <div
                 className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white"
                 data-testid="workspace-file-tree"
@@ -619,8 +658,10 @@ export default function DeveloperWorkspace() {
                 </div>
               ) : null}
             </aside>
+          );
 
-            <section className="flex-1 min-w-0 flex flex-col gap-2">
+          const editorPane = (
+            <section className="h-full min-w-0 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="truncate font-mono text-xs text-slate-600" data-testid="workspace-open-path">
                   {selectedPath || "Select a file"}
@@ -761,10 +802,10 @@ export default function DeveloperWorkspace() {
                 ) : null}
               </div>
             </section>
-          </div>
+          );
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 h-64 shrink-0" data-testid="workspace-stage-b-panels">
-            <div className="lg:col-span-1 min-h-0">
+          const agentPane = (
+            <div className="h-full min-w-0 overflow-hidden" data-testid="workspace-agent-pane">
               <MentrixCodingAgentPanel
                 workspaceRoot={rootPath}
                 model={agentModel}
@@ -779,11 +820,67 @@ export default function DeveloperWorkspace() {
                 initialSessionId={deepSession || null}
               />
             </div>
-            <WorkspaceTerminal workspaceRoot={rootPath} />
-            <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
-          </div>
-            </>
-          )}
+          );
+
+          const bottomPane = (
+            <div
+              className="grid h-full grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 overflow-auto"
+              data-testid="workspace-stage-b-panels"
+            >
+              <WorkspaceTerminal workspaceRoot={rootPath} />
+              <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
+            </div>
+          );
+
+          let mainRow: ReactNode = editorPane;
+          if (showAgent) {
+            mainRow = (
+              <SplitPane
+                axis="horizontal"
+                storageKey="zect_ws_agent"
+                initial={70}
+                min={45}
+                max={88}
+                testId="workspace-split-agent"
+              >
+                {editorPane}
+                {agentPane}
+              </SplitPane>
+            );
+          }
+          if (showExplorer) {
+            mainRow = (
+              <SplitPane
+                axis="horizontal"
+                storageKey="zect_ws_h"
+                initial={20}
+                min={12}
+                max={40}
+                testId="workspace-split-h"
+              >
+                {explorerPane}
+                {mainRow}
+              </SplitPane>
+            );
+          }
+          if (showBottom) {
+            return (
+              <SplitPane
+                axis="vertical"
+                storageKey="zect_ws_v"
+                initial={68}
+                min={40}
+                max={88}
+                testId="workspace-split-v"
+              >
+                {mainRow}
+                {bottomPane}
+              </SplitPane>
+            );
+          }
+          return mainRow;
+        })()
+      )}
         </div>
 
         <WorkspaceContextUsedPanel

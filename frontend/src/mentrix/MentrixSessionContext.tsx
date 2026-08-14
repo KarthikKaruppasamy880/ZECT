@@ -50,6 +50,7 @@ import {
   OPENAI_QUOTA_STATUS,
 } from "@/mentrix/desktopBridge";
 import { cancelBrowserSpeech, speakMentrix } from "@/mentrix/speak";
+import { createVoiceHoldOff } from "@/mentrix/voiceHoldOff";
 
 export type AvatarState =
   | "idle"
@@ -261,6 +262,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
 
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
   const voiceConnectingRef = useRef(false);
+  const voiceHoldOffRef = useRef(createVoiceHoldOff());
   const micDeviceIdRef = useRef(micDeviceId);
   micDeviceIdRef.current = micDeviceId;
   const pendingArgsRef = useRef<Record<string, Record<string, unknown>>>({});
@@ -427,6 +429,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startVoice = useCallback(async () => {
+    voiceHoldOffRef.current.onExplicitConnect();
     if (voiceConnectingRef.current) {
       pushLog("Connect Voice — already connecting (ignored)");
       return;
@@ -875,9 +878,10 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const toggleVoice = useCallback(() => {
     if (voiceConnectingRef.current) return;
     if (voiceConnected || realtimeRef.current) {
+      voiceHoldOffRef.current.onManualDisconnect();
       stopVoice();
-      setStatusLine("Voice disconnected");
-      pushLog("Voice disconnected");
+      setStatusLine("Voice disconnected — Connect required (wake will not reconnect)");
+      pushLog("Voice disconnected — hold-off until explicit Connect");
       return;
     }
     void startVoice();
@@ -898,6 +902,10 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     if (desktop?.onWake) {
       unsubs.push(
         desktop.onWake(() => {
+          if (voiceHoldOffRef.current.shouldIgnoreWake("wake")) {
+            pushLog("Wake ignored — Connect Voice required after Disconnect");
+            return;
+          }
           setAvatar("listening");
           setDockExpanded(true);
           pushLog("Wake — Connect Voice (Realtime)");
@@ -918,6 +926,10 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       );
     }
     const onDomWake = () => {
+      if (voiceHoldOffRef.current.shouldIgnoreWake("wake")) {
+        pushLog("Wake ignored — Connect Voice required after Disconnect");
+        return;
+      }
       setAvatar("listening");
       setDockExpanded(true);
       void startVoiceRef.current();
@@ -985,9 +997,13 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!wakeQueued) return;
     setWakeQueued(false);
+    if (voiceHoldOffRef.current.shouldIgnoreWake("wake")) {
+      pushLog("Wake ignored — Connect Voice required after Disconnect");
+      return;
+    }
     setDockExpanded(true);
     void startVoiceRef.current();
-  }, [wakeQueued]);
+  }, [pushLog, wakeQueued]);
 
   // Queue wake if event fires before provider effects settle (first paint).
   useEffect(() => {

@@ -3,7 +3,16 @@
 @tailwind utilities;
 @layer base {
   :root {
-    --radius: 0.5rem
+    --radius: 0.5rem;
+    --zect-space: 0.75rem;
+    --zect-fg: #0f172a;
+    --zect-muted: #64748b;
+    --zect-accent: #0f766e;
+    --zect-danger: #b91c1c;
+  }
+  :focus-visible {
+    outline: 2px solid var(--zect-accent);
+    outline-offset: 2px;
   }
 }
 

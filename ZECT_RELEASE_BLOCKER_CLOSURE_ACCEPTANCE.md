@@ -1,29 +1,37 @@
 # ZECT R4.5 — Release Blocker Closure Acceptance
 
-**Date:** 2026-08-13  
-**Spec:** `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5  
-**Mode:** Re-acceptance after R1.5 (#146), R2.5 (#147), R3.5 (#148) merged to `develop`  
-**`develop` SHA:** `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c`  
-**local == origin/develop (pre-branch):** YES  
-**This branch:** `docs/r4.5-release-blocker-closure` (docs only; no R5 implementation)
+**Date:** 2026-08-13 (addendum: closure + core UX)  
+**Spec:** `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md` then `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md` then `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
+**Mode:** Re-acceptance after closure/UX; origin/develop unchanged  
+**origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
+**local feature (unpushed):** `feat/release-closure-core-ux` from `184aa78` / `92e206e`  
+**local == origin/develop:** YES for develop; production R1.6–R3.6 and closure/UX are local-only
 
 ## Final verdict
 
 **RELEASE_CANDIDATE_PARTIAL**
 
-Do not claim `RELEASE_CANDIDATE_PASS`. The three remaining externals are not proven on this SHA:
+Do not claim `RELEASE_CANDIDATE_PASS`. Remaining blockers:
 
-1. Clean-machine NSIS with no system Python  
-2. Presenton + ZECT registry mapping producing real PPTX with `zinnia_verified=true` in all environments  
-3. Live GitHub PR/repo create (`GITHUB_TOKEN` + `github.com` remote; not `local_branch_only`)
+1. Clean-machine NSIS with no system Python — **BLOCKED_EXTERNAL**  
+2. Packaged Present/Voicebox; Present-all two-slide clone; Disconnect live; standard-voice live speak  
+3. Product branch not on origin/develop (`gh` not logged in)  
+4. R3.6 remediate→READY_TO_SHIP not re-run; disposable repo DELETE 403  
+
+Closed this session (still unmerged): Present **EDITOR** and **EXPORT** headed PASS in ZECT UI; Projects/WorkItems/sample process/workbench SplitPane headed hygiene PASS. Core UX: **CORE_UX_PARTIAL**.
+
+Live on this workstation (not yet merged): cloned Narrate PASS (prior), Zinnia PPTX via ZECT API PASS (prior), two real GitHub PRs PASS (prior).
 
 R5+ (KV cache, OCR/XLSX, broader web, Graphify, new agents) is **NOT_STARTED**. Stop here.
+
+Detail: `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`.
 
 ## Git truth
 
 | Field | Value |
 |-------|--------|
-| `git log -1` | `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c Merge branch 'feat/r3.5-multi-repo-agent-delivery' into develop` |
+| `git log -1` origin/develop | `45f4407fc2c5603db572e7b23b88289226557aeb` Merge branch 'docs/r4.5-release-blocker-closure' into develop |
+| local feature | `92e206e` — R1.6/R2.6/R3.6 production (unpushed) |
 | #146 merge | `c324b80` — R1.5 Windows backend sidecar |
 | #147 merge | `baa75ed` — R2.5 Zinnia registry mapping |
 | #148 merge | `94ddf31` — R3.5 multi-repo AGENT delivery |
@@ -32,12 +40,12 @@ R5+ (KV cache, OCR/XLSX, broader web, Graphify, new agents) is **NOT_STARTED**. 
 
 | Activity | Result |
 |----------|--------|
-| Frozen pytest subset | **23 passed** (`test_packaging_sidecar.py`, `test_present_template_registry.py`, `test_multi_repo_developer.py`, `--noconftest`) |
-| New headed Playwright | **Not run** this session |
+| Frozen pytest subset | **62 passed** this campaign (sidecar, registry, multi-repo, voice cloning) |
+| New headed Playwright | R2.6 clone Narrate PASS; R3.6 GitHub PRs **2 passed** |
 | New full live security campaign | **Not run** this session |
-| Clean-machine NSIS | **Not run** — remains UNPROVEN |
-| Live Presenton PPTX PASS | **Not run** — remains BLOCKED_EXTERNAL |
-| Live GitHub PR create via AGENT | **Not run** — remains `local_branch_only` |
+| Clean-machine NSIS | **Not run** — remains UNPROVEN / BLOCKED_EXTERNAL |
+| Live Presenton PPTX PASS | **PASS via ZECT API** this campaign (`zinnia_verified: true`); UI first click 502 |
+| Live GitHub PR create via AGENT | **PASS (local live)** — two `github.com` PRs; `ready_to_ship: false` as negative; product branch unpushed |
 
 Security coverage cited below is **existing** merged tests/CI from prior PRs, plus the packaging sidecar secret-absence unit tests. Residual risk is unchanged: packaged NSIS attack surface unproven on a clean machine; Presenton is external; GitHub token/remote path is unproven.
 
@@ -81,10 +89,10 @@ py -3.12 -m pytest tests/fixes_and_phases/test_packaging_sidecar.py tests/fixes_
 
 | Gate | Why it is not PASS |
 |------|--------------------|
-| Clean-machine Windows NSIS, no system Python | Sidecar exists; dedicated install-VM proof was not recorded. Never PASS without it. |
-| Presenton + registry PPTX | Lifecycle/registry shipped; full PPTX + `zinnia_verified=true` in all envs needs live Presenton and a mapped master. |
-| Live GitHub PR create | AGENT records `pr_status: local_branch_only` without token+github origin. Do not claim GitHub PR PASS. |
+| Clean-machine Windows NSIS, no system Python | Sidecar exists; dedicated install-VM proof was not recorded. **BLOCKED_EXTERNAL.** Never PASS without it. |
+| Presenton + registry PPTX | Live API PASS on this workstation; UI first generate 502; packaged Present unproven. |
+| Live GitHub PR create | Two `github.com` PRs created live. Product fixes unpushed. Remediate→READY_TO_SHIP not re-run. DELETE 403. |
 
 ## Stop
 
-R4.5 re-acceptance complete. **Do not start R5–R9.** See also `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_CANONICAL_COMPLETION_AUDIT.md`, `ZECT_RELEASE_CANDIDATE_R4_ACCEPTANCE.md`.
+R1.6–R3.6 live proof recorded locally. **Do not start R5–R9.** See `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`, `ZECT_PRODUCT_BASELINE_FINAL_ACCEPTANCE.md`, `ZECT_CANONICAL_COMPLETION_AUDIT.md`, `ZECT_RELEASE_CANDIDATE_R4_ACCEPTANCE.md`.

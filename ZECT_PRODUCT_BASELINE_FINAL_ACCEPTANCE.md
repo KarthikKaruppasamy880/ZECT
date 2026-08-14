@@ -1,16 +1,21 @@
 # ZECT Product Baseline — Final Acceptance
 
-**Date:** 2026-08-13 (updated after R4.5 re-acceptance)  
-**Prompts:** `prompts/ZECT_PRODUCT_BASELINE_REMEDIATION_AND_MERGE.md`, `prompts/ZECT_NEXT_ROADMAP_KV_CACHE_DOCUMENT_WEB_GRAPH_AGENTS.md` (R1–R4), `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md`  
-**Final `develop` SHA:** `94ddf31debb3cbdcdcdb6a5c5f9e12423803178c`  
-**local == origin/develop:** YES (sync before `docs/r4.5-release-blocker-closure`)
+**Date:** 2026-08-13 (updated after release-candidate closure + core UX)  
+**Prompts:** `prompts/ZECT_PRODUCT_BASELINE_REMEDIATION_AND_MERGE.md`, `prompts/ZECT_NEXT_ROADMAP_KV_CACHE_DOCUMENT_WEB_GRAPH_AGENTS.md` (R1–R4), `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md`, `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`, `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md`, `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
+**origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
+**local feature (unpushed):** `feat/release-closure-core-ux` (from `184aa78` / `92e206e`)  
+**local origin/develop match:** YES for `45f4407`; R1.6–R3.6 and closure/UX production are **not** on origin
 
 ## Release-readiness verdict
 
 **RELEASE_CANDIDATE_PARTIAL**  
-Baseline remediation complete; R1–R4 (#142–#144) and R1.5–R3.5 (#146–#148) merged. Not one-click release complete. Clean-machine NSIS, Presenton-dependent PPTX, and live GitHub PR create remain PARTIAL / BLOCKED_EXTERNAL. **R5–R9 not started.**
+R1.5–R3.5 remain on `develop`. This campaign proved live cloned Narrate + Zinnia PPTX (ZECT API) and two real GitHub PRs, but did not merge to `develop` (push credentials). Clean-machine NSIS remains **BLOCKED_EXTERNAL**. **R5–R9 not started.**
 
-Canonical R4.5 table: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`.
+Canonical tables: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`.
+
+### R1.6 / R2.6 / R3.6 gate report
+
+`PPTX_GENERATION` PASS (API; UI first click 502) | `ZINNIA_VERIFIED` PASS | `TEMPLATE_GALLERY` PASS | `PRESENT_EDITOR` **PASS** (headed 2026-08-13 closure) | `PRESENT_EXPORT` **PASS** (headed) | `CLONED_VOICE` PASS (1-slide prior) | `STANDARD_VOICE` PARTIAL | `NO_OVERLAP` PASS (one playback) | `DISCONNECT_FSM` UNIT_PASS | `PACKAGED_RUNTIME` BLOCKED_EXTERNAL | origin merge **BLOCKED_EXTERNAL** | Core UX **CORE_UX_PARTIAL** (`ZECT_CORE_PRODUCT_UX_RECONCILIATION_ACCEPTANCE.md`)
 
 ## Merged production tranches
 
@@ -42,19 +47,20 @@ Prior: #133–#135, #137–#138.
 | #147 | R2.5 Present/Zinnia registry | **PARTIAL / BLOCKED_EXTERNAL** — registry + lifecycle shipped; PPTX + `zinnia_verified=true` in all envs needs Presenton + mapped master |
 | #148 | R3.5 multi-repo AGENT | **PARTIAL** — isolated worktrees + aggregate gate live-proven; GitHub PR create `local_branch_only` |
 | (this) | R4.5 re-acceptance | **RELEASE_CANDIDATE_PARTIAL** |
+| unpushed `92e206e` | R1.6 / R2.6 / R3.6 live proof | **PARTIAL** — see `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`; not on origin/develop |
 
-## Capability matrix (develop @ `94ddf31`)
+## Capability matrix (origin/develop @ `45f4407`; local proof @ `92e206e`)
 
 | Capability | Status | Notes |
 |---|---|---|
 | Companion sidebar | **PASS** | #139 |
 | Learning Expansion D | **PASS** | #136 |
 | ZECT Present product UI | **PARTIAL** | `/present` LIVE; Presenton for PPTX |
-| Present template / zinnia_verified | **PARTIAL / BLOCKED_EXTERNAL** | #147 registry mapping; honest false without Presenton + master |
+| Present template / zinnia_verified | **PASS (live API, local)** | registry mapping; UI first generate 502 |
 | Repo/Branch/PR/Worktree | **PASS** | #137 |
 | Multi-repo attach/switch | **PASS** | #141 |
 | Multi-repo ASK/PLAN | **PARTIAL (advanced)** | #144 API + manifest |
-| Multi-repo AGENT (isolated worktrees) | **PARTIAL** | #148 aggregate gate live; GitHub PR unproven |
+| Multi-repo AGENT (isolated worktrees) | **PARTIAL** | #148 aggregate gate; R3.6 live GitHub PRs proven locally (2 `github.com` URLs), not merged |
 | Document Intelligence B | **PARTIAL** | #134 |
 | Web Intelligence C | **PARTIAL** | #135 |
 | Ultra Review closed-loop | **PARTIAL** | #138 |
@@ -79,11 +85,12 @@ Prior: #133–#135, #137–#138.
 
 ## Remaining PARTIAL / BLOCKED (R5+ out of scope)
 
-1. Windows one-click (clean-machine NSIS with no system Python)  
-2. Presenton PPTX + `zinnia_verified=true` in all environments  
-3. Multi-repo live GitHub PR/repo create  
-4. OCR/XLSX, Search/YT/Reddit  
-5. KV cache, Graphify, new agents — **NOT_STARTED**
+1. Windows one-click (clean-machine NSIS with no system Python) — R1.6 **BLOCKED_EXTERNAL**  
+2. Present UI first-generate 502, Present-all clone, export/editor, Disconnect live, packaged Present/Voicebox  
+3. Product branch not on `origin/develop` (git push / `gh` auth)  
+4. R3.6 remediate→`READY_TO_SHIP`; disposable repo DELETE 403  
+5. OCR/XLSX, Search/YT/Reddit  
+6. KV cache, Graphify, new agents — **NOT_STARTED**
 
 ## Security
 
@@ -91,4 +98,4 @@ No new full live security campaign in the R4.5 session. Cite existing merged cov
 
 ## Stop
 
-R4.5 stop condition met: R1.5–R3.5 merged, canonical acceptance + audit updated, **R5+ not started**. See `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`.
+R1.6–R3.6 live proof recorded. **Do not start R5–R9.** See `ZECT_R1_6_R2_6_R3_6_ACCEPTANCE.md`.

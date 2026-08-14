@@ -341,3 +341,48 @@ def test_evidence_verifier_stale_head_direct():
     )
     assert result.ready_to_ship is False
     assert any("stale_evidence" in e for e in result.errors)
+
+
+def test_redact_secrets_strips_github_tokens():
+    from app.services.work_items.multi_repo_agent import _redact_secrets
+
+    raw = (
+        "fatal: https://x-access-token:gho_NotARealToken123@github.com/acme/r.git "
+        "Authentication failed Bearer gho_NotARealToken123 "
+        "http.extraHeader=AUTHORIZATION: bearer gho_NotARealToken123"
+    )
+    out = _redact_secrets(raw)
+    assert "gho_NotARealToken123" not in out
+    assert "[redacted]" in out
+
+
+def test_git_push_github_uses_extraheader_not_origin_rewrite(tmp_path, monkeypatch):
+    from app.services.work_items.multi_repo_agent import _git_push_github
+
+    calls = []
+
+    class Fake:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs.get("env") or {}))
+        return Fake()
+
+    monkeypatch.setattr("app.services.work_items.multi_repo_agent.subprocess.run", fake_run)
+    out = _git_push_github(
+        tmp_path,
+        origin="https://github.com/acme/widget.git",
+        branch="zect-wi-1",
+        token="gho_NotARealToken123",
+    )
+    assert out["ok"] is True
+    cmd, env = calls[0]
+    joined = " ".join(cmd)
+    assert "gho_NotARealToken123" not in joined
+    assert env.get("GIT_CONFIG_KEY_1") == "http.extraHeader"
+    assert env.get("GIT_CONFIG_VALUE_1") == "AUTHORIZATION: bearer gho_NotARealToken123"
+    assert "x-access-token" not in joined
+    assert "https://github.com/acme/widget.git" in joined
+

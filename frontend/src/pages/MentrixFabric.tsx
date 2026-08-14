@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Network, Play, RefreshCw, AlertTriangle } from "lucide-react";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, createSampleProcess, ingestWorkItem } from "@/lib/api";
 import { showToast } from "@/components/Toast";
 import { Link } from "react-router-dom";
 
@@ -90,12 +90,43 @@ export default function MentrixFabric() {
             <Network className="h-6 w-6 text-teal-700" /> Mentrix Fabric
           </h1>
           <p className="text-sm text-slate-500">
-            Multi-surface classify → refuse → Mentrix Coding Agent handoff
+            External process → Connector → ZECT WorkItem → Project → ASK/PLAN/AGENT. Ticket text is untrusted.
           </p>
         </div>
         <button type="button" onClick={() => refresh()} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />
         </button>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4" data-testid="process-sample-card">
+        <h2 className="text-sm font-semibold text-slate-800">Sample process</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Fix Failed Order Validation — isolated SAMPLE fixture. Maps Process → WorkItem → Project. Does not complete live Camunda tasks.
+        </p>
+        <button
+          type="button"
+          data-testid="process-sample-create"
+          className="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-xs text-white"
+          onClick={async () => {
+            try {
+              const out = await createSampleProcess();
+              showToast("success", out.work_item.title);
+              window.location.assign(`/work-items`);
+            } catch {
+              showToast("error", "Could not create sample process");
+            }
+          }}
+        >
+          Create sample WorkItem
+        </button>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4" data-testid="process-ingest-card">
+        <h2 className="text-sm font-semibold text-slate-800">Map Jira / Camunda → WorkItem</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Uses the existing WorkItem ingest adapter. Ticket text is untrusted. Never completes a live process task.
+        </p>
+        <ProcessIngestForm />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -170,5 +201,87 @@ export default function MentrixFabric() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ProcessIngestForm() {
+  const [source, setSource] = useState("jira");
+  const [externalId, setExternalId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <form
+      className="mt-3 flex flex-wrap items-end gap-2"
+      data-testid="process-ingest-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!externalId.trim()) return;
+        setBusy(true);
+        try {
+          const pid = projectId.trim() ? Number(projectId) : undefined;
+          const out = await ingestWorkItem({
+            source,
+            external_id: externalId.trim(),
+            project_id: Number.isFinite(pid) ? pid : undefined,
+            require_repo: false,
+            raw: {
+              key: externalId.trim(),
+              id: externalId.trim(),
+              title: `${source} ${externalId.trim()}`,
+              description: "[untrusted-external] Mapped from Processes UI. Not a live completion.",
+              project_id: Number.isFinite(pid) ? pid : undefined,
+            },
+          });
+          showToast("success", `${out.work_item.source} → WorkItem #${out.work_item.id}`);
+          window.location.assign("/work-items");
+        } catch (err) {
+          showToast("error", err instanceof Error ? err.message : "Ingest failed");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <label className="text-xs text-slate-600">
+        Source
+        <select
+          data-testid="process-ingest-source"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+        >
+          <option value="jira">Jira</option>
+          <option value="camunda">Camunda / Mentrix Process</option>
+        </select>
+      </label>
+      <label className="text-xs text-slate-600">
+        External id
+        <input
+          data-testid="process-ingest-external-id"
+          value={externalId}
+          onChange={(e) => setExternalId(e.target.value)}
+          placeholder="ZECT-123 or task id"
+          className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-xs min-w-[10rem]"
+        />
+      </label>
+      <label className="text-xs text-slate-600">
+        Project id (optional)
+        <input
+          data-testid="process-ingest-project-id"
+          value={projectId}
+          onChange={(e) => setProjectId(e.target.value)}
+          placeholder="numeric"
+          className="mt-1 block rounded-lg border border-slate-200 px-2 py-1.5 text-xs w-24"
+        />
+      </label>
+      <button
+        type="submit"
+        data-testid="process-ingest-submit"
+        disabled={busy || !externalId.trim()}
+        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-40"
+      >
+        {busy ? "Mapping…" : "Create WorkItem"}
+      </button>
+    </form>
   );
 }

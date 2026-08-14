@@ -3,6 +3,7 @@
  * Electron: parse notes → F5 → speak await → Right Arrow.
  * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
  */
+import PresentEditor from "@/components/PresentEditor";
 import { useEffect, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
 import {
@@ -151,8 +152,10 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
   const [lastTemplateSent, setLastTemplateSent] = useState("");
   const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
+  const [generationProgress, setGenerationProgress] = useState("");
   const usingStock = voiceChoice.startsWith("stock:");
-  const cloneNarrateBlocked = !usingStock && engineStatus !== null && !engineStatus.online;
+  const usingNone = voiceChoice === "none";
+  const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
 
   useEffect(() => {
     try {
@@ -180,26 +183,36 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     } catch {
       /* ignore */
     }
-    mentrixPresentonStatus()
-      .then((s) => {
-        setPresentonReady(!!s.configured && !!s.reachable);
-        const life = String(s.lifecycle || "") as ProviderLifecycle;
-        if (
-          life === "READY" ||
-          life === "TEMPLATE_NOT_READY" ||
-          life === "PROVIDER_UNAVAILABLE" ||
-          life === "STARTING" ||
-          life === "GENERATION_FAILED"
-        ) {
-          setLifecycle(life);
-        } else {
-          setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+    let statusCancelled = false;
+    const loadPresentonStatus = async () => {
+      for (let attempt = 0; attempt < 4 && !statusCancelled; attempt++) {
+        try {
+          const s = await mentrixPresentonStatus();
+          if (statusCancelled) return;
+          setPresentonReady(!!s.configured && !!s.reachable);
+          const life = String(s.lifecycle || "") as ProviderLifecycle;
+          if (
+            life === "READY" ||
+            life === "TEMPLATE_NOT_READY" ||
+            life === "PROVIDER_UNAVAILABLE" ||
+            life === "STARTING" ||
+            life === "GENERATION_FAILED"
+          ) {
+            setLifecycle(life);
+          } else {
+            setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+          }
+          if (s.configured && s.reachable) return;
+        } catch {
+          if (attempt === 3 && !statusCancelled) {
+            setPresentonReady(false);
+            setLifecycle("PROVIDER_UNAVAILABLE");
+          }
         }
-      })
-      .catch(() => {
-        setPresentonReady(false);
-        setLifecycle("PROVIDER_UNAVAILABLE");
-      });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    };
+    void loadPresentonStatus();
     mentrixCompanionIntegrations()
       .then((s) => {
         // Prefer status endpoint for ready; integrations is backup if status fails earlier
@@ -213,7 +226,6 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     mentrixPresentonTemplates()
       .then((res) => {
         if (res.reachable === false) {
-          setPresentonReady(false);
           setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
         }
         const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
@@ -261,6 +273,9 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           { id: "technical", label: "Technical" },
         ]),
       );
+    return () => {
+      statusCancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -304,6 +319,9 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     }
     if (choice.startsWith("stock:")) {
       return { stockVoice: choice.slice("stock:".length), requireClone: false };
+    }
+    if (choice === "none") {
+      return { requireClone: false, stockVoice: "" };
     }
     return { requireClone: true };
   };
@@ -442,6 +460,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const generateDeck = async () => {
     setBusy(true);
     setStatus("");
+    setGenerationProgress("Preparing");
     try {
       if (!presentonReady) {
         setLifecycle("PROVIDER_UNAVAILABLE");
@@ -487,14 +506,26 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       }
       const slidesHint = prep.n_slides_hint || nSlides;
       if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
-      const out = await mentrixPresentonGenerate({
-        content: adapted,
-        n_slides: slidesHint,
-        template,
-        ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
-        custom_id: customTemplateId.trim() || undefined,
-        filename: "mentrix-deck.pptx",
-      });
+      const stages = ["Outline", "Slides", "Applying template", "Finalizing"];
+      let stageIdx = 0;
+      setGenerationProgress(stages[0]);
+      const stageTimer = window.setInterval(() => {
+        stageIdx = Math.min(stageIdx + 1, stages.length - 1);
+        setGenerationProgress(stages[stageIdx]);
+      }, 3500);
+      let out: Awaited<ReturnType<typeof mentrixPresentonGenerate>> | undefined;
+      try {
+        out = await mentrixPresentonGenerate({
+          content: adapted,
+          n_slides: slidesHint,
+          template,
+          ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
+          custom_id: customTemplateId.trim() || undefined,
+          filename: "mentrix-deck.pptx",
+        });
+      } finally {
+        window.clearInterval(stageTimer);
+      }
       setFlowBApproved(false);
       const sent = out?.template_sent || template;
       setLastTemplateSent(sent);
@@ -503,6 +534,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       }
       if (out?.path) {
         persistPath(out.path);
+        setGenerationProgress("Ready");
         const zinniaNote =
           templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
             ? ` Zinnia NOT verified (wire template=${sent}; map zinnia-executive-v1 in the ZECT registry).`
@@ -619,13 +651,17 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     setBusy(true);
     setStatus("");
     try {
+      if (usingNone) {
+        setStatus("No narration selected.");
+        return;
+      }
       if (cloneNarrateBlocked) {
         setStatus(
           `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to narrate in your voice.`,
         );
         return;
       }
-      if (!defaultVoice && !usingStock) {
+      if (!defaultVoice && !usingStock && !usingNone) {
         setStatus("No cloned voice saved — open Voice tab → clone a sample, or pick an OpenAI stock voice.");
       }
       const text =
@@ -742,13 +778,17 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         );
         return;
       }
+      if (usingNone) {
+        setStatus("No narration selected — present the deck without audio.");
+        return;
+      }
       if (cloneNarrateBlocked) {
         setStatus(
           `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
         );
         return;
       }
-      if (!defaultVoice && !usingStock) {
+      if (!defaultVoice && !usingStock && !usingNone) {
         setStatus("Clone a voice first (Voice tab) or pick an OpenAI stock voice — Present uses your saved clone.");
       }
 
@@ -1075,6 +1115,11 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         <Sparkles className="h-3.5 w-3.5" />
         Generate deck
       </button>
+      {generationProgress ? (
+        <p className={`text-[11px] ${dark ? "text-teal-300" : "text-teal-800"}`} data-testid="present-generation-progress">
+          {generationProgress}
+        </p>
+      ) : null}
       {lastTemplateSent && (
         <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
           Last Presenton template_sent: {lastTemplateSent}
@@ -1179,6 +1224,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
               {!v.has_sample ? " — sample missing" : ""}
             </option>
           ))}
+          <option value="none">No narration</option>
           {STOCK_VOICES.map((v) => (
             <option key={v.id} value={`stock:${v.id}`}>
               {v.label}
@@ -1294,6 +1340,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           {status}
         </p>
       )}
+      {path && /\.pptx$/i.test(path) ? <PresentEditor pptxPath={path} /> : null}
     </div>
   );
 }

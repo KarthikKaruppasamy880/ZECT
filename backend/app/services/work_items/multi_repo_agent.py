@@ -673,6 +673,9 @@ def _record_pr(
     origin = (remote.stdout or "").strip()
     if not token or remote.returncode != 0 or "github.com" not in origin.lower():
         rec["pr_status"] = "local_branch_only"
+        rec["pr_error"] = rec.get("pr_error") or (
+            "missing_github_token_or_origin" if not token or "github.com" not in origin.lower() else "no_origin"
+        )
         return rec
 
     owner, repo_name = _parse_github_origin(origin)
@@ -680,29 +683,28 @@ def _record_pr(
         rec["pr_error"] = "cannot_parse_github_origin"
         return rec
 
-    push = subprocess.run(
-        ["git", "push", "-u", "origin", branch],
-        cwd=str(worktree),
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
-    if push.returncode != 0:
+    push = _git_push_github(worktree, origin=origin, branch=branch, token=token)
+    if not push.get("ok"):
         rec["pr_status"] = "local_branch_only"
-        rec["pr_error"] = (push.stderr or push.stdout or "push_failed")[:400]
+        rec["pr_error"] = str(push.get("error") or "push_failed")[:400]
         return rec
 
     try:
         from app import github_service
 
+        base = "main"
+        try:
+            info = github_service.get_repo_info(owner, repo_name)
+            base = str(getattr(info, "default_branch", None) or "main")
+        except Exception:  # noqa: BLE001
+            base = "main"
         pr = github_service.create_pull_request(
             owner=owner,
             repo=repo_name,
             title=title,
             body=body,
             head=branch,
-            base="main",
+            base=base,
         )
         rec["pr_status"] = "created"
         rec["pr_number"] = pr.get("number")
@@ -710,10 +712,53 @@ def _record_pr(
         rec["ci"] = "pending"
     except Exception as exc:  # noqa: BLE001
         rec["pr_status"] = "local_branch_only"
-        rec["pr_error"] = str(exc)[:400]
+        rec["pr_error"] = _redact_secrets(str(exc)[:400])
         rec["pr_url"] = None
         rec["pr_number"] = None
     return rec
+
+
+def _redact_secrets(text: str) -> str:
+    s = text or ""
+    s = re.sub(r"(gho_|ghp_|github_pat_|ghu_|ghs_|ghr_)[A-Za-z0-9_]+", "[redacted]", s)
+    s = re.sub(r"(x-access-token:)[^@\s]+", r"\1[redacted]", s, flags=re.I)
+    s = re.sub(r"(Authorization:\s*bearer\s+)\S+", r"\1[redacted]", s, flags=re.I)
+    s = re.sub(r"(Bearer |token )[A-Za-z0-9._\-]+", r"\1[redacted]", s, flags=re.I)
+    return s
+
+
+def _git_push_github(worktree: Path, *, origin: str, branch: str, token: str) -> dict[str, Any]:
+    """Push with GITHUB_TOKEN via http.extraHeader so the token is not stored in origin URL."""
+    owner, repo_name = _parse_github_origin(origin)
+    if not owner or not repo_name or not token or not branch:
+        return {"ok": False, "error": "push_precondition"}
+    https = f"https://github.com/{owner}/{repo_name}.git"
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_COUNT"] = "2"
+    env["GIT_CONFIG_KEY_0"] = "credential.helper"
+    env["GIT_CONFIG_VALUE_0"] = ""
+    env["GIT_CONFIG_KEY_1"] = "http.extraHeader"
+    env["GIT_CONFIG_VALUE_1"] = f"AUTHORIZATION: bearer {token}"
+    proc = subprocess.run(
+        [
+            "git",
+            "push",
+            "-u",
+            https,
+            f"{branch}:{branch}",
+        ],
+        cwd=str(worktree),
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    if proc.returncode == 0:
+        return {"ok": True}
+    err = _redact_secrets((proc.stderr or proc.stdout or "push_failed")[:400])
+    return {"ok": False, "error": err}
 
 
 def _parse_github_origin(url: str) -> tuple[str, str]:

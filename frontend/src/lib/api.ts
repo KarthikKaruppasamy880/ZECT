@@ -70,8 +70,36 @@ import type {
 } from "@/types";
 
 // Projects
-export const getProjects = (status?: string) =>
-  request<Project[]>(`/api/projects${status ? `?status=${status}` : ""}`);
+export const createSampleProcess = () =>
+  request<{
+    ok: boolean;
+    created: boolean;
+    project_id: number;
+    work_item: { id: number; title: string; source: string; project_id?: number };
+    note?: string;
+  }>("/api/work-items/sample-process", { method: "POST" });
+
+export const ingestWorkItem = (body: {
+  source: string;
+  external_id: string;
+  raw?: Record<string, unknown>;
+  project_id?: number | null;
+  repository_id?: number | null;
+  repository_ref?: string;
+  require_repo?: boolean;
+}) =>
+  request<{
+    work_item: { id: number; title: string; source: string; status: string; project_id?: number };
+    needs_human: boolean;
+    missing_repository_identity: boolean;
+  }>("/api/work-items/ingest", { method: "POST", body: JSON.stringify(body) });
+export const getProjects = (status?: string, opts?: { includeFixtures?: boolean }) => {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (!opts?.includeFixtures) params.set("exclude_fixtures", "1");
+  const q = params.toString();
+  return request<Project[]>(`/api/projects${q ? `?${q}` : ""}`);
+};
 export const getProject = (id: number) => request<Project>(`/api/projects/${id}`);
 export const createProject = (data: Partial<Project>) =>
   request<Project>("/api/projects", { method: "POST", body: JSON.stringify(data) });
@@ -612,8 +640,10 @@ export const mentrixPresentonGenerate = (data: {
   custom_id?: string;
   instructions?: string;
   filename?: string;
-}) =>
-  request<{
+}) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 600_000);
+  return request<{
     ok: boolean;
     path: string;
     bytes?: number;
@@ -630,8 +660,44 @@ export const mentrixPresentonGenerate = (data: {
     presenton_request?: { template?: string; n_slides?: number };
   }>(
     "/api/mentrix/presenton/generate",
-    { method: "POST", body: JSON.stringify(data) },
-  );
+    { method: "POST", body: JSON.stringify(data), signal: controller.signal },
+  ).finally(() => clearTimeout(timer));
+};
+
+export const mentrixParsePptxFromPath = (path: string) =>
+  request<{
+    ok: boolean;
+    count: number;
+    slides: { index: number; notes?: string; text?: string }[];
+    filename: string;
+    path?: string;
+  }>("/api/mentrix/present/parse-pptx-path", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+
+export const mentrixPresentSaveNotes = (
+  path: string,
+  slides: Array<{ index: number; notes?: string; text?: string }>,
+) =>
+  request<{ ok: boolean; notes_path?: string; count?: number }>("/api/mentrix/present/save-notes", {
+    method: "POST",
+    body: JSON.stringify({ path, slides }),
+  });
+
+export async function mentrixPresentPptxDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const url = `${API}/api/mentrix/present/pptx?path=${encodeURIComponent(path)}`;
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Export failed");
+  }
+  const blob = await res.blob();
+  const disp = res.headers.get("content-disposition") || "";
+  const match = disp.match(/filename="?([^"]+)"?/i);
+  return { blob, filename: match?.[1] || "zect-deck.pptx" };
+}
 
 export const mentrixPresentationAudiences = () =>
   request<{ audiences: Array<{ id: string; label: string; slide_count_hint?: number }> }>(
@@ -926,7 +992,7 @@ export async function mentrixSpeakClonedDetailed(
     voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== ""
       ? false
       : voiceOpts?.requireClone !== false;
-  const speakTimeoutMs = Number(import.meta.env.VITE_MENTRIX_SPEAK_TIMEOUT_MS || 45000);
+  const speakTimeoutMs = Number(import.meta.env.VITE_MENTRIX_SPEAK_TIMEOUT_MS || 180000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), speakTimeoutMs);
   let res: Response;

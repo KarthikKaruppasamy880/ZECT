@@ -1,4 +1,5 @@
 import os
+import threading
 from github import Github, GithubException
 from app.schemas import (
     GitHubRepoInfo, GitHubPR, GitHubPRFile,
@@ -6,16 +7,19 @@ from app.schemas import (
 )
 
 _gh: Github | None = None
+_gh_token: str | None = None
+_gh_lock = threading.Lock()
 
 
 def get_github() -> Github:
-    global _gh
+    """Build a GitHub client from the current GITHUB_TOKEN (refresh if token changes)."""
+    global _gh, _gh_token
     token = os.getenv("GITHUB_TOKEN", "")
-    if _gh is None and token:
-        _gh = Github(token)
-    elif _gh is None:
-        _gh = Github()  # unauthenticated (60 req/hr)
-    return _gh
+    with _gh_lock:
+        if _gh is None or token != (_gh_token or ""):
+            _gh = Github(token) if token else Github()
+            _gh_token = token
+        return _gh
 
 
 def list_org_repos(org: str, limit: int = 30) -> list[GitHubRepoInfo]:

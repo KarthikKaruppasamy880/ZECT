@@ -6,7 +6,13 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { mentrixSpeakClonedDetailed } from "@/lib/api";
-import { cancelMentrixSpeech, requireCloneSpeech, speakMentrixAwait, speakMentrixStreamedAwait } from "./speak";
+import {
+  cancelMentrixSpeech,
+  playMentrixPrefetch,
+  requireCloneSpeech,
+  speakMentrixAwait,
+  speakMentrixStreamedAwait,
+} from "./speak";
 
 class FakeAudio extends EventTarget {
   ended = false;
@@ -182,5 +188,63 @@ describe("speakMentrixStreamedAwait", () => {
 
     expect(result).toEqual({ ok: false, error: "cancelled" });
     expect(mentrixSpeakClonedDetailed).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start the next slide's playback until the current audio has ended", async () => {
+    const playing: number[] = [];
+    const maxConcurrent: number[] = [];
+    class GatedAudio extends EventTarget {
+      src: string;
+      constructor(src?: string) {
+        super();
+        this.src = src || "";
+      }
+      play() {
+        playing.push(1);
+        maxConcurrent.push(playing.length);
+        return Promise.resolve();
+      }
+      pause() {
+        /* no-op */
+      }
+      removeAttribute() {
+        /* no-op */
+      }
+      load() {
+        /* no-op */
+      }
+      endNow() {
+        playing.pop();
+        this.dispatchEvent(new Event("ended"));
+      }
+    }
+    const instances: GatedAudio[] = [];
+    vi.stubGlobal(
+      "Audio",
+      function Audio(src?: string) {
+        const a = new GatedAudio(src);
+        instances.push(a);
+        return a;
+      } as unknown as typeof Audio,
+    );
+
+    const run = playMentrixPrefetch(
+      [
+        { url: "blob:slide-1", engine: "zect_voicebox" },
+        { url: "blob:slide-2", engine: "zect_voicebox" },
+      ],
+      { requireClone: true },
+    );
+    await Promise.resolve();
+    expect(instances.length).toBe(1);
+    expect(Math.max(0, ...maxConcurrent)).toBe(1);
+    instances[0].endNow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(instances.length).toBe(2);
+    instances[1].endNow();
+    const result = await run;
+    expect(result.ok).toBe(true);
+    expect(Math.max(...maxConcurrent)).toBe(1);
   });
 });

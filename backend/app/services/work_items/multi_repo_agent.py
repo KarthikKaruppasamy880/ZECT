@@ -720,8 +720,9 @@ def _record_pr(
 
 def _redact_secrets(text: str) -> str:
     s = text or ""
-    s = re.sub(r"(gho_|ghp_|github_pat_|ghu_|ghs_)[A-Za-z0-9_]+", "[redacted]", s)
+    s = re.sub(r"(gho_|ghp_|github_pat_|ghu_|ghs_|ghr_)[A-Za-z0-9_]+", "[redacted]", s)
     s = re.sub(r"(x-access-token:)[^@\s]+", r"\1[redacted]", s, flags=re.I)
+    s = re.sub(r"(Authorization:\s*bearer\s+)\S+", r"\1[redacted]", s, flags=re.I)
     s = re.sub(r"(Bearer |token )[A-Za-z0-9._\-]+", r"\1[redacted]", s, flags=re.I)
     return s
 

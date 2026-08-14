@@ -346,7 +346,11 @@ def test_evidence_verifier_stale_head_direct():
 def test_redact_secrets_strips_github_tokens():
     from app.services.work_items.multi_repo_agent import _redact_secrets
 
-    raw = "fatal: https://x-access-token:gho_NotARealToken123@github.com/acme/r.git Authentication failed Bearer gho_NotARealToken123"
+    raw = (
+        "fatal: https://x-access-token:gho_NotARealToken123@github.com/acme/r.git "
+        "Authentication failed Bearer gho_NotARealToken123 "
+        "http.extraHeader=AUTHORIZATION: bearer gho_NotARealToken123"
+    )
     out = _redact_secrets(raw)
     assert "gho_NotARealToken123" not in out
     assert "[redacted]" in out

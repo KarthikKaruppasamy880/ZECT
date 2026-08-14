@@ -120,7 +120,7 @@ def _normalize_events(raw: Any) -> list[dict[str, Any]]:
 
 
 def _append_event(run: MentrixRun, event: dict[str, Any]) -> list[dict[str, Any]]:
-    events = _normalize_events(json.loads(run.events_json or "[]"))
+    events = _normalize_events(_json_list(run.events_json))
     next_seq = (events[-1]["sequence_id"] if events else 0) + 1
     payload = dict(event)
     payload.setdefault("sequence_id", next_seq)
@@ -305,7 +305,7 @@ def get_run_plan(run_id: int, db: Session = Depends(get_db), _user: CurrentUser 
     return {
         "run_id": run.id,
         "status": run.status,
-        "plan_confirmed": bool(json.loads(run.gates_json or "{}").get("plan_confirmed")),
+        "plan_confirmed": bool(_json_dict(run.gates_json).get("plan_confirmed")),
         "plan": plan,
         "root_cause": result.get("root_cause"),
     }
@@ -324,7 +324,8 @@ def patch_run_plan(
     if run.status != "awaiting_plan_confirm":
         raise HTTPException(status_code=400, detail="Plan can only be edited while awaiting_plan_confirm")
     result = _json_dict(run.result_json)
-    plan = dict(result.get("plan") or {})
+    raw_plan = result.get("plan")
+    plan = dict(raw_plan) if isinstance(raw_plan, dict) else {}
     if req.summary is not None:
         plan["summary"] = req.summary
     if req.plan is not None:
@@ -334,8 +335,8 @@ def patch_run_plan(
     if req.steps is not None:
         plan["steps"] = req.steps
     result["plan"] = plan
-    cp = result.get("_checkpoint") or {}
-    if cp.get("plan") is not None:
+    cp = result.get("_checkpoint") if isinstance(result.get("_checkpoint"), dict) else {}
+    if isinstance(cp.get("plan"), dict):
         inner = dict(cp["plan"])
         if req.steps is not None:
             inner["steps"] = req.steps
@@ -921,7 +922,7 @@ def refresh_sast_for_run(
     }
     result["sast"] = gates["sast_detail"]
     result["gates"] = gates
-    events = json.loads(run.events_json or "[]")
+    events = _json_list(run.events_json)
     events.append({
         "ts": datetime.now(timezone.utc).isoformat(),
         "agent": "integrator",

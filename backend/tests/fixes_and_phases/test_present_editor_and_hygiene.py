@@ -72,3 +72,15 @@ def test_run_to_dict_survives_string_result():
     assert out["result"] == {}
     assert out["events"][0]["event"] == "x"
     assert "str" not in str(out.get("error") or "")
+
+
+def test_append_event_survives_malformed_events_json():
+    from app.domains.agent_run.mentrix import _append_event
+
+    class BrokenRun:
+        events_json = "{"
+
+    run = BrokenRun()
+    events = _append_event(run, {"event": "ok", "message": "hi"})  # type: ignore[arg-type]
+    assert events[-1]["event"] == "ok"
+    assert '"ok"' in run.events_json

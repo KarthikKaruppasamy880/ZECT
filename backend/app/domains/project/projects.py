@@ -1,18 +1,46 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.infrastructure.database import get_db
 from app.models import Project, Repo
 from app.schemas import ProjectCreate, ProjectUpdate, ProjectOut
+import re
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
+DEMO_NAMES = frozenset(
+    {
+        "Policy Admin Modernization",
+        "Claims Processing API",
+        "Agent Portal Redesign",
+        "Underwriting Rules Engine",
+        "Customer Notifications Service",
+        "Document Intelligence Pipeline",
+    }
+)
+FIXTURE_NAME = re.compile(
+    r"^(Phase6\b|zect-r36-|r36-live-|Repo Onboard |Onboarding Test|LIVE_E2E\b)",
+    re.I,
+)
+
+
+def is_fixture_project_name(name: str) -> bool:
+    n = (name or "").strip()
+    return n in DEMO_NAMES or bool(FIXTURE_NAME.search(n))
+
 
 @router.get("", response_model=list[ProjectOut])
-def list_projects(status: str | None = None, db: Session = Depends(get_db)):
+def list_projects(
+    status: str | None = None,
+    exclude_fixtures: bool = Query(False),
+    db: Session = Depends(get_db),
+):
     query = db.query(Project)
     if status:
         query = query.filter(Project.status == status)
-    return query.order_by(Project.updated_at.desc()).all()
+    rows = query.order_by(Project.updated_at.desc()).all()
+    if exclude_fixtures:
+        rows = [p for p in rows if not is_fixture_project_name(p.name or "")]
+    return rows
 
 
 @router.post("", response_model=ProjectOut, status_code=201)

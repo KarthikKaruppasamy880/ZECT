@@ -161,6 +161,30 @@ export default function ZectPresent() {
 
       {step <= 1 && (
         <section className="space-y-4" data-testid="zect-present-gallery">
+          <label className="block space-y-1">
+            <span className="text-sm font-semibold text-slate-800">What should this presentation cover?</span>
+            <textarea
+              data-testid="zect-present-prompt"
+              rows={5}
+              defaultValue={(() => {
+                try {
+                  return localStorage.getItem("zect_mentrix_present_deck_prompt") || "";
+                } catch {
+                  return "";
+                }
+              })()}
+              onChange={(e) => {
+                try {
+                  localStorage.setItem("zect_mentrix_present_deck_prompt", e.target.value);
+                } catch {
+                  /* ignore */
+                }
+              }}
+              placeholder="Describe the audience, decisions needed, and key points. Attach a template below, then Generate."
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900"
+            />
+          </label>
+
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <h2 className="text-sm font-semibold text-slate-800">Template gallery</h2>
             <div className="flex items-center gap-3">

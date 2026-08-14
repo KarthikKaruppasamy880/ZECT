@@ -1,10 +1,10 @@
 # ZECT Release Candidate R4 — Full Baseline E2E Acceptance
 
-**Date:** 2026-08-13 (R1.6 / R2.6 / R3.6 addendum; origin/develop @ `45f4407`)  
-**Spec:** Next roadmap §R4 then `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`  
+**Date:** 2026-08-13 (closure + core UX addendum; origin/develop @ `45f4407`)  
+**Spec:** Next roadmap §R4 then `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md` then `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md` then `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
 **origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
-**local feature (unpushed):** `92e206e30b06b64bcdf576fe37e3147d27fca136`  
-**local == origin/develop:** YES for develop; R1.6–R3.6 code is local-only
+**local feature (unpushed):** `feat/release-closure-core-ux` (from `184aa78` / `92e206e`)  
+**local == origin/develop:** YES for develop; R1.6–R3.6 and closure/UX code is local-only
 
 ## Verdict
 
@@ -26,6 +26,7 @@ Full matrices: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, `ZECT_R1_6_R2_6_R3_
 | R4 Full release E2E | — | **PASS (CI)** at `2724fef`; still green on `45f4407` | GitHub CI; not a new security campaign |
 | R4.5 Re-acceptance | docs | **RELEASE_CANDIDATE_PARTIAL** | blocker-closure acceptance |
 | R1.6 / R2.6 / R3.6 | unpushed `92e206e` | **PARTIAL** | cloned Narrate + 2 live GitHub PRs; NSIS BLOCKED_EXTERNAL; not on origin |
+| Closure + Core UX | local `feat/release-closure-core-ux` | **PARTIAL** | Headed PRESENT_EDITOR + PRESENT_EXPORT PASS; hygiene PASS; merge BLOCKED_EXTERNAL; `CORE_UX_PARTIAL` |
 
 ## Prior baseline (remediation)
 

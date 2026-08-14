@@ -43,6 +43,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     getProjects()
@@ -50,9 +51,15 @@ export default function Projects() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = filter
-    ? projects.filter((p) => p.status === filter)
-    : projects;
+  const filtered = projects.filter((p) => {
+    if (filter && p.status !== filter) return false;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      const hay = `${p.name} ${p.team || ""} ${p.description || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
 
   if (loading) {
     return (
@@ -63,11 +70,11 @@ export default function Projects() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div data-testid="projects-page">
+      <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
-          <p className="text-slate-500 text-sm">Manage your engineering projects</p>
+          <p className="text-slate-500 text-sm">Authorized projects you can access. Acceptance fixtures are hidden.</p>
         </div>
         <Link
           to="/projects/new"
@@ -81,7 +88,14 @@ export default function Projects() {
         <RepoOnboardingPanel />
       </div>
 
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-6 flex-wrap items-center">
+        <input
+          data-testid="projects-search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search projects"
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs min-w-[12rem]"
+        />
         {["", "active", "completed", "on-hold"].map((f) => (
           <button
             key={f}

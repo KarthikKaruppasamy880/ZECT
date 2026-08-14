@@ -1,30 +1,45 @@
 # ZECT R1.6 / R2.6 / R3.6 — Final release proof
 
-**Date:** 2026-08-13  
-**Spec:** `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`  
-**Feature branch:** `feat/r16-r26-r36-final-proof` @ `92e206e30b06b64bcdf576fe37e3147d27fca136`  
+**Date:** 2026-08-13 (closure + core UX addendum)  
+**Specs:** `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md` then `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md` then `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
+**Feature branch (prior):** `feat/r16-r26-r36-final-proof` @ `92e206e30b06b64bcdf576fe37e3147d27fca136` / docs `184aa78`  
+**This session branch:** `feat/release-closure-core-ux` (local; production+UX uncommitted)  
 **origin/develop (unchanged):** `45f4407fc2c5603db572e7b23b88289226557aeb`  
-**Product PR to develop:** **not pushed** (`gh` not logged in; HTTPS push to `ZECT.git` returned invalid credentials)
+**Product PR to develop:** **not pushed** (`gh` not logged in)
 
 ## Verdict
 
 **RELEASE_CANDIDATE_PARTIAL**
 
-Do not claim `RELEASE_CANDIDATE_PASS`. R1.6 clean-machine NSIS is unproven. R2.6 cloned Narrate and Zinnia PPTX (via ZECT API) passed live; Present-all / export / Disconnect live / packaged Present remain PARTIAL. R3.6 created two real `github.com` PRs (not `local_branch_only`); remediate→`READY_TO_SHIP` was not re-run. **R5+ not started.**
+Do not claim `RELEASE_CANDIDATE_PASS`. R1.6 clean-machine NSIS is unproven. Origin merge is **BLOCKED_EXTERNAL**. Closure headed-proved Present **EDITOR** and **EXPORT** in the ZECT UI. Live two-slide clone, standard-voice speak, Disconnect live, packaged runtime, and multi-repo READY_AFTER_FIX remain open. **R5+ not started.** Core UX: `ZECT_CORE_PRODUCT_UX_RECONCILIATION_ACCEPTANCE.md` → **CORE_UX_PARTIAL**.
 
-## Gate report
+## Gate report (closure §11)
 
 | Gate | Status | Notes |
 |------|--------|-------|
-| PPTX_GENERATION | **PASS** (API) / PARTIAL (UI first click) | ZECT `POST /api/mentrix/presenton/generate` HTTP 200, lifecycle READY, PPTX ~624,433 bytes. First ZECT Present UI click returned HTTP 502 / `GENERATION_FAILED`; same API retry succeeded. |
-| ZINNIA_VERIFIED | **PASS** | `zinnia_verified: true`, `mapping_source: registry`, `template_sent` is a 36-char provider UUID (not `modern/general/standard/swift`). UUID not copied here. |
-| TEMPLATE_GALLERY | **PASS** | ZECT Present gallery + Zinnia executive card + user PPTX template register in ZECT UI (not Presenton `:5000`). |
-| EDITOR | **PARTIAL** | Inspect/edit/rewrite not fully re-proven this campaign. |
-| CLONED_VOICE | **PASS** | ZECT Present **Narrate** → `/speak` through ZECT APIs → Voicebox `chatterbox-mtl` `models_ready: true`. Evidence: 1 speak call, 145004 bytes, `engine: zect_voicebox`, HTTP 200, `stock_engine_calls: 0`. Status: Narrating with saved voice “R26 Live Clone”. |
-| NO_OVERLAP | **PASS** | `audio_play_count: 1`, `max_concurrent_playback: 1`. Present-all prefetch / two sequential clone speaks **not** fully proven. |
-| DISCONNECT_FSM | **UNIT_PASS** | `voiceHoldOff` vitest. Headed Realtime Connect/Disconnect not live this run. |
-| EXPORT | **PARTIAL** | Editable PPTX export not fully re-proven. |
-| PACKAGED_RUNTIME | **BLOCKED_EXTERNAL** | This workstation is not a clean Windows VM (system Python 3.12/3.14 on PATH, source checkout, no NSIS artifacts in `electron/dist`). Source-run tests were not substituted as packaging PASS. |
+| WINDOWS_CLEAN_INSTALL | **BLOCKED_EXTERNAL** | No clean VM; system Python on PATH; no NSIS in `electron/dist` |
+| PACKAGED_BACKEND | **BLOCKED_EXTERNAL** | Same as clean install |
+| PRESENT_PPTX_GENERATION | **PASS** (API, prior) / PARTIAL (UI first click 502 prior) | Presenton `:5000` HTTP 200 this session; generate not re-run |
+| ZINNIA_VERIFIED | **PASS** (prior) | Registry mapping; UUID not copied here |
+| TEMPLATE_GALLERY | **PASS** | ZECT `/present`, not Presenton UI |
+| PRESENT_EDITOR | **PASS** (headed this session) | Thumbs, notes save, executive rewrite control. Charts/images/tables not edited |
+| PRESENT_EXPORT | **PASS** (headed this session) | ZECT UI Export PPTX download >100 bytes |
+| CLONED_VOICE | **PASS** (prior, 1 slide) | 2-slide Present-all not re-proven this session |
+| STANDARD_VOICE | **PARTIAL** | Stock + No narration options headed-visible; live stock speak not run |
+| NO_OVERLAP | **PASS** (prior, one playback) | Unchanged |
+| DISCONNECT_FSM_LIVE | **UNIT_PASS** | Headed Connect/Disconnect not live |
+| PACKAGED_PRESENT | **BLOCKED_EXTERNAL** | Managed external Presenton; not bundled |
+| PACKAGED_VOICEBOX | **BLOCKED_EXTERNAL** | Docker Voicebox `chatterbox-mtl` `models_ready=true` this workstation; not NSIS-bundled |
+| MULTI_REPO_REAL_PRS | **PASS** (prior) | Two real `github.com` PRs |
+| MULTI_REPO_BLOCKED_GATE | **PASS** (prior) | `ready_to_ship: false` |
+| MULTI_REPO_READY_AFTER_FIX | **NOT RUN** | Spec remediates then re-AGENT; DELETE 403 leftovers |
+| FULL_HEADED_E2E | **PARTIAL** | Hygiene + editor/export PASS; full surface campaign not re-run |
+| SECURITY | **PARTIAL** | PPTX allowlist, fixture hide, untrusted ingest tag |
+| FROZEN_REGRESSION | **PARTIAL** | Hygiene/sidecar passed; 2 registry tests failed against live workstation registry |
+| PPTX_GENERATION | **PASS** (API) / PARTIAL (UI first click) | Preserved prior: HTTP 200, PPTX ~624,433 bytes; first UI click 502 then API retry |
+| EDITOR | **PASS** | Supersedes prior PARTIAL — headed this session |
+| EXPORT | **PASS** | Supersedes prior PARTIAL — headed this session |
+| PACKAGED_RUNTIME | **BLOCKED_EXTERNAL** | Unchanged |
 
 ## R1.6 Clean Windows
 

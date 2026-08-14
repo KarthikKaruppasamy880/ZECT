@@ -1,11 +1,11 @@
 # ZECT R4.5 — Release Blocker Closure Acceptance
 
-**Date:** 2026-08-13 (addendum: R1.6 / R2.6 / R3.6 live proof)  
-**Spec:** `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`  
-**Mode:** Re-acceptance after live R1.6/R2.6/R3.6; origin/develop unchanged  
+**Date:** 2026-08-13 (addendum: closure + core UX)  
+**Spec:** `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md` §R4.5 then `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md` then `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md` then `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
+**Mode:** Re-acceptance after closure/UX; origin/develop unchanged  
 **origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
-**local feature (unpushed):** `feat/r16-r26-r36-final-proof` @ `92e206e30b06b64bcdf576fe37e3147d27fca136`  
-**local == origin/develop:** YES for develop; production R1.6–R3.6 commit is local-only
+**local feature (unpushed):** `feat/release-closure-core-ux` from `184aa78` / `92e206e`  
+**local == origin/develop:** YES for develop; production R1.6–R3.6 and closure/UX are local-only
 
 ## Final verdict
 
@@ -14,11 +14,13 @@
 Do not claim `RELEASE_CANDIDATE_PASS`. Remaining blockers:
 
 1. Clean-machine NSIS with no system Python — **BLOCKED_EXTERNAL**  
-2. Packaged Present/Voicebox; Present UI first-generate 502; Present-all clone; export/editor; Disconnect live  
-3. Product branch not on origin/develop (`gh` not logged in; HTTPS push invalid credentials)  
-4. R3.6 remediate→READY_TO_SHIP; disposable repo DELETE 403  
+2. Packaged Present/Voicebox; Present-all two-slide clone; Disconnect live; standard-voice live speak  
+3. Product branch not on origin/develop (`gh` not logged in)  
+4. R3.6 remediate→READY_TO_SHIP not re-run; disposable repo DELETE 403  
 
-Live on this workstation (not yet merged): cloned Narrate PASS, Zinnia PPTX via ZECT API PASS, two real GitHub PRs PASS.
+Closed this session (still unmerged): Present **EDITOR** and **EXPORT** headed PASS in ZECT UI; Projects/WorkItems/sample process/workbench SplitPane headed hygiene PASS. Core UX: **CORE_UX_PARTIAL**.
+
+Live on this workstation (not yet merged): cloned Narrate PASS (prior), Zinnia PPTX via ZECT API PASS (prior), two real GitHub PRs PASS (prior).
 
 R5+ (KV cache, OCR/XLSX, broader web, Graphify, new agents) is **NOT_STARTED**. Stop here.
 

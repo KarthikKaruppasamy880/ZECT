@@ -12,6 +12,7 @@ from app.domains.work_items import service as wi_svc
 from app.domains.work_items.events import forbid_event_delete, forbid_event_update
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.database import get_db
+from app.models import Project, WorkItem
 
 router = APIRouter(prefix="/api/work-items", tags=["work-items"])
 developer_router = APIRouter(prefix="/api/mentrix/developer", tags=["mentrix-developer"])
@@ -68,6 +69,60 @@ def list_work_items(
 ):
     items = wi_svc.list_work_items(db, project_id=project_id, status=status, limit=limit)
     return {"items": [wi_svc.serialize_work_item(w) for w in items]}
+
+
+SAMPLE_PROCESS_TITLE = "Fix Failed Order Validation"
+SAMPLE_PROCESS_EXTERNAL = "SAMPLE-ORDER-VALIDATION"
+
+
+@router.post("/sample-process")
+def create_sample_process(
+    db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Isolated SAMPLE Camunda-style process → WorkItem. Never completes a live engine task."""
+    project = db.query(Project).filter(Project.name == "ZECT Sample Processes").first()
+    if not project:
+        project = Project(
+            name="ZECT Sample Processes",
+            description="Isolated SAMPLE fixtures for Process → WorkItem demos. Not production Camunda.",
+            team="ZECT",
+            status="active",
+            current_stage="plan",
+        )
+        db.add(project)
+        db.flush()
+    existing = db.query(WorkItem).filter(WorkItem.external_id == SAMPLE_PROCESS_EXTERNAL).first()
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "project_id": project.id,
+            "work_item": wi_svc.serialize_work_item(existing),
+            "note": "Existing SAMPLE process WorkItem reused. External task text is untrusted.",
+        }
+    wi = wi_svc.create_work_item(
+        db,
+        title=SAMPLE_PROCESS_TITLE,
+        description=(
+            "[untrusted-external] SAMPLE incident: order validation failed in checkout. "
+            "Review → investigate → plan → human approval → agent → tests → review → evidence. "
+            "Do not complete production Camunda tasks."
+        ),
+        source="camunda",
+        external_id=SAMPLE_PROCESS_EXTERNAL,
+        project_id=project.id,
+        created_by=getattr(user, "email", "") or getattr(user, "username", "") or "",
+        requirements=["Investigate failing validation", "Propose fix", "Human approval before AGENT"],
+        acceptance=["Tests pass", "Evidence recorded", "WorkItem READY_TO_SHIP only after verifiers"],
+    )
+    return {
+        "ok": True,
+        "created": True,
+        "project_id": project.id,
+        "work_item": wi_svc.serialize_work_item(wi),
+        "note": "SAMPLE fixture only. Ticket text is untrusted external context.",
+    }
 
 
 @router.get("/{work_item_id}")

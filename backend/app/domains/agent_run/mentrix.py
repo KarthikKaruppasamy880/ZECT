@@ -39,6 +39,22 @@ MENTRIX_TERMINAL = frozenset({"completed", "failed", "cancelled", "pr_created", 
 RETRYABLE_STATUSES = frozenset({"failed", "cancelled", "needs_human"})
 
 
+def _json_dict(raw: str | None) -> dict[str, Any]:
+    try:
+        val = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return val if isinstance(val, dict) else {}
+
+
+def _json_list(raw: str | None) -> list[Any]:
+    try:
+        val = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        return []
+    return val if isinstance(val, list) else []
+
+
 class StartRunRequest(BaseModel):
     goal: str
     mode: str = "chat"
@@ -127,13 +143,13 @@ def _artifacts_from_run(run: MentrixRun, result: dict[str, Any], files_written: 
 
 
 def _run_to_dict(run: MentrixRun) -> dict:
-    result = json.loads(run.result_json or "{}")
-    builder = result.get("builder") or {}
+    result = _json_dict(run.result_json)
+    builder = result.get("builder") if isinstance(result.get("builder"), dict) else {}
     files_written = builder.get("files_written") or result.get("files_written") or []
     if not isinstance(files_written, list):
         files_written = []
-    events = _normalize_events(json.loads(run.events_json or "[]"))
-    gates = json.loads(run.gates_json or "{}")
+    events = _normalize_events(_json_list(run.events_json))
+    gates = _json_dict(run.gates_json)
     terminal_lines = [
         f"[{e.get('phase') or e.get('agent') or 'mentrix'}] {e.get('message') or e.get('event') or ''}"
         for e in events
@@ -156,8 +172,8 @@ def _run_to_dict(run: MentrixRun) -> dict:
         "batch_index": result.get("batch_index"),
         "batch_total": result.get("batch_total"),
         "batch_files": result.get("batch_files") or [],
-        "files_expected": (result.get("plan") or {}).get("files_expected")
-        or (result.get("builder") or {}).get("files_expected")
+        "files_expected": (result.get("plan") if isinstance(result.get("plan"), dict) else {}).get("files_expected")
+        or (result.get("builder") if isinstance(result.get("builder"), dict) else {}).get("files_expected")
         or [],
         "artifacts": _artifacts_from_run(run, result, files_written),
         "terminal": terminal_lines[-80:],
@@ -284,8 +300,8 @@ def get_run_plan(run_id: int, db: Session = Depends(get_db), _user: CurrentUser 
     run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    result = json.loads(run.result_json or "{}")
-    plan = result.get("plan") or {}
+    result = _json_dict(run.result_json)
+    plan = result.get("plan") if isinstance(result.get("plan"), dict) else {}
     return {
         "run_id": run.id,
         "status": run.status,
@@ -307,7 +323,7 @@ def patch_run_plan(
         raise HTTPException(status_code=404, detail="Run not found")
     if run.status != "awaiting_plan_confirm":
         raise HTTPException(status_code=400, detail="Plan can only be edited while awaiting_plan_confirm")
-    result = json.loads(run.result_json or "{}")
+    result = _json_dict(run.result_json)
     plan = dict(result.get("plan") or {})
     if req.summary is not None:
         plan["summary"] = req.summary
@@ -458,8 +474,8 @@ def retry_run(
             status_code=400,
             detail=f"Cannot retry a run in status={run.status}",
         )
-    result = json.loads(run.result_json or "{}")
-    ctx = result.get("context") or {}
+    result = _json_dict(run.result_json)
+    ctx = result.get("context") if isinstance(result.get("context"), dict) else {}
     goal = (run.goal or "").strip()
     mode = run.mode or "deliver"
     project_key = ctx.get("project_key") or ""
@@ -542,7 +558,7 @@ def stream_run_events(
                 if not row:
                     yield f"event: error\ndata: {json.dumps({'error': 'not_found'})}\n\n"
                     return
-                events = _normalize_events(json.loads(row.events_json or "[]"))
+                events = _normalize_events(_json_list(row.events_json))
                 new_events = [e for e in events if int(e.get("sequence_id") or 0) > cursor]
                 for ev in new_events:
                     cursor = int(ev["sequence_id"])
@@ -614,8 +630,8 @@ def approve_run(
     if run.status in ("pr_created",):
         raise HTTPException(status_code=400, detail="PR already created for this run")
 
-    gates = json.loads(run.gates_json or "{}")
-    result = json.loads(run.result_json or "{}")
+    gates = _json_dict(run.gates_json)
+    result = _json_dict(run.result_json)
 
     # Security / secrets critical findings are never waiveable
     if gates.get("security_critical") and req.acknowledge_issues:
@@ -710,8 +726,8 @@ def create_pr_for_run(
         return {**_run_to_dict(run), "status": "already_created"}
 
     # Hard completion backstop — re-check gates; no silent partial ship
-    gates = json.loads(run.gates_json or "{}")
-    result = json.loads(run.result_json or "{}")
+    gates = _json_dict(run.gates_json)
+    result = _json_dict(run.result_json)
     # Strip acknowledge for create-pr hard check on incomplete/contract/grounding
     hard_gates = dict(gates)
     hard_gates["acknowledge_issues"] = False
@@ -792,7 +808,7 @@ def create_pr_for_run(
             "by": user.email,
         },
     )
-    result = json.loads(run.result_json or "{}")
+    result = _json_dict(run.result_json)
     result["pr"] = pr_meta if not dry else {"dry_run": True, "html_url": pr_url}
 
     # Semgrep / GitHub Checks SAST after PR exists (never blocks pre-check create).
@@ -873,8 +889,8 @@ def refresh_sast_for_run(
     run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    gates = json.loads(run.gates_json or "{}")
-    result = json.loads(run.result_json or "{}")
+    gates = _json_dict(run.gates_json)
+    result = _json_dict(run.result_json)
     detail = gates.get("sast_detail") or result.get("sast") or {}
     owner = (owner or detail.get("owner") or "").strip()
     repo = (repo or detail.get("repo") or "").strip()
@@ -1584,6 +1600,59 @@ async def present_parse_pptx(
     if not slides:
         raise HTTPException(status_code=400, detail="No slides found in that .pptx")
     return {"ok": True, "count": len(slides), "slides": slides, "filename": file.filename or "deck.pptx"}
+
+
+class PresentPathIn(BaseModel):
+    path: str
+    slides: list[dict[str, Any]] | None = None
+
+
+def _pptx_from_request(path_str: str):
+    from app.services.pptx_paths import resolve_allowlisted_pptx
+
+    try:
+        return resolve_allowlisted_pptx(path_str)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/present/pptx")
+def present_download_pptx(path: str, _user: CurrentUser = Depends(get_current_user)):
+    """Download a generated PPTX from an allowlisted user folder (ZECT UI export)."""
+    pptx = _pptx_from_request(path)
+    return FileResponse(
+        path=str(pptx),
+        filename=pptx.name,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+
+@router.post("/present/parse-pptx-path")
+def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.pptx_parse import parse_pptx_bytes
+
+    pptx = _pptx_from_request(body.path)
+    slides = parse_pptx_bytes(pptx.read_bytes())
+    if not slides:
+        raise HTTPException(status_code=400, detail="No slides found in that .pptx")
+    return {"ok": True, "count": len(slides), "slides": slides, "filename": pptx.name, "path": str(pptx)}
+
+
+@router.post("/present/save-notes")
+def present_save_notes(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    """Persist speaker notes sidecar next to an allowlisted PPTX (does not rewrite slide XML)."""
+    pptx = _pptx_from_request(body.path)
+    sidecar = pptx.with_suffix(".notes.json")
+    payload = {
+        "path": str(pptx),
+        "slides": body.slides or [],
+    }
+    sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return {"ok": True, "notes_path": str(sidecar), "count": len(body.slides or [])}
 
 
 @router.post("/companion/realtime/session")

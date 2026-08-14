@@ -105,6 +105,15 @@ Current built-in providers:
 - audit-trail anomaly scan (ZECT-native)
 - malware file scan via the ZECT Security Scan daemon (`services/zect-security-scan`)
 
+## Presenton (optional presentation engine)
+
+ZECT Present talks to a self-hosted Presenton instance over HTTP (`PRESENTON_BASE_URL`)
+as a hidden PresentationProvider. Normal users never see Presenton branding, admin UI,
+or raw template UUIDs. ZECT does not vendor Presenton UI source; the ZECT editor and
+gallery are ZECT-owned. Presenton is Apache License 2.0
+(https://github.com/presenton/presenton). Keep NOTICE/LICENSE with any distributed
+engine image. Model providers used by Presenton have their own terms.
+
 Underlying open-source malware engine (when the security-scan compose image is used):
 ClamAV — GPL-2.0 — https://www.clamav.net/ — https://github.com/Cisco-Talos/clamav
 (Product chrome never displays this name; this notice is license compliance only.)

@@ -1,10 +1,10 @@
 # ZECT Product Baseline — Final Acceptance
 
-**Date:** 2026-08-13 (updated after R1.6 / R2.6 / R3.6 live proof)  
-**Prompts:** `prompts/ZECT_PRODUCT_BASELINE_REMEDIATION_AND_MERGE.md`, `prompts/ZECT_NEXT_ROADMAP_KV_CACHE_DOCUMENT_WEB_GRAPH_AGENTS.md` (R1–R4), `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md`, `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`  
+**Date:** 2026-08-13 (updated after release-candidate closure + core UX)  
+**Prompts:** `prompts/ZECT_PRODUCT_BASELINE_REMEDIATION_AND_MERGE.md`, `prompts/ZECT_NEXT_ROADMAP_KV_CACHE_DOCUMENT_WEB_GRAPH_AGENTS.md` (R1–R4), `prompts/ZECT_R4_5_RELEASE_BLOCKER_CLOSURE.md`, `prompts/ZECT_R1_6_R2_6_R3_6_FINAL_RELEASE_PROOF.md`, `prompts/ZECT_RELEASE_CANDIDATE_FINAL_CLOSURE.md`, `prompts/ZECT_CORE_PRODUCT_UX_RECONCILIATION.md`  
 **origin/develop SHA:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
-**local feature (unpushed):** `feat/r16-r26-r36-final-proof` @ `92e206e30b06b64bcdf576fe37e3147d27fca136`  
-**local origin/develop match:** YES for `45f4407`; R1.6–R3.6 production commit is **not** on origin
+**local feature (unpushed):** `feat/release-closure-core-ux` (from `184aa78` / `92e206e`)  
+**local origin/develop match:** YES for `45f4407`; R1.6–R3.6 and closure/UX production are **not** on origin
 
 ## Release-readiness verdict
 
@@ -15,7 +15,7 @@ Canonical tables: `ZECT_RELEASE_BLOCKER_CLOSURE_ACCEPTANCE.md`, `ZECT_R1_6_R2_6_
 
 ### R1.6 / R2.6 / R3.6 gate report
 
-`PPTX_GENERATION` PASS (API; UI first click 502) | `ZINNIA_VERIFIED` PASS | `TEMPLATE_GALLERY` PASS | `EDITOR` PARTIAL | `CLONED_VOICE` PASS (Narrate) | `NO_OVERLAP` PASS (one playback) | `DISCONNECT_FSM` UNIT_PASS | `EXPORT` PARTIAL | `PACKAGED_RUNTIME` BLOCKED_EXTERNAL
+`PPTX_GENERATION` PASS (API; UI first click 502) | `ZINNIA_VERIFIED` PASS | `TEMPLATE_GALLERY` PASS | `PRESENT_EDITOR` **PASS** (headed 2026-08-13 closure) | `PRESENT_EXPORT` **PASS** (headed) | `CLONED_VOICE` PASS (1-slide prior) | `STANDARD_VOICE` PARTIAL | `NO_OVERLAP` PASS (one playback) | `DISCONNECT_FSM` UNIT_PASS | `PACKAGED_RUNTIME` BLOCKED_EXTERNAL | origin merge **BLOCKED_EXTERNAL** | Core UX **CORE_UX_PARTIAL** (`ZECT_CORE_PRODUCT_UX_RECONCILIATION_ACCEPTANCE.md`)
 
 ## Merged production tranches
 

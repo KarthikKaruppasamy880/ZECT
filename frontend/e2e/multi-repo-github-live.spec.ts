@@ -208,6 +208,22 @@ test.describe("R3.6 live GitHub multi-repo PR", () => {
         "local_branch_only is not PASS — need >=2 github.com PRs with pr_status created",
       ).toBeGreaterThanOrEqual(2);
       expect(agent.data?.ready_to_ship, "failing mandatory test on repo-b must keep WorkItem not READY").toBe(false);
+
+      const trees = agent.data?.worktrees || [];
+      const failTree = trees.find(
+        (w: { repository_id?: number }) => Number(w.repository_id) === repoIds[1],
+      );
+      const wtPath = String(failTree?.worktree_path || path.join(destRoot, names[1]));
+      const blockPath = path.join(wtPath, "tests", "test_block.py");
+      fs.mkdirSync(path.dirname(blockPath), { recursive: true });
+      fs.writeFileSync(blockPath, "def test_block():\n    assert True\n");
+      const agent2 = await api(page, "POST", "/api/mentrix/developer/agent/start", {
+        work_item_id: workItemId,
+        deterministic: true,
+      });
+      evidence.ready_after_fix = agent2.data?.ready_to_ship;
+      evidence.aggregate_after_fix = agent2.data?.aggregate_status;
+      expect(agent2.data?.ready_to_ship, "fixing repo-b mandatory test should allow READY_TO_SHIP").toBe(true);
       void urls;
     } finally {
       evidence.cleanup = [];

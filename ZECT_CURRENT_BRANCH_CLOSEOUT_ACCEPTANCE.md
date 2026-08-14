@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13  
 **Spec:** `prompts/ZECT_CURRENT_BRANCH_CLOSEOUT_BEFORE_SOVEREIGNTY.md`  
-**Branch:** `feat/release-closure-core-ux`  
+**Branch:** `feat/release-closure-core-ux` @ `1d97637`  
 **origin/develop:** `45f4407fc2c5603db572e7b23b88289226557aeb`  
 **Sovereignty plan:** **NOT STARTED** (`prompts/ZECT_OSS_SOVEREIGNTY_NATIVE_ENGINES_PLAN.md` unread for implementation)
 
@@ -20,7 +20,7 @@ GitHub CLI is not logged in. Per operator: human will create the PR for this bra
 |-------|--------|
 | Local branch | `feat/release-closure-core-ux` |
 | Parent | `184aa78` (R1.6–R3.6 acceptance) |
-| Production commits on this branch vs `45f4407` | `92e206e` + `184aa78` + closeout commit (this file) |
+| Production commits on this branch vs `45f4407` | `92e206e` + `184aa78` + `1d97637` |
 | `gh auth` | not logged in |
 | Push / PR / CI / Ultra Review on origin | **BLOCKED_EXTERNAL** |
 | Merge SHA | none |

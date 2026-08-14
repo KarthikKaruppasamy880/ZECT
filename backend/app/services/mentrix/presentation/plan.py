@@ -17,7 +17,27 @@ MIN_SLIDES = 3
 MAX_SLIDES = 20
 MAX_TITLE = 160
 MAX_TEXT = 4000
-ALLOWED_VISUAL = frozenset({"none", "chart", "table", "image", "quote", "metric", "diagram"})
+ALLOWED_VISUAL = frozenset(
+    {
+        "none",
+        "chart",
+        "table",
+        "image",
+        "quote",
+        "metric",
+        "diagram",
+        "comparison",
+        "timeline",
+        "process",
+        "architecture",
+    }
+)
+_VISUAL_TO_BLOCK = {
+    "comparison": "table",
+    "timeline": "diagram",
+    "process": "diagram",
+    "architecture": "diagram",
+}
 ALLOWED_LAYOUT = frozenset(
     {
         "title",
@@ -111,6 +131,7 @@ def normalize_slide(raw: Any, *, index: int) -> dict[str, Any]:
     visual = _str(row.get("visual_intent"), limit=24).lower() or "none"
     if visual not in ALLOWED_VISUAL:
         visual = "none"
+    block_intent = _VISUAL_TO_BLOCK.get(visual, visual)
     layout = _str(row.get("layout_intent"), limit=32).lower() or "title_body"
     if layout not in ALLOWED_LAYOUT:
         layout = "title_body"
@@ -120,10 +141,13 @@ def normalize_slide(raw: Any, *, index: int) -> dict[str, Any]:
     slide = {
         "index": index,
         "title": _str(row.get("title"), limit=MAX_TITLE) or f"Slide {index + 1}",
+        "purpose": _str(row.get("purpose") or row.get("key_message"), limit=80),
+        "key_message": _str(row.get("key_message"), limit=400),
         "content_blocks": content_blocks,
         "blocks": typed,
         "evidence": evidence,
-        "visual_intent": visual,
+        "visual_intent": block_intent if block_intent in {"none", "chart", "table", "image", "quote", "metric", "diagram"} else visual,
+        "visual_choice": visual,
         "layout_intent": layout,
         "notes_intent": _str(row.get("notes_intent") or row.get("notes"), limit=MAX_TEXT),
     }

@@ -38,7 +38,31 @@ def _clear_slides(prs: Presentation) -> None:
         sld_id_lst.remove(sld_id)
 
 
-def _pick_layout(prs: Presentation, intent: str):
+def _definition_layout_needles(definition: dict[str, Any] | None, intent: str) -> tuple[str, ...]:
+    """Prefer TemplateDefinition layout names that match the slide intent."""
+    names = [str(row.get("name") or "").strip().lower() for row in list((definition or {}).get("layouts") or [])]
+    names = [n for n in names if n]
+    want = (intent or "title_body").lower()
+    prefer = {
+        "title": ("title slide", "title"),
+        "title_body": ("title and content", "title and body", "content"),
+        "two_column": ("two content", "comparison", "two column"),
+        "section": ("section header", "section"),
+        "closing": ("title slide", "blank"),
+        "text_image": ("picture with caption", "title and content", "picture"),
+        "full_image": ("blank", "picture"),
+        "chart_commentary": ("title and content", "content"),
+        "table": ("title and content", "content"),
+        "comparison": ("comparison", "two content"),
+        "metrics": ("title and content", "blank"),
+        "quote": ("quote", "blank", "title slide"),
+        "diagram": ("title and content", "blank"),
+    }.get(want, ("content",))
+    matched = tuple(n for n in names if any(p in n for p in prefer))
+    return matched or prefer
+
+
+def _pick_layout(prs: Presentation, intent: str, definition: dict[str, Any] | None = None):
     layouts = list(prs.slide_layouts)
     if not layouts:
         raise UnsafePptxError("template_has_no_layouts")
@@ -58,11 +82,11 @@ def _pick_layout(prs: Presentation, intent: str):
         "quote": ("quote", "blank", "title slide"),
         "diagram": ("title and content", "blank", "content"),
     }
-    needles = aliases.get(want, ("content",))
+    needles = _definition_layout_needles(definition, want) + aliases.get(want, ("content",))
     named = [(sl, (sl.name or "").lower()) for sl in layouts]
     for needle in needles:
         for sl, name in named:
-            if needle in name:
+            if needle and needle in name:
                 return sl
     # Prefer a layout with a body placeholder
     for sl in layouts:
@@ -204,7 +228,7 @@ def render_plan_to_pptx(
                 pass
     for slide_spec in slides_in:
         layout_intent = choose_layout(slide_spec)
-        layout = _pick_layout(prs, layout_intent)
+        layout = _pick_layout(prs, layout_intent, definition)
         slide = prs.slides.add_slide(layout)
         try:
             fallback_index = int(slide_spec.get("index") or 0)

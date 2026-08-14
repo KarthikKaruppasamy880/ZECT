@@ -170,14 +170,49 @@ def paint_diagram(slide, block: dict[str, Any], geometry: dict[str, int]) -> boo
     nodes = [str(n) for n in list(content.get("nodes") or []) if str(n).strip()][:6]
     if not nodes:
         return False
+    dtype = str(content.get("diagram_type") or "flow").lower()
+    if dtype in {"process", "sequence"} and len(nodes) >= 2:
+        row_cy = max(int(geometry["cy"] / max(len(nodes), 1) - int(Inches(0.08))), 280000)
+        for i, node in enumerate(nodes):
+            box = {
+                "x": geometry["x"] + int(Inches(0.4)),
+                "y": geometry["y"] + i * (row_cy + int(Inches(0.1))),
+                "cx": geometry["cx"] - int(Inches(0.8)),
+                "cy": row_cy,
+            }
+            shape = _box(slide, box, fill=RGBColor(0x00, 0x62, 0x8B))
+            _text(shape, node[:60], size=12, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+        return True
+    if dtype == "architecture" and len(nodes) >= 3:
+        top, bottom = nodes[: (len(nodes) + 1) // 2], nodes[(len(nodes) + 1) // 2 :]
+        rows = [top, bottom]
+        row_cy = max(geometry["cy"] // 2 - int(Inches(0.12)), 350000)
+        for r, row in enumerate(rows):
+            gap = max(20000, geometry["cx"] // max(len(row) * 8, 1))
+            cell_cx = max(int(geometry["cx"] / max(len(row), 1) - gap), 350000)
+            y = geometry["y"] + r * (row_cy + int(Inches(0.2)))
+            for i, node in enumerate(row):
+                box = {"x": geometry["x"] + i * (cell_cx + gap), "y": y, "cx": cell_cx, "cy": row_cy}
+                shape = _box(slide, box, fill=RGBColor(0x00, 0x62, 0x8B) if r == 0 else RGBColor(0x44, 0x54, 0x6A))
+                _text(shape, node[:60], size=11, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+        return True
     gap = max(20000, geometry["cx"] // max(len(nodes) * 8, 1))
-    cell_cx = max(int(geometry["cx"] / len(nodes) - gap), 400000)
-    y = geometry["y"] + geometry["cy"] // 3
-    cy = max(geometry["cy"] // 3, 400000)
+    cell_cx = max(int(geometry["cx"] / len(nodes) - gap), 320000)
+    y = geometry["y"] + geometry["cy"] // 4
+    cy = max(geometry["cy"] // 2, 360000)
     for i, node in enumerate(nodes):
         box = {"x": geometry["x"] + i * (cell_cx + gap), "y": y, "cx": cell_cx, "cy": cy}
         shape = _box(slide, box, fill=RGBColor(0x00, 0x62, 0x8B))
         _text(shape, node[:60], size=12, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+        if i < len(nodes) - 1 and dtype in {"flow", "process", "sequence", "timeline"}:
+            arrow_x = box["x"] + box["cx"]
+            arrow = {
+                "x": arrow_x,
+                "y": y + cy // 2 - int(Inches(0.08)),
+                "cx": max(gap, 80000),
+                "cy": int(Inches(0.16)),
+            }
+            _box(slide, arrow, fill=RGBColor(0xFF, 0x75, 0x00))
     return True
 
 

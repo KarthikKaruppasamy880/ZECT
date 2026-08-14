@@ -641,6 +641,8 @@ export const mentrixPresentonGenerate = (data: {
   instructions?: string;
   filename?: string;
   asset_ids?: string[];
+  fast_basic?: boolean;
+  require_llm?: boolean;
 }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 600_000);
@@ -658,6 +660,10 @@ export const mentrixPresentonGenerate = (data: {
     canonical_id?: string;
     mapping_source?: string;
     blocked_external?: boolean;
+    planner_mode?: string;
+    fallback?: boolean;
+    fallback_reason?: string;
+    degraded?: boolean;
     presenton_request?: { template?: string; n_slides?: number };
   }>(
     "/api/mentrix/presenton/generate",

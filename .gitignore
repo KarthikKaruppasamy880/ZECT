@@ -56,8 +56,11 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 
-# Local Present assets / template worktrees (never commit user images)
+# Local Present assets / template worktrees (never commit user images or org masters)
 .zect/present-assets/
+.zect/present-templates/
+.zect/live-endurance/
+.zect/work/
 test-results/
 electron/resources/backend/python-runtime/
 electron/resources/backend/src/

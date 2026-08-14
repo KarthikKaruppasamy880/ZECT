@@ -1432,6 +1432,8 @@ class PresentonGenerateRequest(BaseModel):
     instructions: str = ""
     filename: str = ""
     asset_ids: list[str] = []
+    fast_basic: bool = False
+    require_llm: bool = False
 
 
 @router.get("/presenton/status")
@@ -1471,6 +1473,8 @@ def presenton_generate(
             filename=req.filename,
             user_id=str(uid),
             asset_ids=list(req.asset_ids or []),
+            require_llm=bool(req.require_llm),
+            fast_basic=bool(req.fast_basic),
         )
     )
     if not out.get("ok"):
@@ -1494,6 +1498,10 @@ def presenton_generate(
                 "block_code": out.get("block_code") or out.get("error") or "",
                 "retries": out.get("retries"),
                 "provider": out.get("provider"),
+                "planner_mode": out.get("planner_mode"),
+                "fallback": out.get("fallback"),
+                "fallback_reason": out.get("fallback_reason"),
+                "degraded": out.get("degraded"),
             },
         )
     return out

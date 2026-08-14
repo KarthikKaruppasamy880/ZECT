@@ -153,6 +153,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const [lastTemplateSent, setLastTemplateSent] = useState("");
   const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
   const [generationProgress, setGenerationProgress] = useState("");
+  const [plannerDegraded, setPlannerDegraded] = useState(false);
   const usingStock = voiceChoice.startsWith("stock:");
   const usingNone = voiceChoice === "none";
   const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
@@ -457,10 +458,11 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     };
   };
 
-  const generateDeck = async () => {
+  const generateDeck = async (opts?: { fastBasic?: boolean }) => {
     setBusy(true);
     setStatus("");
     setGenerationProgress("Preparing");
+    setPlannerDegraded(false);
     try {
       if (!presentonReady) {
         setLifecycle("PROVIDER_UNAVAILABLE");
@@ -522,6 +524,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
           custom_id: customTemplateId.trim() || undefined,
           filename: "mentrix-deck.pptx",
+          fast_basic: Boolean(opts?.fastBasic),
         });
       } finally {
         window.clearInterval(stageTimer);
@@ -535,14 +538,19 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       if (out?.path) {
         persistPath(out.path);
         setGenerationProgress("Ready");
+        const degraded = Boolean(out.degraded || out.planner_mode === "HEURISTIC_FALLBACK");
+        setPlannerDegraded(degraded);
         const zinniaNote =
           templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
             ? ` Zinnia NOT verified (wire template=${sent}; map zinnia-executive-v1 in the ZECT registry).`
             : out.zinnia_verified
               ? ` zinnia_verified=true (registry mapping, wire template=${sent}).`
               : ` Presenton template_sent=${sent}.`;
+        const degradedNote = degraded
+          ? ` DEGRADED Fast-Basic (planner_mode=${out.planner_mode || "HEURISTIC_FALLBACK"}; ${out.fallback_reason || "llm unavailable"}). Retry for Model Gateway quality, or keep this draft. Presenton is not used automatically.`
+          : "";
         setStatus(
-          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${slidesHint} slides).${zinniaNote} Review claims, then Open → Zoom → share approve → Narrate.`,
+          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${slidesHint} slides).${zinniaNote}${degradedNote} Review claims, then Open → Zoom → share approve → Narrate.`,
         );
       } else {
         setLifecycle("GENERATION_FAILED");
@@ -566,7 +574,12 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           detail.zinnia_verified === false && String(detail.ui_template_choice || "").startsWith("zinnia-")
             ? ` zinnia_verified=false template_sent=${sent || "none"}.`
             : "";
-        setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}`);
+        const plannerMode = String(detail.planner_mode || "");
+        const degradedHint =
+          plannerMode === "HEURISTIC_FALLBACK" || String(detail.error || "") === "llm_planner_required"
+            ? " Model Gateway planner unavailable — use Retry or Fast-Basic. Presenton is not used automatically."
+            : "";
+        setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}${degradedHint}`);
       } else {
         setLifecycle("GENERATION_FAILED");
         setStatus(e instanceof Error ? e.message : "Generate deck failed");
@@ -1115,6 +1128,33 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         <Sparkles className="h-3.5 w-3.5" />
         Generate deck
       </button>
+      <button
+        type="button"
+        data-testid="present-deck-generate-fast-basic"
+        disabled={busy || !presentonReady}
+        onClick={() => void generateDeck({ fastBasic: true })}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
+        title="Skip Model Gateway and use labeled Fast-Basic heuristic planning"
+      >
+        Fast-Basic generation
+      </button>
+      {plannerDegraded ? (
+        <p className={`text-[11px] mt-1 ${dark ? "text-amber-300" : "text-amber-800"}`} data-testid="present-planner-degraded">
+          Degraded mode: heuristic Fast-Basic draft. Retry Generate for Model Gateway quality. Presenton fallback is not automatic.
+        </p>
+      ) : null}
+      {plannerDegraded ? (
+        <button
+          type="button"
+          data-testid="present-deck-generate-retry"
+          disabled={busy || !presentonReady}
+          onClick={() => void generateDeck()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-950 disabled:opacity-40 ml-2 mt-1"
+          title="Retry Model Gateway planner (not Presenton)"
+        >
+          Retry Model Gateway
+        </button>
+      ) : null}
       {generationProgress ? (
         <p className={`text-[11px] ${dark ? "text-teal-300" : "text-teal-800"}`} data-testid="present-generation-progress">
           {generationProgress}

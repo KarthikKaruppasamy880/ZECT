@@ -1431,6 +1431,7 @@ class PresentonGenerateRequest(BaseModel):
     custom_id: str = ""
     instructions: str = ""
     filename: str = ""
+    asset_ids: list[str] = []
 
 
 @router.get("/presenton/status")
@@ -1469,6 +1470,7 @@ def presenton_generate(
             instructions=req.instructions,
             filename=req.filename,
             user_id=str(uid),
+            asset_ids=list(req.asset_ids or []),
         )
     )
     if not out.get("ok"):
@@ -1553,13 +1555,33 @@ def present_download_pptx(path: str, _user: CurrentUser = Depends(get_current_us
 
 @router.post("/present/parse-pptx-path")
 def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.document import inspect_pptx_visuals, merge_sidecar_slides
     from app.services.pptx_parse import parse_pptx_bytes
+    from app.services.pptx_paths import notes_sidecar_for_pptx
 
     pptx = _pptx_from_request(body.path)
-    slides = parse_pptx_bytes(pptx.read_bytes())
+    data = pptx.read_bytes()
+    slides = parse_pptx_bytes(data)
     if not slides:
         raise HTTPException(status_code=400, detail="No slides found in that .pptx")
-    return {"ok": True, "count": len(slides), "slides": slides, "filename": pptx.name, "path": str(pptx)}
+    sidecar_slides = None
+    try:
+        sidecar = notes_sidecar_for_pptx(pptx)
+        if sidecar.is_file():
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("slides"), list):
+                sidecar_slides = payload["slides"]
+    except (PermissionError, OSError, ValueError, json.JSONDecodeError):
+        sidecar_slides = None
+    slides = merge_sidecar_slides(slides, sidecar_slides)
+    return {
+        "ok": True,
+        "count": len(slides),
+        "slides": slides,
+        "filename": pptx.name,
+        "path": str(pptx),
+        "visuals": inspect_pptx_visuals(data),
+    }
 
 
 @router.post("/present/save-notes")
@@ -1580,7 +1602,7 @@ def present_save_notes(body: PresentPathIn, _user: CurrentUser = Depends(get_cur
         try:
             from app.services.mentrix.presentation.document_io import apply_document_to_pptx
 
-            apply_document_to_pptx(pptx, body.slides or [])
+            apply_document_to_pptx(pptx, body.slides or [], user_id=str(getattr(_user, "user_id", None) or getattr(_user, "username", "anon")))
             ooxml = True
         except Exception as exc:  # noqa: BLE001 — sidecar already saved
             ooxml_error = str(exc)[:200]

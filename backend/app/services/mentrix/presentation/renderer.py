@@ -49,6 +49,14 @@ def _pick_layout(prs: Presentation, intent: str):
         "two_column": ("two content", "comparison", "two column"),
         "section": ("section header", "section"),
         "closing": ("blank", "title slide", "end"),
+        "text_image": ("title and content", "picture with caption", "content"),
+        "full_image": ("blank", "picture", "title and content"),
+        "chart_commentary": ("title and content", "content", "text"),
+        "table": ("title and content", "content"),
+        "comparison": ("comparison", "two content", "two column"),
+        "metrics": ("title and content", "content", "blank"),
+        "quote": ("quote", "blank", "title slide"),
+        "diagram": ("title and content", "blank", "content"),
     }
     needles = aliases.get(want, ("content",))
     named = [(sl, (sl.name or "").lower()) for sl in layouts]
@@ -120,14 +128,26 @@ def _set_notes(slide, notes: str) -> None:
     notes_slide.notes_text_frame.text = text
 
 
-def _maybe_table(slide, blocks: list[dict[str, Any]]) -> None:
-    rows = [str(b.get("text") or "") for b in blocks if str(b.get("text") or "").strip()]
-    if len(rows) < 2:
-        return
-    table_shape = slide.shapes.add_table(len(rows), 1, Inches(0.6), Inches(4.6), Inches(8.8), Inches(1.8))
-    table = table_shape.table
-    for i, row in enumerate(rows[:12]):
-        table.cell(i, 0).text = row[:200]
+def _prepare_image_assets(plan: dict[str, Any], *, user_id: str) -> None:
+    from app.services.mentrix.presentation.asset_resolver import store_example_image
+
+    uid = (user_id or "anon").strip() or "anon"
+    for slide_spec in list(plan.get("slides") or []):
+        for block in list(slide_spec.get("blocks") or []):
+            if str(block.get("kind") or "") != "image":
+                continue
+            content = block.get("content") if isinstance(block.get("content"), dict) else {}
+            if str(content.get("asset_id") or "").strip():
+                continue
+            meta = store_example_image(user_id=uid, label=str(slide_spec.get("title") or "ZECT")[:32])
+            content["asset_id"] = meta["asset_id"]
+            block["content"] = content
+            block["provenance"] = {
+                "source": "example",
+                "generated": True,
+                "note": "Generated placeholder, not a user photo",
+            }
+            block["validation"] = {"ok": True, "errors": []}
 
 
 def validate_generated_pptx(data: bytes, *, n_slides: int) -> dict[str, Any]:
@@ -151,11 +171,17 @@ def render_plan_to_pptx(
     *,
     template_path: Path | None = None,
     definition: dict[str, Any] | None = None,
+    user_id: str = "anon",
 ) -> bytes:
-    """Render a PresentationPlan to PPTX bytes. Charts/images remain PARTIAL."""
+    """Render a PresentationPlan to PPTX bytes using canonical visual blocks."""
+    from app.services.mentrix.presentation.blocks import text_lines
+    from app.services.mentrix.presentation.layout import choose_layout, place_blocks
+    from app.services.mentrix.presentation.visual import paint_block
+
     slides_in = list(plan.get("slides") or [])
     if not slides_in:
         raise UnsafePptxError("plan_has_no_slides")
+    _prepare_image_assets(plan, user_id=user_id)
     prs = None
     if template_path and Path(template_path).is_file():
         raw = Path(template_path).read_bytes()
@@ -177,18 +203,23 @@ def render_plan_to_pptx(
             except (TypeError, ValueError):
                 pass
     for slide_spec in slides_in:
-        layout = _pick_layout(prs, str(slide_spec.get("layout_intent") or "title_body"))
+        layout_intent = choose_layout(slide_spec)
+        layout = _pick_layout(prs, layout_intent)
         slide = prs.slides.add_slide(layout)
         try:
             fallback_index = int(slide_spec.get("index") or 0)
         except (TypeError, ValueError):
             fallback_index = 0
         title = str(slide_spec.get("title") or f"Slide {fallback_index + 1}")
-        blocks = list(slide_spec.get("content_blocks") or [])
-        bullets = [str(b.get("text") or "").strip() for b in blocks if str(b.get("text") or "").strip()]
-        _fill_placeholder(slide, title=title, bullets=bullets)
-        if str(slide_spec.get("visual_intent") or "") == "table":
-            _maybe_table(slide, blocks)
+        bullets = text_lines(list(slide_spec.get("blocks") or []))
+        if not bullets:
+            blocks = list(slide_spec.get("content_blocks") or [])
+            bullets = [str(b.get("text") or "").strip() for b in blocks if str(b.get("text") or "").strip()]
+        skip_body = layout_intent in {"full_image", "quote"}
+        _fill_placeholder(slide, title=title, bullets=[] if skip_body else bullets)
+        placements = place_blocks(slide_spec, prs=prs, definition=definition)
+        for item in placements:
+            paint_block(slide, item["block"], item["geometry"], user_id=user_id)
         _set_notes(slide, str(slide_spec.get("notes_intent") or ""))
     buf = io.BytesIO()
     prs.save(buf)

@@ -1,12 +1,12 @@
 /**
  * S6.5 headed visual parity: native plan → image/chart/table → editor → export → reopen.
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { loadEnvCreds } from "./helpers/env";
+import { gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,20 +17,6 @@ const PNG = Buffer.from(
   "base64",
 );
 
-async function ensureLoggedIn(page: Page) {
-  const { username, password } = loadEnvCreds();
-  await page.goto("/");
-  const loginVisible = await page.getByTestId("login-username").isVisible().catch(() => false);
-  const token = await page.evaluate(() => localStorage.getItem("zect_token"));
-  if (loginVisible || !token) {
-    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId("login-username").fill(username);
-    await page.getByTestId("login-password").fill(password);
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
-  }
-}
-
 test.describe("S6.5 visual content editor", () => {
   test("chart, table, and image survive editor save/export/reopen", async ({ page }) => {
     fs.mkdirSync(ART, { recursive: true });
@@ -39,9 +25,7 @@ test.describe("S6.5 visual content editor", () => {
     expect(fs.existsSync(dest)).toBeTruthy();
     expect(fs.statSync(dest).size).toBeGreaterThan(1000);
 
-    await ensureLoggedIn(page);
-    await page.goto("/present");
-    await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
+    await gotoAuthed(page, "/present", "zect-present-page");
     await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
     await page.getByTestId("zect-present-continue-generate").click();
     await expect(page.getByTestId("present-deck-panel")).toBeVisible();

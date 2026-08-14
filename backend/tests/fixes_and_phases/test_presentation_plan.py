@@ -81,7 +81,7 @@ def test_llm_json_is_validated(monkeypatch):
         "narrative": "Decisions then owners",
         "n_slides": 4,
         "slides": [
-            {"title": "Title", "content_blocks": ["Open"], "layout_intent": "title", "notes_intent": "Welcome"},
+            {"title": "Q3 Delivery Status", "content_blocks": ["Open"], "layout_intent": "title", "notes_intent": "Welcome"},
             {"title": "Status", "content_blocks": ["Green"], "visual_intent": "chart"},
             {"title": "Ask", "content_blocks": ["Approve"], "layout_intent": "closing"},
             {"title": "Appendix", "content_blocks": ["Detail"]},
@@ -98,7 +98,7 @@ def test_llm_json_is_validated(monkeypatch):
     assert out["ok"] is True
     assert out["plan"]["planner_source"] == "llm"
     assert len(out["plan"]["slides"]) == 4
-    assert out["plan"]["slides"][0]["title"] == "Title"
+    assert out["plan"]["slides"][0]["title"] == "Q3 Delivery Status"
 
 
 def test_invalid_llm_json_repairs_then_falls_back():

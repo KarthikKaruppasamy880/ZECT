@@ -1,31 +1,17 @@
 /**
  * Present editor + UI export from an allowlisted PPTX (ZECT UI, not Presenton).
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { loadEnvCreds } from "./helpers/env";
+import { gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(FRONTEND, "..");
 const ART = path.join(REPO, "test-results/present-editor-export");
-
-async function ensureLoggedIn(page: Page) {
-  const { username, password } = loadEnvCreds();
-  await page.goto("/");
-  const loginVisible = await page.getByTestId("login-username").isVisible().catch(() => false);
-  const token = await page.evaluate(() => localStorage.getItem("zect_token"));
-  if (loginVisible || !token) {
-    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId("login-username").fill(username);
-    await page.getByTestId("login-password").fill(password);
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
-  }
-}
 
 test.describe("Present editor export", () => {
   test("open generated-style PPTX in ZECT editor, edit notes, export", async ({ page }) => {
@@ -34,9 +20,7 @@ test.describe("Present editor export", () => {
     runPythonScript(path.join(FRONTEND, "e2e/fixtures/make_tiny_pptx.py"), [dest]);
     expect(fs.existsSync(dest)).toBeTruthy();
 
-    await ensureLoggedIn(page);
-    await page.goto("/present");
-    await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
+    await gotoAuthed(page, "/present", "zect-present-page");
     await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
     await page.getByTestId("zect-present-continue-generate").click();
     await expect(page.getByTestId("present-deck-panel")).toBeVisible();

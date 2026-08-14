@@ -9,7 +9,7 @@ from typing import Any
 
 from pptx import Presentation
 from pptx.enum.shapes import PP_PLACEHOLDER
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Emu, Inches
 
 from app.services.mentrix.presentation.template_importer import UnsafePptxError, inspect_pptx_archive
 from app.services.pptx_parse import parse_pptx_bytes
@@ -60,7 +60,7 @@ def _pick_layout(prs: Presentation, intent: str):
     for sl in layouts:
         try:
             kinds = [ph.placeholder_format.type for ph in sl.placeholders]
-        except Exception:
+        except ValueError:
             kinds = []
         if PP_PLACEHOLDER.BODY in kinds or PP_PLACEHOLDER.OBJECT in kinds:
             return sl
@@ -78,7 +78,7 @@ def _fill_placeholder(slide, *, title: str, bullets: list[str]) -> None:
             continue
         try:
             ph_type = shape.placeholder_format.type
-        except Exception:
+        except ValueError:
             continue
         if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE, PP_PLACEHOLDER.VERTICAL_TITLE) and not title_set:
             shape.text_frame.text = title[:160]
@@ -156,16 +156,16 @@ def render_plan_to_pptx(
     slides_in = list(plan.get("slides") or [])
     if not slides_in:
         raise UnsafePptxError("plan_has_no_slides")
-    used_template = False
     prs = None
     if template_path and Path(template_path).is_file():
+        raw = Path(template_path).read_bytes()
+        zf = inspect_pptx_archive(raw)
+        zf.close()
         try:
-            prs = Presentation(str(template_path))
+            prs = Presentation(io.BytesIO(raw))
             _clear_slides(prs)
-            used_template = True
-        except Exception:
-            prs = None
-            used_template = False
+        except Exception as exc:
+            raise UnsafePptxError("template_open_failed") from exc
     if prs is None:
         prs = Presentation()
         cx = (definition or {}).get("slide_size", {}).get("cx") if definition else None
@@ -174,7 +174,7 @@ def render_plan_to_pptx(
             try:
                 prs.slide_width = Emu(int(cx))
                 prs.slide_height = Emu(int(cy))
-            except Exception:
+            except (TypeError, ValueError):
                 pass
     for slide_spec in slides_in:
         layout = _pick_layout(prs, str(slide_spec.get("layout_intent") or "title_body"))

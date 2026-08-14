@@ -141,7 +141,9 @@ def build_presentation_plan(
             blob += "\n" + str(item.get("content") or "")
     sens = classify_deck_material(blob, hint=sensitivity_hint)
     ok, reason = can_generate(sens)
-    if not ok:
+    level = str(sens.get("sensitivity") or "PUBLIC").upper()
+    # LLM-unavailable is not a sensitivity block. Only RESTRICTED/CONFIDENTIAL fail-closed.
+    if not ok and (sens.get("forbid_external_retrieval") or level in ("RESTRICTED", "CONFIDENTIAL")):
         plan = empty_plan(n_slides=n_slides, template_id=template_id, audience_id=audience_id)
         return {
             "ok": False,

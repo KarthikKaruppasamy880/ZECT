@@ -116,6 +116,20 @@ def test_invalid_llm_json_repairs_then_falls_back():
     assert calls["n"] >= 1
 
 
+def test_llm_unavailable_is_not_sensitivity_block():
+    """CI has no local LLM and no OPENAI_API_KEY. PUBLIC decks must still heuristic-plan."""
+    with patch(
+        "app.services.mentrix.presentation.planner.can_generate",
+        return_value=(False, "no_local_or_cloud_llm"),
+    ):
+        with patch("app.services.phases.llm_phase._chat", return_value={"ok": False, "error": "offline", "content": ""}):
+            out = build_presentation_plan(prompt="Weekly status", n_slides=4, audience_id="general")
+    assert out["ok"] is True
+    assert out.get("error") != "sensitivity_blocked"
+    assert out["plan"]["planner_source"] == "heuristic"
+    assert len(out["plan"]["slides"]) == 4
+
+
 def test_service_plan_does_not_call_presenton():
     with patch("app.services.presenton_client.generate_presentation") as gen:
         with patch("app.services.phases.llm_phase._chat", return_value={"ok": False, "error": "offline", "content": ""}):

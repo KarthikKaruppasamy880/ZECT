@@ -105,3 +105,34 @@ def test_render_plan_round_trip_notes(tmp_path):
     slides = parse_pptx_bytes(data)
     assert len(slides) == 3
     assert "on track" in (slides[0].get("notes") or "").lower()
+
+
+def test_corrupt_master_does_not_claim_zinnia_verified(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    monkeypatch.setenv("ZECT_PRESENTATION_PROVIDER", "zect_native")
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.native_provider.default_pptx_save_dir",
+        lambda: tmp_path,
+    )
+    imported = tmpl.import_canonical_master(
+        "zinnia-executive-v1",
+        make_master_pptx_bytes(),
+        name="Zinnia Executive",
+        filename="exec.pptx",
+    )
+    assert imported["native_ready"] is True
+    master = tmpl.source_pptx_path("zinnia-executive-v1", user_id="u1")
+    assert master is not None
+    master.write_bytes(b"PK\x03\x04not-a-real-pptx")
+    with patch("app.services.phases.llm_phase._chat", return_value={"ok": False, "error": "offline", "content": ""}):
+        out = PresentationService().generate(
+            PresentationGenerateRequest(
+                content="Q3 delivery status",
+                n_slides=4,
+                ui_template_choice="zinnia-executive-v1",
+                user_id="u1",
+            )
+        )
+    assert out["ok"] is False
+    assert out["zinnia_verified"] is False
+    assert out["http_status"] == 502

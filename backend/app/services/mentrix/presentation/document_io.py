@@ -46,7 +46,7 @@ def _write_slide_text(slide, text: str) -> None:
             continue
         try:
             ph_type = shape.placeholder_format.type
-        except Exception:
+        except ValueError:
             continue
         if ph_type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.VERTICAL_BODY):
             tf = shape.text_frame

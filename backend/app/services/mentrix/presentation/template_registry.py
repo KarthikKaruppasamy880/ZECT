@@ -255,6 +255,9 @@ def list_builtin_zinnia() -> list[dict[str, Any]]:
     for row in _CANONICAL_ZINNIA:
         mapped = get_provider_mapping(str(row["id"]))
         pid = str((mapped or {}).get("provider_template_id") or "")
+        from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+        native = _native_ready(str(row["id"]))
         out.append(
             {
                 "id": row["id"],
@@ -263,7 +266,8 @@ def list_builtin_zinnia() -> list[dict[str, Any]]:
                 "kind": row["kind"],
                 "preview": row["preview"],
                 "aliases": list(row.get("aliases") or ()),
-                "mapped": is_verified_provider_id(pid),
+                "mapped": is_verified_provider_id(pid) or native,
+                "native_ready": native,
                 "provider_uuid_hidden": True,
             }
         )
@@ -286,7 +290,11 @@ def _public_row(
     entry.pop("path", None)
     entry.setdefault("scope", default_scope)
     entry.setdefault("kind", default_kind)
-    entry["mapped"] = bool(entry.get("mapped")) or is_verified_provider_id(pid)
+    from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+    native = _native_ready(str(entry.get("id") or ""))
+    entry["native_ready"] = native
+    entry["mapped"] = bool(entry.get("mapped")) or is_verified_provider_id(pid) or native
     entry["provider_uuid_hidden"] = True
     return entry
 
@@ -312,7 +320,11 @@ def list_org_masters() -> list[dict[str, Any]]:
     for row in rows:
         mapped = get_provider_mapping(str(row["id"]))
         pid = str((mapped or {}).get("provider_template_id") or "")
-        row["mapped"] = is_verified_provider_id(pid)
+        from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+        native = _native_ready(str(row["id"]))
+        row["mapped"] = is_verified_provider_id(pid) or native
+        row["native_ready"] = native
         row["provider_uuid_hidden"] = True
     uploaded = []
     for t in _load_org():
@@ -354,8 +366,10 @@ async def register_user_pptx(
     filename = (upload.filename or "template.pptx").strip()
     if not filename.lower().endswith(".pptx"):
         return {"ok": False, "error": "pptx_required"}
-    raw = await upload.read()
-    if not raw or len(raw) > 40 * 1024 * 1024:
+    from app.services.mentrix.presentation.template_importer import MAX_ARCHIVE_BYTES
+
+    raw = await upload.read(MAX_ARCHIVE_BYTES + 1)
+    if not raw or len(raw) > MAX_ARCHIVE_BYTES:
         return {"ok": False, "error": "invalid_or_too_large"}
     org_scope = (scope or "USER").strip().upper() in {"ORG", "ORGANIZATION", "ORG_SHARED"}
     prefix = "org" if org_scope else "user"
@@ -366,6 +380,24 @@ async def register_user_pptx(
     dest.write_bytes(raw)
     if not path_under_allowed_roots(str(dest)) and not str(dest).startswith(str(_root())):
         pass
+    native_ready_flag = False
+    preview = f"Uploaded PPTX template ({len(raw)} bytes)."
+    try:
+        from app.services.mentrix.presentation.template_importer import UnsafePptxError, import_pptx_bytes
+
+        imported = import_pptx_bytes(
+            raw,
+            zect_id=tid,
+            scope="ORG" if org_scope else "USER",
+            name=safe_name,
+            source_filename=filename,
+        )
+        definition = imported.get("definition") or {}
+        native_ready_flag = bool(definition.get("ready"))
+        preview = str(definition.get("preview") or preview)
+    except UnsafePptxError as exc:
+        dest.unlink(missing_ok=True)
+        return {"ok": False, "error": "unsafe_or_invalid_pptx", "detail": str(exc)}
     entry = {
         "id": tid,
         "name": safe_name,
@@ -374,9 +406,10 @@ async def register_user_pptx(
         "filename": filename,
         "path": str(dest),
         "created_at": _now(),
-        "preview": f"Uploaded PPTX template ({len(raw)} bytes).",
+        "preview": preview,
         "presenton_template_id": None,
-        "mapped": False,
+        "mapped": native_ready_flag,
+        "native_ready": native_ready_flag,
         "provider_uuid_hidden": True,
     }
     if org_scope:
@@ -387,7 +420,73 @@ async def register_user_pptx(
         templates = _load_list(_meta_path(user_id))
         templates.insert(0, entry)
         _save_list(_meta_path(user_id), templates)
-    return {"ok": True, "template": entry}
+    return {"ok": True, "template": _public_row(entry, default_scope=entry["scope"], default_kind=entry["kind"])}
+
+
+def import_canonical_master(
+    zect_id: str,
+    data: bytes,
+    *,
+    name: str = "",
+    filename: str = "",
+) -> dict[str, Any]:
+    """Admin: import a Zinnia/org PPTX master into TemplateDefinition without Presenton."""
+    zid = canonical_id(zect_id) or (zect_id or "").strip()
+    if not zid.startswith("zinnia-") and not zid.startswith("org-"):
+        return {"ok": False, "error": "canonical_id_required"}
+    if not data or len(data) > 40 * 1024 * 1024:
+        return {"ok": False, "error": "invalid_or_too_large"}
+    dest_dir = _root() / "masters"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{_SAFE.sub('_', zid)[:80]}.pptx"
+    staged = dest_dir / f"{_SAFE.sub('_', zid)[:80]}.incoming.pptx"
+    staged.write_bytes(data)
+    try:
+        from app.services.mentrix.presentation.template_importer import UnsafePptxError, import_pptx_bytes
+
+        scope = "ZINNIA" if zid.startswith("zinnia-") else "ORG"
+        imported = import_pptx_bytes(
+            data,
+            zect_id=zid,
+            scope=scope,
+            name=name or zid,
+            source_filename=filename,
+        )
+        os.replace(staged, dest)
+    except UnsafePptxError as exc:
+        staged.unlink(missing_ok=True)
+        return {"ok": False, "error": "unsafe_or_invalid_pptx", "detail": str(exc)}
+    definition = imported.get("definition") or {}
+    from app.services.mentrix.presentation.template_definition import public_definition
+
+    return {
+        "ok": True,
+        "template_id": zid,
+        "native_ready": bool(definition.get("ready")),
+        "definition": public_definition(definition),
+    }
+
+
+def source_pptx_path(zect_id: str, user_id: str | int | None = None) -> Path | None:
+    """Local master PPTX for native generate — never a Presenton UUID."""
+    zid = canonical_id(zect_id) or (zect_id or "").strip()
+    if not zid:
+        return None
+    master = _root() / "masters" / f"{_SAFE.sub('_', zid)[:80]}.pptx"
+    if master.is_file():
+        return master
+    for row in _load_org():
+        if str(row.get("id") or "") == zid:
+            p = Path(str(row.get("path") or ""))
+            if p.is_file():
+                return p
+    if user_id is not None:
+        for row in _load_list(_meta_path(user_id)):
+            if str(row.get("id") or "") == zid:
+                p = Path(str(row.get("path") or ""))
+                if p.is_file():
+                    return p
+    return None
 
 
 def bind_uploaded_template_provider(
@@ -449,8 +548,13 @@ def preview_template(user_id: str | int, template_id: str) -> dict[str, Any]:
         return {"ok": False, "error": "not_found"}
     mapped = get_provider_mapping(t["id"]) or {}
     upload_pid = str(t.get("presenton_template_id") or "")
-    ready = is_verified_provider_id(str(mapped.get("provider_template_id") or "")) or is_verified_provider_id(
-        upload_pid
+    from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+    native = _native_ready(str(t["id"]))
+    ready = (
+        is_verified_provider_id(str(mapped.get("provider_template_id") or ""))
+        or is_verified_provider_id(upload_pid)
+        or native
     )
     return {
         "ok": True,
@@ -481,6 +585,10 @@ def provider_lifecycle(
     if configured is None and reachable is None:
         # Registry-only view (no provider probe yet)
         tid = canonical_id(template_id) or (template_id or "")
+        from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+        if _native_ready(tid):
+            return LIFECYCLE_READY
         if tid.startswith("zinnia-") or tid.startswith("org-"):
             mapped = get_provider_mapping(tid)
             if not is_verified_provider_id(str((mapped or {}).get("provider_template_id") or "")):

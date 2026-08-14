@@ -42,6 +42,18 @@ def test_allowlisted_pptx_roundtrip(tmp_path, monkeypatch):
         resolve_allowlisted_pptx(str(outsider))
 
 
+def test_default_pptx_save_dir_is_allowlisted(tmp_path, monkeypatch):
+    from app.services.pptx_paths import default_pptx_save_dir
+
+    monkeypatch.setattr("app.services.pptx_paths.Path.home", staticmethod(lambda: tmp_path))
+    dest = default_pptx_save_dir()
+    assert dest.is_dir()
+    assert dest != tmp_path.resolve()
+    deck = dest / "generated.pptx"
+    deck.write_bytes(b"PK\x03\x04fake")
+    assert resolve_allowlisted_pptx(str(deck)) == deck.resolve()
+
+
 def test_notes_sidecar_rejects_symlink(tmp_path, monkeypatch):
     from app.services.pptx_paths import notes_sidecar_for_pptx
 

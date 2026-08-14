@@ -1,4 +1,4 @@
-"""Present Deck analysis API — Flow A/B (Presenton remains the generator)."""
+"""Present Deck analysis API — Flow A/B (PresentationService; Presenton stays default)."""
 
 from __future__ import annotations
 
@@ -53,6 +53,15 @@ class MappingIn(BaseModel):
 class BindUploadIn(BaseModel):
     template_id: str
     provider_template_id: str
+
+
+class PresentationPlanIn(BaseModel):
+    prompt: str
+    n_slides: int = 6
+    template_id: str = ""
+    audience_id: str = "general"
+    sensitivity_hint: Optional[str] = None
+    documents: list[str] = Field(default_factory=list)
 
 
 @router.get("/audiences")
@@ -139,3 +148,53 @@ def presentation_template_mapping(body: MappingIn, current_user: CurrentUser = D
 def presentation_template_bind(body: BindUploadIn, current_user: CurrentUser = Depends(get_current_user)):
     uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
     return tmpl.bind_uploaded_template_provider(uid, body.template_id, body.provider_template_id)
+
+
+@router.post("/templates/import-master")
+@require_authentication
+async def presentation_template_import_master(
+    file: UploadFile = File(...),
+    zect_id: str = Form(...),
+    name: Optional[str] = Form(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Admin: import a Zinnia/org PPTX into TemplateDefinition (no Presenton required)."""
+    if (current_user.role or "").lower() != "admin":
+        return {"ok": False, "error": "admin_required"}
+    from app.services.mentrix.presentation.template_importer import MAX_ARCHIVE_BYTES
+
+    raw = await file.read(MAX_ARCHIVE_BYTES + 1)
+    if len(raw) > MAX_ARCHIVE_BYTES:
+        return {"ok": False, "error": "invalid_or_too_large"}
+    return tmpl.import_canonical_master(
+        zect_id,
+        raw,
+        name=name or "",
+        filename=file.filename or "",
+    )
+
+
+@router.post("/plan")
+@require_authentication
+def presentation_plan(body: PresentationPlanIn, current_user: CurrentUser = Depends(get_current_user)):
+    """Structured PresentationPlan via Model Gateway. Does not call Presenton."""
+    from app.services.mentrix.presentation.provider import PresentationGenerateRequest
+    from app.services.mentrix.presentation.service import PresentationService
+
+    context_items = [
+        {"source_type": "document", "source_id": f"doc-{i}", "content": text}
+        for i, text in enumerate(body.documents or [])
+        if str(text or "").strip()
+    ]
+    return PresentationService().plan(
+        PresentationGenerateRequest(
+            content=body.prompt,
+            n_slides=body.n_slides,
+            template=body.template_id,
+            ui_template_choice=body.template_id,
+            audience_id=body.audience_id,
+            sensitivity_hint=body.sensitivity_hint or "",
+            context_items=context_items,
+            user_id=str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")),
+        )
+    )

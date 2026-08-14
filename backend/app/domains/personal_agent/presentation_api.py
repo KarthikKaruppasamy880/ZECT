@@ -1,4 +1,4 @@
-"""Present Deck analysis API — Flow A/B (Presenton remains the generator)."""
+"""Present Deck analysis API — Flow A/B (PresentationService; Presenton stays default)."""
 
 from __future__ import annotations
 
@@ -139,3 +139,23 @@ def presentation_template_mapping(body: MappingIn, current_user: CurrentUser = D
 def presentation_template_bind(body: BindUploadIn, current_user: CurrentUser = Depends(get_current_user)):
     uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
     return tmpl.bind_uploaded_template_provider(uid, body.template_id, body.provider_template_id)
+
+
+@router.post("/templates/import-master")
+@require_authentication
+async def presentation_template_import_master(
+    file: UploadFile = File(...),
+    zect_id: str = Form(...),
+    name: Optional[str] = Form(None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Admin: import a Zinnia/org PPTX into TemplateDefinition (no Presenton required)."""
+    if (current_user.role or "").lower() != "admin":
+        return {"ok": False, "error": "admin_required"}
+    raw = await file.read()
+    return tmpl.import_canonical_master(
+        zect_id,
+        raw,
+        name=name or "",
+        filename=file.filename or "",
+    )

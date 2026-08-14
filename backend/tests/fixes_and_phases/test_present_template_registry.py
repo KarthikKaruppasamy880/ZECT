@@ -8,6 +8,7 @@ from fastapi import UploadFile
 
 from app.services.mentrix.presentation import template_registry as tmpl
 from app.services.presenton_client import resolve_presenton_template_id
+from tests.fixes_and_phases.pptx_fixtures import make_master_pptx_bytes
 
 
 def test_list_includes_canonical_zinnia(tmp_path, monkeypatch):
@@ -37,18 +38,20 @@ def test_register_and_preview_user_pptx(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
 
     async def _run():
-        upload = UploadFile(filename="master.pptx", file=BytesIO(b"PK\x03\x04fake-pptx"))
+        upload = UploadFile(filename="master.pptx", file=BytesIO(make_master_pptx_bytes()))
         reg = await tmpl.register_user_pptx("u1", upload, name="My Master")
         assert reg["ok"] is True
         tid = reg["template"]["id"]
         assert tid.startswith("user-")
+        assert "path" not in reg["template"]
         listed = tmpl.list_templates("u1")
         assert any(t["id"] == tid for t in listed["my_templates"])
         prev = tmpl.preview_template("u1", tid)
         assert prev["ok"] is True
         assert prev["provider_uuid_hidden"] is True
         assert "provider_template_id" not in prev
-        assert prev["lifecycle"] == tmpl.LIFECYCLE_TEMPLATE_NOT_READY
+        assert prev["lifecycle"] == tmpl.LIFECYCLE_READY
+        assert prev["mapped"] is True
         other = tmpl.list_templates("u2")
         assert other["my_templates"] == []
 
@@ -61,7 +64,7 @@ def test_org_upload_not_visible_as_user_private(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
 
     async def _run():
-        upload = UploadFile(filename="org.pptx", file=BytesIO(b"PK\x03\x04fake-pptx"))
+        upload = UploadFile(filename="org.pptx", file=BytesIO(make_master_pptx_bytes()))
         reg = await tmpl.register_user_pptx("admin", upload, name="Org Master", scope="ORG")
         assert reg["ok"] is True
         tid = reg["template"]["id"]
@@ -115,6 +118,7 @@ def test_env_seeds_executive_only_into_registry(tmp_path, monkeypatch):
 
 def test_fallback_provider_ids_cannot_register_as_zinnia_master(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
     bad = tmpl.register_provider_mapping("zinnia-executive-v1", "modern")
     assert bad["ok"] is False
     assert resolve_presenton_template_id("zinnia-executive-v1")["zinnia_verified"] is False
@@ -155,6 +159,7 @@ def test_org_unmapped_is_not_zinnia_verified(tmp_path, monkeypatch):
 
 def test_provider_lifecycle_states(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
     assert (
         tmpl.provider_lifecycle(configured=False, reachable=False)
         == tmpl.LIFECYCLE_PROVIDER_UNAVAILABLE
@@ -193,3 +198,39 @@ def test_provider_lifecycle_states(tmp_path, monkeypatch):
         )
         == tmpl.LIFECYCLE_GENERATION_FAILED
     )
+
+
+def test_garbage_pptx_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+
+    async def _run():
+        upload = UploadFile(filename="bad.pptx", file=BytesIO(b"PK\x03\x04fake-pptx"))
+        reg = await tmpl.register_user_pptx("u1", upload, name="Bad")
+        assert reg["ok"] is False
+        assert reg["error"] == "unsafe_or_invalid_pptx"
+
+    import asyncio
+
+    asyncio.run(_run())
+
+
+def test_native_import_does_not_verify_presenton_zinnia(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
+    imported = tmpl.import_canonical_master(
+        "zinnia-executive-v1",
+        make_master_pptx_bytes(),
+        name="Zinnia Executive",
+        filename="exec.pptx",
+    )
+    assert imported["ok"] is True
+    assert imported["native_ready"] is True
+    listed = tmpl.list_templates("u1")
+    assert listed["lifecycle"] == tmpl.LIFECYCLE_READY
+    exec_row = next(t for t in listed["zinnia"] if t["id"] == "zinnia-executive-v1")
+    assert exec_row["native_ready"] is True
+    assert exec_row["mapped"] is True
+    resolved = resolve_presenton_template_id("zinnia-executive-v1")
+    assert resolved["zinnia_verified"] is False
+    assert resolved["lifecycle"] == tmpl.LIFECYCLE_TEMPLATE_NOT_READY
+    assert resolved["template_id"] == "modern"

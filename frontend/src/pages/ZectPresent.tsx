@@ -138,7 +138,7 @@ export default function ZectPresent() {
         </h1>
         <p className="text-sm text-slate-600">
           Choose a Zinnia or organization template, generate an editable PPTX, refine notes, and rehearse with
-          Voicebox — without opening a third-party Presenton UI.
+          Voicebox.
         </p>
       </header>
 

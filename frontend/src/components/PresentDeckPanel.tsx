@@ -180,26 +180,36 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     } catch {
       /* ignore */
     }
-    mentrixPresentonStatus()
-      .then((s) => {
-        setPresentonReady(!!s.configured && !!s.reachable);
-        const life = String(s.lifecycle || "") as ProviderLifecycle;
-        if (
-          life === "READY" ||
-          life === "TEMPLATE_NOT_READY" ||
-          life === "PROVIDER_UNAVAILABLE" ||
-          life === "STARTING" ||
-          life === "GENERATION_FAILED"
-        ) {
-          setLifecycle(life);
-        } else {
-          setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+    let statusCancelled = false;
+    const loadPresentonStatus = async () => {
+      for (let attempt = 0; attempt < 4 && !statusCancelled; attempt++) {
+        try {
+          const s = await mentrixPresentonStatus();
+          if (statusCancelled) return;
+          setPresentonReady(!!s.configured && !!s.reachable);
+          const life = String(s.lifecycle || "") as ProviderLifecycle;
+          if (
+            life === "READY" ||
+            life === "TEMPLATE_NOT_READY" ||
+            life === "PROVIDER_UNAVAILABLE" ||
+            life === "STARTING" ||
+            life === "GENERATION_FAILED"
+          ) {
+            setLifecycle(life);
+          } else {
+            setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+          }
+          if (s.configured && s.reachable) return;
+        } catch {
+          if (attempt === 3 && !statusCancelled) {
+            setPresentonReady(false);
+            setLifecycle("PROVIDER_UNAVAILABLE");
+          }
         }
-      })
-      .catch(() => {
-        setPresentonReady(false);
-        setLifecycle("PROVIDER_UNAVAILABLE");
-      });
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    };
+    void loadPresentonStatus();
     mentrixCompanionIntegrations()
       .then((s) => {
         // Prefer status endpoint for ready; integrations is backup if status fails earlier
@@ -213,7 +223,6 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
     mentrixPresentonTemplates()
       .then((res) => {
         if (res.reachable === false) {
-          setPresentonReady(false);
           setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
         }
         const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
@@ -261,6 +270,9 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           { id: "technical", label: "Technical" },
         ]),
       );
+    return () => {
+      statusCancelled = true;
+    };
   }, []);
 
   useEffect(() => {

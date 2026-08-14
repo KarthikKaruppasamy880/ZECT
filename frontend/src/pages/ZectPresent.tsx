@@ -93,7 +93,7 @@ export default function ZectPresent() {
     }
     const p = await mentrixPresentationTemplatePreview(canonical).catch(() => null);
     setPreview(p?.preview || p?.name || canonical);
-    setStep(1);
+    setStep((s) => (s > 1 ? s : 1));
   };
 
   const onUpload = async (file: File | null) => {

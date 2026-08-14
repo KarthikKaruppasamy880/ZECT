@@ -926,7 +926,7 @@ export async function mentrixSpeakClonedDetailed(
     voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== ""
       ? false
       : voiceOpts?.requireClone !== false;
-  const speakTimeoutMs = Number(import.meta.env.VITE_MENTRIX_SPEAK_TIMEOUT_MS || 45000);
+  const speakTimeoutMs = Number(import.meta.env.VITE_MENTRIX_SPEAK_TIMEOUT_MS || 180000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), speakTimeoutMs);
   let res: Response;

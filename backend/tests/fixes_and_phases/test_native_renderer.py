@@ -40,7 +40,7 @@ def test_native_generate_writes_valid_pptx_without_presenton(tmp_path, monkeypat
                 )
             )
         gen.assert_not_called()
-    assert out["ok"] is True
+    assert out["ok"] is True, out.get("error") or out.get("hint") or out
     assert out["provider"] == "zect_native"
     assert out["zinnia_verified"] is True
     path = Path(out["path"])
@@ -57,14 +57,18 @@ def test_native_zinnia_without_definition_is_not_ready(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_PRESENTATION_PROVIDER", "zect_native")
     monkeypatch.delenv("ZINNIA_PRESENTON_TEMPLATE_ID", raising=False)
     with patch("app.services.presenton_client.generate_presentation") as gen:
-        out = PresentationService().generate(
-            PresentationGenerateRequest(
-                content="Status",
-                n_slides=4,
-                ui_template_choice="zinnia-executive-v1",
-                user_id="u1",
+        with patch(
+            "app.services.phases.llm_phase._chat",
+            return_value={"ok": False, "error": "offline", "content": ""},
+        ):
+            out = PresentationService().generate(
+                PresentationGenerateRequest(
+                    content="Status",
+                    n_slides=4,
+                    ui_template_choice="zinnia-executive-v1",
+                    user_id="u1",
+                )
             )
-        )
         gen.assert_not_called()
     assert out["ok"] is False
     assert out["http_status"] == 409

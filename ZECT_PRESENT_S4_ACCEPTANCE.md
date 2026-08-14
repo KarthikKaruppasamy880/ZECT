@@ -15,6 +15,6 @@
 
 ## Honest limits
 
-- Master fidelity vs Presenton is not proven (S7).
-- Tables optional; charts/images not production-complete.
-- `poetry.lock` not regenerated (Poetry not on PATH); CI installs via `requirements.txt`.
+- Charts, images remain **PARTIAL**. Tables are optional.
+- XML entity expansion is rejected (`<!DOCTYPE` / `<!ENTITY`) without adding `defusedxml`.
+- `poetry.lock` is regenerated so Docker `poetry install` includes python-pptx 1.0.2.

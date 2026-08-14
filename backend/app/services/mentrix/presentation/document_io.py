@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from pptx import Presentation
 from pptx.enum.shapes import PP_PLACEHOLDER
+from pptx.util import Inches
 
 from app.services.mentrix.presentation.renderer import _set_notes, validate_generated_pptx
 
@@ -26,9 +28,15 @@ def apply_document_to_pptx(path: str | Path, slides: list[dict[str, Any]]) -> di
         if text:
             _write_slide_text(slide, text)
         _set_notes(slide, str(spec.get("notes") or ""))
-    prs.save(str(pptx))
-    data = pptx.read_bytes()
-    validate_generated_pptx(data, n_slides=len(prs.slides))
+    tmp = pptx.with_name(f"{pptx.stem}.zect-tmp{pptx.suffix}")
+    try:
+        prs.save(str(tmp))
+        data = tmp.read_bytes()
+        validate_generated_pptx(data, n_slides=len(prs.slides))
+        os.replace(tmp, pptx)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
     return {"ok": True, "path": str(pptx), "slide_count": len(prs.slides), "ooxml_roundtrip": True}
 
 
@@ -57,3 +65,11 @@ def _write_slide_text(slide, text: str) -> None:
                     p = tf.add_paragraph()
                     p.text = extra[:800]
             return
+    if rest:
+        box = slide.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(5))
+        tf = box.text_frame
+        tf.word_wrap = True
+        tf.text = rest[0][:800]
+        for extra in rest[1:8]:
+            p = tf.add_paragraph()
+            p.text = extra[:800]

@@ -7,6 +7,7 @@ from io import BytesIO
 from fastapi import UploadFile
 
 from app.services.mentrix.presentation import template_registry as tmpl
+from app.services.mentrix.presentation.template_definition import native_ready
 from app.services.presenton_client import resolve_presenton_template_id
 from tests.fixes_and_phases.pptx_fixtures import make_master_pptx_bytes
 
@@ -234,3 +235,17 @@ def test_native_import_does_not_verify_presenton_zinnia(tmp_path, monkeypatch):
     assert resolved["zinnia_verified"] is False
     assert resolved["lifecycle"] == tmpl.LIFECYCLE_TEMPLATE_NOT_READY
     assert resolved["template_id"] == "modern"
+
+
+def test_invalid_canonical_replacement_preserves_master(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    good = make_master_pptx_bytes()
+    first = tmpl.import_canonical_master("zinnia-executive-v1", good, name="Zinnia Executive", filename="exec.pptx")
+    assert first["ok"] is True
+    master = tmpl.source_pptx_path("zinnia-executive-v1")
+    assert master is not None
+    before = master.read_bytes()
+    bad = tmpl.import_canonical_master("zinnia-executive-v1", b"PK\x03\x04not-a-real-pptx", name="bad", filename="bad.pptx")
+    assert bad["ok"] is False
+    assert master.read_bytes() == before
+    assert native_ready("zinnia-executive-v1") is True

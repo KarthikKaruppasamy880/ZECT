@@ -68,3 +68,24 @@ def test_reject_symlink_attr(tmp_path, monkeypatch):
         zf.writestr(info, b"<p/>")
     with pytest.raises(UnsafePptxError, match="zip_symlink_rejected"):
         inspect_pptx_archive(buf.getvalue())
+
+
+def test_reject_encrypted_zip():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("ppt/presentation.xml", b"<p/>")
+        zf.filelist[-1].flag_bits |= 0x1
+    with pytest.raises(UnsafePptxError, match="zip_encrypted"):
+        inspect_pptx_archive(buf.getvalue())
+
+
+def test_reject_xml_entities(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "ppt/presentation.xml",
+            b"""<?xml version="1.0"?><!DOCTYPE p [<!ENTITY x "aaaa">]><p>&x;</p>""",
+        )
+    with pytest.raises(UnsafePptxError, match="xml_entities_rejected"):
+        import_pptx_bytes(buf.getvalue(), zect_id="user-x", scope="USER")

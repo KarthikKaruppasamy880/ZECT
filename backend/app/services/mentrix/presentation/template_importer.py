@@ -59,6 +59,9 @@ def inspect_pptx_archive(data: bytes) -> zipfile.ZipFile:
     total = 0
     for info in infos:
         _safe_zip_name(info.filename)
+        if info.flag_bits & 0x1:
+            zf.close()
+            raise UnsafePptxError("zip_encrypted")
         if info.file_size < 0 or info.compress_size < 0:
             zf.close()
             raise UnsafePptxError("zip_bomb")
@@ -85,10 +88,16 @@ def _read_xml(zf: zipfile.ZipFile, name: str) -> ET.Element | None:
         return None
     if info.file_size > MAX_XML_BYTES:
         raise UnsafePptxError("xml_too_large")
-    with zf.open(info, "r") as handle:
-        raw = handle.read(MAX_XML_BYTES + 1)
+    try:
+        with zf.open(info, "r") as handle:
+            raw = handle.read(MAX_XML_BYTES + 1)
+    except (RuntimeError, NotImplementedError, OSError, zipfile.BadZipFile) as exc:
+        raise UnsafePptxError("invalid_zip_member") from exc
     if len(raw) > MAX_XML_BYTES:
         raise UnsafePptxError("xml_too_large")
+    head = raw[:4096].upper()
+    if b"<!DOCTYPE" in head or b"<!ENTITY" in head:
+        raise UnsafePptxError("xml_entities_rejected")
     try:
         return ET.fromstring(raw)
     except ET.ParseError:

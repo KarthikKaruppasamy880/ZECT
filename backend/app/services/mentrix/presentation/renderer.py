@@ -179,7 +179,11 @@ def render_plan_to_pptx(
     for slide_spec in slides_in:
         layout = _pick_layout(prs, str(slide_spec.get("layout_intent") or "title_body"))
         slide = prs.slides.add_slide(layout)
-        title = str(slide_spec.get("title") or f"Slide {slide_spec.get('index', 0) + 1}")
+        try:
+            fallback_index = int(slide_spec.get("index") or 0)
+        except (TypeError, ValueError):
+            fallback_index = 0
+        title = str(slide_spec.get("title") or f"Slide {fallback_index + 1}")
         blocks = list(slide_spec.get("content_blocks") or [])
         bullets = [str(b.get("text") or "").strip() for b in blocks if str(b.get("text") or "").strip()]
         _fill_placeholder(slide, title=title, bullets=bullets)

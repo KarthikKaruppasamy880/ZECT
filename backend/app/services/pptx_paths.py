@@ -15,6 +15,7 @@ def pptx_output_roots() -> list[Path]:
         home / "OneDrive" / "Desktop",
         home / "Downloads",
         home / "OneDrive" / "Downloads",
+        home / ".zect" / "present-output",
     ]
     return [p.resolve() for p in candidates if p.is_dir()]
 
@@ -44,17 +45,21 @@ def resolve_allowlisted_pptx(path_str: str) -> Path:
 
 
 def default_pptx_save_dir() -> Path:
-    """Allowlisted user folder for generated PPTX (Documents/Desktop)."""
+    """Allowlisted user folder for generated PPTX (Documents/Desktop/Downloads)."""
     home = Path.home()
     for candidate in (
         home / "Documents",
         home / "OneDrive" / "Documents",
         home / "Desktop",
         home / "OneDrive" / "Desktop",
+        home / "Downloads",
+        home / "OneDrive" / "Downloads",
     ):
         if candidate.is_dir():
             return candidate.resolve()
-    return home.resolve()
+    fallback = home / ".zect" / "present-output"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback.resolve()
 
 
 def notes_sidecar_for_pptx(pptx: Path) -> Path:

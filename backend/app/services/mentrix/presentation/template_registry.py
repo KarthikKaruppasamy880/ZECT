@@ -366,8 +366,10 @@ async def register_user_pptx(
     filename = (upload.filename or "template.pptx").strip()
     if not filename.lower().endswith(".pptx"):
         return {"ok": False, "error": "pptx_required"}
-    raw = await upload.read()
-    if not raw or len(raw) > 40 * 1024 * 1024:
+    from app.services.mentrix.presentation.template_importer import MAX_ARCHIVE_BYTES
+
+    raw = await upload.read(MAX_ARCHIVE_BYTES + 1)
+    if not raw or len(raw) > MAX_ARCHIVE_BYTES:
         return {"ok": False, "error": "invalid_or_too_large"}
     org_scope = (scope or "USER").strip().upper() in {"ORG", "ORGANIZATION", "ORG_SHARED"}
     prefix = "org" if org_scope else "user"
@@ -437,7 +439,8 @@ def import_canonical_master(
     dest_dir = _root() / "masters"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{_SAFE.sub('_', zid)[:80]}.pptx"
-    dest.write_bytes(data)
+    staged = dest_dir / f"{_SAFE.sub('_', zid)[:80]}.incoming.pptx"
+    staged.write_bytes(data)
     try:
         from app.services.mentrix.presentation.template_importer import UnsafePptxError, import_pptx_bytes
 
@@ -449,8 +452,9 @@ def import_canonical_master(
             name=name or zid,
             source_filename=filename,
         )
+        os.replace(staged, dest)
     except UnsafePptxError as exc:
-        dest.unlink(missing_ok=True)
+        staged.unlink(missing_ok=True)
         return {"ok": False, "error": "unsafe_or_invalid_pptx", "detail": str(exc)}
     definition = imported.get("definition") or {}
     from app.services.mentrix.presentation.template_definition import public_definition

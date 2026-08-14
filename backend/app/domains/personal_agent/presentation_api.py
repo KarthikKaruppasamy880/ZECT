@@ -161,7 +161,11 @@ async def presentation_template_import_master(
     """Admin: import a Zinnia/org PPTX into TemplateDefinition (no Presenton required)."""
     if (current_user.role or "").lower() != "admin":
         return {"ok": False, "error": "admin_required"}
-    raw = await file.read()
+    from app.services.mentrix.presentation.template_importer import MAX_ARCHIVE_BYTES
+
+    raw = await file.read(MAX_ARCHIVE_BYTES + 1)
+    if len(raw) > MAX_ARCHIVE_BYTES:
+        return {"ok": False, "error": "invalid_or_too_large"}
     return tmpl.import_canonical_master(
         zect_id,
         raw,

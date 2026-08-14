@@ -36,3 +36,10 @@ def test_zect_present_does_not_reference_presenton_types():
     text = ZECT_PRESENT.read_text(encoding="utf-8")
     hits = [needle for needle in FORBIDDEN_UI if needle in text]
     assert hits == []
+
+
+def test_planner_does_not_import_presenton_client():
+    planner = ROOT / "backend" / "app" / "services" / "mentrix" / "presentation" / "planner.py"
+    text = planner.read_text(encoding="utf-8")
+    assert "presenton_client" not in text
+    assert "PresentonProvider" not in text

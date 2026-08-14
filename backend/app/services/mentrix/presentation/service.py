@@ -55,7 +55,41 @@ class PresentationService:
     def list_engine_templates(self) -> dict[str, Any]:
         return self._provider.list_engine_templates()
 
+    def plan(self, req: PresentationGenerateRequest) -> dict[str, Any]:
+        from app.services.mentrix.presentation.planner import build_presentation_plan
+
+        ui = (req.ui_template_choice or req.template or "").strip()
+        return build_presentation_plan(
+            prompt=req.content,
+            n_slides=req.n_slides,
+            template_id=ui,
+            audience_id=req.audience_id or "general",
+            sensitivity_hint=req.sensitivity_hint or None,
+            context_items=list(req.context_items or []),
+        )
+
     def generate(self, req: PresentationGenerateRequest) -> dict[str, Any]:
+        from app.services.mentrix.presentation.sensitivity import classify_deck_material
+
+        if self.provider_name == "presenton":
+            blob = req.content or ""
+            for item in req.context_items or []:
+                if isinstance(item, dict):
+                    blob += "\n" + str(item.get("content") or "")
+            sens = classify_deck_material(blob, hint=req.sensitivity_hint or None)
+            if sens.get("forbid_external_retrieval"):
+                return {
+                    "ok": False,
+                    "error": "restricted_external_provider",
+                    "hint": "RESTRICTED/CONFIDENTIAL decks cannot be sent to an external presentation engine",
+                    "http_status": 403,
+                    "lifecycle": "GENERATION_FAILED",
+                    "provider": self.provider_name,
+                    "zinnia_verified": False,
+                    "blocked_external": True,
+                    "block_code": "restricted_external_provider",
+                    "sensitivity": sens.get("sensitivity"),
+                }
         out = self._provider.generate(req)
         out.setdefault("provider", self.provider_name)
         return out

@@ -16,6 +16,9 @@ class PresentationGenerateRequest:
     instructions: str = ""
     filename: str = ""
     user_id: str = "anon"
+    audience_id: str = "general"
+    sensitivity_hint: str = ""
+    context_items: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

@@ -55,6 +55,15 @@ class BindUploadIn(BaseModel):
     provider_template_id: str
 
 
+class PresentationPlanIn(BaseModel):
+    prompt: str
+    n_slides: int = 6
+    template_id: str = ""
+    audience_id: str = "general"
+    sensitivity_hint: Optional[str] = None
+    documents: list[str] = Field(default_factory=list)
+
+
 @router.get("/audiences")
 @require_authentication
 def audiences(current_user: CurrentUser = Depends(get_current_user)):
@@ -158,4 +167,30 @@ async def presentation_template_import_master(
         raw,
         name=name or "",
         filename=file.filename or "",
+    )
+
+
+@router.post("/plan")
+@require_authentication
+def presentation_plan(body: PresentationPlanIn, current_user: CurrentUser = Depends(get_current_user)):
+    """Structured PresentationPlan via Model Gateway. Does not call Presenton."""
+    from app.services.mentrix.presentation.provider import PresentationGenerateRequest
+    from app.services.mentrix.presentation.service import PresentationService
+
+    context_items = [
+        {"source_type": "document", "source_id": f"doc-{i}", "content": text}
+        for i, text in enumerate(body.documents or [])
+        if str(text or "").strip()
+    ]
+    return PresentationService().plan(
+        PresentationGenerateRequest(
+            content=body.prompt,
+            n_slides=body.n_slides,
+            template=body.template_id,
+            ui_template_choice=body.template_id,
+            audience_id=body.audience_id,
+            sensitivity_hint=body.sensitivity_hint or "",
+            context_items=context_items,
+            user_id=str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")),
+        )
     )

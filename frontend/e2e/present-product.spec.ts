@@ -52,7 +52,7 @@ test.describe("ZECT Present product", () => {
   test("gallery → zinnia → generate workspace → notes", async ({ page }) => {
     fs.mkdirSync(ART, { recursive: true });
     await ensureLoggedIn(page);
-    await page.goto("/present");
+    await page.goto("/present/create");
     await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("link", { name: "Present" })).toBeVisible();
     await expect(page.getByTestId("zect-present-template-zinnia-executive-v1")).toBeVisible();
@@ -108,7 +108,6 @@ test.describe("ZECT Present product", () => {
       await gen.click();
       await page.waitForTimeout(3500);
     }
-    await expect(page.getByTestId("present-deck-notes")).toBeVisible();
     await expect(page.getByTestId("present-deck-analyze")).toBeVisible();
     await page.screenshot({ path: path.join(ART, "03-notes-rehearse.png") });
 

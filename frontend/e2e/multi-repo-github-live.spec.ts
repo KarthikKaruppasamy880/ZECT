@@ -122,6 +122,8 @@ test.describe("R3.6 live GitHub multi-repo PR", () => {
       const proj = await api(page, "POST", "/api/projects", {
         name: `r36-live-${stamp}`,
         description: "disposable R3.6 GitHub proof",
+        provenance: "test",
+        test_run_id: `r36-live-${stamp}`,
         repos: [],
       });
       expect(proj.status).toBeLessThan(300);

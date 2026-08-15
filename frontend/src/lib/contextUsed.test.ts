@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildContextUsedRows } from "@/lib/contextUsed";
+import { buildContextUsedRows, canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
 
 describe("buildContextUsedRows", () => {
   it("marks missing WorkItem and empty PI sources without inventing values", () => {
@@ -54,6 +54,8 @@ describe("buildContextUsedRows", () => {
     expect(byId.skills.status).toBe("used");
     expect(byId.playbooks.status).toBe("used");
     expect(byId.model.detail).toContain("provider=local");
+    expect(byId.lattice.status).toBe("used");
+    expect(byId.lattice.detail).toContain("state=READY");
   });
 
   it("flags unverified-only memory as unverified not used", () => {
@@ -64,5 +66,16 @@ describe("buildContextUsedRows", () => {
     });
     const mem = rows.find((r) => r.id === "memory");
     expect(mem?.status).toBe("unverified");
+  });
+
+  it("canonicalizes Lattice states for header and Context Used", () => {
+    const rows = buildContextUsedRows({
+      pi: { lattice: { state: "NOT_INDEXED", action_label: "Index repository" } },
+    });
+    const lattice = rows.find((r) => r.id === "lattice");
+    expect(lattice?.detail).toContain("state=NOT_INDEXED");
+    expect(canonicalLatticeState("ok")).toBe("READY");
+    expect(canonicalLatticeState("")).toBe("NOT_APPLICABLE");
+    expect(latticeHeaderLabel("READY")).toBe("Lattice READY");
   });
 });

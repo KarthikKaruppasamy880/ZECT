@@ -13,6 +13,10 @@ const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const REPO = path.resolve(FRONTEND, "..");
 const ART = path.join(REPO, "test-results/present-editor-export");
 
+function encodeDeckId(p: string) {
+  return Buffer.from(p, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 test.describe("Present editor export", () => {
   test("open generated-style PPTX in ZECT editor, edit notes, export", async ({ page }) => {
     fs.mkdirSync(ART, { recursive: true });
@@ -20,11 +24,7 @@ test.describe("Present editor export", () => {
     runPythonScript(path.join(FRONTEND, "e2e/fixtures/make_tiny_pptx.py"), [dest]);
     expect(fs.existsSync(dest)).toBeTruthy();
 
-    await gotoAuthed(page, "/present", "zect-present-page");
-    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
-    await page.getByTestId("zect-present-continue-generate").click();
-    await expect(page.getByTestId("present-deck-panel")).toBeVisible();
-    await page.getByTestId("present-deck-path").fill(dest);
+    await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}`, "present-review");
     await expect(page.getByTestId("present-editor")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("present-editor-thumbs")).toBeVisible();
     await page.getByTestId("present-editor-thumb-1").click();
@@ -37,6 +37,7 @@ test.describe("Present editor export", () => {
     const outFile = path.join(ART, download.suggestedFilename() || "export.pptx");
     await download.saveAs(outFile);
     expect(fs.statSync(outFile).size).toBeGreaterThan(100);
+    await page.getByTestId("present-open-rehearse").click();
     const voice = page.getByTestId("present-deck-voice-select");
     await expect(voice).toBeVisible();
     await expect(voice.locator('option[value="none"]')).toHaveCount(1);

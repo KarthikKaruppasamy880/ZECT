@@ -17,6 +17,10 @@ const PNG = Buffer.from(
   "base64",
 );
 
+function encodeDeckId(p: string) {
+  return Buffer.from(p, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 test.describe("S6.5 visual content editor", () => {
   test("chart, table, and image survive editor save/export/reopen", async ({ page }) => {
     fs.mkdirSync(ART, { recursive: true });
@@ -25,11 +29,7 @@ test.describe("S6.5 visual content editor", () => {
     expect(fs.existsSync(dest)).toBeTruthy();
     expect(fs.statSync(dest).size).toBeGreaterThan(1000);
 
-    await gotoAuthed(page, "/present", "zect-present-page");
-    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
-    await page.getByTestId("zect-present-continue-generate").click();
-    await expect(page.getByTestId("present-deck-panel")).toBeVisible();
-    await page.getByTestId("present-deck-path").fill(dest);
+    await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}`, "present-review");
     await expect(page.getByTestId("present-editor")).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId("present-editor-thumb-2").click();
@@ -58,8 +58,7 @@ test.describe("S6.5 visual content editor", () => {
     await download.saveAs(outFile);
     expect(fs.statSync(outFile).size).toBeGreaterThan(1000);
 
-    await page.getByTestId("present-deck-path").fill("");
-    await page.getByTestId("present-deck-path").fill(dest);
+    await page.reload();
     await expect(page.getByTestId("present-editor-thumbs")).toBeVisible({ timeout: 20_000 });
     await page.getByTestId("present-editor-thumb-2").click();
     await expect(page.getByTestId("present-editor-chart-title")).toHaveValue(/Updated example chart/i);

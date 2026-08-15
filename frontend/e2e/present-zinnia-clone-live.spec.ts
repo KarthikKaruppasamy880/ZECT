@@ -46,9 +46,8 @@ async function jsonGet(url: string): Promise<{ ok: boolean; status: number; body
 }
 
 async function openGenerateWorkspace(page: Page) {
-  await gotoAuthed(page, "/present", "zect-present-page");
+  await gotoAuthed(page, "/present/create", "zect-present-page");
   await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
-  await page.getByRole("button", { name: /3\.\s*Generate/ }).click();
   await expect(page.getByTestId("present-deck-panel")).toBeVisible({ timeout: 10_000 });
 }
 
@@ -86,7 +85,7 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
     });
 
     try {
-      await gotoAuthed(page, "/present", "zect-present-page");
+      await gotoAuthed(page, "/present/create", "zect-present-page");
       expect(page.url()).not.toMatch(/:5000\b/);
       await expect(page.getByTestId("zect-present-template-zinnia-executive-v1")).toBeVisible();
       await expect(page.getByTestId("present-lifecycle-state")).toBeVisible();
@@ -99,7 +98,6 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       evidence.user_template_registered = true;
       await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
       await expect(page.getByTestId("zect-present-template-preview")).toBeVisible({ timeout: 15_000 });
-      await page.getByRole("button", { name: /3\.\s*Generate/ }).click();
       await expect(page.getByTestId("zect-present-workspace")).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId("zect-present-selected")).toContainText("zinnia-executive-v1");
       await expect(page.getByTestId("present-deck-template")).toHaveValue("zinnia-executive-v1");

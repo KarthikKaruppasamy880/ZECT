@@ -45,7 +45,7 @@ test("S7.6 headed LLM-native: Zinnia generate uses Model Gateway planner and edi
       }
     });
 
-    await gotoAuthed(page, "/present", "zect-present-page");
+    await gotoAuthed(page, "/present/create", "zect-present-page");
     expect(page.url()).not.toMatch(/:5000\b/);
     await expect(page.getByTestId("zect-present-template-zinnia-executive-v1")).toBeVisible();
     await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
@@ -97,13 +97,8 @@ test("S7.6 headed LLM-native: Zinnia generate uses Model Gateway planner and edi
     await download.saveAs(outFile);
     expect(fs.statSync(outFile).size).toBeGreaterThan(1000);
 
-    const deckPath = String(last.path || "");
-    if (deckPath) {
-      await page.getByTestId("present-deck-path").fill("");
-      await page.getByTestId("present-deck-path").fill(deckPath);
-      await expect(page.getByTestId("present-editor-thumbs")).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId("present-editor-notes")).toHaveValue(/S7.6 headed notes/i);
-    }
+    await expect(page.getByTestId("present-editor-thumbs")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("present-editor-notes")).toHaveValue(/S7.6 headed notes/i);
     await page.screenshot({ path: path.join(ART, "04-editor-reopen.png") });
     fs.writeFileSync(
       path.join(ART, "evidence.json"),

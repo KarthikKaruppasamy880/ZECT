@@ -81,10 +81,17 @@ CORPUS: list[dict] = [
     },
     {
         "id": "table_data",
-        "prompt": "Table of workstream status, owners, and RAG. Keep columns readable; do not invent private numbers.",
+        "prompt": "Table of workstream status from the attached evidence. Do not invent owners or dates.",
         "audience": "general",
         "template": "zinnia-executive-v1",
         "n": N_SLIDES,
+        "context": [
+            {
+                "source_type": "document",
+                "source_id": "ws-1",
+                "content": "Workstream | Status | Owner\nIdentity | Delayed | TBD\nBilling | On track | TBD\nClaims portal | At risk | TBD",
+            }
+        ],
     },
     {
         "id": "zinnia_executive",

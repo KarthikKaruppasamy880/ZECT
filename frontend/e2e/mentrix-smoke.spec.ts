@@ -55,15 +55,28 @@ test.describe("Mentrix smoke", () => {
     await expect(page.getByTestId("system-health-page")).toBeVisible();
   });
 
-  test("Developer Workspace shows Context Used panel", async ({ page }) => {
+  test("Developer Workspace shows Context Used as a tools tab, not a fourth column", async ({ page }) => {
     await page.goto("/workspace");
     await expect(page.getByTestId("developer-workspace")).toBeVisible();
+    await expect(page.getByTestId("workspace-toggle-context")).toBeVisible();
+    await expect(page.getByTestId("workspace-context-used")).toHaveCount(0);
+    await page.getByTestId("workspace-toggle-context").click();
     await expect(page.getByTestId("workspace-context-used")).toBeVisible();
     await expect(page.getByTestId("workspace-context-used-rows")).toBeVisible();
     await expect(page.getByTestId("context-used-work_item")).toBeVisible();
     await expect(page.getByTestId("context-used-knowledge")).toBeVisible();
     await expect(page.getByTestId("context-used-memory")).toBeVisible();
     await expect(page.getByTestId("context-used-model")).toBeVisible();
+    await expect(page.getByTestId("context-used-lattice")).toBeVisible();
+    const latticeRow = page.getByTestId("context-used-lattice");
+    await expect(latticeRow).toContainText(/state=(NOT_CONFIGURED|NOT_INDEXED|INDEXING|READY|STALE|ERROR|NOT_APPLICABLE)/);
+    const header = page.getByTestId("workspace-lattice-status");
+    if (await header.isVisible().catch(() => false)) {
+      const state = await header.getAttribute("data-lattice-state");
+      expect(state).toMatch(/^(NOT_CONFIGURED|NOT_INDEXED|INDEXING|READY|STALE|ERROR|NOT_APPLICABLE)$/);
+      await expect(header).toContainText(`Lattice ${state}`);
+      await expect(latticeRow).toContainText(`state=${state}`);
+    }
   });
 
   test("Mentrix upgrade mode chat + gates", async ({ page }) => {

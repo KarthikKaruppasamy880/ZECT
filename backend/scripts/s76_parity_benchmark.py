@@ -180,7 +180,7 @@ def main() -> int:
         print(json.dumps(payload))
         return 3
 
-    rng = random.Random(20260814)
+    rng = random.Random(int(os.environ.get("ZECT_AB_SEED", "202608147")))
     mapping: dict[str, dict] = {}
     rows: list[dict] = []
 

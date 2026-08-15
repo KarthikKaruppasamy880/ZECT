@@ -445,12 +445,15 @@ export type LatticeStatusResponse = {
   errors?: string[];
   indexed_at?: string | null;
   repository_id?: number | null;
+  indexed_commit_sha?: string;
+  live_commit_sha?: string;
 };
 
-export const latticeStatus = (project_key: string) =>
-  request<LatticeStatusResponse>(
-    `/api/lattice/status?project_key=${encodeURIComponent(project_key)}`,
-  );
+export const latticeStatus = (project_key: string, repositoryId?: number | null) => {
+  const qs = new URLSearchParams({ project_key });
+  if (repositoryId != null) qs.set("repository_id", String(repositoryId));
+  return request<LatticeStatusResponse>(`/api/lattice/status?${qs}`);
+};
 
 export const latticeBlueprintPrompt = (
   project_key: string,

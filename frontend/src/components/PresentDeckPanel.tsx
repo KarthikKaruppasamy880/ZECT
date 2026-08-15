@@ -171,6 +171,7 @@ export default function PresentDeckPanel({
   const [generationProgress, setGenerationProgress] = useState("");
   const [plannerDegraded, setPlannerDegraded] = useState(false);
   const [qualitySummary, setQualitySummary] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const usingStock = voiceChoice.startsWith("stock:");
   const usingNone = voiceChoice === "none";
   const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
@@ -1187,7 +1188,12 @@ export default function PresentDeckPanel({
         <Sparkles className="h-3.5 w-3.5" />
         Generate presentation
       </button>
-      <details className="inline-block ml-2 align-middle" data-testid="present-advanced-generate">
+      <details
+        className="inline-block ml-2 align-middle"
+        data-testid="present-advanced-generate"
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
         <summary className={`cursor-pointer text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
           Advanced
         </summary>

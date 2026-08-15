@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -14,6 +14,8 @@ import {
   Sparkles,
   Code2,
   FolderOpen,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
@@ -25,6 +27,15 @@ import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
 import SplitPane, { resetSplitLayout } from "@/components/SplitPane";
+import {
+  DEFAULT_WORKSPACE_CHROME,
+  WORKSPACE_SPLIT_KEYS,
+  effectivePanes,
+  loadWorkspaceChrome,
+  saveWorkspaceChrome,
+  type WorkspaceBottomTab,
+  type WorkspaceMaximized,
+} from "@/lib/workspaceChrome";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
@@ -127,17 +138,75 @@ export default function DeveloperWorkspace() {
   const deepWorkItem = searchParams.get("work_item_id");
   const workItemId = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
   const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos } = useActiveProject();
-  const projectRepoIds = repos
-    .filter((r) => activeProjectId != null && r.project_id === activeProjectId)
-    .map((r) => r.repo_id);
+  const projectRepoIds = useMemo(
+    () =>
+      repos
+        .filter((r) => activeProjectId != null && r.project_id === activeProjectId)
+        .map((r) => r.repo_id),
+    [repos, activeProjectId],
+  );
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
   const [showImport, setShowImport] = useState(() => !rootPath);
-  const [showExplorer, setShowExplorer] = useState(true);
-  const [showAgent, setShowAgent] = useState(true);
-  const [showBottom, setShowBottom] = useState(true);
-  const [showContext, setShowContext] = useState(false);
+  const [chrome, setChrome] = useState(() => loadWorkspaceChrome());
+  const showExplorer = chrome.explorer;
+  const showAgent = chrome.agent;
+  const showBottom = chrome.bottom;
+  const showContext = chrome.context;
+  const maximized = chrome.maximized;
+  const bottomTab = chrome.bottomTab;
+  const panes = effectivePanes(chrome);
+
+  const setShowExplorer = (updater: boolean | ((prev: boolean) => boolean)) => {
+    setChrome((prev) => ({
+      ...prev,
+      explorer: typeof updater === "function" ? updater(prev.explorer) : updater,
+      maximized: null,
+    }));
+  };
+  const setShowAgent = (updater: boolean | ((prev: boolean) => boolean)) => {
+    setChrome((prev) => ({
+      ...prev,
+      agent: typeof updater === "function" ? updater(prev.agent) : updater,
+      maximized: null,
+    }));
+  };
+  const setShowBottom = (updater: boolean | ((prev: boolean) => boolean)) => {
+    setChrome((prev) => ({
+      ...prev,
+      bottom: typeof updater === "function" ? updater(prev.bottom) : updater,
+      maximized: null,
+    }));
+  };
+  const setShowContext = (updater: boolean | ((prev: boolean) => boolean)) => {
+    setChrome((prev) => {
+      const next = typeof updater === "function" ? updater(prev.context) : updater;
+      return {
+        ...prev,
+        context: next,
+        bottom: next ? true : prev.bottom,
+        bottomTab: next ? "context" : prev.bottomTab === "context" ? "terminal" : prev.bottomTab,
+        maximized: null,
+      };
+    });
+  };
+  const setMaximized = (pane: WorkspaceMaximized) => {
+    setChrome((prev) => ({ ...prev, maximized: prev.maximized === pane ? null : pane }));
+  };
+  const setBottomTab = (tab: WorkspaceBottomTab) => {
+    setChrome((prev) => ({
+      ...prev,
+      bottomTab: tab,
+      context: tab === "context" ? true : prev.context,
+      bottom: true,
+      maximized: prev.maximized === "bottom" ? "bottom" : null,
+    }));
+  };
+
+  useEffect(() => {
+    saveWorkspaceChrome(chrome);
+  }, [chrome]);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
@@ -211,6 +280,10 @@ export default function DeveloperWorkspace() {
 
   const loadTree = useCallback(async () => {
     if (!rootPath) {
+      setTree([]);
+      return;
+    }
+    if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
       setTree([]);
       return;
     }
@@ -521,7 +594,6 @@ export default function DeveloperWorkspace() {
             data-testid="workspace-toggle-context"
             onClick={() => {
               setShowContext((v) => !v);
-              if (!showBottom) setShowBottom(true);
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
           >
@@ -531,7 +603,8 @@ export default function DeveloperWorkspace() {
             type="button"
             data-testid="workspace-reset-layout"
             onClick={() => {
-              resetSplitLayout(["zect_ws_h", "zect_ws_agent", "zect_ws_v"]);
+              resetSplitLayout([...WORKSPACE_SPLIT_KEYS]);
+              saveWorkspaceChrome(DEFAULT_WORKSPACE_CHROME);
               window.location.reload();
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
@@ -660,8 +733,16 @@ export default function DeveloperWorkspace() {
                 className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white"
                 data-testid="workspace-file-tree"
               >
-                <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100">
-                  Files
+                <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100 flex items-center justify-between">
+                  <span>Files</span>
+                  <button
+                    type="button"
+                    className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
+                    data-testid="workspace-maximize-explorer"
+                    onClick={() => setMaximized("explorer")}
+                  >
+                    {maximized === "explorer" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                  </button>
                 </div>
                 {loadingTree ? (
                   <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
@@ -694,6 +775,14 @@ export default function DeveloperWorkspace() {
                   {revealLine ? `:${revealLine}` : ""}
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
+                    data-testid="workspace-maximize-editor"
+                    onClick={() => setMaximized("editor")}
+                  >
+                    {maximized === "editor" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowSymbols((v) => !v)}
@@ -831,7 +920,19 @@ export default function DeveloperWorkspace() {
           );
 
           const agentPane = (
-            <div className="h-full min-w-0 overflow-hidden" data-testid="workspace-agent-pane">
+            <div className="h-full min-w-0 overflow-hidden flex flex-col" data-testid="workspace-agent-pane">
+              <div className="flex items-center justify-between border-b border-slate-100 px-2 py-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Agent</span>
+                <button
+                  type="button"
+                  className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
+                  data-testid="workspace-maximize-agent"
+                  onClick={() => setMaximized("agent")}
+                >
+                  {maximized === "agent" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
               <MentrixCodingAgentPanel
                 workspaceRoot={rootPath}
                 model={agentModel}
@@ -845,40 +946,71 @@ export default function DeveloperWorkspace() {
                 initialGoal={deepGoal}
                 initialSessionId={deepSession || null}
               />
+              </div>
             </div>
           );
 
+          const contextPanel = (
+            <WorkspaceContextUsedPanel
+              projectId={activeProjectId}
+              projectKey={activeProjectKey || ""}
+              repositoryId={activeRepoId}
+              repositoryIds={projectRepoIds}
+              activeRepoLabel={
+                activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
+              }
+              workItemId={workItemId}
+            />
+          );
+
           const bottomPane = (
-            <div
-              className={`grid h-full grid-cols-1 ${showContext ? "lg:grid-cols-3" : "lg:grid-cols-2"} gap-3 min-h-0 overflow-auto`}
-              data-testid="workspace-stage-b-panels"
-            >
-              <WorkspaceTerminal workspaceRoot={rootPath} />
-              <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
-              {showContext ? (
-                <WorkspaceContextUsedPanel
-                  projectId={activeProjectId}
-                  projectKey={activeProjectKey || ""}
-                  repositoryId={activeRepoId}
-                  repositoryIds={projectRepoIds}
-                  activeRepoLabel={
-                    activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
-                  }
-                  workItemId={workItemId}
-                />
-              ) : null}
+            <div className="flex h-full min-h-0 flex-col" data-testid="workspace-stage-b-panels">
+              <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1">
+                {(
+                  [
+                    ["terminal", "Terminal"],
+                    ["timeline", "Timeline"],
+                    ["context", "Context"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    data-testid={`workspace-bottom-tab-${id}`}
+                    onClick={() => setBottomTab(id)}
+                    className={`rounded px-2 py-1 text-[11px] ${
+                      bottomTab === id ? "bg-teal-50 text-teal-900" : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="ml-auto rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
+                  data-testid="workspace-maximize-bottom"
+                  onClick={() => setMaximized("bottom")}
+                >
+                  {maximized === "bottom" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-auto p-2">
+                {bottomTab === "terminal" ? <WorkspaceTerminal workspaceRoot={rootPath} /> : null}
+                {bottomTab === "timeline" ? <WorkspaceMentrixTimeline workspaceRoot={rootPath} /> : null}
+                {bottomTab === "context" ? contextPanel : null}
+              </div>
             </div>
           );
 
           let mainRow: ReactNode = editorPane;
-          if (showAgent) {
+          if (panes.agent) {
             mainRow = (
               <SplitPane
                 axis="horizontal"
                 storageKey="zect_ws_agent"
-                initial={70}
-                min={45}
-                max={88}
+                initial={76}
+                min={55}
+                max={90}
                 testId="workspace-split-agent"
               >
                 {editorPane}
@@ -886,14 +1018,14 @@ export default function DeveloperWorkspace() {
               </SplitPane>
             );
           }
-          if (showExplorer) {
+          if (panes.explorer) {
             mainRow = (
               <SplitPane
                 axis="horizontal"
                 storageKey="zect_ws_h"
-                initial={20}
-                min={12}
-                max={40}
+                initial={16}
+                min={10}
+                max={32}
                 testId="workspace-split-h"
               >
                 {explorerPane}
@@ -901,14 +1033,14 @@ export default function DeveloperWorkspace() {
               </SplitPane>
             );
           }
-          if (showBottom) {
+          if (panes.bottom) {
             return (
               <SplitPane
                 axis="vertical"
                 storageKey="zect_ws_v"
-                initial={68}
-                min={40}
-                max={88}
+                initial={74}
+                min={50}
+                max={90}
                 testId="workspace-split-v"
               >
                 {mainRow}

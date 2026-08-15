@@ -45,10 +45,38 @@ export default function WorkspaceContextUsedPanel({
   const [error, setError] = useState("");
   const [activeWiId, setActiveWiId] = useState<number | null>(workItemId ?? null);
 
+  const repoIdsKey = repositoryIds.join(",");
   const load = useCallback(async () => {
+    const ids = repoIdsKey
+      ? repoIdsKey.split(",").map((s) => Number(s)).filter((n) => Number.isFinite(n))
+      : [];
     setLoading(true);
     setError("");
     try {
+      if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
+        setRows(
+          buildContextUsedRows({
+            workItem: null,
+            pi: null,
+            model: null,
+            activeRepoLabel,
+            repoContexts: ids.map((id) => ({ repository_id: id })),
+          }),
+        );
+        return;
+      }
+      if (!projectId && !workItemId && !projectKey) {
+        setRows(
+          buildContextUsedRows({
+            workItem: null,
+            pi: null,
+            model: null,
+            activeRepoLabel,
+            repoContexts: ids.map((id) => ({ repository_id: id })),
+          }),
+        );
+        return;
+      }
       let wi: WorkItemLite | null = null;
       if (workItemId) {
         const wr = await apiFetch(`/api/work-items/${workItemId}`);
@@ -69,8 +97,8 @@ export default function WorkspaceContextUsedPanel({
       if (projectId != null) piQs.set("project_id", String(projectId));
       if (projectKey) piQs.set("project_key", projectKey);
       if (repositoryId != null) piQs.set("repository_id", String(repositoryId));
-      if (repositoryIds.length > 1) {
-        piQs.set("repository_ids", repositoryIds.join(","));
+      if (ids.length > 1) {
+        piQs.set("repository_ids", ids.join(","));
       }
       const [piRes, modelRes] = await Promise.all([
         apiFetch(`/api/mentrix/developer/project-intelligence?${piQs}`),
@@ -98,13 +126,13 @@ export default function WorkspaceContextUsedPanel({
           pi: null,
           model: null,
           activeRepoLabel,
-          repoContexts: repositoryIds.map((id) => ({ repository_id: id })),
+          repoContexts: ids.map((id) => ({ repository_id: id })),
         }),
       );
     } finally {
       setLoading(false);
     }
-  }, [projectId, projectKey, repositoryId, repositoryIds, activeRepoLabel, workItemId]);
+  }, [projectId, projectKey, repositoryId, repoIdsKey, activeRepoLabel, workItemId]);
 
   useEffect(() => {
     void load();

@@ -35,18 +35,22 @@ export function useWorkspaceRepoContext() {
       setStatus(null);
       return null;
     }
+    if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
+      setStatus(null);
+      return null;
+    }
     setLoadingStatus(true);
     try {
-      const s = await latticeStatus(pk);
+      const s = await latticeStatus(pk, activeRepoId);
       setStatus(s);
       return s;
     } catch {
-      setStatus({ indexed: false, project_key: pk, has_blueprint: false });
+      setStatus({ indexed: false, project_key: pk, has_blueprint: false, state: "ERROR" });
       return null;
     } finally {
       setLoadingStatus(false);
     }
-  }, [projectKey]);
+  }, [projectKey, activeRepoId]);
 
   const loadBlueprintPrompt = useCallback(async (rebuild = false) => {
     if (!projectKey) return "";

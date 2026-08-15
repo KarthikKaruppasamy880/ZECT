@@ -88,6 +88,50 @@ class TestLatticeStatus:
         assert data["graph_stats"]["files_indexed"] == 10
 
 
+def test_lattice_status_commit_moved_is_stale(monkeypatch):
+    from app.services.lattice import indexer
+
+    graph = indexer.LatticeGraph(project_key="sha-stale", files_indexed=3, symbols=2)
+
+    class _Repo:
+        clone_status = "cloned"
+        local_path = "C:/tmp/zect-repo"
+        indexed_at = None
+        last_pulled_at = None
+        index_stats = {}
+
+    class _Bp:
+        indexed_commit_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    class _Query:
+        def __init__(self, row):
+            self._row = row
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return self._row
+
+    class _Db:
+        def query(self, model):
+            name = getattr(model, "__name__", str(model))
+            if "Repo" in name and "Blueprint" not in name:
+                return _Query(_Repo())
+            return _Query(_Bp())
+
+    monkeypatch.setattr(indexer, "get_graph", lambda pk: graph)
+    monkeypatch.setattr(
+        "app.services.work_items.multi_repo_context.git_head_sha",
+        lambda path: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    out = indexer.get_lattice_status("sha-stale", db=_Db(), repository_id=1)
+    assert out["state"] == "STALE"
+    assert out["reason"] == "commit_moved"
+    assert out["indexed_commit_sha"].startswith("aaa")
+    assert out["live_commit_sha"].startswith("bbb")
+
+
 def test_lattice_status_canonical_states():
     from app.services.lattice.indexer import get_lattice_status
 

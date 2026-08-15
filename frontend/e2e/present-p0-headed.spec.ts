@@ -19,6 +19,9 @@ async function generateAndExport(page: Page, opts: { fast: boolean; shotPrefix: 
   const { fast, shotPrefix } = opts;
   fs.mkdirSync(ART, { recursive: true });
   fs.writeFileSync(path.join(ART, `${shotPrefix}-started.txt`), new Date().toISOString());
+  await page.addInitScript((origin: string) => {
+    sessionStorage.setItem("zect_api_origin", origin);
+  }, API);
   await gotoAuthed(page, "/present", "present-dashboard");
   await page.screenshot({ path: path.join(ART, `${shotPrefix}-01-dashboard.png`), timeout: 15_000 });
   const click = (id: string) => page.getByTestId(id).click({ force: true, timeout: 20_000 });
@@ -50,19 +53,18 @@ async function generateAndExport(page: Page, opts: { fast: boolean; shotPrefix: 
     }
   };
   if (fast) {
-    await page.locator('[data-testid="present-advanced-generate"]').evaluate(
-      (el: HTMLDetailsElement) => {
-        el.open = true;
-      },
-      undefined,
-      { timeout: 20_000 },
-    );
-    await expect(page.getByTestId("present-deck-generate-fast-basic")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("present-deck-generate-fast-basic")).toBeEnabled({ timeout: 90_000 });
+    await page.locator('[data-testid="present-advanced-generate"]').evaluate((el: HTMLDetailsElement) => {
+      el.open = true;
+      el.dispatchEvent(new Event("toggle", { bubbles: true }));
+    });
+    const fastBtn = page.getByTestId("present-deck-generate-fast-basic");
+    await expect(fastBtn).toBeVisible({ timeout: 20_000 });
+    await expect(fastBtn).toBeEnabled({ timeout: 90_000 });
+    await fastBtn.evaluate((el: HTMLButtonElement) => el.click());
   } else {
     await expect(page.getByTestId("present-deck-generate")).toBeEnabled({ timeout: 90_000 });
+    await clickGenerate();
   }
-  await clickGenerate();
   const bounced = page.getByText(/click Generate again/i);
   const first = await Promise.race([
     generateWait.then((r) => ({ kind: "gen" as const, r })),
@@ -71,7 +73,11 @@ async function generateAndExport(page: Page, opts: { fast: boolean; shotPrefix: 
   let genRes = first.kind === "gen" ? first.r : undefined;
   if (first.kind === "bounce") {
     await approve.check();
-    await clickGenerate();
+    if (fast) {
+      await page.getByTestId("present-deck-generate-fast-basic").evaluate((el: HTMLButtonElement) => el.click());
+    } else {
+      await page.getByTestId("present-deck-generate").click();
+    }
     genRes = await generateWait;
   }
   expect(genRes, "generate response missing").toBeTruthy();
@@ -145,6 +151,9 @@ test.describe("P0 Present headed generate/export", () => {
   test("Developer layout: Context Used tab + Lattice states", async ({ page }) => {
     test.setTimeout(120_000);
     fs.mkdirSync(ART, { recursive: true });
+    await page.addInitScript((origin: string) => {
+      sessionStorage.setItem("zect_api_origin", origin);
+    }, API);
     await gotoAuthed(page, "/workspace", "developer-workspace");
     await expect(page.getByTestId("workspace-toggle-context")).toBeVisible();
     await expect(page.getByTestId("workspace-context-used")).toHaveCount(0);

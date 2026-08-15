@@ -76,6 +76,52 @@ def test_zect_deck_fixture_duplicate_overlap():
     assert after["covering_dump_count"] == 0
 
 
+def test_zinnia_master_does_not_stack_title_textbox_on_object_placeholder():
+    root = Path(__file__).resolve().parents[2]
+    master = root.parent / ".zect/present-templates/masters/zinnia-executive-v1.pptx"
+    if not master.is_file():
+        return
+    plan = {
+        "slides": [
+            {
+                "title": "Q3 Delivery Overview",
+                "content_blocks": [
+                    {"kind": "bullet", "text": "Overview of Q3 objectives and deliverables."},
+                    {"kind": "bullet", "text": "Summary of progress against targets."},
+                ],
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "content": {"text": "Overview of Q3 objectives and deliverables."},
+                        "validation": {"ok": True, "errors": []},
+                    }
+                ],
+            }
+        ]
+    }
+    data = render_plan_to_pptx(plan, template_path=master)
+    report = inspect_pptx_bytes(data)
+    findings = [f for slide in report["slides"] for f in slide.get("findings") or []]
+    assert "placeholder_and_generated" not in findings
+    prs = Presentation(io.BytesIO(data))
+    slide = prs.slides[0]
+    titled = []
+    for sh in slide.shapes:
+        if not getattr(sh, "has_text_frame", False):
+            continue
+        text = (sh.text_frame.text or "").strip()
+        if not text:
+            continue
+        titled.append((sh.name, int(sh.left), int(sh.top), int(sh.width), int(sh.height), text.splitlines()[0][:80]))
+    for i, a in enumerate(titled):
+        for b in titled[i + 1 :]:
+            ax2, ay2 = a[1] + a[3], a[2] + a[4]
+            bx2, by2 = b[1] + b[3], b[2] + b[4]
+            overlap_x = min(ax2, bx2) - max(a[1], b[1])
+            overlap_y = min(ay2, by2) - max(a[2], b[2])
+            assert overlap_x <= 40000 or overlap_y <= 40000, (a[0], b[0], a[5], b[5])
+
+
 def test_placeholder_and_generated_are_mutually_exclusive():
     plan = {
         "slides": [
@@ -97,6 +143,44 @@ def test_placeholder_and_generated_are_mutually_exclusive():
     findings = [f for slide in report["slides"] for f in slide.get("findings") or []]
     assert "placeholder_and_generated" not in findings
     assert report["covering_dump_count"] == 0
+
+
+def test_inspector_flags_layout_inherited_placeholder_overlap():
+    """Slide XML often omits placeholder xfrms; export gate must still see COM-visible overlap."""
+    master = Path(__file__).resolve().parents[2].parent / ".zect/present-templates/masters/zinnia-executive-v1.pptx"
+    if not master.is_file():
+        return
+    prs = Presentation(str(master))
+    sld_id_lst = prs.slides._sldIdLst  # noqa: SLF001
+    for sld_id in list(sld_id_lst):
+        r_id = sld_id.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        if r_id:
+            try:
+                prs.part.drop_rel(r_id)
+            except Exception:
+                pass
+        sld_id_lst.remove(sld_id)
+    layout = prs.slide_layouts[min(1, len(prs.slide_layouts) - 1)]
+    slide = prs.slides.add_slide(layout)
+    obj = None
+    for shape in slide.shapes:
+        try:
+            if int(shape.placeholder_format.type) == 7:
+                obj = shape
+                break
+        except Exception:
+            continue
+    if obj is None:
+        return
+    obj.text_frame.text = "Overview of Q3 objectives and deliverables."
+    box = slide.shapes.add_textbox(obj.left, obj.top, obj.width, obj.height)
+    box.text_frame.text = "Q3 Delivery Overview"
+    buf = io.BytesIO()
+    prs.save(buf)
+    report = inspect_pptx_bytes(buf.getvalue())
+    assert report["status"] == "FAIL"
+    assert "text_shape_collision" in report["hard_findings"]
+    assert report["export_blocked"] is True
 
 
 def test_compose_splits_body_and_visual():

@@ -1,36 +1,36 @@
 # ZECT Developer Workbench Acceptance
 
-**Date:** 2026-08-14  
+**Date:** 2026-08-15  
 **Route:** `/workspace` (`DeveloperWorkspace.tsx`)  
-**On develop:** shell, Monaco, terminal, timeline, SplitPane persistence — **yes** (`origin/develop` `c32b975` includes historic workspace PRs).  
-**This session:** Lattice/PI state wiring; no Coding Agent / LRR / Ultra Review rebuild.
+**Canonical develop:** `origin/develop` = `1b1cf40` (PR **#153** human-merged).  
+**This branch:** `feat/developer-workspace-ux` (not on develop until human merge).
 
-## Present on develop
+## Chrome (Cursor-class)
 
 | Surface | Status |
 |---------|--------|
-| Explorer + Monaco editor | Present |
-| Agent panel | Present (`MentrixCodingAgentPanel`) |
-| Terminal / Mentrix timeline | Present |
-| Diff / inline Ask / symbols | Present |
-| `SplitPane` drag + `localStorage` + keyboard nudge | Present (`workspace-split-agent` and related keys) |
-| `resetSplitLayout` | Present |
-| Multi-repo status | Present (`DeveloperMultiRepoStatus`) |
-| Repo onboarding | Present; should collapse after activation (existing panel) |
-| Active project/repo | `ActiveProjectContext` |
+| Explorer / Editor / Agent / bottom tools | Resizable `SplitPane` (`workspace-split-h`, `workspace-split-agent`, `workspace-split-v`) with drag handle + keyboard nudge |
+| Editor-first defaults | Explorer 16% (max 32), agent split 76% editor, vertical 74% editor |
+| Persistence | `zect_ws_chrome` for visibility / maximize / bottom tab; split percents stay in existing keys |
+| Maximize / hide | `workspace-maximize-explorer\|editor\|agent\|bottom`; toggles clear maximize |
+| Bottom tools | Tabs Terminal / Timeline / Context (not a 2–3 column grid). Context Used default off |
+| Reset | `workspace-reset-layout` restores chrome + split keys |
 
-## V2 additions (not yet on develop)
+## Lattice / stale repo / console noise
 
-- PI / Lattice canonical `state` instead of `unavailable`/`ok`.
-- Index Repository action from PI (`POST /api/repos/{id}/index`).
-- Shared control CSS tokens (not yet applied to every workspace chrome).
+- Lattice header + Context Used share `NOT_CONFIGURED \| NOT_INDEXED \| INDEXING \| READY \| STALE \| ERROR \| NOT_APPLICABLE`.
+- Indexed SHA vs live HEAD → `STALE` / `commit_moved` (`GET /api/lattice/status?repository_id=`).
+- Stale `zect_active_project` ids are cleared **only** after a successful projects/repos list (failed fetch no longer wipes a live selection).
+- `getRepoIdentity` / branches run only when the id is in the loaded catalog.
+- Session 401/404 clears `zect_session_id`. Presence WS uses `getApiBase()` and stops after 3 failures. Context Used does not refetch on every render.
 
-## Not re-proven this session
+## Proof this session
 
-- Headed Playwright at 1280×720 / 1366×768 / 1440×900 / 1920×1080  
-- Electron `/workspace` parity  
-- `'str' object has no attribute 'get'` historically fixed in run-to-dict tests; not re-hunted on live UI  
+- Headed P0: Context Used tab + Lattice state chip **passed**.
+- `core-ux-hygiene.spec.ts`: maximize/hide/context **passed**.
+- Viewport sweep at 1280×720 / 1366×768 / 1440×900 / 1920×1080: **not** re-run this session.
+- Electron `/workspace` parity: **not** this PR (Electron proof is Present Generate → Review → Export).
 
 ## Gate
 
-**PARTIAL.** Workbench exists on develop. V2 P1 remaining: viewport + Electron sweep, apply `zect-btn`/`zect-select` consistently, headed PI Index on a real cloned repo.
+**READY_TO_MERGE** with the Present P0 branch work (human merge only). Not S8C / Graphify / new agents.

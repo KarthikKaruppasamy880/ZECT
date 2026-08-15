@@ -59,6 +59,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (typeof localStorage === "undefined" || !localStorage.getItem("zect_token")) return;
     const savedId = localStorage.getItem("zect_session_id");
     if (savedId) {
       fetchSession(parseInt(savedId, 10));
@@ -75,6 +76,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         setSession(data);
         setMessages(data.messages || []);
         localStorage.setItem("zect_session_id", String(id));
+      } else if (res.status === 404 || res.status === 401) {
+        localStorage.removeItem("zect_session_id");
       }
     } catch {
       /* ignore */

@@ -156,6 +156,17 @@ def _fill_text_frame(shape, lines: list[str]) -> None:
         p.level = 0
 
 
+_TITLE_PH = {
+    PP_PLACEHOLDER.TITLE,
+    PP_PLACEHOLDER.CENTER_TITLE,
+    PP_PLACEHOLDER.VERTICAL_TITLE,
+}
+_BODY_PH = {
+    PP_PLACEHOLDER.BODY,
+    PP_PLACEHOLDER.VERTICAL_BODY,
+}
+
+
 def _fill_placeholder(
     slide,
     *,
@@ -163,15 +174,24 @@ def _fill_placeholder(
     bullets: list[str],
     regions: dict[str, Any] | None = None,
     skip_body: bool = False,
+    prefer_generated_body: bool = False,
 ) -> None:
-    """Populate placeholders XOR generated shapes — never both for the same role."""
+    """Populate placeholders XOR generated shapes — never both for the same role.
+
+    Zinnia masters often put an OBJECT content placeholder in the title slot and a
+    BODY placeholder below. Prefer real TITLE/BODY types; only then assign leftover
+    OBJECT slots (top-most unused → title, next → body). Never fill one shape twice.
+    """
     _clear_placeholder_sample_text(slide)
-    title_set = False
-    body_set = False
     title_ph = None
     body_ph = None
+    object_phs: list[Any] = []
     if slide.shapes.title is not None:
-        title_ph = slide.shapes.title
+        try:
+            if slide.shapes.title.placeholder_format.type in _TITLE_PH:
+                title_ph = slide.shapes.title
+        except Exception:
+            title_ph = slide.shapes.title
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
@@ -179,16 +199,27 @@ def _fill_placeholder(
             ph_type = shape.placeholder_format.type
         except ValueError:
             continue
-        if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE, PP_PLACEHOLDER.VERTICAL_TITLE):
+        if ph_type in _TITLE_PH:
             if title_ph is None:
                 title_ph = shape
-        elif ph_type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.VERTICAL_BODY):
+        elif ph_type in _BODY_PH:
             if body_ph is None:
                 body_ph = shape
+        elif ph_type == PP_PLACEHOLDER.OBJECT:
+            object_phs.append(shape)
+    unused = [s for s in object_phs if s is not title_ph and s is not body_ph]
+    unused.sort(key=lambda s: (int(getattr(s, "top", 0) or 0), int(getattr(s, "height", 0) or 0)))
+    for shape in unused:
+        if title_ph is None:
+            title_ph = shape
+        elif body_ph is None:
+            body_ph = shape
+    title_set = False
+    body_set = False
     if title_ph is not None:
         title_ph.text_frame.text = title[:160]
         title_set = True
-    if not skip_body and body_ph is not None:
+    if not skip_body and body_ph is not None and body_ph is not title_ph and not prefer_generated_body:
         _fill_text_frame(body_ph, bullets)
         body_set = True
     if not title_set:
@@ -315,6 +346,7 @@ def render_plan_to_pptx(
             bullets=[] if skip_body else bullets,
             regions=regions,
             skip_body=skip_body,
+            prefer_generated_body=bool(visuals),
         )
         placements = place_blocks(slide_spec, prs=prs, definition=definition)
         for item in placements:

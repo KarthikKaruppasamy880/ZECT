@@ -670,12 +670,42 @@ def get_lattice_status(
     last_pulled = getattr(repo, "last_pulled_at", None) if repo else None
     if indexed_at and last_pulled and last_pulled > indexed_at:
         stale = True
+    indexed_sha = ""
+    if db is not None and pk:
+        try:
+            from app.models import LatticeStructuralBlueprint
+
+            bp_row = (
+                db.query(LatticeStructuralBlueprint)
+                .filter(LatticeStructuralBlueprint.project_key == pk)
+                .first()
+            )
+            indexed_sha = str(getattr(bp_row, "indexed_commit_sha", "") or "")
+        except Exception:  # noqa: BLE001
+            indexed_sha = ""
+    live_sha = ""
+    local_path = str(getattr(repo, "local_path", "") or "") if repo is not None else ""
+    if local_path:
+        try:
+            from app.services.work_items.multi_repo_context import git_head_sha
+
+            live_sha = git_head_sha(local_path) or ""
+        except Exception:  # noqa: BLE001
+            live_sha = ""
+    commit_stale = bool(indexed_sha and live_sha and indexed_sha[:12] != live_sha[:12])
+    if commit_stale:
+        stale = True
     state = "STALE" if stale else "READY"
+    reason = "graph_ready"
+    if commit_stale:
+        reason = "commit_moved"
+    elif indexed_at and last_pulled and last_pulled > indexed_at:
+        reason = "pulled_after_index"
     return {
         "state": state,
         "indexed": True,
         "project_key": pk,
-        "reason": "pulled_after_index" if stale else "graph_ready",
+        "reason": reason,
         "action": "reindex" if stale else "view_intelligence",
         "action_label": "Re-index repository" if stale else "View intelligence",
         "files_indexed": graph.files_indexed,
@@ -687,6 +717,8 @@ def get_lattice_status(
         "indexed_at": indexed_at.isoformat() if indexed_at else None,
         "last_pulled_at": last_pulled.isoformat() if last_pulled else None,
         "repository_id": repository_id,
+        "indexed_commit_sha": indexed_sha,
+        "live_commit_sha": live_sha,
     }
 
 

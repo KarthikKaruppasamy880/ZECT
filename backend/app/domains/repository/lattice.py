@@ -275,11 +275,12 @@ def blueprint_get(project_key: str, db: Session = Depends(get_db), _user: Curren
 @router.get("/status")
 def lattice_status_api(
     project_key: str,
+    repository_id: int | None = None,
     db: Session = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ):
     """Canonical Lattice state plus backward-compatible indexed/has_blueprint fields."""
-    detail = get_lattice_status(project_key, db=db)
+    detail = get_lattice_status(project_key, db=db, repository_id=repository_id)
     graph = get_graph(project_key)
     bp = get_structural_blueprint(db, project_key)
     stats: dict = {}
@@ -309,6 +310,8 @@ def lattice_status_api(
         "errors": detail.get("errors") or [],
         "indexed_at": detail.get("indexed_at"),
         "repository_id": detail.get("repository_id"),
+        "indexed_commit_sha": detail.get("indexed_commit_sha") or (bp or {}).get("indexed_commit_sha") or "",
+        "live_commit_sha": detail.get("live_commit_sha") or "",
     }
 
 

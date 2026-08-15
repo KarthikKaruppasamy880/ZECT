@@ -62,6 +62,7 @@ import {
   mentrixVoiceEngineStatus,
 } from "@/lib/api";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
+import { MemoryRouter } from "react-router-dom";
 
 describe("PresentDeckPanel clone narrate gate", () => {
   beforeEach(() => {
@@ -88,7 +89,11 @@ describe("PresentDeckPanel clone narrate gate", () => {
       hint: "Start local Chatterbox",
     });
 
-    render(<PresentDeckPanel />);
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-engine-status").textContent).toMatch(/offline/i);
@@ -105,7 +110,11 @@ describe("PresentDeckPanel clone narrate gate", () => {
       hint: "online",
     });
 
-    render(<PresentDeckPanel />);
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-engine-status").textContent).toMatch(/online/i);
@@ -123,7 +132,11 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
     (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
 
-    render(<PresentDeckPanel />);
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel mode="create" />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
@@ -149,7 +162,11 @@ describe("PresentDeckPanel clone narrate gate", () => {
       path: "C:\\Users\\me\\Documents\\mentrix-deck.pptx",
     });
 
-    render(<PresentDeckPanel />);
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel mode="create" />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-generate")).not.toBeDisabled();

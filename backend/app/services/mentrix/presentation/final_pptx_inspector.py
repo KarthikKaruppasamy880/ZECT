@@ -105,6 +105,42 @@ def _broken_relationship_count(names: list[str], data: bytes) -> int:
     return broken
 
 
+def _resolved_slide_geoms(data: bytes) -> list[dict[str, dict[str, int]]]:
+    """Placeholder xfrms often live on the layout; python-pptx resolves on-slide positions."""
+    out: list[dict[str, dict[str, int]]] = []
+    try:
+        prs = Presentation(io.BytesIO(data))
+    except Exception:
+        return out
+    for slide in prs.slides:
+        by_name: dict[str, dict[str, int]] = {}
+        for shape in slide.shapes:
+            try:
+                name = str(getattr(shape, "name", "") or "")
+                if not name:
+                    continue
+                by_name[name] = {
+                    "x": int(shape.left or 0),
+                    "y": int(shape.top or 0),
+                    "cx": int(shape.width or 0),
+                    "cy": int(shape.height or 0),
+                }
+            except Exception:
+                continue
+        out.append(by_name)
+    return out
+
+
+def _fill_missing_geom(shapes: list[dict[str, Any]], resolved: dict[str, dict[str, int]]) -> None:
+    for shape in shapes:
+        geom = shape.get("geometry") or {}
+        if int(geom.get("cx") or 0) > 0 and int(geom.get("cy") or 0) > 0:
+            continue
+        hit = resolved.get(str(shape.get("name") or ""))
+        if hit:
+            shape["geometry"] = hit
+
+
 def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None) -> dict[str, Any]:
     if not data:
         return {
@@ -117,6 +153,7 @@ def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None)
             "accept_warnings_allowed": False,
         }
     names: list[str] = []
+    resolved_geoms = _resolved_slide_geoms(data)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = [i.filename.replace("\\", "/") for i in zf.infolist()]
@@ -133,6 +170,8 @@ def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None)
             cx, cy = slide_size_emu(definition)
             for idx, name in enumerate(slide_names):
                 shapes = _iter_shapes(zf.read(name))
+                if idx < len(resolved_geoms):
+                    _fill_missing_geom(shapes, resolved_geoms[idx])
                 findings: list[str] = []
                 text_boxes = [s for s in shapes if s["text"] or s["ph"]]
                 titles = [s for s in text_boxes if (s["ph"] or "") in {"title", "ctrTitle", "title"} or "title" in (s["name"] or "").lower()]
@@ -256,11 +295,12 @@ def _placeholder_plus_generated(shapes: list[dict[str, Any]]) -> bool:
         t0 = _norm(titles[0]["text"])
         if any(_norm(g["text"]) == t0 or t0 in _norm(g["text"]) for g in gen_titles):
             return True
-    bodies = [s for s in shapes if (s.get("ph") or "") in {"body", "obj"} and s.get("text")]
-    dumps = [s for s in shapes if not s.get("ph") and s.get("text")]
-    if bodies and dumps:
-        bt = _norm(bodies[0]["text"])
-        if bt and any(bt in _norm(d["text"]) or _norm(d["text"]) in bt for d in dumps if boxes_overlap(bodies[0]["geometry"], d["geometry"])):
+    placeholders = [s for s in shapes if s.get("ph") and s.get("text")]
+    generated = [s for s in shapes if not s.get("ph") and s.get("text")]
+    for ph in placeholders:
+        for gen in generated:
+            if not boxes_overlap(ph["geometry"], gen["geometry"], pad=12000):
+                continue
             return True
     return False
 

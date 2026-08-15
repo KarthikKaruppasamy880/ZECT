@@ -54,6 +54,7 @@ export default function ProjectRepoSelector() {
     setHeadSha("");
     setDirty(false);
     if (!activeRepoId) return;
+    if (!repos.some((r) => r.repo_id === activeRepoId)) return;
     getRepoIdentity(activeRepoId)
       .then((id) => {
         setHeadSha(id.head_sha || "");
@@ -86,7 +87,7 @@ export default function ProjectRepoSelector() {
         setHeadSha("");
         setDirty(false);
       });
-  }, [activeRepoId]);
+  }, [activeRepoId, repos, activeRepo, setActiveBranch]);
 
   const filteredRepos = repos.filter(
     (r) => !activeProjectId || r.project_id === activeProjectId,
@@ -354,7 +355,7 @@ export default function ProjectRepoSelector() {
           data-testid="workspace-lattice-status"
           data-lattice-state={loadingStatus ? "" : latticeState}
           className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium ${latticeTone}`}
-          title={projectKey}
+          title={[projectKey, latticeIdx?.indexed_commit_sha && `indexed=${String(latticeIdx.indexed_commit_sha).slice(0, 12)}`, latticeIdx?.live_commit_sha && `head=${String(latticeIdx.live_commit_sha).slice(0, 12)}`].filter(Boolean).join(" · ")}
         >
           <Network size={10} />
           {loadingStatus ? "…" : latticeHeaderLabel(latticeState)}

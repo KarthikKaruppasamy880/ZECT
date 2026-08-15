@@ -112,10 +112,12 @@ def paint_table(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
 
 def paint_metric(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
     content = block.get("content") if isinstance(block.get("content"), dict) else {}
-    shape = _box(slide, geometry, fill=RGBColor(0xF7, 0xF4, 0xEF))
-    label = str(content.get("label") or "Metric")
-    value = str(content.get("value") or "—")
+    label = str(content.get("label") or "Metric").strip()
+    value = str(content.get("value") or "—").strip()
     unit = str(content.get("unit") or "")
+    if value.lower() in {"n/a", "na", "none", "-", "—"}:
+        return False
+    shape = _box(slide, geometry, fill=RGBColor(0xF7, 0xF4, 0xEF))
     tf = shape.text_frame
     tf.word_wrap = True
     tf.clear()

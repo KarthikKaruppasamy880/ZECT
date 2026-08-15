@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Users, Wifi, WifiOff } from "lucide-react";
-import { apiFetch } from "@/lib/api";
-
-const WS_BASE = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/^http/, "ws");
+import { apiFetch, getApiBase } from "@/lib/api";
 
 interface PresenceUser {
   user: string;
@@ -19,6 +17,10 @@ const USER_COLORS = [
   "text-blue-400", "text-green-400", "text-purple-400", "text-amber-400",
   "text-pink-400", "text-cyan-400", "text-red-400", "text-indigo-400",
 ];
+
+function wsBase(): string {
+  return getApiBase().replace(/^http/, "ws");
+}
 
 function resolvePresenceUser(explicit?: string): string {
   if (explicit && explicit !== "admin" && explicit !== "anonymous") return explicit;
@@ -40,12 +42,33 @@ export default function CollaborationPanel({ room, user }: CollaborationPanelPro
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>();
   const failCountRef = useRef(0);
+  const disabledRef = useRef(false);
+
+  const fetchPresence = useCallback(async () => {
+    if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) return;
+    try {
+      const res = await apiFetch(`/api/realtime/presence/${encodeURIComponent(room)}`);
+      if (res.status === 401 || res.status === 404) {
+        disabledRef.current = true;
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        setUsers(data.users || []);
+        setActiveCount(data.active_users || 0);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [room]);
 
   const connect = useCallback(() => {
-    if (!backendReady) return;
+    if (!backendReady || disabledRef.current) return;
+    if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (failCountRef.current >= 3) return;
 
-    const ws = new WebSocket(`${WS_BASE}/ws/${room}?user=${encodeURIComponent(presenceUser)}`);
+    const ws = new WebSocket(`${wsBase()}/ws/${encodeURIComponent(room)}?user=${encodeURIComponent(presenceUser)}`);
 
     ws.onopen = () => {
       failCountRef.current = 0;
@@ -68,6 +91,7 @@ export default function CollaborationPanel({ room, user }: CollaborationPanelPro
     ws.onclose = () => {
       setConnected(false);
       failCountRef.current += 1;
+      if (disabledRef.current || failCountRef.current >= 3) return;
       const delay = Math.min(30_000, 3000 * failCountRef.current);
       reconnectRef.current = setTimeout(connect, delay);
     };
@@ -77,20 +101,7 @@ export default function CollaborationPanel({ room, user }: CollaborationPanelPro
     };
 
     wsRef.current = ws;
-  }, [backendReady, room, presenceUser]);
-
-  const fetchPresence = async () => {
-    try {
-      const res = await apiFetch(`/api/realtime/presence/${room}`);
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data.users || []);
-        setActiveCount(data.active_users || 0);
-      }
-    } catch {
-      /* ignore */
-    }
-  };
+  }, [backendReady, room, presenceUser, fetchPresence]);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,8 +121,7 @@ export default function CollaborationPanel({ room, user }: CollaborationPanelPro
     if (!backendReady) return;
     connect();
     const onVis = () => {
-      if (document.visibilityState === "visible") {
-        failCountRef.current = 0;
+      if (document.visibilityState === "visible" && !disabledRef.current) {
         connect();
       }
     };

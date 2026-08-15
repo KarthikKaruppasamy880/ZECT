@@ -80,14 +80,44 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
+      let projectsOk = false;
+      let reposOk = false;
       const [projs, cloned] = await Promise.all([
-        getProjects().catch(() => []),
-        getClonedRepos().catch(() => []),
+        getProjects()
+          .then((rows) => {
+            projectsOk = true;
+            return rows;
+          })
+          .catch(() => []),
+        getClonedRepos()
+          .then((rows) => {
+            reposOk = true;
+            return rows;
+          })
+          .catch(() => []),
       ]);
-      setProjects(projs.map((p: any) => ({ id: p.id, name: p.name, status: p.status })));
-      setRepos(cloned.map((r: any) => ({
+      const projectRows = projs.map((p: { id: number; name: string; status: string }) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+      }));
+      const repoRows = cloned.map((r: {
+        repo_id: number;
+        owner: string;
+        repo_name: string;
+        project_id: number;
+        clone_branch: string | null;
+        local_path: string | null;
+        disk_usage_mb?: number;
+        total_files?: number;
+        total_lines?: number;
+      }) => ({
         repo_id: r.repo_id,
         owner: r.owner,
         repo_name: r.repo_name,
@@ -98,7 +128,19 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
         disk_usage_mb: r.disk_usage_mb || 0,
         total_files: r.total_files || 0,
         total_lines: r.total_lines || 0,
-      })));
+      }));
+      setProjects(projectRows);
+      setRepos(repoRows);
+      if (projectsOk) {
+        setActiveProjectId((prev) =>
+          prev == null || projectRows.some((p) => p.id === prev) ? prev : null,
+        );
+      }
+      if (reposOk) {
+        setActiveRepoId((prev) =>
+          prev == null || repoRows.some((r) => r.repo_id === prev) ? prev : null,
+        );
+      }
     } catch {
       // swallow
     } finally {
@@ -115,6 +157,9 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     if (!activeRepoId) {
       setBranches([]);
+      return;
+    }
+    if (!repos.some((r) => r.repo_id === activeRepoId)) {
       return;
     }
     setBranches([]);
@@ -141,7 +186,7 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [activeRepoId]);
+  }, [activeRepoId, repos]);
 
   // Persist to localStorage
   useEffect(() => {

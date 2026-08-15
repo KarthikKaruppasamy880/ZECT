@@ -1,15 +1,16 @@
 # ZECT Native Presentation — Blinded Human A/B Scorecard
 
 **Date:** 2026-08-14  
-**Gate:** S7.6 — human scoring is the primary subjective parity gate.  
+**Corpus:** **post-S7.7** (fresh). Pre-repair packs are in `test-results/s7-parity/human-ab-pre-s77-history/` and are not scoring evidence.  
+**Gate:** Human scoring is the primary subjective parity gate.  
 **Official S7 verdict until this card is completed:** `NATIVE_NOT_READY` / `NOT_READY_FOR_S8C`  
 **Do not start S8C or S8D.**
 
 This file is for **human reviewers only**. Cursor must not fill scores, Preferred A/B/Tie, or comments.
 
-## Packs ready (2026-08-14)
+## Packs ready (post-S7.7)
 
-All **10** corpus cases have both `Deck_A.pptx` and `Deck_B.pptx` under `test-results/s7-parity/human-ab/<case_id>/`. Each folder also has `prompt.txt`, `preview.txt` (titles only), and `README.txt`.
+Nine cases have both `Deck_A.pptx` and `Deck_B.pptx`. `overflow_layout` has one deck only — skip Preferred for that case.
 
 Index: `test-results/s7-parity/human-ab/HUMAN_REVIEW_INDEX.md`  
 Windows opener: `test-results/s7-parity/human-ab/OPEN_FOR_REVIEW.cmd`

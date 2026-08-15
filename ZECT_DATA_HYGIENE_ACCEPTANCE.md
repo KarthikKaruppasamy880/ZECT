@@ -1,7 +1,10 @@
 # ZECT Data Hygiene Acceptance
 
-**Date:** 2026-08-14  
-**Gate:** provenance isolation is implemented; this operator DB was cleaned with keep-cleanup (`keep_ids=[7]` ZOAS Eval). 62 leftover E2E/onboarding rows deleted. `GET /api/projects?exclude_fixtures=0` and `exclude_fixtures=1` both return only ZOAS Eval. Audit: 0 proven_test, 0 name_candidates, 1 authorized.
+**Date:** 2026-08-15  
+**Canonical develop:** `1b1cf40` (PR #153).  
+**Gate:** provenance isolation holds after headed Quality+Fast generate. Deleted E2E/onboarding rows **did not return**.
+
+Live `GET /api/projects?exclude_fixtures=1` on `:8010` and `:8000`: **ZOAS Eval** and **ZECT Sample Processes**. `e2e_like=[]`. Audit: `proven_test=0`, `name_candidates=0`, `authorized=2`. Sample Processes is the WorkItems sample, not an E2E/onboarding leftover.
 
 ## Defect
 

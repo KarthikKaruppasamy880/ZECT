@@ -40,6 +40,13 @@ def apply_document_to_pptx(
         data = tmp.read_bytes()
         validate_generated_pptx(data, n_slides=len(prs.slides))
         os.replace(tmp, pptx)
+        try:
+            from app.services.mentrix.presentation.final_pptx_inspector import inspect_and_repair_pptx
+
+            repaired, _rep = inspect_and_repair_pptx(pptx.read_bytes())
+            pptx.write_bytes(repaired)
+        except Exception:
+            pass
     finally:
         if tmp.exists():
             tmp.unlink(missing_ok=True)
@@ -115,11 +122,14 @@ def _apply_visual_blocks(slide, spec: dict[str, Any], *, user_id: str) -> None:
 
 
 def _write_slide_text(slide, text: str) -> None:
+    """Update existing title/body in place. Never add a covering dump textbox."""
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     title = lines[0][:160] if lines else text[:160]
     body = lines[1:]
+    title_written = False
     if slide.shapes.title is not None:
         slide.shapes.title.text = title
+        title_written = True
         rest = body
     else:
         rest = lines or [text]
@@ -139,11 +149,25 @@ def _write_slide_text(slide, text: str) -> None:
                     p = tf.add_paragraph()
                     p.text = extra[:800]
             return
-    if rest:
-        box = slide.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(5))
-        tf = box.text_frame
-        tf.word_wrap = True
-        tf.text = rest[0][:800]
-        for extra in rest[1:8]:
-            p = tf.add_paragraph()
-            p.text = extra[:800]
+    if not rest:
+        return
+    # Prefer rewriting an existing non-placeholder text frame rather than stacking a new box.
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        try:
+            shape.placeholder_format.type
+            continue
+        except ValueError:
+            current = (shape.text_frame.text or "").strip()
+            if not current:
+                continue
+            if title_written and current[:80] == title[:80]:
+                continue
+            tf = shape.text_frame
+            tf.clear()
+            tf.text = rest[0][:800]
+            for extra in rest[1:8]:
+                p = tf.add_paragraph()
+                p.text = extra[:800]
+            return

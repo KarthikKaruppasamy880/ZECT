@@ -166,16 +166,23 @@ def test_native_visual_generate_zero_presenton(tmp_path, monkeypatch):
         with patch("app.services.phases.llm_phase._chat", return_value={"ok": False, "error": "offline", "content": ""}):
             out = PresentationService().generate(
                 PresentationGenerateRequest(
-                    content="Executive update with metrics chart, status table, and an image figure",
+                    content="Leadership brief with an illustrative KPI trend chart, a status table from attached evidence, and an authorized figure.",
                     n_slides=6,
                     ui_template_choice="zinnia-executive-v1",
                     filename="s65.pptx",
                     user_id="u1",
                     asset_ids=[meta["asset_id"]],
+                    context_items=[
+                        {
+                            "source_type": "document",
+                            "source_id": "ws-1",
+                            "content": "Workstream | Status | Owner\nIdentity | Delayed | TBD\nBilling | On track | TBD\nIllustrative KPI: Q1 12, Q2 18, Q3 15, Q4 22",
+                        }
+                    ],
                 )
             )
         gen.assert_not_called()
-    assert out["ok"] is True
+    assert out["ok"] is True, out.get("error") or out.get("hint") or "generate failed"
     assert out["zinnia_verified"] is True
     data = Path(out["path"]).read_bytes()
     visuals = inspect_pptx_visuals(data)

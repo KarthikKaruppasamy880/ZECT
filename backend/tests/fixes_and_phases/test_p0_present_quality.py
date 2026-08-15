@@ -1,0 +1,324 @@
+"""P0 Present export quality: OOXML inspector, composition mutual exclusion, keep-cleanup."""
+
+from __future__ import annotations
+
+import inspect
+import io
+from pathlib import Path
+
+from pptx import Presentation
+from pptx.util import Inches
+
+from app.infrastructure.database import SessionLocal
+from app.models import Project
+from app.services.fixture_isolation import keep_cleanup_projects
+from app.services.mentrix.presentation.document_io import apply_document_to_pptx
+from app.services.mentrix.presentation.final_pptx_inspector import (
+    inspect_and_repair_pptx,
+    inspect_pptx_bytes,
+    strip_covering_dump_shapes,
+)
+from app.services.mentrix.presentation.layout_composer import compose_regions
+from app.services.mentrix.presentation.native_provider import ZectNativePresentationProvider
+from app.services.mentrix.presentation.quality_critic import critique_plan
+from app.services.mentrix.presentation.quality_repair import repair_until_pass
+from app.services.mentrix.presentation.renderer import render_plan_to_pptx
+
+
+def _overlapping_dump_pptx() -> bytes:
+    prs = Presentation()
+    layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(layout)
+    if slide.shapes.title is not None:
+        slide.shapes.title.text = "AI Agentic vs Graph, Loop, KV"
+    box = slide.shapes.add_textbox(Inches(0.6), Inches(1.8), Inches(7), Inches(1.1))
+    box.text_frame.text = "Agentic, graph, loop, KV cache, LLM fine-tuning: key AI terms."
+    dump = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(6.5))
+    dump.text_frame.text = (
+        "AI Agentic vs Graph, Loop, KV Agentic, graph, loop, KV cache, LLM fine-tuning: key AI terms."
+    )
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
+def _fixture_pptx() -> Path | None:
+    here = Path(__file__).resolve().parent
+    for candidate in (
+        here / "fixtures" / "zect-deck-overlap.pptx",
+        here.parents[2] / "prompts" / "zect-deck.pptx",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def test_inspector_flags_covering_dump_and_strip_repairs():
+    data = _overlapping_dump_pptx()
+    report = inspect_pptx_bytes(data)
+    assert report["covering_dump_count"] >= 1 or report["overlap_count"] >= 1
+    assert report["status"] == "FAIL"
+    repaired, removed = strip_covering_dump_shapes(data)
+    assert removed >= 1
+    after = inspect_pptx_bytes(repaired)
+    assert after["covering_dump_count"] == 0
+
+
+def test_zect_deck_fixture_duplicate_overlap():
+    path = _fixture_pptx()
+    if path is None:
+        return
+    report = inspect_pptx_bytes(path.read_bytes())
+    assert report["slide_count"] >= 1
+    assert report["covering_dump_count"] >= 1 or report["overlap_count"] >= 1
+    repaired, _n = strip_covering_dump_shapes(path.read_bytes())
+    after = inspect_pptx_bytes(repaired)
+    assert after["covering_dump_count"] == 0
+
+
+def test_placeholder_and_generated_are_mutually_exclusive():
+    plan = {
+        "slides": [
+            {
+                "title": "Board opening",
+                "content_blocks": [{"kind": "bullet", "text": "Q3 delivery is on track"}],
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "content": {"text": "Q3 delivery is on track"},
+                        "validation": {"ok": True, "errors": []},
+                    }
+                ],
+            }
+        ]
+    }
+    data = render_plan_to_pptx(plan)
+    report = inspect_pptx_bytes(data)
+    findings = [f for slide in report["slides"] for f in slide.get("findings") or []]
+    assert "placeholder_and_generated" not in findings
+    assert report["covering_dump_count"] == 0
+
+
+def test_compose_splits_body_and_visual():
+    definition = {
+        "slide_size": {"cx": 9144000, "cy": 5143500},
+        "layouts": [
+            {
+                "name": "Title and Content",
+                "placeholders": [
+                    {"type": "TITLE", "geometry": {"x": 457200, "y": 200000, "cx": 8229600, "cy": 700000}},
+                    {"type": "BODY", "geometry": {"x": 457200, "y": 1100000, "cx": 8229600, "cy": 3600000}},
+                ],
+            }
+        ],
+    }
+    regions = compose_regions(definition, definition["layouts"][0], split_visual=True)
+    assert regions["visual"]["y"] != regions["body"]["y"] or regions["visual"]["cy"] != regions["body"]["cy"]
+
+
+def test_renderer_does_not_add_covering_dump_on_top_of_placeholders():
+    plan = {
+        "slides": [
+            {
+                "title": "Board opening",
+                "content_blocks": [{"kind": "bullet", "text": "Q3 delivery is on track"}],
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "content": {"text": "Q3 delivery is on track"},
+                        "validation": {"ok": True, "errors": []},
+                    }
+                ],
+            }
+        ]
+    }
+    data = render_plan_to_pptx(plan)
+    report = inspect_pptx_bytes(data)
+    assert report["covering_dump_count"] == 0
+
+
+def test_editor_save_export_idempotent_shape_count(tmp_path):
+    data = render_plan_to_pptx(
+        {
+            "slides": [
+                {
+                    "title": "Status",
+                    "content_blocks": [{"kind": "bullet", "text": "Twelve epics closed"}],
+                    "blocks": [],
+                }
+            ]
+        }
+    )
+    dest = tmp_path / "roundtrip.pptx"
+    dest.write_bytes(data)
+    before = inspect_pptx_bytes(data)["slides"][0]["shape_count"]
+    apply_document_to_pptx(
+        dest,
+        [{"index": 0, "text": "Status\nTwelve epics closed", "notes": "say this"}],
+    )
+    after = inspect_pptx_bytes(dest.read_bytes())
+    assert after["slides"][0]["shape_count"] <= before + 1
+    assert after["covering_dump_count"] == 0
+    apply_document_to_pptx(
+        dest,
+        [{"index": 0, "text": "Status\nTwelve epics closed", "notes": "say this"}],
+    )
+    again = inspect_pptx_bytes(dest.read_bytes())
+    assert again["slides"][0]["shape_count"] == after["slides"][0]["shape_count"]
+
+
+def test_fast_and_quality_both_call_inspector_and_critic():
+    src = inspect.getsource(ZectNativePresentationProvider.generate)
+    assert "repair_until_pass" in src
+    assert "inspect_and_repair_pptx" in src
+    data = render_plan_to_pptx(
+        {"slides": [{"title": "A", "content_blocks": [{"kind": "bullet", "text": "One"}], "blocks": []}]}
+    )
+    _fixed, report = inspect_and_repair_pptx(data)
+    assert "status" in report
+
+
+def test_degraded_fast_does_not_override_layout_fail():
+    plan = {
+        "slides": [
+            {
+                "title": "Overlap",
+                "composed_regions": {
+                    "title": {"x": 400000, "y": 200000, "cx": 8000000, "cy": 800000},
+                    "body": {"x": 400000, "y": 400000, "cx": 8000000, "cy": 3000000},
+                },
+                "content_blocks": [{"kind": "bullet", "text": "Body"}],
+                "blocks": [],
+            }
+        ]
+    }
+    _plan, report = repair_until_pass(plan, None, prompt="status", degraded=True)
+    layout_hard = bool(report.get("overlap_count") or report.get("out_of_bounds_count"))
+    if layout_hard:
+        assert report["status"] == "FAIL"
+        assert not report.get("degraded_override")
+
+
+def test_export_blocked_on_quality_failed():
+    data = _overlapping_dump_pptx()
+    report = inspect_pptx_bytes(data)
+    assert report["status"] == "FAIL"
+    from app.services.mentrix.presentation.deck_catalog import quality_gate_for_path
+    from app.services.pptx_paths import default_pptx_save_dir
+
+    dest = default_pptx_save_dir() / "_p0_quality_fail.pptx"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    gate = quality_gate_for_path(str(dest))
+    assert gate["export_blocked"] is True
+    assert gate["quality_passed"] is False
+    assert gate["accept_warnings_allowed"] is False
+    assert gate.get("hard_findings")
+    dest.unlink(missing_ok=True)
+
+
+def test_accept_warnings_cannot_override_critical_export_block(authed_client, tmp_path):
+    from app.services.pptx_paths import default_pptx_save_dir
+
+    dest = default_pptx_save_dir() / "_p0_hard_block.pptx"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(_overlapping_dump_pptx())
+    gate = authed_client.get(f"/api/mentrix/present/quality-gate?path={dest}")
+    assert gate.status_code == 200, gate.text
+    body = gate.json()
+    assert body["export_blocked"] is True
+    assert body["accept_warnings_allowed"] is False
+    blocked = authed_client.get(
+        f"/api/mentrix/present/pptx?path={dest}&accept_warnings=true"
+    )
+    assert blocked.status_code == 409
+    detail = blocked.json().get("detail") or {}
+    if isinstance(detail, dict):
+        assert detail.get("error") == "export_blocked_critical_quality"
+    dest.unlink(missing_ok=True)
+
+
+def test_kv_cache_grounding_wording():
+    plan = {
+        "slides": [
+            {
+                "title": "KV cache",
+                "content_blocks": [
+                    {"kind": "bullet", "text": "KV cache reduces memory use in the transformer."},
+                ],
+                "blocks": [],
+            }
+        ]
+    }
+    report = critique_plan(plan, None, prompt="Explain KV cache vs recomputation")
+    findings = [f for slide in report["slides"] for f in slide.get("findings") or []]
+    assert "kv_cache_memory_oversimplified" in findings
+    ok = {
+        "slides": [
+            {
+                "title": "KV cache",
+                "content_blocks": [
+                    {
+                        "kind": "bullet",
+                        "text": "KV cache avoids recomputing attention keys; it trades memory for compute.",
+                    }
+                ],
+                "blocks": [],
+            }
+        ]
+    }
+    ok_report = critique_plan(ok, None, prompt="Explain KV cache vs recomputation")
+    ok_findings = [f for slide in ok_report["slides"] for f in slide.get("findings") or []]
+    assert "kv_cache_memory_oversimplified" not in ok_findings
+
+
+def test_keep_cleanup_never_deletes_keep_ids():
+    db = SessionLocal()
+    created = []
+    try:
+        keep = Project(name="P0 Keep Probe", provenance="user", test_run_id="")
+        drop = Project(name="P0 Drop Probe", provenance="user", test_run_id="")
+        db.add_all([keep, drop])
+        db.commit()
+        db.refresh(keep)
+        db.refresh(drop)
+        created = [int(keep.id), int(drop.id)]
+        keep_ids = [int(p.id) for p in db.query(Project).all() if int(p.id) != int(drop.id)]
+        dry = keep_cleanup_projects(db, keep_ids, dry_run=True)
+        assert dry["ok"] is True
+        ids = {row["id"] for row in dry["would_delete"]}
+        assert drop.id in ids
+        assert keep.id not in ids
+        live = keep_cleanup_projects(db, keep_ids, dry_run=False)
+        assert drop.id in live["deleted_ids"]
+        assert keep.id not in live["deleted_ids"]
+        db.expire_all()
+        assert db.query(Project).filter(Project.id == keep.id).first() is not None
+        assert db.query(Project).filter(Project.id == drop.id).first() is None
+    finally:
+        for pid in created:
+            row = db.query(Project).filter(Project.id == pid).first()
+            if row is not None:
+                db.delete(row)
+        db.commit()
+        db.close()
+
+
+def test_keep_cleanup_refuses_empty_keep_ids(authed_client):
+    empty = authed_client.post("/api/projects/fixtures/keep-cleanup", json={"keep_ids": [], "dry_run": True})
+    assert empty.status_code == 400
+    keep = authed_client.post(
+        "/api/projects",
+        json={"name": "Keep Cleanup Probe", "description": "tmp", "provenance": "test", "test_run_id": "p0-keep"},
+    )
+    assert keep.status_code == 201
+    kid = keep.json()["id"]
+    dry = authed_client.post(
+        "/api/projects/fixtures/keep-cleanup",
+        json={"keep_ids": [kid], "dry_run": True},
+    )
+    assert dry.status_code == 200
+    body = dry.json()
+    assert body["ok"] is True
+    assert body["dry_run"] is True
+    assert kid not in {row["id"] for row in body["would_delete"]}

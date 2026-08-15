@@ -92,6 +92,8 @@ class Project(Base):
     completion_percent = Column(Float, default=0.0)
     token_savings = Column(Float, default=0.0)
     risk_alerts = Column(Integer, default=0)
+    provenance = Column(String, default="user", index=True)  # user | test
+    test_run_id = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -1607,6 +1609,8 @@ class WorkItem(Base):
     worktree_path = Column(String, default="")
     current_commit_sha = Column(String, default="")
     created_by = Column(String, default="")
+    is_test_fixture = Column(Boolean, default=False, index=True)
+    test_run_id = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

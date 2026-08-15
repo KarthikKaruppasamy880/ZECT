@@ -7,13 +7,14 @@ import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { loadEnvCreds } from "./helpers/env";
+import { ensureLoggedIn, gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
 import { cloneTranscript, tmpCloneWav } from "./helpers/wav";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(ROOT, "test-results/present-zinnia-clone-live");
 const FRONTEND = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:5173";
+const API_BASE = (process.env.VITE_API_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 const BUILTINS = new Set(["modern", "general", "standard", "swift", ""]);
 
 function writeEvidence(partial: Record<string, unknown>) {
@@ -26,21 +27,6 @@ function writeEvidence(partial: Record<string, unknown>) {
     }
   })();
   fs.writeFileSync(path.join(ART, "evidence.json"), JSON.stringify({ ...prev, ...partial }, null, 2));
-}
-
-async function ensureLoggedIn(page: Page) {
-  const { username, password } = loadEnvCreds();
-  await page.goto("/");
-  const loginVisible = await page.getByTestId("login-username").isVisible().catch(() => false);
-  const token = await page.evaluate(() => localStorage.getItem("zect_token"));
-  if (loginVisible || !token) {
-    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId("login-username").fill(username);
-    await page.getByTestId("login-password").fill(password);
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
-  }
-  expect(await page.evaluate(() => localStorage.getItem("zect_token"))).toBeTruthy();
 }
 
 function tinyPptxPath(): string {
@@ -60,10 +46,8 @@ async function jsonGet(url: string): Promise<{ ok: boolean; status: number; body
 }
 
 async function openGenerateWorkspace(page: Page) {
-  await page.goto("/present");
-  await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
+  await gotoAuthed(page, "/present/create", "zect-present-page");
   await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
-  await page.getByRole("button", { name: /3\.\s*Generate/ }).click();
   await expect(page.getByTestId("present-deck-panel")).toBeVisible({ timeout: 10_000 });
 }
 
@@ -93,6 +77,7 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
           lifecycle: detail?.lifecycle,
           has_path: Boolean(detail?.path),
           mapping_source: detail?.mapping_source,
+          provider: detail?.provider,
         });
       } catch {
         generateMeta.push({ status: res.status(), parse: "non-json" });
@@ -100,11 +85,8 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
     });
 
     try {
-      await ensureLoggedIn(page);
-      await page.goto("/present");
-      await expect(page).toHaveURL(/\/present/);
+      await gotoAuthed(page, "/present/create", "zect-present-page");
       expect(page.url()).not.toMatch(/:5000\b/);
-      await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId("zect-present-template-zinnia-executive-v1")).toBeVisible();
       await expect(page.getByTestId("present-lifecycle-state")).toBeVisible();
       await page.screenshot({ path: path.join(ART, "01-gallery.png") });
@@ -116,7 +98,6 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       evidence.user_template_registered = true;
       await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
       await expect(page.getByTestId("zect-present-template-preview")).toBeVisible({ timeout: 15_000 });
-      await page.getByRole("button", { name: /3\.\s*Generate/ }).click();
       await expect(page.getByTestId("zect-present-workspace")).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId("zect-present-selected")).toContainText("zinnia-executive-v1");
       await expect(page.getByTestId("present-deck-template")).toHaveValue("zinnia-executive-v1");
@@ -135,14 +116,25 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
         });
       evidence.generate_enabled = await gen.isEnabled();
       evidence.lifecycle_workspace = (await page.getByTestId("present-lifecycle-state").innerText().catch(() => "")).trim();
-      const probed = await page.evaluate(async () => {
+      const probed = await page.evaluate(async (apiBase) => {
         const t = localStorage.getItem("zect_token");
-        const r = await fetch("http://127.0.0.1:8000/api/mentrix/presenton/status", {
+        const r = await fetch(`${apiBase}/api/mentrix/presenton/status`, {
           headers: { Authorization: `Bearer ${t}` },
         });
-        const j = (await r.json()) as { reachable?: boolean; lifecycle?: string; configured?: boolean };
-        return { http: r.status, reachable: j.reachable, lifecycle: j.lifecycle, configured: j.configured };
-      });
+        const j = (await r.json()) as {
+          reachable?: boolean;
+          lifecycle?: string;
+          configured?: boolean;
+          provider?: string;
+        };
+        return {
+          http: r.status,
+          reachable: j.reachable,
+          lifecycle: j.lifecycle,
+          configured: j.configured,
+          provider: j.provider,
+        };
+      }, API_BASE);
       evidence.page_presenton_status = probed;
 
       if (await gen.isEnabled()) {
@@ -164,9 +156,12 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       const zinniaVerified = lastGen.zinnia_verified === true && !BUILTINS.has(templateSent.toLowerCase());
       evidence.template_sent = templateSent || null;
       evidence.zinnia_verified = zinniaVerified;
+      evidence.provider = lastGen.provider || null;
       evidence.PPTX_GENERATION =
         lastGen.has_path === true && !BUILTINS.has(templateSent.toLowerCase()) ? "PASS" : "BLOCKED_EXTERNAL";
       evidence.ZINNIA_VERIFIED = zinniaVerified ? "PASS" : "BLOCKED_EXTERNAL";
+      evidence.NO_PRESENTON_NATIVE_CALL =
+        lastGen.provider === "zect_native" && lastGen.has_path === true ? "PASS" : "PARTIAL";
       evidence.EDITOR = "PARTIAL";
       evidence.EXPORT = lastGen.has_path === true ? "PASS" : "PARTIAL";
       await page.screenshot({ path: path.join(ART, "02-workspace-generate.png") });
@@ -231,9 +226,7 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
     });
 
     try {
-      await ensureLoggedIn(page);
-      await page.goto("/settings");
-      await page.getByTestId("clone-voice-panel").waitFor({ timeout: 15_000 });
+      await gotoAuthed(page, "/settings", "clone-voice-panel", 25_000);
       const listVisible = await page
         .getByTestId("clone-voice-list")
         .waitFor({ state: "visible", timeout: 12_000 })
@@ -263,7 +256,9 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       await expect
         .poll(async () => voiceSelect.locator('option[value^="clone:"]').count(), { timeout: 30_000 })
         .toBeGreaterThan(0);
-      await voiceSelect.selectOption({ index: 0 });
+      const cloneVal = await voiceSelect.locator('option[value^="clone:"]').first().getAttribute("value");
+      expect(cloneVal).toBeTruthy();
+      await voiceSelect.selectOption(cloneVal as string);
       evidence.selected_clone_option = true;
       await page.getByTestId("present-deck-notes").fill("Slide one: delivery is on track this week.");
 
@@ -274,7 +269,17 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       evidence.present_all_enabled = await presentAll.isEnabled();
       evidence.present_status_before = await page.getByTestId("present-deck-status").innerText().catch(() => "");
 
-      if (await narrate.isEnabled()) {
+      if (await presentAll.isEnabled()) {
+        await presentAll.click();
+        const deadline = Date.now() + (realVoicebox ? 420_000 : 20_000);
+        while (
+          Date.now() < deadline &&
+          speakMeta.filter((s) => s.bytes > 1000 && /zect_voicebox|chatterbox/i.test(s.engine)).length < 2
+        ) {
+          if (page.isClosed()) break;
+          await page.waitForTimeout(3000).catch(() => undefined);
+        }
+      } else if (await narrate.isEnabled()) {
         await narrate.click();
         const deadline = Date.now() + (realVoicebox ? 180_000 : 20_000);
         while (Date.now() < deadline && !speakMeta.some((s) => s.bytes > 1000 && /zect_voicebox|chatterbox/i.test(s.engine))) {
@@ -298,12 +303,18 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       evidence.stock_engine_calls = stockEngines.length;
       const nonEmpty = speakMeta.some((s) => s.bytes > 1000);
       evidence.CLONED_VOICE =
-        realVoicebox && cloneEngines.length > 0 && nonEmpty && stockEngines.length === 0 ? "PASS" : "BLOCKED_EXTERNAL";
+        realVoicebox && cloneEngines.length >= 2 && nonEmpty && stockEngines.length === 0 ? "PASS" : "BLOCKED_EXTERNAL";
+      evidence.AUDIO_OWNER = stockEngines.length === 0 && cloneEngines.length > 0 ? "clone" : "mixed_or_none";
       evidence.present_status_after = await page.getByTestId("present-deck-status").innerText().catch(() => "");
       evidence.DISCONNECT_FSM = "UNIT_PASS";
       evidence.PACKAGED_RUNTIME = "BLOCKED_EXTERNAL";
       await page.screenshot({ path: path.join(ART, "04-after-narrate.png") });
       expect(page.url()).not.toMatch(/:5000\b/);
+      if (realVoicebox) {
+        expect(cloneEngines.filter((s) => s.bytes > 1000).length).toBeGreaterThanOrEqual(2);
+        expect(stockEngines.length).toBe(0);
+        expect(maxConcurrent).toBeLessThanOrEqual(1);
+      }
     } finally {
       evidence.speak_calls = speakMeta;
       evidence.speak_bytes_total = speakMeta.reduce((a, s) => a + s.bytes, 0);
@@ -313,10 +324,70 @@ test.describe("R2.6 ZECT Present + cloned-voice live", () => {
       evidence.stock_engine_calls = stockEngines.length;
       const nonEmpty = speakMeta.some((s) => s.bytes > 1000 && (s.status || 0) < 400);
       evidence.CLONED_VOICE =
-        realVoicebox && cloneEngines.length > 0 && nonEmpty && stockEngines.length === 0 ? "PASS" : "BLOCKED_EXTERNAL";
+        realVoicebox && cloneEngines.length >= 2 && nonEmpty && stockEngines.length === 0 ? "PASS" : "BLOCKED_EXTERNAL";
       fs.mkdirSync(ART, { recursive: true });
       fs.writeFileSync(path.join(ART, "evidence-clone.json"), JSON.stringify(evidence, null, 2));
       writeEvidence(evidence);
     }
+  });
+
+  test("stock/default voice is the only audio_owner", async ({ page }) => {
+    test.setTimeout(8 * 60_000);
+    const speakMeta: Array<{ bytes: number; engine: string; status: number }> = [];
+    page.on("response", async (res) => {
+      if (!res.url().includes("/api/mentrix/voice/speak") || res.request().method() !== "POST") return;
+      const buf = await res.body().catch(() => Buffer.alloc(0));
+      speakMeta.push({
+        bytes: buf.length,
+        engine: res.headers()["x-mentrix-tts-engine"] || "",
+        status: res.status(),
+      });
+    });
+    await ensureLoggedIn(page);
+    const pptx = tinyPptxPath();
+    await openGenerateWorkspace(page);
+    await page.getByTestId("present-deck-file").setInputFiles(pptx);
+    const voiceSelect = page.getByTestId("present-deck-voice-select");
+    await expect(voiceSelect).toBeVisible();
+    const stockVal = await voiceSelect.locator('option[value^="stock:"]').first().getAttribute("value");
+    expect(stockVal).toBeTruthy();
+    await voiceSelect.selectOption(stockVal as string);
+    await page.getByTestId("present-deck-notes").fill("Stock voice check: one owner, no clone mix.");
+    const narrate = page.getByTestId("present-deck-narrate");
+    await expect(narrate).toBeEnabled({ timeout: 20_000 });
+    await narrate.click();
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline && !speakMeta.some((s) => s.bytes > 200 && (s.status || 0) < 400)) {
+      await page.waitForTimeout(2000);
+    }
+    const cloneEngines = speakMeta.filter((s) => /zect_voicebox|chatterbox/i.test(s.engine));
+    const stockEngines = speakMeta.filter((s) => /openai|stock|tts/i.test(s.engine) && !/zect_voicebox|chatterbox/i.test(s.engine));
+    writeEvidence({
+      STANDARD_VOICE: stockEngines.length > 0 && cloneEngines.length === 0 ? "PASS" : "FAIL",
+      stock_speak: speakMeta,
+    });
+    expect(cloneEngines.length).toBe(0);
+    expect(stockEngines.length).toBeGreaterThan(0);
+  });
+
+  test("No Narration makes zero speak calls", async ({ page }) => {
+    test.setTimeout(120_000);
+    const speakMeta: Array<{ url: string }> = [];
+    page.on("response", (res) => {
+      if (res.url().includes("/api/mentrix/voice/speak") && res.request().method() === "POST") {
+        speakMeta.push({ url: res.url() });
+      }
+    });
+    await ensureLoggedIn(page);
+    const pptx = tinyPptxPath();
+    await openGenerateWorkspace(page);
+    await page.getByTestId("present-deck-file").setInputFiles(pptx);
+    const voiceSelect = page.getByTestId("present-deck-voice-select");
+    await voiceSelect.selectOption("none");
+    await page.getByTestId("present-deck-present-all").click();
+    await expect(page.getByTestId("present-deck-status")).toContainText(/No narration/i, { timeout: 15_000 });
+    await page.waitForTimeout(1500);
+    writeEvidence({ NO_NARRATION: speakMeta.length === 0 ? "PASS" : "FAIL", none_speak_count: speakMeta.length });
+    expect(speakMeta.length).toBe(0);
   });
 });

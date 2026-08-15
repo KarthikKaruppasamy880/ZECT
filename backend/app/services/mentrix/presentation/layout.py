@@ -60,7 +60,24 @@ def _placeholder_box(definition: dict[str, Any] | None, *, kinds: tuple[str, ...
     return None
 
 
-def content_region(prs, definition: dict[str, Any] | None) -> dict[str, int]:
+def content_region(prs, definition: dict[str, Any] | None, slide: dict[str, Any] | None = None) -> dict[str, int]:
+    composed = (slide or {}).get("composed_regions") if isinstance((slide or {}).get("composed_regions"), dict) else {}
+    visual = composed.get("visual") or composed.get("body")
+    if isinstance(visual, dict) and _int(visual.get("cx")) > 0 and _int(visual.get("cy")) > 0:
+        return {
+            "x": _int(visual.get("x")),
+            "y": _int(visual.get("y")),
+            "cx": _int(visual.get("cx")),
+            "cy": _int(visual.get("cy")),
+        }
+    selected = str((slide or {}).get("master_layout_name") or "").strip()
+    if selected:
+        for layout in list((definition or {}).get("layouts") or []):
+            if str(layout.get("name") or "") != selected:
+                continue
+            box = _placeholder_box({"layouts": [layout]}, kinds=("BODY", "OBJECT", "CONTENT"))
+            if box:
+                return box
     box = _placeholder_box(definition, kinds=("BODY", "OBJECT", "CONTENT"))
     if box:
         return box
@@ -68,6 +85,22 @@ def content_region(prs, definition: dict[str, Any] | None) -> dict[str, int]:
     pad_x = int(Inches(0.5))
     pad_y = int(Inches(1.35))
     return {"x": pad_x, "y": pad_y, "cx": max(int(Inches(3)), width - 2 * pad_x), "cy": max(int(Inches(2)), height - pad_y - int(Inches(0.4)))}
+
+
+def clamp_box(geom: dict[str, int], width: int, height: int, *, margin: int = 20000) -> dict[str, int]:
+    out = {
+        "x": max(margin, _int(geom.get("x"))),
+        "y": max(margin, _int(geom.get("y"))),
+        "cx": max(int(Inches(0.6)), _int(geom.get("cx"), int(Inches(1)))),
+        "cy": max(int(Inches(0.6)), _int(geom.get("cy"), int(Inches(1)))),
+    }
+    if out["x"] + out["cx"] > width - margin:
+        out["cx"] = max(int(Inches(0.6)), width - margin - out["x"])
+    if out["y"] + out["cy"] > height - margin:
+        out["cy"] = max(int(Inches(0.6)), height - margin - out["y"])
+    if out["y"] + out["cy"] > height - margin:
+        out["y"] = max(margin, height - margin - out["cy"])
+    return out
 
 
 def overlaps(a: dict[str, int], b: dict[str, int], *, pad: int = 20000) -> bool:
@@ -132,7 +165,18 @@ def _grid(box: dict[str, int], count: int) -> list[dict[str, int]]:
 
 def place_blocks(slide: dict[str, Any], *, prs, definition: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Return placements. Overflow blocks keep validation errors instead of being dropped."""
-    box = content_region(prs, definition)
+    box = content_region(prs, definition, slide)
+    title = ((slide.get("composed_regions") or {}) if isinstance(slide.get("composed_regions"), dict) else {}).get("title")
+    if isinstance(title, dict) and overlaps(box, title):
+        gap = int(Inches(0.12))
+        new_y = _int(title.get("y")) + _int(title.get("cy")) + gap
+        width, height = slide_size(prs, definition)
+        box = {
+            "x": box["x"],
+            "y": new_y,
+            "cx": box["cx"],
+            "cy": max(int(Inches(0.6)), height - new_y - int(Inches(0.28))),
+        }
     layout = choose_layout(slide)
     slide["layout_selected"] = layout
     blocks = list(slide.get("blocks") or [])
@@ -144,15 +188,24 @@ def place_blocks(slide: dict[str, Any], *, prs, definition: dict[str, Any] | Non
         errors = list((block.get("validation") or {}).get("errors") or [])
         if overflow:
             errors.append(overflow)
+        width, height = slide_size(prs, definition)
+        geom = clamp_box(geom, width, height)
         if any(overlaps(geom, other) for other in assigned):
             errors.append("layout_collision")
-        width, height = slide_size(prs, definition)
-        if geom["x"] < 0 or geom["y"] < 0 or geom["x"] + geom["cx"] > width + 20000 or geom["y"] + geom["cy"] > height + 20000:
-            errors.append("layout_out_of_bounds")
+            if overflow == "layout_overflow":
+                block["geometry"] = geom
+                block["layout_intent"] = layout
+                block["validation"] = {"ok": False, "errors": errors}
+                return
+            geom = clamp_box(
+                {"x": geom["x"], "y": assigned[-1]["y"] + assigned[-1]["cy"] + int(Inches(0.1)), "cx": geom["cx"], "cy": geom["cy"]},
+                width,
+                height,
+            )
         block["geometry"] = geom
         block["layout_intent"] = layout
         block["validation"] = {"ok": not errors, "errors": errors}
-        if "layout_collision" in errors or "layout_out_of_bounds" in errors or overflow == "layout_overflow":
+        if overflow == "layout_overflow":
             return
         assigned.append(geom)
         placements.append({"block": block, "geometry": geom})

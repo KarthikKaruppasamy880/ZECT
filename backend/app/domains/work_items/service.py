@@ -32,6 +32,8 @@ def create_work_item(
     requirements: list[Any] | None = None,
     acceptance: list[Any] | None = None,
     created_by: str = "",
+    is_test_fixture: bool = False,
+    test_run_id: str = "",
 ) -> WorkItem:
     wi = WorkItem(
         title=title,
@@ -46,6 +48,8 @@ def create_work_item(
         requirements_json=json.dumps(requirements or [], default=str),
         acceptance_json=json.dumps(acceptance or [], default=str),
         created_by=created_by or "",
+        is_test_fixture=bool(is_test_fixture),
+        test_run_id=(test_run_id or "").strip(),
     )
     db.add(wi)
     db.flush()
@@ -79,12 +83,15 @@ def list_work_items(
     project_id: int | None = None,
     status: str | None = None,
     limit: int = 100,
+    include_fixtures: bool = False,
 ) -> list[WorkItem]:
     q = db.query(WorkItem).order_by(WorkItem.id.desc())
     if project_id is not None:
         q = q.filter(WorkItem.project_id == project_id)
     if status:
         q = q.filter(WorkItem.status == status)
+    if not include_fixtures:
+        q = q.filter((WorkItem.is_test_fixture.is_(False)) | (WorkItem.is_test_fixture.is_(None)))
     return q.limit(min(limit, 500)).all()
 
 
@@ -152,6 +159,8 @@ def serialize_work_item(wi: WorkItem) -> dict[str, Any]:
         "worktree_path": wi.worktree_path,
         "current_commit_sha": wi.current_commit_sha,
         "created_by": wi.created_by,
+        "is_test_fixture": bool(getattr(wi, "is_test_fixture", False)),
+        "test_run_id": str(getattr(wi, "test_run_id", None) or ""),
         "created_at": wi.created_at.isoformat() if wi.created_at else None,
         "updated_at": wi.updated_at.isoformat() if wi.updated_at else None,
     }

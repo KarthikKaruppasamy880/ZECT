@@ -30,7 +30,14 @@ export type RepoContextLite = {
 };
 
 export type ProjectIntelligenceLite = {
-  lattice?: { status?: string; freshness?: string; hits?: unknown[] };
+  lattice?: {
+    status?: string;
+    state?: string;
+    freshness?: string;
+    hits?: unknown[];
+    action_label?: string;
+    action?: string;
+  };
   blueprint?: { snippet?: string; freshness?: string };
   knowledge?: Array<{ content?: string; verification_state?: string }>;
   memory?: Array<{ content?: string; verification_state?: string; freshness?: string }>;
@@ -53,6 +60,30 @@ export type ModelReadinessLite = {
     fallback_reason?: string;
   };
 };
+
+/** Canonical Lattice states shared by Developer header and Context Used. */
+export const LATTICE_STATES = [
+  "NOT_CONFIGURED",
+  "NOT_INDEXED",
+  "INDEXING",
+  "READY",
+  "STALE",
+  "ERROR",
+  "NOT_APPLICABLE",
+] as const;
+
+export type LatticeState = (typeof LATTICE_STATES)[number];
+
+export function canonicalLatticeState(raw?: string | null): LatticeState {
+  const s = String(raw || "NOT_APPLICABLE").trim().toUpperCase();
+  if (s === "OK" || s === "PRESENT" || s === "INDEXED") return "READY";
+  if ((LATTICE_STATES as readonly string[]).includes(s)) return s as LatticeState;
+  return "NOT_APPLICABLE";
+}
+
+export function latticeHeaderLabel(state: LatticeState): string {
+  return `Lattice ${state}`;
+}
 
 function trunc(s: string, n = 120): string {
   const t = s.replace(/\s+/g, " ").trim();
@@ -140,20 +171,27 @@ export function buildContextUsedRows(input: {
   }
 
   const lattice = pi?.lattice;
-  const latticeStatus = String(lattice?.status || pi?.freshness?.lattice || "unavailable");
-  if (latticeStatus === "ok" || latticeStatus === "present") {
+  const latticeStatus = canonicalLatticeState(
+    lattice?.state || lattice?.status || pi?.freshness?.lattice || "NOT_APPLICABLE",
+  );
+  const latticeReady = latticeStatus === "READY" || latticeStatus === "STALE";
+  if (latticeReady) {
     rows.push({
       id: "lattice",
       label: "Lattice",
-      status: lattice?.freshness === "ephemeral" ? "stale" : "used",
-      detail: trunc(`status=${latticeStatus}${lattice?.freshness ? ` · freshness=${lattice.freshness}` : ""}`),
+      status: latticeStatus === "STALE" ? "stale" : "used",
+      detail: trunc(
+        `state=${latticeStatus}${lattice?.action_label ? ` · ${lattice.action_label}` : ""}`,
+      ),
     });
   } else {
     rows.push({
       id: "lattice",
       label: "Lattice",
-      status: "missing",
-      detail: `Not available (${latticeStatus})`,
+      status: latticeStatus === "INDEXING" ? "stale" : "missing",
+      detail: trunc(
+        `state=${latticeStatus}${lattice?.action_label ? ` — ${lattice.action_label}` : ""}`,
+      ),
     });
   }
 

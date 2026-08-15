@@ -130,7 +130,7 @@ test.describe("Present Deck (PPTX + Zoom)", () => {
     expect(recorded.some((c) => c.action === "powerpoint_key" && c.args?.key === "right")).toBeTruthy();
   });
 
-  test("Generate deck button calls Presenton proxy and fills path", async ({ page }) => {
+  test("Generate presentation navigates to Review", async ({ page }) => {
     await page.route("**/api/mentrix/companion/integrations", async (route) => {
       await route.fulfill({
         status: 200,
@@ -141,6 +141,29 @@ test.describe("Present Deck (PPTX + Zoom)", () => {
           openai: true,
           presenton: true,
           presenton_base_url: "http://127.0.0.1:5000",
+        }),
+      });
+    });
+    await page.route("**/api/mentrix/presenton/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ configured: true, reachable: true, lifecycle: "READY" }),
+      });
+    });
+    await page.route("**/api/mentrix/presentation/prepare-prompt", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          adapted_prompt: "ZOAS status brief for leadership",
+          outline: ["Status"],
+          n_slides_hint: 6,
+          sensitivity: { sensitivity: "INTERNAL" },
+          claims: [],
+          requires_user_approval: false,
+          presenton_ready: true,
         }),
       });
     });
@@ -156,12 +179,11 @@ test.describe("Present Deck (PPTX + Zoom)", () => {
       });
     });
 
-    await page.goto("/mentrix-home?voice=1");
+    await page.goto("/present/create");
     await expect(page.getByTestId("present-deck-generate")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("present-deck-prompt").fill("ZOAS status brief for leadership");
+    await expect(page.getByTestId("present-deck-generate")).toBeEnabled({ timeout: 15_000 });
     await page.getByTestId("present-deck-generate").click();
-    await expect(page.getByTestId("present-deck-path")).toHaveValue(/mentrix-deck\.pptx/i, {
-      timeout: 10_000,
-    });
+    await expect(page).toHaveURL(/\/present\/d\//, { timeout: 10_000 });
   });
 });

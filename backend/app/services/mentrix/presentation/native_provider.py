@@ -79,6 +79,9 @@ class ZectNativePresentationProvider:
                 "blocked_external": False,
                 "block_code": "template_not_ready",
             }
+        import time
+
+        t0 = time.perf_counter()
         planned = build_presentation_plan(
             prompt=req.content,
             n_slides=req.n_slides,
@@ -86,6 +89,9 @@ class ZectNativePresentationProvider:
             audience_id=req.audience_id or "general",
             sensitivity_hint=req.sensitivity_hint or None,
             context_items=list(req.context_items or []),
+            require_llm=bool(req.require_llm) and not bool(req.fast_basic),
+            asset_ids=list(req.asset_ids or []),
+            fast_basic=bool(req.fast_basic),
         )
         if not planned.get("ok"):
             return {
@@ -101,6 +107,12 @@ class ZectNativePresentationProvider:
                 "template_sent": None,
                 "blocked_external": bool(planned.get("blocked_external")),
                 "block_code": planned.get("block_code") or planned.get("error") or "",
+                "planner_mode": planned.get("planner_mode") or "",
+                "fallback": bool(planned.get("fallback")),
+                "fallback_reason": planned.get("fallback_reason") or planned.get("detail") or "",
+                "degraded": bool(planned.get("degraded")),
+                "model": planned.get("model") or "",
+                "latency": planned.get("latency") or {},
             }
         definition = load_definition(canon) if canon else None
         source = tmpl.source_pptx_path(canon, user_id=req.user_id) if canon else None
@@ -109,13 +121,27 @@ class ZectNativePresentationProvider:
         asset_ids = [str(a).strip() for a in list(req.asset_ids or []) if str(a).strip()]
         for slide in list(plan.get("slides") or []):
             ensure_visual_blocks(slide, asset_ids=asset_ids)
+        from app.services.mentrix.presentation.quality_repair import repair_until_pass
+
+        degraded = bool(planned.get("degraded"))
+        plan, quality = repair_until_pass(
+            plan,
+            definition,
+            prompt=req.content,
+            context_items=list(req.context_items or []),
+            degraded=degraded,
+        )
+        # Always render a reviewable PPTX. Critic FAIL is reported on the deck;
+        # inspector collisions/clipping/broken rels are hard *export* blockers.
         try:
+            t_render = time.perf_counter()
             data = render_plan_to_pptx(
                 plan,
                 template_path=source if used_master else None,
                 definition=definition,
                 user_id=req.user_id or "anon",
             )
+            render_ms = int((time.perf_counter() - t_render) * 1000)
         except UnsafePptxError as exc:
             return {
                 "ok": False,
@@ -138,6 +164,15 @@ class ZectNativePresentationProvider:
                 "zinnia_verified": False,
                 "block_code": "native_render_failed",
             }
+        from app.services.mentrix.presentation.final_pptx_inspector import (
+            inspect_and_repair_pptx,
+            merge_inspector_into_quality,
+        )
+
+        data, inspector = inspect_and_repair_pptx(data, definition=definition)
+        quality = merge_inspector_into_quality(quality, inspector)
+        layout_hard = bool(quality.get("layout_hard_fail"))
+        export_blocked = bool(layout_hard or inspector.get("status") == "FAIL")
         dest_dir = default_pptx_save_dir()
         dest = _unique_pptx_path(
             dest_dir,
@@ -161,6 +196,9 @@ class ZectNativePresentationProvider:
         zinnia_verified = bool(zinnia_ui and used_master and not is_fallback_template_id(canon))
         if zinnia_ui and is_fallback_template_id(canon):
             zinnia_verified = False
+        latency = dict(planned.get("latency") or {})
+        latency["render_ms"] = render_ms
+        latency["total_generate_ms"] = int((time.perf_counter() - t0) * 1000)
         return {
             "ok": True,
             "path": str(dest),
@@ -178,9 +216,36 @@ class ZectNativePresentationProvider:
             ),
             "lifecycle": tmpl.LIFECYCLE_READY,
             "planner_source": planned["plan"].get("planner_source"),
+            "planner_mode": planned.get("planner_mode") or planned["plan"].get("planner_mode") or "LLM",
+            "fallback": bool(planned.get("fallback")),
+            "fallback_reason": planned.get("fallback_reason") or "",
+            "degraded": bool(planned.get("degraded")),
+            "model": planned.get("model") or "",
             "n_slides": planned["plan"].get("n_slides"),
             "charts_images_tables": visual_status,
             "visual_inventory": inventory,
+            "quality": quality,
+            "overlap_count": quality.get("overlap_count"),
+            "out_of_bounds_count": quality.get("out_of_bounds_count"),
+            "clipped_text_count": quality.get("clipped_text_count"),
+            "whitespace_ratio": quality.get("whitespace_ratio"),
+            "repeated_layout_count": quality.get("repeated_layout_count"),
+            "ungrounded_fact_count": quality.get("ungrounded_fact_count"),
+            "repair_attempts": quality.get("repair_attempts"),
+            "final_quality_status": quality.get("final_quality_status"),
+            "export_blocked": export_blocked,
+            "inspector": inspector,
             "blocked_external": False,
-            "telemetry": {"provider": self.name, "opt_in": True, "used_master": used_master, "visuals": inventory},
+            "latency": latency,
+            "telemetry": {
+                "provider": self.name,
+                "opt_in": True,
+                "used_master": used_master,
+                "visuals": inventory,
+                "planner_mode": planned.get("planner_mode"),
+                "model": planned.get("model") or "",
+                "llm": planned.get("telemetry") or {},
+                "latency": latency,
+                "quality": quality,
+            },
         }

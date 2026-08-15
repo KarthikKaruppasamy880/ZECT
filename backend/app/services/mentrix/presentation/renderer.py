@@ -38,33 +38,69 @@ def _clear_slides(prs: Presentation) -> None:
         sld_id_lst.remove(sld_id)
 
 
-def _pick_layout(prs: Presentation, intent: str):
+def _definition_layout_needles(definition: dict[str, Any] | None, intent: str) -> tuple[str, ...]:
+    """Prefer TemplateDefinition layout names that match the slide intent."""
+    names = [str(row.get("name") or "").strip().lower() for row in list((definition or {}).get("layouts") or [])]
+    names = [n for n in names if n]
+    want = (intent or "title_body").lower()
+    prefer = {
+        "title": ("title slide", "title"),
+        "title_body": ("title and content", "title and body", "subtitle + 1", "1 column", "header", "content"),
+        "two_column": ("two content", "comparison", "two column"),
+        "section": ("section header", "section"),
+        "closing": ("title slide", "blank"),
+        "text_image": ("picture with caption", "title and content", "picture"),
+        "full_image": ("blank", "picture"),
+        "chart_commentary": ("title and content", "content"),
+        "table": ("title and content", "content"),
+        "comparison": ("comparison", "two content"),
+        "metrics": ("title and content", "blank"),
+        "quote": ("quote", "blank", "title slide"),
+        "diagram": ("title and content", "blank"),
+    }.get(want, ("content",))
+    matched = tuple(n for n in names if any(p in n for p in prefer))
+    return matched or prefer
+
+
+def _pick_layout(
+    prs: Presentation,
+    intent: str,
+    definition: dict[str, Any] | None = None,
+    preferred_name: str = "",
+):
     layouts = list(prs.slide_layouts)
     if not layouts:
         raise UnsafePptxError("template_has_no_layouts")
+    want_name = (preferred_name or "").strip().lower()
+    named = [(sl, (sl.name or "").lower()) for sl in layouts]
+    if want_name:
+        for sl, name in named:
+            if name == want_name:
+                return sl
+        for sl, name in named:
+            if want_name in name or (name and name in want_name):
+                return sl
     want = (intent or "title_body").lower()
     aliases = {
         "title": ("title slide", "title", "blank"),
-        "title_body": ("title and content", "title and body", "content", "text"),
-        "two_column": ("two content", "comparison", "two column"),
+        "title_body": ("subtitle + 1", "title + 1", "1 column", "header", "title and content", "title and body", "content", "text"),
+        "two_column": ("two content", "comparison", "two column", "2 column", "subtitle + 2"),
         "section": ("section header", "section"),
         "closing": ("blank", "title slide", "end"),
         "text_image": ("title and content", "picture with caption", "content"),
         "full_image": ("blank", "picture", "title and content"),
-        "chart_commentary": ("title and content", "content", "text"),
-        "table": ("title and content", "content"),
-        "comparison": ("comparison", "two content", "two column"),
-        "metrics": ("title and content", "content", "blank"),
+        "chart_commentary": ("subtitle + 1", "1 column", "title and content", "content", "text"),
+        "table": ("subtitle + 1", "1 column", "title and content", "content"),
+        "comparison": ("comparison", "two content", "two column", "2 column"),
+        "metrics": ("subtitle + 1", "title and content", "content", "blank"),
         "quote": ("quote", "blank", "title slide"),
-        "diagram": ("title and content", "blank", "content"),
+        "diagram": ("blank", "title and content", "content"),
     }
-    needles = aliases.get(want, ("content",))
-    named = [(sl, (sl.name or "").lower()) for sl in layouts]
+    needles = _definition_layout_needles(definition, want) + aliases.get(want, ("content",))
     for needle in needles:
         for sl, name in named:
-            if needle in name:
+            if needle and needle in name:
                 return sl
-    # Prefer a layout with a body placeholder
     for sl in layouts:
         try:
             kinds = [ph.placeholder_format.type for ph in sl.placeholders]
@@ -75,12 +111,67 @@ def _pick_layout(prs: Presentation, intent: str):
     return layouts[0]
 
 
-def _fill_placeholder(slide, *, title: str, bullets: list[str]) -> None:
+def _geom_box(regions: dict[str, Any] | None, key: str, fallback: tuple[float, float, float, float]):
+    geom = (regions or {}).get(key) if isinstance(regions, dict) else None
+    if isinstance(geom, dict) and int(geom.get("cx") or 0) > 0:
+        return Emu(int(geom["x"])), Emu(int(geom["y"])), Emu(int(geom["cx"])), Emu(int(geom["cy"]))
+    return Inches(fallback[0]), Inches(fallback[1]), Inches(fallback[2]), Inches(fallback[3])
+
+
+def _is_placeholder(shape) -> bool:
+    try:
+        _ = shape.placeholder_format.type
+        return True
+    except ValueError:
+        return False
+
+
+def _clear_placeholder_sample_text(slide) -> None:
+    """Wipe leftover master/layout sample text before a single canonical write."""
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        if not _is_placeholder(shape):
+            continue
+        try:
+            shape.text_frame.clear()
+        except Exception:
+            try:
+                shape.text_frame.text = ""
+            except Exception:
+                pass
+
+
+def _fill_text_frame(shape, lines: list[str]) -> None:
+    tf = shape.text_frame
+    tf.clear()
+    tf.word_wrap = True
+    if not lines:
+        tf.text = ""
+        return
+    tf.text = lines[0][:800]
+    for extra in lines[1:8]:
+        p = tf.add_paragraph()
+        p.text = extra[:800]
+        p.level = 0
+
+
+def _fill_placeholder(
+    slide,
+    *,
+    title: str,
+    bullets: list[str],
+    regions: dict[str, Any] | None = None,
+    skip_body: bool = False,
+) -> None:
+    """Populate placeholders XOR generated shapes — never both for the same role."""
+    _clear_placeholder_sample_text(slide)
     title_set = False
     body_set = False
+    title_ph = None
+    body_ph = None
     if slide.shapes.title is not None:
-        slide.shapes.title.text = title[:160]
-        title_set = True
+        title_ph = slide.shapes.title
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
@@ -88,36 +179,30 @@ def _fill_placeholder(slide, *, title: str, bullets: list[str]) -> None:
             ph_type = shape.placeholder_format.type
         except ValueError:
             continue
-        if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE, PP_PLACEHOLDER.VERTICAL_TITLE) and not title_set:
-            shape.text_frame.text = title[:160]
-            title_set = True
-        elif ph_type in (
-            PP_PLACEHOLDER.BODY,
-            PP_PLACEHOLDER.OBJECT,
-            PP_PLACEHOLDER.VERTICAL_BODY,
-        ) and not body_set:
-            tf = shape.text_frame
-            tf.clear()
-            if not bullets:
-                tf.text = ""
-            else:
-                tf.text = bullets[0][:800]
-                for extra in bullets[1:8]:
-                    p = tf.add_paragraph()
-                    p.text = extra[:800]
-                    p.level = 0
-            body_set = True
+        if ph_type in (PP_PLACEHOLDER.TITLE, PP_PLACEHOLDER.CENTER_TITLE, PP_PLACEHOLDER.VERTICAL_TITLE):
+            if title_ph is None:
+                title_ph = shape
+        elif ph_type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT, PP_PLACEHOLDER.VERTICAL_BODY):
+            if body_ph is None:
+                body_ph = shape
+    if title_ph is not None:
+        title_ph.text_frame.text = title[:160]
+        title_set = True
+    if not skip_body and body_ph is not None:
+        _fill_text_frame(body_ph, bullets)
+        body_set = True
     if not title_set:
-        box = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(1))
+        x, y, cx, cy = _geom_box(regions, "title", (0.5, 0.28, 9.0, 0.7))
+        box = slide.shapes.add_textbox(x, y, cx, cy)
+        box.text_frame.word_wrap = True
         box.text_frame.text = title[:160]
+        title_set = True
+    if skip_body:
+        return
     if not body_set and bullets:
-        box = slide.shapes.add_textbox(Inches(0.5), Inches(1.5), Inches(9), Inches(5))
-        tf = box.text_frame
-        tf.word_wrap = True
-        tf.text = bullets[0][:800]
-        for extra in bullets[1:8]:
-            p = tf.add_paragraph()
-            p.text = extra[:800]
+        x, y, cx, cy = _geom_box(regions, "body", (0.5, 1.2, 9.0, 4.8))
+        box = slide.shapes.add_textbox(x, y, cx, cy)
+        _fill_text_frame(box, bullets)
 
 
 def _set_notes(slide, notes: str) -> None:
@@ -174,7 +259,7 @@ def render_plan_to_pptx(
     user_id: str = "anon",
 ) -> bytes:
     """Render a PresentationPlan to PPTX bytes using canonical visual blocks."""
-    from app.services.mentrix.presentation.blocks import text_lines
+    from app.services.mentrix.presentation.blocks import VISUAL_KINDS, text_lines
     from app.services.mentrix.presentation.layout import choose_layout, place_blocks
     from app.services.mentrix.presentation.visual import paint_block
 
@@ -204,7 +289,8 @@ def render_plan_to_pptx(
                 pass
     for slide_spec in slides_in:
         layout_intent = choose_layout(slide_spec)
-        layout = _pick_layout(prs, layout_intent)
+        preferred = str(slide_spec.get("master_layout_name") or "")
+        layout = _pick_layout(prs, layout_intent, definition, preferred_name=preferred)
         slide = prs.slides.add_slide(layout)
         try:
             fallback_index = int(slide_spec.get("index") or 0)
@@ -215,8 +301,21 @@ def render_plan_to_pptx(
         if not bullets:
             blocks = list(slide_spec.get("content_blocks") or [])
             bullets = [str(b.get("text") or "").strip() for b in blocks if str(b.get("text") or "").strip()]
+        visuals = [b for b in list(slide_spec.get("blocks") or []) if str(b.get("kind") or "") in VISUAL_KINDS]
         skip_body = layout_intent in {"full_image", "quote"}
-        _fill_placeholder(slide, title=title, bullets=[] if skip_body else bullets)
+        regions = slide_spec.get("composed_regions") if isinstance(slide_spec.get("composed_regions"), dict) else None
+        if visuals and regions:
+            body = regions.get("body") if isinstance(regions.get("body"), dict) else None
+            visual = regions.get("visual") if isinstance(regions.get("visual"), dict) else None
+            if body and visual and body.get("x") == visual.get("x") and body.get("y") == visual.get("y"):
+                skip_body = True
+        _fill_placeholder(
+            slide,
+            title=title,
+            bullets=[] if skip_body else bullets,
+            regions=regions,
+            skip_body=skip_body,
+        )
         placements = place_blocks(slide_spec, prs=prs, definition=definition)
         for item in placements:
             paint_block(slide, item["block"], item["geometry"], user_id=user_id)

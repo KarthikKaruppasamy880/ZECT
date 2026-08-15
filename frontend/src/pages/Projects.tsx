@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getProjects } from "@/lib/api";
+import { getProjectFixtureAudit, getProjects } from "@/lib/api";
 import type { Project } from "@/types";
 import { STAGES } from "@/types";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
@@ -44,11 +44,15 @@ export default function Projects() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("");
   const [query, setQuery] = useState("");
+  const [candidateCount, setCandidateCount] = useState(0);
 
   useEffect(() => {
     getProjects()
       .then(setProjects)
       .finally(() => setLoading(false));
+    getProjectFixtureAudit()
+      .then((a) => setCandidateCount((a.name_candidates || []).length))
+      .catch(() => setCandidateCount(0));
   }, []);
 
   const filtered = projects.filter((p) => {
@@ -74,7 +78,7 @@ export default function Projects() {
       <div className="flex items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
-          <p className="text-slate-500 text-sm">Authorized projects you can access. Acceptance fixtures are hidden.</p>
+          <p className="text-slate-500 text-sm">Authorized projects you can access. Test fixtures are hidden by provenance.</p>
         </div>
         <Link
           to="/projects/new"
@@ -83,6 +87,17 @@ export default function Projects() {
           <Plus className="h-4 w-4" /> New Project
         </Link>
       </div>
+
+      {candidateCount > 0 && (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          data-testid="projects-hygiene-banner"
+        >
+          {candidateCount} name-candidate project{candidateCount === 1 ? "" : "s"} still have user
+          provenance. They are hidden from this list when empty/test-named, but cleanup only deletes
+          provenance=test rows after tag-by-id. Review GET /api/projects/fixtures/audit.
+        </div>
+      )}
 
       <div className="mb-6">
         <RepoOnboardingPanel />

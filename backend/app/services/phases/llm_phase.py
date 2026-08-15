@@ -16,19 +16,29 @@ from app.services.work_items.fallback_policy import resolve_model_route
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
 
 
-def _route(*, user_allows_cloud: bool | None = None):
-    return resolve_model_route(
-        local_configured=mentrix_local_llm_configured(),
-        cloud_configured=bool((os.getenv("OPENAI_API_KEY") or "").strip()),
-        local_model=mentrix_llm_chat_model(),
-        cloud_model=mentrix_llm_chat_model(),
-        user_allows_cloud=user_allows_cloud,
-    )
+def _route(*, user_allows_cloud: bool | None = None, policy: str | None = None):
+    kwargs: dict[str, Any] = {
+        "local_configured": mentrix_local_llm_configured(),
+        "cloud_configured": bool((os.getenv("OPENAI_API_KEY") or "").strip()),
+        "local_model": mentrix_llm_chat_model(),
+        "cloud_model": mentrix_llm_chat_model(),
+        "user_allows_cloud": user_allows_cloud,
+    }
+    if policy:
+        kwargs["policy"] = policy
+    return resolve_model_route(**kwargs)
 
 
-def _chat(messages: list[dict[str, str]], *, max_tokens: int = 2000, temperature: float = 0.3) -> dict[str, Any]:
+def _chat(
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int = 2000,
+    temperature: float = 0.3,
+    policy: str | None = None,
+    user_allows_cloud: bool | None = None,
+) -> dict[str, Any]:
     """Call openai_compat gateway. Honors fallback policy (never blocks cloud)."""
-    route = _route()
+    route = _route(user_allows_cloud=user_allows_cloud, policy=policy)
     timer = TelemetryTimer()
     if route.blocked or route.provider == "none":
         return {

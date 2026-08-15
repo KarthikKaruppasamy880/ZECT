@@ -1432,6 +1432,8 @@ class PresentonGenerateRequest(BaseModel):
     instructions: str = ""
     filename: str = ""
     asset_ids: list[str] = []
+    fast_basic: bool = False
+    require_llm: bool = False
 
 
 @router.get("/presenton/status")
@@ -1471,6 +1473,8 @@ def presenton_generate(
             filename=req.filename,
             user_id=str(uid),
             asset_ids=list(req.asset_ids or []),
+            require_llm=bool(req.require_llm),
+            fast_basic=bool(req.fast_basic),
         )
     )
     if not out.get("ok"):
@@ -1494,6 +1498,14 @@ def presenton_generate(
                 "block_code": out.get("block_code") or out.get("error") or "",
                 "retries": out.get("retries"),
                 "provider": out.get("provider"),
+                "planner_mode": out.get("planner_mode"),
+                "fallback": out.get("fallback"),
+                "fallback_reason": out.get("fallback_reason"),
+                "degraded": out.get("degraded"),
+                "final_quality_status": out.get("final_quality_status"),
+                "repair_attempts": out.get("repair_attempts"),
+                "overlap_count": out.get("overlap_count"),
+                "ungrounded_fact_count": out.get("ungrounded_fact_count"),
             },
         )
     return out
@@ -1543,14 +1555,97 @@ def _pptx_from_request(path_str: str):
 
 
 @router.get("/present/pptx")
-def present_download_pptx(path: str, _user: CurrentUser = Depends(get_current_user)):
+def present_download_pptx(
+    path: str,
+    accept_warnings: bool = Query(False),
+    _user: CurrentUser = Depends(get_current_user),
+):
     """Download a generated PPTX from an allowlisted user folder (ZECT UI export)."""
     pptx = _pptx_from_request(path)
+    from app.services.mentrix.presentation.deck_catalog import quality_gate_for_path
+
+    gate = quality_gate_for_path(str(pptx))
+    if gate.get("export_blocked") or gate.get("hard_blocked"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "export_blocked_critical_quality",
+                "hint": "Critical quality findings cannot be accepted. Repair collisions, duplicates, clipping, or broken assets.",
+                "hard_findings": gate.get("hard_findings") or [],
+            },
+        )
     return FileResponse(
         path=str(pptx),
         filename=pptx.name,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
+
+
+@router.get("/present/decks")
+def present_list_decks(_user: CurrentUser = Depends(get_current_user), limit: int = Query(24, ge=1, le=80)):
+    from app.services.mentrix.presentation.deck_catalog import list_recent_decks
+
+    return {"ok": True, "items": list_recent_decks(limit=limit)}
+
+
+@router.post("/present/blank")
+def present_blank_deck(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import create_blank_pptx
+
+    dest = create_blank_pptx()
+    return {"ok": True, "path": str(dest), "filename": dest.name}
+
+
+@router.post("/present/import")
+async def present_import_deck(
+    file: UploadFile = File(...),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.presentation.deck_catalog import import_pptx_bytes
+
+    name = (file.filename or "imported.pptx").lower()
+    if not name.endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Upload a .pptx file")
+    data = await file.read()
+    if not data or len(data) > 40_000_000:
+        raise HTTPException(status_code=400, detail="invalid_pptx")
+    dest = import_pptx_bytes(data, filename=file.filename or "imported.pptx")
+    return {"ok": True, "path": str(dest), "filename": dest.name}
+
+
+@router.get("/present/slide-preview")
+def present_slide_preview(
+    path: str,
+    index: int = 0,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.mentrix.presentation.slide_preview import cache_slide_preview
+
+    pptx = _pptx_from_request(path)
+    png = cache_slide_preview(pptx, max(0, index))
+    return FileResponse(path=str(png), media_type="image/png", filename=png.name)
+
+
+@router.get("/present/quality-gate")
+def present_quality_gate(path: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import quality_gate_for_path
+
+    try:
+        return quality_gate_for_path(path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+
+
+@router.get("/present/template-cover/{template_id}")
+def present_template_cover(template_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.template_definition import ensure_template_cover
+
+    cover = ensure_template_cover(template_id)
+    if cover is None or not cover.is_file():
+        raise HTTPException(status_code=404, detail="cover_not_ready")
+    return FileResponse(path=str(cover), media_type="image/png", filename=cover.name)
 
 
 @router.post("/present/parse-pptx-path")

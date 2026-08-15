@@ -137,6 +137,7 @@ export default function DeveloperWorkspace() {
   const [showExplorer, setShowExplorer] = useState(true);
   const [showAgent, setShowAgent] = useState(true);
   const [showBottom, setShowBottom] = useState(true);
+  const [showContext, setShowContext] = useState(false);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
@@ -517,6 +518,17 @@ export default function DeveloperWorkspace() {
           </button>
           <button
             type="button"
+            data-testid="workspace-toggle-context"
+            onClick={() => {
+              setShowContext((v) => !v);
+              if (!showBottom) setShowBottom(true);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
+          >
+            {showContext ? "Hide context" : "Context used"}
+          </button>
+          <button
+            type="button"
             data-testid="workspace-reset-layout"
             onClick={() => {
               resetSplitLayout(["zect_ws_h", "zect_ws_agent", "zect_ws_v"]);
@@ -613,6 +625,7 @@ export default function DeveloperWorkspace() {
       <div className="flex flex-1 min-h-0 gap-3">
         <div className="flex flex-1 min-h-0 flex-col min-w-0">
       {!rootPath ? (
+        <div className="flex flex-1 min-h-0 flex-col gap-3">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
           <div className="flex items-start gap-2">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -625,6 +638,19 @@ export default function DeveloperWorkspace() {
               </p>
             </div>
           </div>
+        </div>
+        {showContext ? (
+          <WorkspaceContextUsedPanel
+            projectId={activeProjectId}
+            projectKey={activeProjectKey || ""}
+            repositoryId={activeRepoId}
+            repositoryIds={projectRepoIds}
+            activeRepoLabel={
+              activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
+            }
+            workItemId={workItemId}
+          />
+        ) : null}
         </div>
       ) : (
         (() => {
@@ -824,11 +850,23 @@ export default function DeveloperWorkspace() {
 
           const bottomPane = (
             <div
-              className="grid h-full grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 overflow-auto"
+              className={`grid h-full grid-cols-1 ${showContext ? "lg:grid-cols-3" : "lg:grid-cols-2"} gap-3 min-h-0 overflow-auto`}
               data-testid="workspace-stage-b-panels"
             >
               <WorkspaceTerminal workspaceRoot={rootPath} />
               <WorkspaceMentrixTimeline workspaceRoot={rootPath} />
+              {showContext ? (
+                <WorkspaceContextUsedPanel
+                  projectId={activeProjectId}
+                  projectKey={activeProjectKey || ""}
+                  repositoryId={activeRepoId}
+                  repositoryIds={projectRepoIds}
+                  activeRepoLabel={
+                    activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
+                  }
+                  workItemId={workItemId}
+                />
+              ) : null}
             </div>
           );
 
@@ -882,17 +920,6 @@ export default function DeveloperWorkspace() {
         })()
       )}
         </div>
-
-        <WorkspaceContextUsedPanel
-          projectId={activeProjectId}
-          projectKey={activeProjectKey || ""}
-          repositoryId={activeRepoId}
-          repositoryIds={projectRepoIds}
-          activeRepoLabel={
-            activeRepo ? `${activeRepo.owner}/${activeRepo.repo_name}` : ""
-          }
-          workItemId={workItemId}
-        />
       </div>
     </div>
   );

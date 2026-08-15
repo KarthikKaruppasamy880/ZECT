@@ -19,6 +19,8 @@ export interface Project {
   completion_percent: number;
   token_savings: number;
   risk_alerts: number;
+  provenance?: string;
+  test_run_id?: string;
   created_at: string;
   updated_at: string;
   repos: Repo[];

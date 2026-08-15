@@ -259,12 +259,19 @@ def text_lines(blocks: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def example_chart_block(slide_index: int, ordinal: int, *, title: str = "Illustrative trend (example data)") -> dict[str, Any]:
+def example_chart_block(
+    slide_index: int,
+    ordinal: int,
+    *,
+    title: str = "Illustrative trend (example data)",
+    chart_type: str = "column",
+) -> dict[str, Any]:
+    kind = chart_type if chart_type in CHART_TYPES else "column"
     return normalize_block(
         {
             "kind": "chart",
             "content": {
-                "chart_type": "column",
+                "chart_type": kind,
                 "title": title,
                 "categories": ["Q1", "Q2", "Q3", "Q4"],
                 "series": [{"name": "Example", "values": [12, 18, 15, 22]}],
@@ -276,15 +283,22 @@ def example_chart_block(slide_index: int, ordinal: int, *, title: str = "Illustr
     )
 
 
-def example_table_block(slide_index: int, ordinal: int) -> dict[str, Any]:
+def example_table_block(
+    slide_index: int,
+    ordinal: int,
+    *,
+    headers: list[str] | None = None,
+    rows: list[list[str]] | None = None,
+    title: str = "Status (example)",
+) -> dict[str, Any]:
+    hdrs = [str(h)[:40] for h in (headers or ["Workstream", "Status", "Owner"])][:6] or ["Workstream", "Status", "Owner"]
+    body = [list(r)[: len(hdrs)] for r in (rows or []) if isinstance(r, list)][:8]
+    if not body:
+        body = [["Delivery", "On track", "A"], ["Risks", "Watch", "B"], ["Ask", "This week", "C"]]
     return normalize_block(
         {
             "kind": "table",
-            "content": {
-                "title": "Status (example)",
-                "headers": ["Workstream", "Status", "Owner"],
-                "rows": [["Delivery", "On track", "A"], ["Risks", "Watch", "B"], ["Ask", "This week", "C"]],
-            },
+            "content": {"title": title, "headers": hdrs, "rows": body},
             "provenance": {"source": "example", "generated": True, "note": "Not factual — example table"},
         },
         slide_index=slide_index,
@@ -312,30 +326,69 @@ def example_quote_block(slide_index: int, ordinal: int, *, text: str) -> dict[st
     )
 
 
-def example_diagram_block(slide_index: int, ordinal: int) -> dict[str, Any]:
+def example_diagram_block(
+    slide_index: int,
+    ordinal: int,
+    *,
+    nodes: list[str] | None = None,
+    diagram_type: str = "flow",
+) -> dict[str, Any]:
+    labels = [str(n).strip()[:60] for n in (nodes or []) if str(n).strip()][:6]
+    if len(labels) < 2:
+        labels = ["Context", "Status", "Decisions"]
     return normalize_block(
         {
             "kind": "diagram",
-            "content": {"nodes": ["Context", "Status", "Decisions"]},
-            "provenance": {"source": "generated"},
+            "content": {"diagram_type": diagram_type or "flow", "nodes": labels},
+            "provenance": {"source": "generated", "generated": True, "note": "Conceptual — not a measured system map"},
         },
         slide_index=slide_index,
         ordinal=ordinal,
     )
 
 
+def _has_valid_kind(blocks: list[dict[str, Any]], kind: str) -> bool:
+    for block in blocks:
+        if str(block.get("kind") or "") != kind:
+            continue
+        if (block.get("validation") or {}).get("ok", True):
+            return True
+    return False
+
+
 def ensure_visual_blocks(slide: dict[str, Any], *, asset_ids: list[str] | None = None) -> dict[str, Any]:
     """Attach typed blocks for visual_intent. Never invent factual numbers (example provenance)."""
     blocks = list(slide.get("blocks") or [])
-    kinds = {str(b.get("kind") or "") for b in blocks}
     intent = str(slide.get("visual_intent") or "none").lower()
     index = int(slide.get("index") or 0)
     assets = [a for a in (asset_ids or []) if a]
-    if intent == "chart" and "chart" not in kinds:
-        blocks.append(example_chart_block(index, len(blocks)))
-    if intent == "table" and "table" not in kinds:
-        blocks.append(example_table_block(index, len(blocks)))
-    if intent == "image" and "image" not in kinds:
+    if intent == "chart" and not _has_valid_kind(blocks, "chart"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "chart"]
+        chart_type = str(slide.get("chart_type") or "column")
+        blocks.append(example_chart_block(index, len(blocks), chart_type=chart_type))
+    if intent == "table":
+        from app.services.mentrix.presentation.content_intent import (
+            is_placeholder_table,
+            parse_delimited_table,
+            table_from_blocks,
+        )
+
+        parsed = table_from_blocks(slide) or parse_delimited_table(
+            [str(b.get("text") or "").strip() for b in list(slide.get("content_blocks") or []) if str(b.get("text") or "").strip()]
+        )
+        if _has_valid_kind(blocks, "table"):
+            pass
+        elif parsed and not is_placeholder_table(*parsed):
+            headers, rows = parsed
+            blocks.append(
+                example_table_block(index, len(blocks), headers=headers, rows=rows, title="Status")
+            )
+        else:
+            slide["visual_intent"] = "none"
+            intent = "none"
+            blocks = [b for b in blocks if str(b.get("kind") or "") != "table"]
+    if intent == "image" and not _has_valid_kind(blocks, "image"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "image"]
         asset = assets[0] if assets else ""
         block = normalize_block(
             {
@@ -348,12 +401,23 @@ def ensure_visual_blocks(slide: dict[str, Any], *, asset_ids: list[str] | None =
         )
         if block:
             blocks.append(block)
-    if intent == "quote" and "quote" not in kinds:
+    if intent == "quote" and not _has_valid_kind(blocks, "quote"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "quote"]
         blocks.append(example_quote_block(index, len(blocks), text=str(slide.get("notes_intent") or "Lead with the decision.")[:400]))
-    if intent == "metric" and "metric" not in kinds:
+    if intent == "metric" and not _has_valid_kind(blocks, "metric"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "metric"]
         blocks.append(example_metric_block(index, len(blocks), label="Example KPI", value="n/a"))
-    if intent == "diagram" and "diagram" not in kinds:
-        blocks.append(example_diagram_block(index, len(blocks)))
+    if intent == "diagram" and not _has_valid_kind(blocks, "diagram"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "diagram"]
+        nodes = [
+            str(b.get("text") or "").strip()
+            for b in list(slide.get("content_blocks") or [])
+            if str(b.get("text") or "").strip()
+        ]
+        dtype = str(slide.get("visual_choice") or slide.get("diagram_type") or "flow")
+        if dtype not in {"flow", "architecture", "process", "sequence", "boxes"}:
+            dtype = "flow"
+        blocks.append(example_diagram_block(index, len(blocks), nodes=nodes, diagram_type=dtype))
     if intent == "image" and assets:
         for block in blocks:
             if block.get("kind") == "image" and not str((block.get("content") or {}).get("asset_id") or "").strip():

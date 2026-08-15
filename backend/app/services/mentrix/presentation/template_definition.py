@@ -64,6 +64,85 @@ def native_ready(zect_id: str) -> bool:
     return bool(row and row.get("ready") is True)
 
 
+def gallery_visual(zect_id: str) -> dict[str, Any]:
+    """Public gallery preview: theme swatches, fonts, layout names. No provider UUIDs."""
+    tid = tmpl.canonical_id(zect_id) or zect_id
+    row = load_definition(tid)
+    colors: list[str] = []
+    fonts: dict[str, str] = {}
+    layout_names: list[str] = []
+    layout_count = 0
+    error = None
+    if not row:
+        error = "definition_missing"
+    else:
+        theme = row.get("theme") if isinstance(row.get("theme"), dict) else {}
+        raw_colors = theme.get("colors") if isinstance(theme.get("colors"), dict) else {}
+        for key in ("accent1", "accent2", "dk2", "lt1"):
+            hexv = str(raw_colors.get(key) or "").strip().lstrip("#")
+            if hexv:
+                colors.append(f"#{hexv}")
+        raw_fonts = theme.get("fonts") if isinstance(theme.get("fonts"), dict) else {}
+        fonts = {
+            "major": str(raw_fonts.get("major") or ""),
+            "minor": str(raw_fonts.get("minor") or ""),
+        }
+        layouts = row.get("layouts") if isinstance(row.get("layouts"), list) else []
+        layout_count = len(layouts)
+        for lay in layouts[:6]:
+            if isinstance(lay, dict) and lay.get("name"):
+                layout_names.append(str(lay["name"]))
+    ready = bool(row and row.get("ready") is True)
+    cover = ensure_template_cover(tid) if ready else None
+    cover_data_url = ""
+    if cover and cover.is_file():
+        import base64
+
+        cover_data_url = "data:image/png;base64," + base64.b64encode(cover.read_bytes()).decode("ascii")
+    return {
+        "colors": colors[:4],
+        "fonts": fonts,
+        "layout_names": layout_names,
+        "layout_count": layout_count,
+        "ready": ready,
+        "readiness": "READY" if ready else "TEMPLATE_NOT_READY",
+        "thumbnail_kind": "cover_render" if cover_data_url else "theme_swatch",
+        "cover_url": f"/api/mentrix/present/template-cover/{tid}" if cover_data_url else "",
+        "cover_data_url": cover_data_url,
+        "error": error,
+        "provider_uuid_hidden": True,
+    }
+
+
+def _cover_dir() -> Path:
+    d = tmpl._root() / "covers"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cover_png_path(zect_id: str) -> Path:
+    safe = tmpl._SAFE.sub("_", (zect_id or "").strip())[:80] or "unknown"
+    return _cover_dir() / f"{safe}.png"
+
+
+def ensure_template_cover(zect_id: str) -> Path | None:
+    """Render a cover PNG from the template master (cached)."""
+    tid = tmpl.canonical_id(zect_id) or zect_id
+    dest = _cover_png_path(tid)
+    master = tmpl.source_pptx_path(tid)
+    if dest.is_file() and (not master or dest.stat().st_mtime >= master.stat().st_mtime):
+        return dest
+    if not master or not master.is_file():
+        return dest if dest.is_file() else None
+    try:
+        from app.services.mentrix.presentation.slide_preview import render_slide_png_bytes
+
+        dest.write_bytes(render_slide_png_bytes(master.read_bytes(), 0))
+        return dest
+    except Exception:
+        return dest if dest.is_file() else None
+
+
 def list_ready_ids() -> list[str]:
     out: list[str] = []
     root = _def_dir()

@@ -24,6 +24,7 @@ import MentrixArtifacts from "@/components/MentrixArtifacts";
 import MentrixDesktopPanel from "@/components/MentrixDesktopPanel";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
+import CloneVoicePanel from "@/components/CloneVoicePanel";
 import ModelSelector from "@/components/ModelSelector";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
@@ -207,26 +208,54 @@ export default function MentrixCompanion() {
                 data-testid="mentrix-voice-section"
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
               >
-                <div className="rounded-lg border border-teal-800/50 bg-slate-900/80 p-3">
-                  <p className="text-[10px] uppercase tracking-[0.2em] text-teal-400">Voice &amp; Present</p>
+                <div className="rounded-lg border border-teal-800/50 bg-slate-900/80 p-3 space-y-2">
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-teal-400">Voice</p>
                   <p className="mt-1 text-xs text-slate-300">
-                    Clone setup lives in <strong className="text-teal-200">Settings → Voice</strong> (sidebar
-                    bottom). Companion uses your default clone for Speak replies, with OpenAI fallback if
-                    Voicebox is down.
+                    Companion conversation voice is separate from presentation narration. Clone setup
+                    also lives in Settings → Voice. Decks are generated on Present — this tab does not
+                    replace that surface.
                   </p>
-                  <a
-                    href="/settings#voice"
-                    className="mt-2 inline-flex text-xs font-medium text-teal-300 underline hover:text-teal-200"
-                    data-testid="voice-open-settings"
-                  >
-                    Open Voice settings
-                  </a>
+                  <dl className="grid gap-1 text-[11px] text-slate-300 sm:grid-cols-2" data-testid="mentrix-voice-roles">
+                    <div>
+                      <dt className="text-teal-400">Companion Voice</dt>
+                      <dd>Speak replies in this HUD (default clone, then fallback).</dd>
+                    </div>
+                    <div>
+                      <dt className="text-teal-400">Default Presentation Voice</dt>
+                      <dd>Narrate / rehearse on Present uses your default clone.</dd>
+                    </div>
+                    <div>
+                      <dt className="text-teal-400">Fallback Presentation Voice</dt>
+                      <dd>Stock OpenAI voice if Voicebox is offline.</dd>
+                    </div>
+                    <div>
+                      <dt className="text-teal-400">Auto fallback policy</dt>
+                      <dd>Clone first; if Voicebox is down, stock TTS; No Narration is explicit.</dd>
+                    </div>
+                  </dl>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href="/settings#voice"
+                      className="zect-btn zect-btn-secondary text-xs"
+                      data-testid="voice-open-settings"
+                    >
+                      Open Voice settings
+                    </a>
+                    <Link
+                      to="/present/create"
+                      className="zect-btn zect-btn-primary text-xs"
+                      data-testid="mentrix-voice-handoff-present"
+                    >
+                      Open Present
+                    </Link>
+                  </div>
                 </div>
+                <CloneVoicePanel variant="dark" defaultExpanded />
                 <div>
                   <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
                     Present deck — PPTX + Zoom
                   </p>
-                  <PresentDeckPanel variant="dark" />
+                  <PresentDeckPanel variant="dark" mode="companion" />
                 </div>
               </div>
             )}

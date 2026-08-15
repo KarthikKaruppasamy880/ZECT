@@ -255,9 +255,10 @@ def list_builtin_zinnia() -> list[dict[str, Any]]:
     for row in _CANONICAL_ZINNIA:
         mapped = get_provider_mapping(str(row["id"]))
         pid = str((mapped or {}).get("provider_template_id") or "")
-        from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+        from app.services.mentrix.presentation.template_definition import gallery_visual, native_ready as _native_ready
 
         native = _native_ready(str(row["id"]))
+        visual = gallery_visual(str(row["id"]))
         out.append(
             {
                 "id": row["id"],
@@ -269,6 +270,8 @@ def list_builtin_zinnia() -> list[dict[str, Any]]:
                 "mapped": is_verified_provider_id(pid) or native,
                 "native_ready": native,
                 "provider_uuid_hidden": True,
+                "visual": visual,
+                "readiness": visual.get("readiness"),
             }
         )
     return out
@@ -290,12 +293,15 @@ def _public_row(
     entry.pop("path", None)
     entry.setdefault("scope", default_scope)
     entry.setdefault("kind", default_kind)
-    from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+    from app.services.mentrix.presentation.template_definition import gallery_visual, native_ready as _native_ready
 
     native = _native_ready(str(entry.get("id") or ""))
+    visual = gallery_visual(str(entry.get("id") or ""))
     entry["native_ready"] = native
     entry["mapped"] = bool(entry.get("mapped")) or is_verified_provider_id(pid) or native
     entry["provider_uuid_hidden"] = True
+    entry["visual"] = visual
+    entry["readiness"] = visual.get("readiness")
     return entry
 
 
@@ -320,12 +326,15 @@ def list_org_masters() -> list[dict[str, Any]]:
     for row in rows:
         mapped = get_provider_mapping(str(row["id"]))
         pid = str((mapped or {}).get("provider_template_id") or "")
-        from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+        from app.services.mentrix.presentation.template_definition import gallery_visual, native_ready as _native_ready
 
         native = _native_ready(str(row["id"]))
+        visual = gallery_visual(str(row["id"]))
         row["mapped"] = is_verified_provider_id(pid) or native
         row["native_ready"] = native
         row["provider_uuid_hidden"] = True
+        row["visual"] = visual
+        row["readiness"] = visual.get("readiness")
     uploaded = []
     for t in _load_org():
         uploaded.append(_public_row(t, default_scope="ORG", default_kind="org_pptx"))
@@ -548,9 +557,10 @@ def preview_template(user_id: str | int, template_id: str) -> dict[str, Any]:
         return {"ok": False, "error": "not_found"}
     mapped = get_provider_mapping(t["id"]) or {}
     upload_pid = str(t.get("presenton_template_id") or "")
-    from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+    from app.services.mentrix.presentation.template_definition import gallery_visual, native_ready as _native_ready
 
     native = _native_ready(str(t["id"]))
+    visual = gallery_visual(str(t["id"]))
     ready = (
         is_verified_provider_id(str(mapped.get("provider_template_id") or ""))
         or is_verified_provider_id(upload_pid)
@@ -567,6 +577,9 @@ def preview_template(user_id: str | int, template_id: str) -> dict[str, Any]:
         "mapped": ready,
         "lifecycle": LIFECYCLE_READY if ready else LIFECYCLE_TEMPLATE_NOT_READY,
         "provider_uuid_hidden": True,
+        "visual": visual,
+        "readiness": visual.get("readiness"),
+        "error": visual.get("error"),
     }
 
 

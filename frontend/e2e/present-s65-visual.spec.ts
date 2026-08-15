@@ -1,12 +1,12 @@
 /**
  * S6.5 headed visual parity: native plan → image/chart/table → editor → export → reopen.
  */
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { loadEnvCreds } from "./helpers/env";
+import { gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,18 +17,8 @@ const PNG = Buffer.from(
   "base64",
 );
 
-async function ensureLoggedIn(page: Page) {
-  const { username, password } = loadEnvCreds();
-  await page.goto("/");
-  const loginVisible = await page.getByTestId("login-username").isVisible().catch(() => false);
-  const token = await page.evaluate(() => localStorage.getItem("zect_token"));
-  if (loginVisible || !token) {
-    await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 15_000 });
-    await page.getByTestId("login-username").fill(username);
-    await page.getByTestId("login-password").fill(password);
-    await page.getByTestId("login-submit").click();
-    await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
-  }
+function encodeDeckId(p: string) {
+  return Buffer.from(p, "utf8").toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 test.describe("S6.5 visual content editor", () => {
@@ -39,13 +29,7 @@ test.describe("S6.5 visual content editor", () => {
     expect(fs.existsSync(dest)).toBeTruthy();
     expect(fs.statSync(dest).size).toBeGreaterThan(1000);
 
-    await ensureLoggedIn(page);
-    await page.goto("/present");
-    await expect(page.getByTestId("zect-present-page")).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
-    await page.getByTestId("zect-present-continue-generate").click();
-    await expect(page.getByTestId("present-deck-panel")).toBeVisible();
-    await page.getByTestId("present-deck-path").fill(dest);
+    await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}`, "present-review");
     await expect(page.getByTestId("present-editor")).toBeVisible({ timeout: 20_000 });
 
     await page.getByTestId("present-editor-thumb-2").click();
@@ -74,8 +58,7 @@ test.describe("S6.5 visual content editor", () => {
     await download.saveAs(outFile);
     expect(fs.statSync(outFile).size).toBeGreaterThan(1000);
 
-    await page.getByTestId("present-deck-path").fill("");
-    await page.getByTestId("present-deck-path").fill(dest);
+    await page.reload();
     await expect(page.getByTestId("present-editor-thumbs")).toBeVisible({ timeout: 20_000 });
     await page.getByTestId("present-editor-thumb-2").click();
     await expect(page.getByTestId("present-editor-chart-title")).toHaveValue(/Updated example chart/i);

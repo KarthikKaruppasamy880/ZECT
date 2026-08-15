@@ -1,26 +1,35 @@
 import { useEffect, useState } from "react";
-import { authHeaders } from "@/lib/api";
+import { Link } from "react-router-dom";
+import { authHeaders, getApiBase, indexClonedRepo } from "@/lib/api";
 
-const API = import.meta.env.VITE_API_URL || "";
+type LatticeSnap = {
+  state?: string;
+  status?: string;
+  action?: string | null;
+  action_label?: string;
+  repository_id?: number | null;
+  detail?: { indexed_at?: string | null; files_indexed?: number; reason?: string };
+};
 
 export default function ProjectIntelligencePage() {
   const [snap, setSnap] = useState<Record<string, unknown> | null>(null);
   const [query, setQuery] = useState("project");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [indexNote, setIndexNote] = useState("");
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
       const qs = new URLSearchParams({ query });
-      const res = await fetch(`${API}/api/mentrix/developer/project-intelligence?${qs}`, {
+      const res = await fetch(`${getApiBase()}/api/mentrix/developer/project-intelligence?${qs}`, {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error(await res.text());
       setSnap(await res.json());
-    } catch (e: any) {
-      setError(e?.message || "Failed to load Project Intelligence");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load Project Intelligence");
     } finally {
       setLoading(false);
     }
@@ -31,15 +40,53 @@ export default function ProjectIntelligencePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const lattice = (snap?.lattice || {}) as LatticeSnap;
+  const state = String(lattice.state || lattice.status || "NOT_APPLICABLE");
+  const repoId = Number(lattice.repository_id || 0);
+
+  const handleIndex = async () => {
+    if (!repoId) {
+      setIndexNote("Select a cloned repository in Developer, then Index.");
+      return;
+    }
+    setIndexNote("Indexing…");
+    try {
+      await indexClonedRepo(repoId);
+      setIndexNote("Index requested. Refresh to see READY or STALE.");
+      await load();
+    } catch (e: unknown) {
+      setIndexNote(e instanceof Error ? e.message : "Index failed");
+    }
+  };
+
   return (
     <div className="p-6 max-w-5xl mx-auto" data-testid="project-intelligence-page">
       <h1 className="text-2xl font-semibold text-slate-900">Project Intelligence</h1>
       <p className="mt-1 text-sm text-slate-600">
         Lattice, Blueprint, Knowledge, Memory, Skills, and Playbooks — fed into Mentrix Ask/Plan/Agent.
       </p>
+      <div
+        className="mt-4 zect-panel flex flex-wrap items-center gap-3"
+        data-testid="pi-lattice-state"
+      >
+        <span className="zect-chip bg-slate-100 text-slate-800">{state}</span>
+        <span className="text-sm text-slate-600">
+          {lattice.action_label || lattice.detail?.reason || "No project key bound"}
+        </span>
+        {lattice.detail?.indexed_at ? (
+          <span className="text-xs text-slate-500">Indexed {lattice.detail.indexed_at}</span>
+        ) : null}
+        <button type="button" className="zect-btn zect-btn-secondary text-xs" onClick={() => void handleIndex()}>
+          {state === "READY" || state === "STALE" ? "Re-index" : "Index Repository"}
+        </button>
+        <Link to="/lattice" className="zect-btn zect-btn-primary text-xs">
+          View Intelligence
+        </Link>
+        {indexNote ? <p className="w-full text-xs text-slate-500">{indexNote}</p> : null}
+      </div>
       <div className="mt-4 flex gap-2">
         <input
-          className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="zect-input flex-1"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Query"
@@ -47,7 +94,7 @@ export default function ProjectIntelligencePage() {
         />
         <button
           type="button"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white"
+          className="zect-btn zect-btn-primary"
           onClick={() => void load()}
           data-testid="pi-refresh"
         >

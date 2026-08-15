@@ -366,15 +366,27 @@ def ensure_visual_blocks(slide: dict[str, Any], *, asset_ids: list[str] | None =
         blocks = [b for b in blocks if str(b.get("kind") or "") != "chart"]
         chart_type = str(slide.get("chart_type") or "column")
         blocks.append(example_chart_block(index, len(blocks), chart_type=chart_type))
-    if intent == "table" and not _has_valid_kind(blocks, "table"):
-        blocks = [b for b in blocks if str(b.get("kind") or "") != "table"]
-        bullets = [
-            str(b.get("text") or "").strip()
-            for b in list(slide.get("content_blocks") or [])
-            if str(b.get("text") or "").strip()
-        ]
-        rows = [[line[:40], "Watch", "Owner"] for line in bullets[:5]] if bullets else None
-        blocks.append(example_table_block(index, len(blocks), rows=rows))
+    if intent == "table":
+        from app.services.mentrix.presentation.content_intent import (
+            is_placeholder_table,
+            parse_delimited_table,
+            table_from_blocks,
+        )
+
+        parsed = table_from_blocks(slide) or parse_delimited_table(
+            [str(b.get("text") or "").strip() for b in list(slide.get("content_blocks") or []) if str(b.get("text") or "").strip()]
+        )
+        if _has_valid_kind(blocks, "table"):
+            pass
+        elif parsed and not is_placeholder_table(*parsed):
+            headers, rows = parsed
+            blocks.append(
+                example_table_block(index, len(blocks), headers=headers, rows=rows, title="Status")
+            )
+        else:
+            slide["visual_intent"] = "none"
+            intent = "none"
+            blocks = [b for b in blocks if str(b.get("kind") or "") != "table"]
     if intent == "image" and not _has_valid_kind(blocks, "image"):
         blocks = [b for b in blocks if str(b.get("kind") or "") != "image"]
         asset = assets[0] if assets else ""

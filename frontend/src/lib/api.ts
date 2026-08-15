@@ -1,7 +1,27 @@
 // Prefer 127.0.0.1 — Electron/Windows can hang on localhost → IPv6 (::1)
 // Canonical packaged/default API port is :8000. Dev stacks may override via VITE_API_URL
 // (e.g. scripts/start-local.ps1 writes :8020 into frontend/.env.local).
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+function bakedApiBase(): string {
+  return import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+}
+
+/** Runtime origin for controlled native headed proof. Loopback only. */
+export function getApiBase(): string {
+  const baked = bakedApiBase();
+  if (typeof window === "undefined") return baked;
+  try {
+    const raw = sessionStorage.getItem("zect_api_origin") || "";
+    if (!raw) return baked;
+    const parsed = new URL(raw);
+    if (!["127.0.0.1", "localhost"].includes(parsed.hostname)) return baked;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return baked;
+    return parsed.origin;
+  } catch {
+    return baked;
+  }
+}
+
+const API = bakedApiBase();
 
 /** Bearer + JSON headers for authenticated API calls. */
 export function authHeaders(extra?: Record<string, string>): Record<string, string> {
@@ -19,7 +39,7 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
 /** Low-level fetch with auth — use when callers need res.ok / status handling. */
 export async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
   const headers = authHeaders(opts?.headers as Record<string, string> | undefined);
-  return fetch(`${API}${path}`, { ...opts, headers });
+  return fetch(`${getApiBase()}${path}`, { ...opts, headers });
 }
 
 export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -101,12 +121,34 @@ export const getProjects = (status?: string, opts?: { includeFixtures?: boolean 
   return request<Project[]>(`/api/projects${q ? `?${q}` : ""}`);
 };
 export const getProject = (id: number) => request<Project>(`/api/projects/${id}`);
+export const getProjectFixtureAudit = () =>
+  request<{
+    ok: boolean;
+    proven_test: Array<{ id: number; name: string; provenance: string; test_run_id: string }>;
+    name_candidates: Array<{ id: number; name: string; provenance: string; test_run_id: string }>;
+    authorized: Array<{ id: number; name: string }>;
+    note?: string;
+  }>("/api/projects/fixtures/audit");
 export const createProject = (data: Partial<Project>) =>
   request<Project>("/api/projects", { method: "POST", body: JSON.stringify(data) });
 export const updateProject = (id: number, data: Partial<Project>) =>
   request<Project>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteProject = (id: number) =>
   request<void>(`/api/projects/${id}`, { method: "DELETE" });
+export const keepCleanupProjects = (keepIds: number[], dryRun = true) =>
+  request<{
+    ok: boolean;
+    dry_run: boolean;
+    would_keep?: Array<{ id: number; name: string }>;
+    would_delete?: Array<{ id: number; name: string }>;
+    deleted_ids?: number[];
+    kept_ids?: number[];
+    count?: number;
+    error?: string;
+  }>("/api/projects/fixtures/keep-cleanup", {
+    method: "POST",
+    body: JSON.stringify({ keep_ids: keepIds, dry_run: dryRun }),
+  });
 export const addProjectRepo = (
   projectId: number,
   data: { owner?: string; repo_name?: string; default_branch?: string; repo_id?: number },
@@ -392,10 +434,17 @@ export const latticeBlueprint = (project_key: string) =>
 
 export type LatticeStatusResponse = {
   indexed: boolean;
+  state?: string;
+  reason?: string;
+  action?: string | null;
+  action_label?: string;
   project_key: string;
   has_blueprint: boolean;
   graph_stats?: Record<string, unknown>;
   blueprint_updated_at?: string | null;
+  errors?: string[];
+  indexed_at?: string | null;
+  repository_id?: number | null;
 };
 
 export const latticeStatus = (project_key: string) =>
@@ -665,6 +714,12 @@ export const mentrixPresentonGenerate = (data: {
     fallback_reason?: string;
     degraded?: boolean;
     presenton_request?: { template?: string; n_slides?: number };
+    provider?: string;
+    final_quality_status?: string;
+    repair_attempts?: number;
+    overlap_count?: number;
+    ungrounded_fact_count?: number;
+    quality?: Record<string, unknown>;
   }>(
     "/api/mentrix/presenton/generate",
     { method: "POST", body: JSON.stringify(data), signal: controller.signal },
@@ -710,16 +765,80 @@ export const mentrixPresentSaveNotes = (path: string, slides: PresentSlide[]) =>
 
 export async function mentrixPresentPptxDownload(path: string): Promise<{ blob: Blob; filename: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
-  const url = `${API}/api/mentrix/present/pptx?path=${encodeURIComponent(path)}`;
+  const url = `${getApiBase()}/api/mentrix/present/pptx?path=${encodeURIComponent(path)}`;
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === "string" ? err.detail : "Export failed");
-  }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      const detail = err.detail;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : detail?.hint || detail?.error || err.detail || "Export failed";
+      throw new Error(String(msg));
+    }
   const blob = await res.blob();
   const disp = res.headers.get("content-disposition") || "";
   const match = disp.match(/filename="?([^"]+)"?/i);
   return { blob, filename: match?.[1] || "zect-deck.pptx" };
+}
+
+export const mentrixPresentDecks = () =>
+  request<{ ok: boolean; items: Array<{ id: string; name: string; path: string; slide_count: number; modified: number; bytes: number }> }>(
+    "/api/mentrix/present/decks",
+  );
+
+export const mentrixPresentBlank = () =>
+  request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/blank", { method: "POST" });
+
+export async function mentrixPresentImport(file: File) {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${getApiBase()}/api/mentrix/present/import`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) throw new Error("Import failed");
+  return (await res.json()) as { ok: boolean; path: string; filename: string };
+}
+
+export async function mentrixPresentSlidePreview(path: string, index: number): Promise<string> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const url = `${getApiBase()}/api/mentrix/present/slide-preview?path=${encodeURIComponent(path)}&index=${index}`;
+  const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error("preview_failed");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export const mentrixPresentQualityGate = (path: string) =>
+  request<{
+    ok: boolean;
+    path: string;
+    export_blocked: boolean;
+    hard_blocked?: boolean;
+    accept_warnings_allowed?: boolean;
+    quality_passed: boolean;
+    slide_count: number;
+    overlap_count: number;
+    clipped_text_count: number;
+    covering_dump_count: number;
+    broken_rel_count?: number;
+    hard_findings?: string[];
+    warnings?: string[];
+    final_quality_status?: string;
+  }>(`/api/mentrix/present/quality-gate?path=${encodeURIComponent(path)}`);
+
+export function encodeDeckId(path: string): string {
+  const b64 = btoa(unescape(encodeURIComponent(path)));
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodeDeckId(id: string): string {
+  const pad = id.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = pad + "=".repeat((4 - (pad.length % 4)) % 4);
+  return decodeURIComponent(escape(atob(padded)));
 }
 
 export const mentrixPresentationAudiences = () =>
@@ -770,12 +889,36 @@ export const mentrixPreparePromptDeck = (data: {
     presenton_ready?: boolean;
   }>("/api/mentrix/presentation/prepare-prompt", { method: "POST", body: JSON.stringify(data) });
 
+export type PresentTemplateVisual = {
+  colors?: string[];
+  fonts?: { major?: string; minor?: string };
+  layout_names?: string[];
+  layout_count?: number;
+  ready?: boolean;
+  readiness?: string;
+  thumbnail_kind?: string;
+  cover_url?: string;
+  cover_data_url?: string;
+  error?: string | null;
+};
+
+export type PresentTemplateCard = {
+  id: string;
+  name: string;
+  scope?: string;
+  kind?: string;
+  preview?: string;
+  visual?: PresentTemplateVisual;
+  readiness?: string;
+  native_ready?: boolean;
+};
+
 export const mentrixPresentationTemplates = () =>
   request<{
     ok: boolean;
-    zinnia: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
-    organization: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
-    my_templates: Array<{ id: string; name: string; scope?: string; kind?: string; preview?: string }>;
+    zinnia: Array<PresentTemplateCard>;
+    organization: Array<PresentTemplateCard>;
+    my_templates: Array<PresentTemplateCard>;
     lifecycle?: string;
     mappings_ready?: Record<string, boolean>;
     canonical_ids?: string[];
@@ -788,6 +931,8 @@ export const mentrixPresentationTemplatePreview = (template_id: string) =>
     name?: string;
     preview?: string;
     error?: string;
+    visual?: PresentTemplateVisual;
+    readiness?: string;
     provider_uuid_hidden?: boolean;
     mapped?: boolean;
     lifecycle?: string;
@@ -1124,9 +1269,8 @@ export const mcpExecute = (server_id: string, tool_name: string, arguments_: Rec
 
 export const mentrixMediaList = () => request<{ items: any[] }>("/api/mentrix/companion/media");
 export const mentrixMediaUrl = (number: number) => {
-  const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : "";
-  return `${API}/api/mentrix/companion/media/${number}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  return `${getApiBase()}/api/mentrix/companion/media/${number}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 };
 export const mentrixStartRun = (
   goal: string,
@@ -1905,6 +2049,8 @@ export const cloneRepo = (repoId: number, branch?: string, shallow = true) =>
   });
 export const pullRepo = (repoId: number) =>
   request<any>(`/api/repos/${repoId}/pull`, { method: "POST" });
+export const indexClonedRepo = (repoId: number) =>
+  request<any>(`/api/repos/${repoId}/index`, { method: "POST" });
 export const getRepoCloneStatus = (repoId: number) =>
   request<any>(`/api/repos/${repoId}/status`);
 export const getRepoBranches = (repoId: number) =>

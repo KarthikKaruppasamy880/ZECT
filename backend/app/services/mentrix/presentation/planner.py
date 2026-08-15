@@ -98,8 +98,16 @@ def _heuristic_plan(
             }
         )
     prompt_l = (prompt or "").lower()
+    table_lines: list[str] = []
+    for ev in evidence:
+        for line in str(ev.get("excerpt") or "").splitlines():
+            if "|" in line and line.count("|") >= 2:
+                table_lines.append(line.strip())
+    for line in (prompt or "").splitlines():
+        if "|" in line and line.count("|") >= 2:
+            table_lines.append(line.strip())
     wants_chart = any(k in prompt_l for k in ("chart", "metric", "kpi", "trend", "dashboard"))
-    wants_table = any(k in prompt_l for k in ("table", "roadmap", "workstream"))
+    wants_table = len(table_lines) >= 2
     wants_image = any(k in prompt_l for k in ("image", "photo", "figure", "screenshot"))
     wants_quote = "quote" in prompt_l or "narrative" in prompt_l
     beats = [
@@ -112,7 +120,7 @@ def _heuristic_plan(
     if wants_chart and count >= 4:
         beats[2] = ("chart_commentary", "chart", "Metrics", "Illustrative trend — example data unless evidence is cited.")
     if wants_table and count >= 5:
-        beats[3] = ("table", "table", "Workstreams", "Status table — example rows unless evidence is cited.")
+        beats[3] = ("table", "table", "Workstreams", "Status table from attached evidence. Unknown owners stay TBD.")
     if wants_image and count >= 3:
         beats[1] = ("text_image", "image", "Context", "What changed, with an authorized figure.")
     if wants_quote and count >= 6:
@@ -122,10 +130,13 @@ def _heuristic_plan(
         layout, visual, heading, notes = (
             beats[i] if i < len(beats) else ("title_body", "none", f"Point {i + 1}", "Cover the next key point.")
         )
+        content_blocks = [{"kind": "bullet", "text": notes}]
+        if visual == "table" and table_lines:
+            content_blocks = [{"kind": "bullet", "text": line} for line in table_lines[:8]]
         slides.append(
             {
                 "title": heading if i else title,
-                "content_blocks": [{"kind": "bullet", "text": notes}],
+                "content_blocks": content_blocks,
                 "evidence": evidence[:2] if i == 1 else [],
                 "visual_intent": visual,
                 "layout_intent": layout,

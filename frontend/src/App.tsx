@@ -22,7 +22,14 @@ import AuditTrail from "@/pages/AuditTrail";
 import RulesEngine from "@/pages/RulesEngine";
 import Integrations from "@/pages/Integrations";
 import ZectLearning from "@/pages/ZectLearning";
-import ZectPresent from "@/pages/ZectPresent";
+import PresentShell from "@/pages/present/PresentShell";
+import PresentDashboard from "@/pages/present/PresentDashboard";
+import PresentCreate from "@/pages/present/PresentCreate";
+import PresentReview from "@/pages/present/PresentReview";
+import PresentRehearse from "@/pages/present/PresentRehearse";
+import PresentExport from "@/pages/present/PresentExport";
+import PresentBlank from "@/pages/present/PresentBlank";
+import PresentImport from "@/pages/present/PresentImport";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
 import AppRunner from "@/pages/AppRunner";
@@ -185,7 +192,16 @@ export default function App() {
           <Route path="/file-organize" element={<FileOrganize />} />
           <Route path="/knowledge-base" element={<KnowledgeBase />} />
           <Route path="/learning" element={<ZectLearning />} />
-          <Route path="/present" element={<ZectPresent />} />
+          <Route path="/present" element={<PresentShell />}>
+            <Route index element={<PresentDashboard />} />
+            <Route path="create" element={<PresentCreate />} />
+            <Route path="blank" element={<PresentBlank />} />
+            <Route path="import" element={<PresentImport />} />
+            <Route path="templates" element={<PresentCreate />} />
+            <Route path="d/:deckId" element={<PresentReview />} />
+            <Route path="d/:deckId/rehearse" element={<PresentRehearse />} />
+            <Route path="d/:deckId/export" element={<PresentExport />} />
+          </Route>
           <Route path="/playbooks" element={<Playbooks />} />
           <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
           <Route path="/secrets" element={<SecretsManager />} />

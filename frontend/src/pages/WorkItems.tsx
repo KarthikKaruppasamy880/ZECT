@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { authHeaders, createSampleProcess } from "@/lib/api";
+import { authHeaders, createSampleProcess, getApiBase } from "@/lib/api";
 import LongRunningRunPanel from "@/components/LongRunningRunPanel";
 
 type WorkItem = {
@@ -15,7 +15,6 @@ type WorkItem = {
   updated_at?: string;
 };
 
-const API = import.meta.env.VITE_API_URL || "";
 
 export default function WorkItems() {
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -28,7 +27,7 @@ export default function WorkItems() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API}/api/work-items?limit=50`, { headers: authHeaders() });
+        const res = await fetch(`${getApiBase()}/api/work-items?limit=50`, { headers: authHeaders() });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         if (!cancelled) {

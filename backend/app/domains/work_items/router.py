@@ -65,10 +65,17 @@ def list_work_items(
     project_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = 100,
+    include_fixtures: bool = False,
     db: Session = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ):
-    items = wi_svc.list_work_items(db, project_id=project_id, status=status, limit=limit)
+    items = wi_svc.list_work_items(
+        db,
+        project_id=project_id,
+        status=status,
+        limit=limit,
+        include_fixtures=include_fixtures,
+    )
     return {"items": [wi_svc.serialize_work_item(w) for w in items]}
 
 

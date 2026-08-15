@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from app.services.mentrix.presentation.audience import get_audience
@@ -30,7 +29,7 @@ _PROCESS_HINTS = ("process", "pipeline", "sequence", "workflow", "handoff")
 _STATUS_HINTS = ("status", "kpi", "metric", "rag", "delivery", "health")
 _DECISION_HINTS = ("decision", "ask", "risk", "approve", "owners")
 _FIGURE_HINTS = ("image", "photo", "figure", "screenshot", "caption")
-_COMPARE_HINTS = ("roadmap", "workstream", "compare", "versus", "vs ", "milestone")
+_COMPARE_HINTS = ("compare", "versus", "vs ", "side by side")
 _CHART_HINTS = ("trend", "dashboard", "chart", "quarter", "over time")
 
 
@@ -84,7 +83,9 @@ def _purpose_for_index(index: int, n: int, audience_id: str) -> str:
 
 
 def _has_numeric_evidence(slide: dict[str, Any]) -> bool:
-    return bool(re.search(r"\d", _blob(slide)))
+    from app.services.mentrix.presentation.content_intent import has_quantitative_series
+
+    return has_quantitative_series(slide)
 
 
 def _chart_type_for(slide: dict[str, Any]) -> str:
@@ -119,9 +120,9 @@ def _choose_visual(
     if purpose == "figure":
         return "image"
     if purpose == "decision":
-        return "table"
+        return "none"
     if purpose == "comparison":
-        return "table"
+        return "none"
     if purpose == "status" and _has_numeric_evidence(slide):
         return "chart"
     if purpose == "status":
@@ -172,14 +173,23 @@ def apply_visual_plan(
             elif purpose == "section":
                 purpose = _purpose_for_index(i, n, audience_id)
         slide["purpose"] = purpose
-        visual = _choose_visual(
-            slide,
-            purpose=purpose,
-            audience_id=audience_id,
-            asset_ids=assets,
-            deck_has_diagram=deck_has_diagram,
-            prompt_l=prompt_l,
-        )
+        from app.services.mentrix.presentation.content_intent import choose_slide_intent, intent_to_visual
+
+        prior = str(slide.get("visual_intent") or "none").lower()
+        intent = choose_slide_intent(slide, purpose=purpose, asset_ids=assets, prompt=prompt)
+        slide["content_intent"] = intent
+        visual = intent_to_visual(intent)
+        if visual == "none" and prior in {"", "none"}:
+            visual = _choose_visual(
+                slide,
+                purpose=purpose,
+                audience_id=audience_id,
+                asset_ids=assets,
+                deck_has_diagram=deck_has_diagram,
+                prompt_l=prompt_l,
+            )
+            if visual == "table":
+                visual = "none"
         slide["visual_intent"] = visual
         if visual == "diagram":
             deck_has_diagram = True

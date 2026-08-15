@@ -121,6 +121,18 @@ class ZectNativePresentationProvider:
         asset_ids = [str(a).strip() for a in list(req.asset_ids or []) if str(a).strip()]
         for slide in list(plan.get("slides") or []):
             ensure_visual_blocks(slide, asset_ids=asset_ids)
+        from app.services.mentrix.presentation.quality_repair import repair_until_pass
+
+        degraded = bool(planned.get("degraded"))
+        plan, quality = repair_until_pass(
+            plan,
+            definition,
+            prompt=req.content,
+            context_items=list(req.context_items or []),
+            degraded=degraded,
+        )
+        # Always render a reviewable PPTX. Critic FAIL is reported on the deck;
+        # inspector collisions/clipping/broken rels are hard *export* blockers.
         try:
             t_render = time.perf_counter()
             data = render_plan_to_pptx(
@@ -152,6 +164,15 @@ class ZectNativePresentationProvider:
                 "zinnia_verified": False,
                 "block_code": "native_render_failed",
             }
+        from app.services.mentrix.presentation.final_pptx_inspector import (
+            inspect_and_repair_pptx,
+            merge_inspector_into_quality,
+        )
+
+        data, inspector = inspect_and_repair_pptx(data, definition=definition)
+        quality = merge_inspector_into_quality(quality, inspector)
+        layout_hard = bool(quality.get("layout_hard_fail"))
+        export_blocked = bool(layout_hard or inspector.get("status") == "FAIL")
         dest_dir = default_pptx_save_dir()
         dest = _unique_pptx_path(
             dest_dir,
@@ -203,6 +224,17 @@ class ZectNativePresentationProvider:
             "n_slides": planned["plan"].get("n_slides"),
             "charts_images_tables": visual_status,
             "visual_inventory": inventory,
+            "quality": quality,
+            "overlap_count": quality.get("overlap_count"),
+            "out_of_bounds_count": quality.get("out_of_bounds_count"),
+            "clipped_text_count": quality.get("clipped_text_count"),
+            "whitespace_ratio": quality.get("whitespace_ratio"),
+            "repeated_layout_count": quality.get("repeated_layout_count"),
+            "ungrounded_fact_count": quality.get("ungrounded_fact_count"),
+            "repair_attempts": quality.get("repair_attempts"),
+            "final_quality_status": quality.get("final_quality_status"),
+            "export_blocked": export_blocked,
+            "inspector": inspector,
             "blocked_external": False,
             "latency": latency,
             "telemetry": {
@@ -214,5 +246,6 @@ class ZectNativePresentationProvider:
                 "model": planned.get("model") or "",
                 "llm": planned.get("telemetry") or {},
                 "latency": latency,
+                "quality": quality,
             },
         }

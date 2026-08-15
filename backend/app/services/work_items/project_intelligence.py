@@ -38,7 +38,12 @@ class ProjectIntelligenceService:
         query: str = "",
         user_id: int | None = None,
     ) -> ProjectIntelligenceSnapshot:
-        lattice: dict[str, Any] = {"status": "unavailable", "hits": []}
+        lattice: dict[str, Any] = {
+            "status": "NOT_APPLICABLE",
+            "state": "NOT_APPLICABLE",
+            "hits": [],
+            "action_label": "Select a project or repository",
+        }
         blueprint: dict[str, Any] = {"snippet": "", "freshness": "unknown"}
         knowledge: list[dict[str, Any]] = []
         memory: list[dict[str, Any]] = []
@@ -46,22 +51,18 @@ class ProjectIntelligenceService:
         playbooks: list[dict[str, Any]] = []
         related = list(related_work or [])
 
-        # Lattice — status + query hits for Developer Ask context
+        # Lattice — canonical state for Developer/PI
         try:
             if project_key:
                 from app.services.lattice.indexer import get_lattice_status, query_graph
 
-                detail = {}
-                status_err = False
-                query_err = False
-                try:
-                    detail = get_lattice_status(project_key) or {}
-                except Exception:  # noqa: BLE001
-                    detail = {"project_key": project_key, "error": "lattice_status_failed"}
-                    status_err = True
+                detail = get_lattice_status(
+                    project_key, db=db, repository_id=repository_id
+                )
                 hits: list[dict[str, Any]] = []
                 q = (query or "").strip()
-                if q:
+                query_err = False
+                if q and detail.get("indexed"):
                     try:
                         raw_hits = query_graph(project_key, q, limit=12) or []
                         for h in raw_hits:
@@ -83,18 +84,39 @@ class ProjectIntelligenceService:
                     except Exception:  # noqa: BLE001
                         hits = []
                         query_err = True
-                lattice_status = "degraded" if (status_err or query_err) else "ok"
+                lattice_state = str(detail.get("state") or "ERROR")
+                if query_err and lattice_state == "READY":
+                    lattice_state = "ERROR"
+                    detail = {**detail, "state": "ERROR", "reason": "query_failed"}
                 lattice = {
-                    "status": lattice_status,
+                    "status": lattice_state,
+                    "state": lattice_state,
                     "detail": detail,
                     "hits": hits,
                     "project_key": project_key,
-                    "freshness": "ephemeral" if not hits else "indexed",
+                    "freshness": "indexed" if detail.get("indexed") else "none",
+                    "action": detail.get("action"),
+                    "action_label": detail.get("action_label"),
+                    "repository_id": repository_id,
                     "query_error": query_err,
-                    "status_error": status_err,
+                }
+            else:
+                lattice = {
+                    "status": "NOT_APPLICABLE",
+                    "state": "NOT_APPLICABLE",
+                    "hits": [],
+                    "action": None,
+                    "action_label": "Select a project or repository",
                 }
         except Exception:  # noqa: BLE001
-            lattice = {"status": "unavailable", "hits": []}
+            lattice = {
+                "status": "ERROR",
+                "state": "ERROR",
+                "hits": [],
+                "reason": "lattice_status_failed",
+                "action": "reindex",
+                "action_label": "Re-index repository",
+            }
 
         # Blueprint
         try:

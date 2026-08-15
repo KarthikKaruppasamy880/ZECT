@@ -239,10 +239,18 @@ export default function LatticeGraph() {
           </p>
           {(projectKey || wsKey) && (
             <p className="text-xs mt-1" data-testid="lattice-index-badge">
+              <span className="zect-chip bg-slate-100 text-slate-800 mr-2">
+                {idxStatus?.state || (idxStatus?.indexed ? "READY" : "NOT_INDEXED")}
+              </span>
               {idxStatus?.indexed ? (
-                <span className="text-teal-700">Graph loaded for {projectKey || wsKey}</span>
+                <span className="text-teal-700">
+                  Graph loaded for {projectKey || wsKey}
+                  {idxStatus.action_label ? ` · ${idxStatus.action_label}` : ""}
+                </span>
               ) : (
-                <span className="text-amber-700">Key {projectKey || wsKey} — ingest or Load graph</span>
+                <span className="text-amber-700">
+                  {idxStatus?.action_label || `Key ${projectKey || wsKey} — ingest or Load graph`}
+                </span>
               )}
             </p>
           )}

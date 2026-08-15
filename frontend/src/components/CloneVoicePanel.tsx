@@ -364,6 +364,32 @@ export default function CloneVoicePanel({
         A saved sample is not the same as ZECT Voicebox online — start the local engine to hear your voice.
       </p>
 
+      <dl
+        className={`grid gap-2 text-[11px] sm:grid-cols-2 ${dark ? "text-slate-300" : "text-slate-600"}`}
+        data-testid="voice-role-legend"
+      >
+        <div>
+          <dt className="font-semibold">My Voice Profiles</dt>
+          <dd>Clones stored in your account below.</dd>
+        </div>
+        <div>
+          <dt className="font-semibold">Companion Voice</dt>
+          <dd>Default clone for Mentrix Speak replies.</dd>
+        </div>
+        <div>
+          <dt className="font-semibold">Default Presentation Voice</dt>
+          <dd>Narrate / rehearse uses the starred default.</dd>
+        </div>
+        <div>
+          <dt className="font-semibold">Fallback Presentation Voice</dt>
+          <dd>Stock voice if Voicebox is offline.</dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="font-semibold">Auto fallback policy</dt>
+          <dd>Clone → stock TTS → No Narration when you choose it. One audio owner; no double voice.</dd>
+        </div>
+      </dl>
+
       <p
         data-testid="clone-voice-engine-status"
         className={`text-[11px] rounded border px-2 py-1 ${

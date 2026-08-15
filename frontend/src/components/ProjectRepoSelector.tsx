@@ -2,6 +2,7 @@ import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { CheckoutBlockedError, checkoutRepoBranch, getRepoIdentity } from "@/lib/api";
 import { deriveProjectKey, writeMentrixWorkspace } from "@/lib/workspaceContext";
+import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
 import { GitBranch, FolderOpen, RefreshCw, ChevronDown, Network } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
@@ -115,6 +116,17 @@ export default function ProjectRepoSelector() {
       setBranchBusy(false);
     }
   };
+
+  const latticeState = canonicalLatticeState(
+    latticeIdx?.state || (latticeIdx?.indexed ? "READY" : projectKey ? "NOT_INDEXED" : "NOT_APPLICABLE"),
+  );
+  const latticeTone = loadingStatus
+    ? "bg-slate-100 text-slate-500"
+    : latticeState === "READY"
+      ? "bg-teal-50 text-teal-700 border border-teal-200"
+      : latticeState === "ERROR"
+        ? "bg-rose-50 text-rose-700 border border-rose-200"
+        : "bg-amber-50 text-amber-700 border border-amber-200";
 
   return (
     <div className="flex items-center gap-2 text-sm flex-wrap">
@@ -340,17 +352,12 @@ export default function ProjectRepoSelector() {
       {activeRepo && projectKey && (
         <span
           data-testid="workspace-lattice-status"
-          className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium ${
-            loadingStatus
-              ? "bg-slate-100 text-slate-500"
-              : latticeIdx?.indexed
-                ? "bg-teal-50 text-teal-700 border border-teal-200"
-                : "bg-amber-50 text-amber-700 border border-amber-200"
-          }`}
+          data-lattice-state={loadingStatus ? "" : latticeState}
+          className={`hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium ${latticeTone}`}
           title={projectKey}
         >
           <Network size={10} />
-          {loadingStatus ? "…" : latticeIdx?.indexed ? "Lattice indexed" : "Not indexed"}
+          {loadingStatus ? "…" : latticeHeaderLabel(latticeState)}
         </span>
       )}
       <button

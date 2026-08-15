@@ -19,6 +19,7 @@ from app.services.lattice.indexer import (
     explain as lattice_explain,
     find_path,
     get_graph,
+    get_lattice_status,
     god_nodes as lattice_god_nodes,
     ingest_path,
     neighbors as lattice_neighbors,
@@ -277,7 +278,8 @@ def lattice_status_api(
     db: Session = Depends(get_db),
     _user: CurrentUser = Depends(get_current_user),
 ):
-    """Whether a project_key has an indexed Lattice graph and structural blueprint."""
+    """Canonical Lattice state plus backward-compatible indexed/has_blueprint fields."""
+    detail = get_lattice_status(project_key, db=db)
     graph = get_graph(project_key)
     bp = get_structural_blueprint(db, project_key)
     stats: dict = {}
@@ -295,11 +297,18 @@ def lattice_status_api(
     elif bp and bp.get("created_at"):
         updated_at = bp["created_at"]
     return {
-        "indexed": graph is not None,
+        "indexed": bool(detail.get("indexed")),
+        "state": detail.get("state") or ("READY" if graph else "NOT_INDEXED"),
+        "reason": detail.get("reason"),
+        "action": detail.get("action"),
+        "action_label": detail.get("action_label"),
         "project_key": project_key,
         "has_blueprint": bp is not None,
         "graph_stats": stats if stats else None,
         "blueprint_updated_at": updated_at,
+        "errors": detail.get("errors") or [],
+        "indexed_at": detail.get("indexed_at"),
+        "repository_id": detail.get("repository_id"),
     }
 
 

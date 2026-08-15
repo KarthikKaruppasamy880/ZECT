@@ -33,6 +33,8 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     repos: list[RepoCreate] = []
+    provenance: str = "user"
+    test_run_id: str = ""
 
 
 class ProjectUpdate(BaseModel):
@@ -52,6 +54,8 @@ class ProjectOut(ProjectBase):
     completion_percent: float
     token_savings: float
     risk_alerts: int
+    provenance: Optional[str] = "user"
+    test_run_id: Optional[str] = ""
     created_at: datetime
     updated_at: datetime
     repos: list[RepoOut] = []

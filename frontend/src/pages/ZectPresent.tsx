@@ -10,9 +10,10 @@ import {
   mentrixPresentationTemplates,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplateUpload,
+  type PresentTemplateCard,
 } from "@/lib/api";
 
-type Tmpl = { id: string; name: string; scope?: string; kind?: string; preview?: string };
+type Tmpl = PresentTemplateCard;
 
 type ProviderLifecycle =
   | "STARTING"
@@ -44,6 +45,68 @@ function initialSelected(): string {
   } catch {
     return DEFAULT_TEMPLATE;
   }
+}
+
+function TemplateCard({
+  tmpl,
+  selected,
+  testId,
+  onSelect,
+}: {
+  tmpl: Tmpl;
+  selected: boolean;
+  testId: string;
+  onSelect: () => void;
+}) {
+  const colors = tmpl.visual?.colors || [];
+  const layouts = tmpl.visual?.layout_names || [];
+  const ready = tmpl.visual?.ready ?? tmpl.native_ready;
+  const fonts = tmpl.visual?.fonts;
+  return (
+    <button
+      key={tmpl.id}
+      type="button"
+      data-testid={testId}
+      onClick={onSelect}
+      className={`text-left rounded-xl border p-3 hover:border-teal-500 ${
+        selected ? "border-teal-600 bg-teal-50 ring-2 ring-teal-600/30" : "border-slate-200 bg-white"
+      }`}
+    >
+      <div
+        className="mb-2 h-16 rounded-lg border border-slate-200 overflow-hidden flex"
+        data-testid={`${testId}-thumb`}
+        aria-hidden
+      >
+        {(colors.length ? colors : ["#0f766e", "#44546A", "#FF7500", "#E7E6E6"]).map((c) => (
+          <span key={c} className="flex-1" style={{ background: c }} />
+        ))}
+      </div>
+      <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+        <Sparkles className="h-4 w-4 text-teal-700 shrink-0" />
+        <span className="truncate">{tmpl.name}</span>
+      </div>
+      <p className="mt-1 text-xs text-slate-500 line-clamp-2">{tmpl.preview}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        <span className="zect-chip bg-slate-100 text-slate-700">{tmpl.scope || "ZECT"}</span>
+        <span
+          className={`zect-chip ${ready ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800"}`}
+        >
+          {tmpl.visual?.readiness || (ready ? "READY" : "TEMPLATE_NOT_READY")}
+        </span>
+      </div>
+      {fonts?.major ? (
+        <p className="mt-1 text-[10px] text-slate-400 truncate">
+          {fonts.major}
+          {fonts.minor && fonts.minor !== fonts.major ? ` / ${fonts.minor}` : ""}
+        </p>
+      ) : null}
+      {layouts.length > 0 ? (
+        <p className="mt-1 text-[10px] text-slate-500 line-clamp-1" title={layouts.join(", ")}>
+          {tmpl.visual?.layout_count || layouts.length} layouts · {layouts.slice(0, 3).join(" · ")}
+        </p>
+      ) : null}
+    </button>
+  );
 }
 
 export default function ZectPresent() {
@@ -92,7 +155,11 @@ export default function ZectPresent() {
       /* ignore */
     }
     const p = await mentrixPresentationTemplatePreview(canonical).catch(() => null);
-    setPreview(p?.preview || p?.name || canonical);
+    const bits = [p?.preview || p?.name || canonical];
+    const layouts = p?.visual?.layout_names || [];
+    if (layouts.length) bits.push(layouts.slice(0, 4).join(" · "));
+    if (p?.visual?.error) bits.push(`Preview error: ${p.visual.error}`);
+    setPreview(bits.join(" — "));
     setStep((s) => (s > 1 ? s : 1));
   };
 
@@ -216,21 +283,13 @@ export default function ZectPresent() {
             <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Zinnia</p>
             <div className="grid sm:grid-cols-3 gap-3">
               {zinnia.map((t) => (
-                <button
+                <TemplateCard
                   key={t.id}
-                  type="button"
-                  data-testid={`zect-present-template-${t.id}`}
-                  onClick={() => void selectTemplate(t.id)}
-                  className={`text-left rounded-xl border p-3 hover:border-teal-500 ${
-                    selected === t.id ? "border-teal-600 bg-teal-50" : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
-                    <Sparkles className="h-4 w-4 text-teal-700" />
-                    {t.name}
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">{t.preview}</p>
-                </button>
+                  tmpl={t}
+                  selected={selected === t.id}
+                  testId={`zect-present-template-${t.id}`}
+                  onSelect={() => void selectTemplate(t.id)}
+                />
               ))}
             </div>
           </div>
@@ -239,18 +298,13 @@ export default function ZectPresent() {
             <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Organization</p>
             <div className="grid sm:grid-cols-3 gap-3">
               {org.map((t) => (
-                <button
+                <TemplateCard
                   key={`org-${t.id}`}
-                  type="button"
-                  data-testid={`zect-present-template-${t.id}`}
-                  onClick={() => void selectTemplate(t.id)}
-                  className={`text-left rounded-xl border p-3 hover:border-teal-500 ${
-                    selected === t.id ? "border-teal-600 bg-teal-50" : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="text-sm font-medium text-slate-900">{t.name}</div>
-                  <p className="mt-1 text-xs text-slate-500">{t.preview}</p>
-                </button>
+                  tmpl={t}
+                  selected={selected === t.id}
+                  testId={`zect-present-template-${t.id}`}
+                  onSelect={() => void selectTemplate(t.id)}
+                />
               ))}
             </div>
           </div>
@@ -262,18 +316,13 @@ export default function ZectPresent() {
             ) : (
               <div className="grid sm:grid-cols-3 gap-3">
                 {mine.map((t) => (
-                  <button
+                  <TemplateCard
                     key={t.id}
-                    type="button"
-                    data-testid={`zect-present-my-${t.id}`}
-                    onClick={() => void selectTemplate(t.id)}
-                    className={`text-left rounded-xl border p-3 hover:border-teal-500 ${
-                      selected === t.id ? "border-teal-600 bg-teal-50" : "border-slate-200 bg-white"
-                    }`}
-                  >
-                    <div className="text-sm font-medium text-slate-900">{t.name}</div>
-                    <p className="mt-1 text-xs text-slate-500">{t.preview}</p>
-                  </button>
+                    tmpl={t}
+                    selected={selected === t.id}
+                    testId={`zect-present-my-${t.id}`}
+                    onSelect={() => void selectTemplate(t.id)}
+                  />
                 ))}
               </div>
             )}
@@ -292,13 +341,13 @@ export default function ZectPresent() {
           <button
             type="button"
             data-testid="zect-present-continue-generate"
-            className="rounded-lg bg-teal-700 px-4 py-2 text-sm text-white hover:bg-teal-800"
+            className="zect-btn zect-btn-primary"
             onClick={() => {
               setPanelKey((k) => k + 1);
               setStep(2);
             }}
           >
-            Continue to Generate
+            Generate presentation
           </button>
         </section>
       )}

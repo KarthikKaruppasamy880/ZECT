@@ -6,7 +6,9 @@ import {
   mentrixAnalyzeDeck,
   mentrixParsePptxFromPath,
   mentrixPresentPptxDownload,
+  mentrixPresentQualityGate,
   mentrixPresentSaveNotes,
+  mentrixPresentSlidePreview,
   mentrixPresentationAssetUpload,
   type PresentBlock,
   type PresentSlide,
@@ -26,6 +28,32 @@ const fingerprint = (rows: Slide[]) =>
     .map((s) => `${s.index}:${s.text || ""}:${s.notes || ""}:${JSON.stringify(s.blocks || [])}`)
     .join("|");
 
+function SlideThumbPreview({ path, index }: { path: string; index: number }) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let active = true;
+    let created = "";
+    mentrixPresentSlidePreview(path, index)
+      .then((u) => {
+        if (!active) {
+          URL.revokeObjectURL(u);
+          return;
+        }
+        created = u;
+        setUrl(u);
+      })
+      .catch(() => {
+        if (active) setUrl("");
+      });
+    return () => {
+      active = false;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [path, index]);
+  if (!url) return null;
+  return <img src={url} alt="" className="mb-1 h-14 w-full rounded border border-slate-200 object-cover" />;
+}
+
 export default function PresentEditor({ pptxPath }: PresentEditorProps) {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [selected, setSelected] = useState(0);
@@ -33,6 +61,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
   const [busy, setBusy] = useState(false);
   const [filename, setFilename] = useState("");
   const [sourceFp, setSourceFp] = useState("");
+  const [previewUrl, setPreviewUrl] = useState("");
 
   const persist = useCallback((path: string, next: Slide[], fp: string) => {
     try {
@@ -86,6 +115,31 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
   }, [load]);
 
   const current = slides[selected];
+
+  useEffect(() => {
+    let active = true;
+    let created = "";
+    if (!pptxPath || !current) {
+      setPreviewUrl("");
+      return;
+    }
+    mentrixPresentSlidePreview(pptxPath, selected)
+      .then((url) => {
+        if (!active) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        created = url;
+        setPreviewUrl(url);
+      })
+      .catch(() => {
+        if (active) setPreviewUrl("");
+      });
+    return () => {
+      active = false;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [pptxPath, selected, current]);
 
   const patchSlide = (index: number, patch: Partial<Slide>) => {
     setSlides((prev) => {
@@ -173,6 +227,13 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
   const exportPptx = async () => {
     setBusy(true);
     try {
+      const gate = await mentrixPresentQualityGate(pptxPath);
+      if (gate.export_blocked || gate.hard_blocked) {
+        setStatus(
+          `Export blocked: ${(gate.hard_findings || []).join(", ") || "critical quality"}. Accepting warnings cannot override this.`,
+        );
+        return;
+      }
       const { blob, filename: name } = await mentrixPresentPptxDownload(pptxPath);
       if (blob.size < 100) throw new Error("Export produced an empty file");
       const url = URL.createObjectURL(blob);
@@ -246,6 +307,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                   selected === i ? "bg-teal-50 text-teal-900" : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
+                <SlideThumbPreview path={pptxPath} index={s.index} />
                 <div className="font-medium">Slide {s.index + 1}</div>
                 <div className="line-clamp-3 text-slate-500">{s.text || s.notes || "(empty)"}</div>
               </button>
@@ -276,6 +338,21 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
         </ul>
         {current ? (
           <div className="flex h-full min-w-0 flex-col gap-2 overflow-auto p-3">
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt={`Slide ${current.index + 1} canvas`}
+                data-testid="present-editor-canvas"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50"
+              />
+            ) : (
+              <div
+                data-testid="present-editor-canvas"
+                className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-500"
+              >
+                Slide canvas preview unavailable — showing extracted text.
+              </div>
+            )}
             <label className="text-[11px] font-medium text-slate-600">
               Slide text
               <textarea

@@ -92,4 +92,27 @@ class PresentationService:
                 }
         out = self._provider.generate(req)
         out.setdefault("provider", self.provider_name)
+        path = str(out.get("path") or "").strip()
+        if out.get("ok") and path:
+            try:
+                from pathlib import Path
+
+                from app.services.mentrix.presentation.final_pptx_inspector import (
+                    inspect_and_repair_pptx,
+                    merge_inspector_into_quality,
+                )
+
+                pptx = Path(path)
+                if pptx.is_file():
+                    data, inspector = inspect_and_repair_pptx(pptx.read_bytes())
+                    pptx.write_bytes(data)
+                    quality = merge_inspector_into_quality(dict(out.get("quality") or {}), inspector)
+                    out["quality"] = quality
+                    out["inspector"] = inspector
+                    out["overlap_count"] = quality.get("overlap_count")
+                    out["final_quality_status"] = quality.get("final_quality_status") or inspector.get("status")
+                    out["export_blocked"] = bool(quality.get("layout_hard_fail") or inspector.get("status") == "FAIL")
+                    out["bytes"] = len(data)
+            except Exception as exc:  # noqa: BLE001 — inspector must not 500 generate
+                out.setdefault("inspector_error", str(exc)[:200])
         return out

@@ -582,6 +582,114 @@ def get_graph(project_key: str) -> LatticeGraph | None:
     return None
 
 
+LATTICE_STATES = (
+    "NOT_CONFIGURED",
+    "NOT_INDEXED",
+    "INDEXING",
+    "READY",
+    "STALE",
+    "ERROR",
+    "NOT_APPLICABLE",
+    "REGRESSION",
+)
+
+
+def get_lattice_status(
+    project_key: str,
+    *,
+    db: Any = None,
+    repository_id: int | None = None,
+) -> dict[str, Any]:
+    """Canonical Lattice state for Developer/PI. Never return a vague MISSING."""
+    pk = (project_key or "").strip()
+    if not pk:
+        return {
+            "state": "NOT_APPLICABLE",
+            "indexed": False,
+            "project_key": "",
+            "reason": "no_project_key",
+            "action": None,
+            "action_label": "Select a project or repository",
+        }
+    graph = get_graph(pk)
+    repo = None
+    if db is not None and repository_id:
+        try:
+            from app.models import Repo
+
+            repo = db.query(Repo).filter(Repo.id == repository_id).first()
+        except Exception:  # noqa: BLE001
+            repo = None
+
+    clone_status = str(getattr(repo, "clone_status", "") or "")
+    stats = getattr(repo, "index_stats", None) if repo is not None else None
+    indexing_flag = str(stats.get("indexing") or "") if isinstance(stats, dict) else ""
+    if clone_status == "cloning" or indexing_flag.lower() in {"1", "true"}:
+        return {
+            "state": "INDEXING",
+            "indexed": False,
+            "project_key": pk,
+            "reason": "index_in_progress",
+            "action": "wait",
+            "action_label": "Indexing in progress",
+            "clone_status": clone_status,
+        }
+    if graph and graph.errors and int(graph.files_indexed or 0) == 0:
+        return {
+            "state": "ERROR",
+            "indexed": False,
+            "project_key": pk,
+            "reason": "index_failed",
+            "action": "reindex",
+            "action_label": "Re-index repository",
+            "errors": list(graph.errors)[:8],
+        }
+    if not graph:
+        if repo and clone_status in {"", "not_cloned"}:
+            return {
+                "state": "NOT_CONFIGURED",
+                "indexed": False,
+                "project_key": pk,
+                "reason": "repo_not_cloned",
+                "action": "clone_or_index",
+                "action_label": "Clone or index repository",
+                "repository_id": repository_id,
+            }
+        return {
+            "state": "NOT_INDEXED",
+            "indexed": False,
+            "project_key": pk,
+            "reason": "graph_missing",
+            "action": "index_repository",
+            "action_label": "Index repository",
+            "repository_id": repository_id,
+        }
+
+    stale = False
+    indexed_at = getattr(repo, "indexed_at", None) if repo else None
+    last_pulled = getattr(repo, "last_pulled_at", None) if repo else None
+    if indexed_at and last_pulled and last_pulled > indexed_at:
+        stale = True
+    state = "STALE" if stale else "READY"
+    return {
+        "state": state,
+        "indexed": True,
+        "project_key": pk,
+        "reason": "pulled_after_index" if stale else "graph_ready",
+        "action": "reindex" if stale else "view_intelligence",
+        "action_label": "Re-index repository" if stale else "View intelligence",
+        "files_indexed": graph.files_indexed,
+        "symbols": graph.symbols,
+        "nodes": len(graph.nodes),
+        "edges": len(graph.edges),
+        "languages": graph.languages,
+        "errors": list(graph.errors)[:8],
+        "indexed_at": indexed_at.isoformat() if indexed_at else None,
+        "last_pulled_at": last_pulled.isoformat() if last_pulled else None,
+        "repository_id": repository_id,
+    }
+
+
 def query_graph(
     project_key: str,
     q: str,

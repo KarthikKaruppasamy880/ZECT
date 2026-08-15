@@ -3,6 +3,7 @@
  * Electron: parse notes → F5 → speak await → Right Arrow.
  * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
  */
+import { Link } from "react-router-dom";
 import PresentEditor from "@/components/PresentEditor";
 import { useEffect, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
@@ -89,6 +90,12 @@ type Props = {
   variant?: "dark" | "light";
   /** Prefill ZECT template id (e.g. zinnia-executive-v1) when mounted from product Present. */
   initialTemplateId?: string;
+  /** companion = narrate/open only; create = Generate presentation. */
+  mode?: "companion" | "create";
+  initialPath?: string;
+  initialPrompt?: string;
+  toneHint?: string;
+  onGenerated?: (path: string) => void;
 };
 
 type SlideParsed = { index: number; notes?: string; text?: string };
@@ -117,7 +124,15 @@ function friendlyDesktopError(code: string): string {
   return c;
 }
 
-export default function PresentDeckPanel({ variant = "dark", initialTemplateId }: Props) {
+export default function PresentDeckPanel({
+  variant = "dark",
+  initialTemplateId,
+  mode = "companion",
+  initialPath,
+  initialPrompt,
+  toneHint,
+  onGenerated,
+}: Props) {
   const [path, setPath] = useState("");
   const [notes, setNotes] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -149,20 +164,22 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
+  const isCreate = mode === "create";
   const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
   const [lastTemplateSent, setLastTemplateSent] = useState("");
   const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
   const [generationProgress, setGenerationProgress] = useState("");
   const [plannerDegraded, setPlannerDegraded] = useState(false);
+  const [qualitySummary, setQualitySummary] = useState("");
   const usingStock = voiceChoice.startsWith("stock:");
   const usingNone = voiceChoice === "none";
   const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
 
   useEffect(() => {
     try {
-      setPath(localStorage.getItem(STORAGE_KEY) || "");
+      setPath(initialPath || localStorage.getItem(STORAGE_KEY) || "");
       setNotes(localStorage.getItem(NOTES_KEY) || "");
-      setPrompt(localStorage.getItem(PROMPT_KEY) || "");
+      setPrompt(initialPrompt || localStorage.getItem(PROMPT_KEY) || "");
       setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
       setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
       setAudienceId(localStorage.getItem(AUDIENCE_KEY) || "general");
@@ -461,7 +478,7 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
   const generateDeck = async (opts?: { fastBasic?: boolean }) => {
     setBusy(true);
     setStatus("");
-    setGenerationProgress("Preparing");
+    setGenerationProgress("Understanding request");
     setPlannerDegraded(false);
     try {
       if (!presentonReady) {
@@ -469,7 +486,9 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         setStatus("Presentation provider unavailable — BLOCKED_EXTERNAL until Presenton is configured and reachable.");
         return;
       }
-      const content = prompt.trim();
+      const content = [prompt.trim(), toneHint?.trim() ? `Tone: ${toneHint.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n\n");
       if (!content) {
         setStatus("Enter a deck prompt (topic + key points) for Presenton.");
         return;
@@ -508,7 +527,18 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       }
       const slidesHint = prep.n_slides_hint || nSlides;
       if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
-      const stages = ["Outline", "Slides", "Applying template", "Finalizing"];
+      const stages = [
+        "Understanding request",
+        "Building story",
+        "Selecting layouts",
+        "Planning visuals",
+        `Composing slide 1 of ${slidesHint}`,
+        "Grounding",
+        "Quality",
+        "Repairing",
+        "Building PPTX",
+        "Ready for review",
+      ];
       let stageIdx = 0;
       setGenerationProgress(stages[0]);
       const stageTimer = window.setInterval(() => {
@@ -537,7 +567,15 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       }
       if (out?.path) {
         persistPath(out.path);
-        setGenerationProgress("Ready");
+        setGenerationProgress("Ready for review");
+        onGenerated?.(out.path);
+        const qualityBits = [
+          out.provider,
+          out.planner_mode,
+          out.final_quality_status ? `quality=${out.final_quality_status}` : "",
+          out.repair_attempts != null ? `repair=${out.repair_attempts}` : "",
+        ].filter(Boolean);
+        setQualitySummary(qualityBits.join(" · "));
         const degraded = Boolean(out.degraded || out.planner_mode === "HEURISTIC_FALLBACK");
         setPlannerDegraded(degraded);
         const zinniaNote =
@@ -915,10 +953,14 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         </span>
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
-        {isDesktop
-          ? "Electron: open PowerPoint + Zoom, then Present & narrate advances slides (F5 / Right). You share the window in Zoom."
-          : "Browser: upload a .pptx to narrate every slide with your clone. For PowerPoint auto-advance, use the Electron desktop app."}
+        {isCreate
+          ? "Prompt + template, then Generate presentation. Voice and Zoom live on Rehearse after a draft exists."
+          : isDesktop
+            ? "Electron: open PowerPoint + Zoom, then Present & narrate advances slides (F5 / Right). You share the window in Zoom."
+            : "Browser: upload a .pptx to narrate every slide with your clone. For PowerPoint auto-advance, use the Electron desktop app."}
       </p>
+      {!isCreate ? (
+        <>
       <p
         data-testid="present-deck-voice-status"
         className={`text-[11px] rounded border px-2 py-1 ${
@@ -948,8 +990,21 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       >
         {engineBannerText}
       </p>
+        </>
+      ) : null}
+      {!isCreate ? (
+        <Link
+          to="/present/create"
+          className={`inline-flex text-xs underline ${dark ? "text-teal-300" : "text-teal-800"}`}
+          data-testid="present-deck-handoff-create"
+        >
+          Create with AI in Present
+        </Link>
+      ) : null}
+      {isCreate ? (
+      <>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
-        Generate deck prompt (Presenton)
+        What should this presentation cover?
         <textarea
           data-testid="present-deck-prompt"
           value={prompt}
@@ -1118,26 +1173,39 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
         data-testid="present-deck-generate"
         disabled={busy || !presentonReady}
         onClick={() => void generateDeck()}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-700 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950 disabled:opacity-40"
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-violet-700 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950 disabled:opacity-40"
+            : "inline-flex items-center gap-1.5 rounded-lg bg-teal-800 px-3 py-2 text-xs text-white hover:bg-teal-900 disabled:opacity-40"
+        }
         title={
           presentonReady
-            ? "Calls PRESENTON_BASE_URL generate API with selected template"
-            : "Presenton unreachable — set PRESENTON_BASE_URL and start Presenton Docker"
+            ? "Generate a reviewable draft (Quality). Inspector and critic always run."
+            : "Presentation provider unreachable"
         }
       >
         <Sparkles className="h-3.5 w-3.5" />
-        Generate deck
+        Generate presentation
       </button>
+      <details className="inline-block ml-2 align-middle" data-testid="present-advanced-generate">
+        <summary className={`cursor-pointer text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+          Advanced
+        </summary>
       <button
         type="button"
         data-testid="present-deck-generate-fast-basic"
         disabled={busy || !presentonReady}
         onClick={() => void generateDeck({ fastBasic: true })}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
-        title="Skip Model Gateway and use labeled Fast-Basic heuristic planning"
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 mt-1"
+            : "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 mt-1"
+        }
+        title="Fast reduces planning latency only — layout inspector still runs"
       >
-        Fast-Basic generation
+        Fast
       </button>
+      </details>
       {plannerDegraded ? (
         <p className={`text-[11px] mt-1 ${dark ? "text-amber-300" : "text-amber-800"}`} data-testid="present-planner-degraded">
           Degraded mode: heuristic Fast-Basic draft. Retry Generate for Model Gateway quality. Presenton fallback is not automatic.
@@ -1160,6 +1228,11 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           {generationProgress}
         </p>
       ) : null}
+      {qualitySummary ? (
+        <p className={`text-[11px] ${dark ? "text-slate-300" : "text-slate-700"}`} data-testid="present-quality-status">
+          {qualitySummary}
+        </p>
+      ) : null}
       {lastTemplateSent && (
         <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
           Last Presenton template_sent: {lastTemplateSent}
@@ -1168,17 +1241,25 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
       <button
         type="button"
         data-testid="present-deck-analyze"
-        disabled={busy}
+        disabled={busy || !path}
         onClick={() => void analyzeExisting()}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
-        title="Flow A: classify + audience + claims for existing notes/upload"
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
+            : "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 ml-2"
+        }
+        title="Review quality of the generated draft"
       >
-        Analyze deck
+        Review quality
       </button>
+      </>
+      ) : null}
       <p className={`text-[11px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
         Pick template + slides, then Generate. Open presentation / Open Zoom need Electron. Clone narrate needs
         ZECT Voicebox online (or pick an OpenAI stock voice).
       </p>
+      {!isCreate ? (
+      <>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Presentation path (.pptx){isDesktop ? "" : " — optional in browser; prefer upload below"}
         <input
@@ -1372,6 +1453,9 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           </button>
         )}
       </div>
+      {path && /\.pptx$/i.test(path) ? <PresentEditor pptxPath={path} /> : null}
+      </>
+      ) : null}
       {status && (
         <p
           data-testid="present-deck-status"
@@ -1380,7 +1464,6 @@ export default function PresentDeckPanel({ variant = "dark", initialTemplateId }
           {status}
         </p>
       )}
-      {path && /\.pptx$/i.test(path) ? <PresentEditor pptxPath={path} /> : null}
     </div>
   );
 }

@@ -107,7 +107,7 @@ def test_git_add_rejects_sibling_repo_path(allowed_root: Path):
     (b / "secret.txt").write_text("secret\n", encoding="utf-8")
     with pytest.raises(HTTPException) as exc:
         relpaths_inside_repo(str(a), [str(b / "secret.txt")])
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 400
     with pytest.raises(HTTPException):
         git_ops.git_add(str(a), files=["../beta/secret.txt"])
 

@@ -32,8 +32,12 @@ def resolved_under(candidate: str | Path, root: str | Path) -> Path:
 
 
 def relpaths_inside_repo(repo_path: str, files: Iterable[str]) -> list[str]:
-    """Normalize git pathspecs so they cannot escape the bound repo (sibling / .. / flags)."""
-    repo = path_under_allowed_roots(repo_path)
+    """Normalize git pathspecs so they cannot escape the bound repo (sibling / .. / flags).
+
+    ``repo_path`` must already be validated by git_ops (allowed roots). This helper
+    only jails pathspecs inside that directory after symlink resolve.
+    """
+    repo = Path(repo_path).resolve()
     out: list[str] = []
     for raw in files:
         name = str(raw or "").strip()
@@ -41,7 +45,14 @@ def relpaths_inside_repo(repo_path: str, files: Iterable[str]) -> list[str]:
             continue
         if name.startswith("-"):
             raise HTTPException(status_code=400, detail="invalid_pathspec")
-        rel = resolved_under(name, repo).relative_to(repo)
+        as_path = Path(name)
+        if as_path.is_absolute() or ".." in as_path.parts:
+            raise HTTPException(status_code=400, detail="path_outside_repo")
+        resolved = (repo / as_path).resolve()
+        try:
+            rel = resolved.relative_to(repo)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="path_outside_repo") from exc
         out.append(str(rel).replace("\\", "/"))
     return out
 

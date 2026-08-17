@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   ChevronDown,
@@ -38,7 +38,14 @@ import {
 } from "@/lib/workspaceChrome";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
+import WorkspaceRootsRail from "@/components/WorkspaceRootsRail";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import {
+  excludeWorkspaceRoot,
+  excludedRootIds,
+  includeWorkspaceRoot,
+  visibleProjectRepos,
+} from "@/lib/workspaceRoots";
 import {
   fileList,
   fileRead,
@@ -51,7 +58,7 @@ import {
   mentrixGetRun,
   mentrixListRuns,
 } from "@/lib/api";
-import { readMentrixWorkspace } from "@/lib/workspaceContext";
+import { deriveProjectKey, readMentrixWorkspace, writeMentrixWorkspace } from "@/lib/workspaceContext";
 import { isPathInsideRoot, languageFromPath, normalizePath, pathMatchesMarker, relativeToRoot } from "@/lib/workspacePaths";
 
 type TreeNode = {
@@ -137,7 +144,12 @@ export default function DeveloperWorkspace() {
   const deepGoal = searchParams.get("goal") || "";
   const deepWorkItem = searchParams.get("work_item_id");
   const workItemId = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
-  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos } = useActiveProject();
+  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos, setActiveRepo } =
+    useActiveProject();
+  const [excludedRoots, setExcludedRoots] = useState(() => excludedRootIds(activeProjectId));
+  useEffect(() => {
+    setExcludedRoots(excludedRootIds(activeProjectId));
+  }, [activeProjectId]);
   const projectRepoIds = useMemo(
     () =>
       repos
@@ -145,10 +157,23 @@ export default function DeveloperWorkspace() {
         .map((r) => r.repo_id),
     [repos, activeProjectId],
   );
+  const visibleRoots = useMemo(
+    () => visibleProjectRepos(activeProjectId, repos, excludedRoots),
+    [activeProjectId, repos, excludedRoots],
+  );
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
-  const [showImport, setShowImport] = useState(() => !rootPath);
+  const [showImport, setShowImport] = useState(false);
+  const userToggledImport = useRef(false);
+  useEffect(() => {
+    if (userToggledImport.current) return;
+    if (!rootPath && visibleRoots.length === 0) {
+      setShowImport(true);
+      return;
+    }
+    if (rootPath) setShowImport(false);
+  }, [rootPath, visibleRoots.length]);
   const [chrome, setChrome] = useState(() => loadWorkspaceChrome());
   const showExplorer = chrome.explorer;
   const showAgent = chrome.agent;
@@ -278,19 +303,22 @@ export default function DeveloperWorkspace() {
     }
   }, [deepRunId]);
 
+  const treeGen = useRef(0);
   const loadTree = useCallback(async () => {
+    const gen = ++treeGen.current;
     if (!rootPath) {
-      setTree([]);
+      if (gen === treeGen.current) setTree([]);
       return;
     }
     if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
-      setTree([]);
+      if (gen === treeGen.current) setTree([]);
       return;
     }
     setLoadingTree(true);
     setError("");
     try {
       const nodes = await fileTree(rootPath, 5);
+      if (gen !== treeGen.current) return;
       const normalized = normalizeTreeNodes(Array.isArray(nodes) ? nodes : []);
       setTree(normalized);
       setExpanded(new Set([normalizePath(rootPath)]));
@@ -298,18 +326,61 @@ export default function DeveloperWorkspace() {
       setSelectedPath("");
       setContent("");
       setBaseline("");
+      setLoadingTree(false);
       await Promise.all([refreshGit(rootPath), refreshAgentMarkers()]);
     } catch (e) {
+      if (gen !== treeGen.current) return;
       setError(e instanceof Error ? e.message : "Failed to load tree");
       setTree([]);
     } finally {
-      setLoadingTree(false);
+      if (gen === treeGen.current) setLoadingTree(false);
     }
   }, [rootPath, refreshGit, refreshAgentMarkers]);
 
   useEffect(() => {
     void loadTree();
   }, [loadTree]);
+
+  const handleSelectRoot = (repoId: number) => {
+    const nextId = Number(repoId);
+    if (!Number.isFinite(nextId) || nextId <= 0) return;
+    if (nextId === Number(activeRepoId)) return;
+    if (dirty && !window.confirm("Switch workspace root and discard unsaved editor changes?")) return;
+    const repo = visibleRoots.find((row) => Number(row.repo_id) === nextId);
+    if (repo?.local_path) {
+      writeMentrixWorkspace(repo.local_path, deriveProjectKey(repo.owner, repo.repo_name));
+    }
+    setActiveRepo(nextId);
+  };
+
+  const handleRemoveRoot = (repoId: number) => {
+    if (activeProjectId == null) return;
+    if (!window.confirm("Remove this folder from the workspace? Disk files are not deleted.")) return;
+    const next = excludeWorkspaceRoot(activeProjectId, repoId);
+    setExcludedRoots(next);
+    if (activeRepoId === repoId) {
+      const remain = visibleProjectRepos(activeProjectId, repos, next);
+      setActiveRepo(remain[0]?.repo_id ?? null);
+    }
+  };
+
+  const handleAddRoot = () => {
+    userToggledImport.current = true;
+    setShowImport(true);
+  };
+
+  const handleRepairRoot = (repoId: number) => {
+    userToggledImport.current = true;
+    setActiveRepo(repoId);
+    setShowImport(true);
+  };
+
+  const handleRootActivated = (info: { projectId: number; repoId: number; localPath?: string }) => {
+    includeWorkspaceRoot(info.projectId, info.repoId);
+    setExcludedRoots(excludedRootIds(info.projectId));
+    setShowImport(false);
+    void loadTree();
+  };
 
   const loadDirChildren = useCallback(async (dirPath: string): Promise<TreeNode[]> => {
     const norm = normalizePath(dirPath);
@@ -559,7 +630,10 @@ export default function DeveloperWorkspace() {
           <button
             type="button"
             data-testid="workspace-import-local"
-            onClick={() => setShowImport((v) => !v)}
+            onClick={() => {
+              userToggledImport.current = true;
+              setShowImport((v) => !v);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
           >
             <FolderOpen className="h-3.5 w-3.5" />
@@ -630,10 +704,7 @@ export default function DeveloperWorkspace() {
             compact
             preferOpenLocal
             navigateTo={null}
-            onActivated={() => {
-              setShowImport(false);
-              void loadTree();
-            }}
+            onActivated={handleRootActivated}
           />
         </div>
       )}
@@ -673,7 +744,11 @@ export default function DeveloperWorkspace() {
           </>
         )}
         <span className="text-slate-400">|</span>
-        <span className="truncate font-mono text-[11px] text-slate-500" title={rootPath}>
+        <span
+          className="truncate font-mono text-[11px] text-slate-500"
+          title={rootPath}
+          data-testid="workspace-active-root-path"
+        >
           {rootPath || "No workspace root — set Active Project or Mentrix workspace"}
         </span>
         {activeRepo && (
@@ -697,7 +772,7 @@ export default function DeveloperWorkspace() {
 
       <div className="flex flex-1 min-h-0 gap-3">
         <div className="flex flex-1 min-h-0 flex-col min-w-0">
-      {!rootPath ? (
+      {!rootPath && visibleRoots.length === 0 ? (
         <div className="flex flex-1 min-h-0 flex-col gap-3">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
           <div className="flex items-start gap-2">
@@ -728,11 +803,21 @@ export default function DeveloperWorkspace() {
       ) : (
         (() => {
           const explorerPane = (
-            <aside className="h-full flex flex-col gap-2 min-h-0 min-w-0">
-              <div
-                className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white"
-                data-testid="workspace-file-tree"
-              >
+            <aside className="h-full flex flex-col gap-2 min-h-0 min-w-0 relative z-10">
+              <div className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white flex flex-col min-h-0">
+                <WorkspaceRootsRail
+                  projectId={activeProjectId}
+                  repos={visibleRoots}
+                  activeRepoId={activeRepoId}
+                  onSelectRoot={handleSelectRoot}
+                  onRemoveRoot={handleRemoveRoot}
+                  onAddRoot={handleAddRoot}
+                  onRepairRoot={handleRepairRoot}
+                />
+                <div
+                  className="flex-1 overflow-auto min-h-0"
+                  data-testid="workspace-file-tree"
+                >
                 <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100 flex items-center justify-between">
                   <span>Files</span>
                   <button
@@ -744,7 +829,11 @@ export default function DeveloperWorkspace() {
                     {maximized === "explorer" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                   </button>
                 </div>
-                {loadingTree ? (
+                {!rootPath ? (
+                  <p className="p-3 text-xs text-amber-800" data-testid="workspace-root-unavailable-active">
+                    ROOT_UNAVAILABLE. Repair this root or switch to another authorized folder.
+                  </p>
+                ) : loadingTree ? (
                   <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
                   </div>
@@ -753,6 +842,7 @@ export default function DeveloperWorkspace() {
                 ) : (
                   <div className="py-1">{renderTree(tree)}</div>
                 )}
+                </div>
               </div>
               {showSymbols ? (
                 <div className="h-56 shrink-0">

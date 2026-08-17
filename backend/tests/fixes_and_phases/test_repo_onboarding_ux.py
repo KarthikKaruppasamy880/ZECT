@@ -288,6 +288,39 @@ def test_safe_checkout_stash_allows_switch_and_updates_branch(allowed_root: Path
     ident = repo_git_identity(mem_db, repo.id)
     assert ident["branch"] == "dev"
     assert ident["head_sha"] == _head_sha(repo_path)
+    assert ident["root_state"] == "READY"
+
+
+def test_repo_git_identity_missing_path_is_root_unavailable(allowed_root: Path, mem_db: Session):
+    project = mem_db.query(Project).first()
+    repo_path = _init_git_repo(allowed_root / "gone-root")
+    repo = _register_repo(mem_db, project, repo_path)
+    repo.local_path = str((allowed_root / "does-not-exist").resolve())
+    mem_db.commit()
+    ident = repo_git_identity(mem_db, repo.id)
+    assert ident["ok"] is True
+    assert ident["root_state"] == "ROOT_UNAVAILABLE"
+    assert ident["cloned"] is False
+    assert ident["error"] == "path_not_found"
+
+
+def test_repo_git_identity_missing_local_path_is_root_unavailable(mem_db: Session):
+    project = mem_db.query(Project).first()
+    repo = Repo(
+        project_id=project.id,
+        owner="local",
+        repo_name="ghost",
+        default_branch="main",
+        clone_status="cloned",
+        local_path=None,
+    )
+    mem_db.add(repo)
+    mem_db.commit()
+    mem_db.refresh(repo)
+    ident = repo_git_identity(mem_db, repo.id)
+    assert ident["ok"] is True
+    assert ident["root_state"] == "ROOT_UNAVAILABLE"
+    assert ident["error"] == "missing_local_path"
 
 
 # ---------------------------------------------------------------------------

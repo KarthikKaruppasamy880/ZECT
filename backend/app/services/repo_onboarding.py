@@ -346,25 +346,41 @@ def clone_from_url(
     return {"ok": True, "repo_id": repo.id, "reused": False, **result}
 
 
+_ROOT_UNAVAILABLE_ERRORS = frozenset({"path_not_found", "not_a_git_repository", "missing_local_path", "path_denied"})
+
+
+def _unavailable_identity(repo: Repo, *, error: str, local_path: str | None = None) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "repo_id": repo.id,
+        "cloned": False,
+        "root_state": "ROOT_UNAVAILABLE",
+        "error": error,
+        "branch": repo.clone_branch or repo.default_branch or "",
+        "head_sha": "",
+        "dirty": False,
+        "clean": True,
+        "local_path": local_path if local_path is not None else repo.local_path,
+        "origin_url": "",
+    }
+
+
 def repo_git_identity(db: Session, repo_id: int) -> dict[str, Any]:
     repo = db.query(Repo).filter(Repo.id == repo_id).first()
     if not repo:
         return {"ok": False, "error": "repo_not_found"}
     if not repo.local_path:
-        return {
-            "ok": True,
-            "repo_id": repo.id,
-            "cloned": False,
-            "branch": repo.clone_branch or repo.default_branch,
-            "head_sha": "",
-            "dirty": False,
-            "clean": True,
-            "local_path": None,
-        }
-    info = inspect_git_repo(repo.local_path)
+        return _unavailable_identity(repo, error="missing_local_path", local_path=None)
+    try:
+        info = inspect_git_repo(repo.local_path)
+    except ValueError:
+        return _unavailable_identity(repo, error="path_denied")
     if not info.get("ok"):
-        return {"ok": False, "repo_id": repo.id, **info}
-    return {"ok": True, "repo_id": repo.id, "cloned": True, **info}
+        err = str(info.get("error") or "unavailable")
+        if err in _ROOT_UNAVAILABLE_ERRORS or "denied" in err.lower():
+            return _unavailable_identity(repo, error=err)
+        return {"ok": False, "repo_id": repo.id, "root_state": "ERROR", **info}
+    return {"ok": True, "repo_id": repo.id, "cloned": True, "root_state": "READY", **info}
 
 
 def safe_checkout(

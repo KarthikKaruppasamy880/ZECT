@@ -13,6 +13,7 @@ type WorkspaceSymbolsPanelProps = {
   workspaceRoot: string;
   openFilePath: string;
   repoId?: number | null;
+  repositoryIds?: number[];
   onJump: (target: SymbolJumpTarget) => void;
 };
 
@@ -31,6 +32,7 @@ export default function WorkspaceSymbolsPanel({
   workspaceRoot,
   openFilePath,
   repoId,
+  repositoryIds,
   onJump,
 }: WorkspaceSymbolsPanelProps) {
   const [query, setQuery] = useState("");
@@ -77,7 +79,14 @@ export default function WorkspaceSymbolsPanel({
     setBusy(true);
     setError("");
     try {
-      const items = await searchCodeSymbols(q, undefined, undefined, repoId ?? undefined, 40);
+      const items = await searchCodeSymbols(
+        q,
+        undefined,
+        undefined,
+        repoId ?? undefined,
+        40,
+        repositoryIds?.length ? repositoryIds : undefined,
+      );
       setResults(Array.isArray(items) ? items : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed");
@@ -113,6 +122,9 @@ export default function WorkspaceSymbolsPanel({
                 <span className="ml-1 font-normal text-slate-400">{s.symbol_type}</span>
               </div>
               <div className="font-mono text-[10px] text-slate-500 truncate">
+                {(s as { root_label?: string }).root_label
+                  ? `${(s as { root_label?: string }).root_label} · `
+                  : ""}
                 {s.file_path}:{s.line_start}
               </div>
             </button>

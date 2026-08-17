@@ -58,10 +58,11 @@ def search_symbols(
     symbol_type: Optional[str] = None,
     language: Optional[str] = None,
     repo_id: Optional[int] = None,
+    repo_ids: Optional[str] = None,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    """Search indexed code symbols."""
+    """Search indexed code symbols. Same-name hits stay tagged with repo identity and are not merged."""
     try:
         q = db.query(CodeSymbol).filter(
             CodeSymbol.symbol_name.ilike(f"%{query}%")
@@ -70,10 +71,31 @@ def search_symbols(
             q = q.filter(CodeSymbol.symbol_type == symbol_type)
         if language:
             q = q.filter(CodeSymbol.language == language)
-        if repo_id:
-            q = q.filter(CodeSymbol.repo_id == repo_id)
+        ids: list[int] = []
+        if repo_ids:
+            ids = [int(x) for x in repo_ids.split(",") if x.strip().isdigit()]
+        elif repo_id:
+            ids = [int(repo_id)]
+        if ids:
+            q = q.filter(CodeSymbol.repo_id.in_(ids))
         items = q.order_by(CodeSymbol.symbol_name).limit(limit).all()
-        return [_sym_to_dict(s) for s in items]
+        repo_map = {}
+        sha_map: dict[int, str] = {}
+        if items:
+            rids = {s.repo_id for s in items if s.repo_id}
+            if rids:
+                repo_map = {r.id: r for r in db.query(Repo).filter(Repo.id.in_(rids)).all()}
+                from app.services.workspace_multi_root import repo_identity_envelope
+
+                for rid, repo in repo_map.items():
+                    try:
+                        sha_map[rid] = str(repo_identity_envelope(db, repo).get("commit_sha") or "")
+                    except Exception:
+                        sha_map[rid] = ""
+        return [
+            _sym_to_dict(s, repo=repo_map.get(s.repo_id), commit_sha=sha_map.get(s.repo_id or 0, ""))
+            for s in items
+        ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -227,16 +249,20 @@ def get_file_symbols(path: str, repo_id: Optional[int] = None, db: Session = Dep
         if repo_id:
             q = q.filter(CodeSymbol.repo_id == repo_id)
         items = q.order_by(CodeSymbol.line_start).all()
-        return [_sym_to_dict(s) for s in items]
+        repo = db.query(Repo).filter(Repo.id == repo_id).first() if repo_id else None
+        return [_sym_to_dict(s, repo=repo) for s in items]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _sym_to_dict(s: CodeSymbol) -> dict:
+def _sym_to_dict(s: CodeSymbol, repo: Optional[Repo] = None, commit_sha: str = "") -> dict:
+    project_id = repo.project_id if repo else None
     return {
         "id": s.id,
         "repo_id": s.repo_id,
         "file_path": s.file_path,
+        "path": s.file_path,
+        "symbol": s.symbol_name,
         "symbol_name": s.symbol_name,
         "symbol_type": s.symbol_type,
         "language": s.language,
@@ -247,4 +273,9 @@ def _sym_to_dict(s: CodeSymbol) -> dict:
         "parent_symbol": s.parent_symbol,
         "is_exported": s.is_exported,
         "indexed_at": s.indexed_at.isoformat() if s.indexed_at else None,
+        "project_id": project_id,
+        "workspace_id": f"project:{project_id}" if project_id is not None else None,
+        "commit_sha": commit_sha or "",
+        "root_label": f"{repo.owner}/{repo.repo_name}" if repo else None,
+        "semantic_cross_repo_references": False,
     }

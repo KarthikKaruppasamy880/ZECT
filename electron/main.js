@@ -18,7 +18,8 @@ const { stripEchoPhrases, passesVoiceGate } = require("./voice-filter");
 const serviceLifecycle = require("./service-lifecycle");
 
 // Single-instance lock (A7) — second launch focuses the existing window.
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
+const gotSingleInstanceLock =
+  process.env.ZECT_ALLOW_MULTI_INSTANCE === "1" ? true : app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
 }

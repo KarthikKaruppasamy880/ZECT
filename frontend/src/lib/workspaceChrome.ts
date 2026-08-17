@@ -1,7 +1,14 @@
 /** Persist Developer Workspace chrome: pane visibility, maximize, bottom tab. */
 
 export type WorkspaceMaximized = "explorer" | "editor" | "agent" | "bottom" | null;
-export type WorkspaceBottomTab = "terminal" | "timeline" | "context";
+export type WorkspaceBottomTab =
+  | "terminal"
+  | "timeline"
+  | "context"
+  | "search"
+  | "problems"
+  | "tests"
+  | "evidence";
 
 export type WorkspaceChrome = {
   explorer: boolean;
@@ -25,7 +32,15 @@ export const DEFAULT_WORKSPACE_CHROME: WorkspaceChrome = {
 };
 
 const MAXIMIZED: WorkspaceMaximized[] = ["explorer", "editor", "agent", "bottom"];
-const TABS: WorkspaceBottomTab[] = ["terminal", "timeline", "context"];
+const TABS: WorkspaceBottomTab[] = [
+  "terminal",
+  "timeline",
+  "context",
+  "search",
+  "problems",
+  "tests",
+  "evidence",
+];
 
 export function loadWorkspaceChrome(): WorkspaceChrome {
   try {

@@ -34,7 +34,7 @@ from app.domains.integration import (
     ci_monitor,
     ci_remediation,
 )
-from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer, coding_engine, coding_agent
+from app.domains.workspace import app_runner, autofix, rules_engine, sandbox, diff_viewer, coding_engine, coding_agent, workspace_search
 from app.domains.repository import (
     repo_analysis,
     file_explorer,
@@ -108,6 +108,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(generated_outputs.router)
     app.include_router(mcp.router)
     app.include_router(app_runner.router)
+    app.include_router(workspace_search.router)
     app.include_router(file_explorer.router)
     app.include_router(git_ops.router)
     app.include_router(ci_monitor.router)

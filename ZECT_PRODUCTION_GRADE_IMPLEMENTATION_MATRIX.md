@@ -1,10 +1,10 @@
 # ZECT Production-Grade Implementation Matrix
 
 **Date:** 2026-08-17  
-**Canonical develop:** `origin/develop` = `a0bada0c771c9e2cc62061d1bb01cc099e021e13` (PR **#154** human-merged).  
-**Local develop:** `a0bada0` — **equals** `origin/develop`.  
-**This working branch:** `feat/developer-multi-root-workspace` (not on develop until human merge).  
-**Prompt:** `prompts/ZECT_PRODUCTION_GRADE_FINAL_CLOSURE.md`  
+**Canonical develop:** `origin/develop` = `6fa05d8d9ec8a400464b4510fd4d94c18021cf5f` (PR **#155** human-merged).  
+**Local develop:** `6fa05d8` — **equals** `origin/develop`.  
+**This working branch:** `feat/developer-multi-root-ide` (not on develop until human merge).  
+**Prompt:** `prompts/ZECT_DEVELOPER_MULTI_ROOT_IDE_COMPLETION.md`  
 **No auto-merge.** S8C / S8D / Graphify / KV-cache / OCR-XLSX / broader Web / new-agent roadmap: **not started**.
 
 ## Git truth
@@ -23,8 +23,8 @@ Nothing local-only is called complete.
 | Surface | Capability | files | commit / PR | on develop? | browser | Electron | security | operational | status | blocker |
 |---------|------------|-------|-------------|-------------|---------|----------|----------|-------------|--------|---------|
 | Companion | HUD/dock orchestration, brokered tools, voice, handoffs | `MentrixCompanion.tsx`, `companion.py`, `permission_broker.py` | #139+ | yes | PARTIAL (e2e companion specs) | PARTIAL (dock/desktop bridge) | Permission broker unit | Live M365/Slack/Jira | **PARTIAL** | No single Companion→ship golden path; connectors `BLOCKED_EXTERNAL` |
-| Developer chrome | Explorer \| Editor \| Agent + bottom tabs, persist, maximize | `DeveloperWorkspace.tsx`, `workspaceChrome.ts` | #154 | yes | PARTIAL (hygiene) | not re-run | path jail on active root | layout persist | **PARTIAL** | Viewport sweep / Electron `/workspace` not re-proven at `a0bada0` |
-| Developer multi-root | Simultaneous Root A+B+C explorer | `WorkspaceRootsRail.tsx`, `workspaceRoots.ts`, `repo_git_identity` | this PR | **no** | unit + opt-in headed spec | not yet | remove ≠ delete disk | ROOT_UNAVAILABLE | **IN_PR** | Does **not** complete merged Explorer tree, per-root terminals, workspace search/symbols, repo-scoped Git safety proof, multi-repo WorkItem/Coding Agent proof, or Electron workspace restore |
+| Developer chrome | Explorer \| Editor \| Agent + bottom tabs, persist, maximize | `DeveloperWorkspace.tsx`, `workspaceChrome.ts` | #154+this | **no** until merge | headed hygiene + search tab | Electron restore this PR | path jail on active root | layout persist | **PASS** (chrome) | Overall ZECT still PARTIAL |
+| Developer multi-root | Merged A+B+C explorer, locked terminals, search, git jail, Electron restore | `WorkspaceRootsRail.tsx`, `workspace_search.py`, `workspace_multi_root.py` | this PR | **no** | headed `workspace-multi-root.spec.ts` | headed restore spec **PASS** locally | bound_root + pathspec jail | ROOT_UNAVAILABLE + session persist | **IN_PR** | Semantic cross-repo refs not implemented; live GitHub multi-PR `BLOCKED_EXTERNAL` |
 | Lattice / context | Canonical states + SHA STALE | `indexer.py`, `lattice.py`, `WorkspaceContextUsedPanel.tsx` | #154 | yes | header chip + Context tab | not re-run | repo-scoped status | STALE on commit move | **PARTIAL** | Per-root indexing UX incomplete; Graphify out of scope |
 | Coding Agent | Interactive edit loop | `MentrixCodingAgentPanel.tsx`, `mentrix_agent_tools.py` | prior | yes | panel in workspace | not mission-proven | path jail; cmd approval | worktree isolation | **PARTIAL** | Native tools lack commit/push/PR; Missions A–G unlabeled |
 | WorkItem / multi-repo agent | ASK/PLAN/AGENT + isolated worktrees | `multi_repo_agent.py`, `DeveloperMultiRepoStatus.tsx` | #144/#148 | yes | status strip | n/a | authorized repo ids | aggregate READY | **PARTIAL** | Live GitHub PR / READY_AFTER_FIX `BLOCKED_EXTERNAL` |
@@ -49,17 +49,14 @@ Nothing local-only is called complete.
 | E | WorkItems / Processes / Lattice per-root | not started |
 | F | Security / ops / soak / a11y | not started |
 
-## This PR does not complete multi-root
+## This PR (multi-root IDE)
 
-Human-merge the rail slice first. Remaining multi-root requirements (do not start until merged):
+Human-merge after CI. Remaining **outside** this tranche:
 
-- Merged multi-root Explorer tree
-- Per-root terminals
-- Workspace-wide search/symbols
-- Repo-scoped Git safety proof
-- Multi-repo WorkItem / Coding Agent proof
-- Electron workspace restore
+- Semantic cross-repo references
+- Live GitHub multi-repo PRs (`BLOCKED_EXTERNAL` without tokens)
+- Companion / coding missions / Present+Voice re-proof / Graphify
 
 ## Verdict so far
 
-**ZECT_PRODUCTION_PARTIAL.** Canonical develop is healthy post-#154. Production-grade is **not** earned from unit tests or prior-session Present/PowerPoint evidence. First implementation slice is multi-root explorer rails on top of existing chrome.
+**ZECT_PRODUCTION_PARTIAL.** Canonical develop is healthy post-#155. This PR completes the Developer multi-root IDE gate for human merge; it does **not** make overall ZECT production-grade.

@@ -56,6 +56,12 @@ test.describe("Core UX hygiene", () => {
       await expect(page.getByTestId("workspace-file-tree")).toHaveCount(0);
       await maxEditor.click();
     }
+    if (await page.getByTestId("workspace-bottom-tab-search").isVisible().catch(() => false)) {
+      await page.getByTestId("workspace-bottom-tab-search").click();
+      await expect(page.getByTestId("workspace-search-panel")).toBeVisible();
+      await page.getByTestId("workspace-bottom-tab-terminal").click();
+      await expect(page.getByTestId("workspace-terminal")).toBeVisible();
+    }
     await page.getByTestId("workspace-toggle-explorer").click();
     await page.getByTestId("workspace-toggle-agent").click();
     await page.getByTestId("workspace-toggle-bottom").click();

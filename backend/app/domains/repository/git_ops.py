@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.infrastructure.allowed_paths import path_under_allowed_roots
+from app.services.workspace_multi_root import reject_force_git_args, relpaths_inside_repo
 
 router = APIRouter(prefix="/api/git", tags=["git-ops"])
 
@@ -167,7 +168,8 @@ def git_add(repo_path: str, files: list[str] | None = None):
     """Stage files. If files is None, stages all changes."""
     path = _validate_repo(repo_path)
     if files:
-        result = _run_git(path, ["add"] + files)
+        safe = relpaths_inside_repo(path, files)
+        result = _run_git(path, ["add", "--"] + safe)
     else:
         result = _run_git(path, ["add", "-A"])
 
@@ -183,7 +185,8 @@ def git_commit(req: GitCommitRequest):
 
     # Optionally add specific files first
     if req.files:
-        add_result = _run_git(path, ["add"] + req.files)
+        safe = relpaths_inside_repo(path, req.files)
+        add_result = _run_git(path, ["add", "--"] + safe)
         if add_result["exit_code"] != 0:
             raise HTTPException(status_code=500, detail=f"git add failed: {add_result['stderr']}")
 
@@ -200,6 +203,7 @@ def git_commit(req: GitCommitRequest):
 def git_push(req: GitPushRequest):
     """Push commits to remote."""
     path = _validate_repo(req.repo_path)
+    reject_force_git_args([req.remote, req.branch or ""])
     branch = req.branch
     if not branch:
         br = _run_git(path, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -252,13 +256,7 @@ def git_restore(req: GitRestoreRequest):
     if not req.files:
         raise HTTPException(status_code=400, detail="files required")
     path = _validate_repo(req.repo_path)
-    # Reject absolute / traversal segments — restore args must be relative paths inside the repo
-    safe: list[str] = []
-    for f in req.files:
-        cleaned = (f or "").replace("\\", "/").strip()
-        if not cleaned or cleaned.startswith("/") or ".." in cleaned.split("/"):
-            raise HTTPException(status_code=400, detail=f"Invalid path: {f}")
-        safe.append(cleaned)
+    safe = relpaths_inside_repo(path, req.files)
     result = _run_git(path, ["restore", "--source=HEAD", "--staged", "--worktree", "--"] + safe)
     if result["exit_code"] != 0:
         # Older git may lack `restore` — fall back to checkout --

@@ -130,7 +130,11 @@ test.describe("workspace multi-root", () => {
     await expect(page.getByTestId(`workspace-root-${idB}`)).toBeVisible();
     await expect(page.getByTestId(`workspace-root-${idC}`)).toBeVisible();
     await expect(page.getByTestId(`workspace-root-${idA}`)).toHaveAttribute("data-active", "true");
-    await expect(page.getByTestId("workspace-file-zect.txt")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId(`workspace-file-${idA}-zect.txt`)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId(`workspace-file-${idB}-zoas.txt`)).toBeVisible();
+    await expect(page.getByTestId(`workspace-file-${idC}-other.txt`)).toBeVisible();
+    await expect(page.getByTestId(`workspace-file-${idA}-README.md`)).toBeVisible();
+    await expect(page.getByTestId(`workspace-file-${idC}-README.md`)).toBeVisible();
     await page.screenshot({ path: path.join(ART, "01-three-roots.png"), fullPage: false });
 
     await page.getByTestId(`workspace-root-select-${idC}`).evaluate((el) => (el as HTMLElement).click());
@@ -138,8 +142,34 @@ test.describe("workspace multi-root", () => {
       timeout: 15_000,
     });
     await expect(page.getByTestId("workspace-active-root-path")).toContainText(/other/i);
-    await expect(page.getByTestId("workspace-file-other.txt")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("workspace-file-zect.txt")).toHaveCount(0);
+    await expect(page.getByTestId(`workspace-file-${idA}-zect.txt`)).toBeVisible();
+
+    await page.getByTestId("workspace-bottom-tab-terminal").click();
+    const newTerm = page.getByTestId("workspace-terminal-new-root");
+    if (await newTerm.isVisible().catch(() => false)) {
+      await newTerm.selectOption(String(idC));
+      await expect(page.getByTestId("workspace-terminal-cwd")).toContainText(/other/i);
+      await page.getByTestId(`workspace-root-select-${idA}`).evaluate((el) => (el as HTMLElement).click());
+      await expect(page.getByTestId(`workspace-root-${idA}`)).toHaveAttribute("data-active", "true", {
+        timeout: 10_000,
+      });
+      await expect(page.getByTestId("workspace-terminal-cwd")).toContainText(/other/i);
+    }
+
+    await page.getByTestId("workspace-bottom-tab-search").click();
+    await page.getByTestId("workspace-search-query").fill("other-content");
+    await page.getByTestId("workspace-search-run").click();
+    await expect(page.getByTestId("workspace-search-hit").first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("workspace-search-hit").first()).toHaveAttribute("data-root", /other/i);
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await expect(page.getByTestId("workspace-roots-rail")).toBeVisible();
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await expect(page.getByTestId("workspace-roots-rail")).toBeVisible();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.getByTestId("workspace-roots-rail")).toBeVisible();
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await expect(page.getByTestId("workspace-roots-rail")).toBeVisible();
 
     await page.getByTestId(`workspace-root-remove-${idB}`).click({ force: true });
     await expect(page.getByTestId(`workspace-root-${idB}`)).toHaveCount(0, { timeout: 10_000 });

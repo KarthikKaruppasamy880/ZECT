@@ -17,7 +17,17 @@ vi.mock("@/lib/api", () => ({
       origin_url: "https://example.com/zect.git",
     };
   }),
-  latticeStatus: vi.fn(async () => ({ indexed: true, state: "READY", project_key: "local-zect", has_blueprint: false })),
+  latticeStatus: vi.fn(async () => ({
+    indexed: true,
+    state: "READY",
+    project_key: "local-zect",
+    has_blueprint: false,
+    action: "view_intelligence",
+    action_label: "View intelligence",
+    live_commit_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    indexed_commit_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  })),
+  latticeIngest: vi.fn(async () => ({ ok: true })),
 }));
 
 const repos = [
@@ -47,11 +57,30 @@ describe("WorkspaceRootsRail", () => {
     expect(screen.getByTestId("workspace-roots-rail")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-root-1")).toHaveAttribute("data-active", "true");
     await waitFor(() => expect(screen.getByTestId("workspace-root-unavailable-2")).toHaveTextContent("ROOT_UNAVAILABLE"));
+    await waitFor(() => expect(screen.getByTestId("workspace-root-sha-1")).toHaveTextContent(/head bbbbbbb/i));
+    expect(screen.getByTestId("workspace-root-view-lattice-1")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("workspace-root-select-2"));
     expect(onSelectRoot).toHaveBeenCalledWith(2);
     fireEvent.click(screen.getByTestId("workspace-root-remove-1"));
     expect(onRemoveRoot).toHaveBeenCalledWith(1);
     fireEvent.click(screen.getByTestId("workspace-add-root"));
     expect(onAddRoot).toHaveBeenCalled();
+  });
+
+  it("nests files under ready roots and hides them for ROOT_UNAVAILABLE", async () => {
+    render(
+      <WorkspaceRootsRail
+        projectId={10}
+        repos={repos}
+        activeRepoId={1}
+        onSelectRoot={vi.fn()}
+        onRemoveRoot={vi.fn()}
+        onAddRoot={vi.fn()}
+        fileTree={(id) => <div data-testid={`nested-${id}`}>file-{id}</div>}
+      />,
+    );
+    expect(screen.getByTestId("nested-1")).toHaveTextContent("file-1");
+    await waitFor(() => expect(screen.getByTestId("workspace-root-unavailable-2")).toBeInTheDocument());
+    expect(screen.queryByTestId("nested-2")).not.toBeInTheDocument();
   });
 });

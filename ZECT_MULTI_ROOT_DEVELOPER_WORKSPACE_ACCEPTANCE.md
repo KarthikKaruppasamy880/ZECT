@@ -1,40 +1,64 @@
 # ZECT Multi-Root Developer Workspace Acceptance
 
 **Date:** 2026-08-17  
-**Canonical develop:** `a0bada0` (PR #154).  
-**Branch:** `feat/developer-multi-root-workspace`  
-**No auto-merge.** This PR does **not** claim full multi-root completion. Graphify / S8C / next production tranche: **not started**.
+**Canonical develop after #155:** `6fa05d8d9ec8a400464b4510fd4d94c18021cf5f`  
+**Branch:** `feat/developer-multi-root-ide`  
+**No auto-merge.** Graphify / S8C / Companion closure: **not started**.
 
-## In this PR (rail slice only)
+## Proof this session
+
+| Gate | Result |
+|------|--------|
+| Backend isolation / search / runner | **PASS** — `test_workspace_multi_root_ide.py` + onboarding/sandbox/allowed_paths/multi_repo_developer **55 passed** |
+| Frontend unit | **PASS** — rail nested trees, session persist (no secrets), chrome |
+| `npx tsc -b` | **PASS** |
+| Headed hygiene | **PASS** — `e2e/core-ux-hygiene.spec.ts` |
+| Headed 3-root workspace | **PASS** — `e2e/workspace-multi-root.spec.ts` (merged files, duplicate README, terminal cwd lock, search `other-content`, viewports 1280/1366/1440/1920, remove B keeps disk) |
+| Electron restore ≥3 roots | **PASS** — `e2e/workspace-electron-restore.spec.ts` (local Electron binary; not in `test:e2e:core`) |
+| Mentrix Ultra Review | **PASS** (diff review this SHA) — no valid branch-introduced Critical/Major left open |
+| CodeRabbit | **SKIPPED** until PR (never PASS) |
+
+## Requirements
 
 | Requirement | Status |
 |-------------|--------|
-| Authorized-roots rail listing project repos together | **PASS** — `WorkspaceRootsRail`; file tree still follows the **active** root |
-| Per-root branch / dirty / remote / Lattice / authorized | **PARTIAL** — identity + Lattice on each row |
-| Add local / clone / attach registered | **PASS** — reuses `RepoOnboardingPanel` (does not duplicate onboarding) |
-| Remove from workspace, never delete disk | **PASS** — `zect_ws_roots` exclusion list only |
-| Missing root → `ROOT_UNAVAILABLE` + Repair | **PASS** — `repo_git_identity` + Repair opens import on that root |
+| Merged Explorer (`WORKSPACE` → all authorized roots + files) | **PASS** — files from every ready root visible together; duplicate names tagged `workspace-file-{repoId}-{name}` |
+| Per-root terminals | **PASS** — session cwd locked; new terminal picks a root; Explorer switch does not retarget |
+| Workspace search | **PASS** — scopes file / active root / workspace; hits carry `project_id + workspace_id + repo_id + commit_sha + path`; Bearer required |
+| Symbols | **PARTIAL** — indexed search tagged per repo + commit SHA when identity is available; **semantic cross-repo references are not merged** |
+| Repo-scoped Git safety | **PASS** — add/commit/restore pathspecs cannot escape the bound repo; `--force` rejected; sibling HEAD unchanged on status/checkout |
+| Persistence | **PASS** — `zect_ws_roots` + `zect_ws_session` (editors/terminals/work item/project/repo); never secrets |
+| Electron restore | **PASS** (this machine) — three roots visible after close/relaunch with dedicated `--user-data-dir` |
+| Per-root Lattice | **PASS** — Explorer row shows canonical state, live vs indexed SHA, Index/Re-index/View; header chip + Context Used stay repo-scoped |
+| Multi-repo WorkItem sibling failure | **PASS** (prior + re-run) — `test_multi_repo_developer.py`; aggregate not READY if B fails |
+| IDE chrome | **PASS** — Terminal / Problems / Tests / Timeline / Evidence / Context / Search; Multi-Repo compact in Tests/Evidence |
+| Security | **PASS** — runner `bound_root` + `..` reject; git sibling jail; catalog fetch no longer wipes repos on transient failure; remove ≠ disk delete |
 
-## Explicitly out of scope (remaining multi-root)
+## Mentrix Ultra Review (this diff)
 
-This PR does **not** complete:
+| ID | Severity | Classification | Notes |
+|----|----------|----------------|-------|
+| Search unauthenticated | Critical | **ALREADY_FIXED** | `POST /api/workspace/search` now `Depends(get_current_user)` + global AuthMiddleware |
+| Git pathspec sibling escape | Critical | **ALREADY_FIXED** | `relpaths_inside_repo` on add/commit/restore |
+| Runner cwd outside bound root | Critical | **ALREADY_FIXED** | `bound_root` + resolve jail |
+| Catalog wipe on 401 | Major | **ALREADY_FIXED** | `ActiveProjectContext` only replaces projects/repos after a successful list |
+| Nested Index button in root select | Major | **ALREADY_FIXED** | actions sit beside Repair, not inside the select control |
+| `".." in command` substring | Minor | **ACCEPTED** | false positives possible; fail-closed for bound terminals |
+| Semantic cross-repo refs | — | **OUT_OF_SCOPE** | honest limitation flag `semantic_cross_repo_references: false` |
+| Identity 200 vs `repo_not_found` | — | **OUT_OF_SCOPE** | `ROOT_UNAVAILABLE` 200 is intentional |
 
-1. Merged multi-root Explorer tree (`WORKSPACE / ZECT / ZOAS / other-authorized-root` with files under each root at once)
-2. Per-root terminals (cwd locked to the selected authorized root; cannot escape)
-3. Workspace-wide search / symbols with root labels and `project_id + workspace_id + repo_id + commit_sha + path`
-4. Repo-scoped Git safety proof (independent branch/worktree/diff/commit/PR per root in the Explorer)
-5. Multi-repo WorkItem / Coding Agent proof (identify both repos, isolated worktrees, sibling failure blocks aggregate READY)
-6. Electron workspace restore of authorized roots after restart
+## Explicit limitations
 
-Do not start that work until this PR is **human-merged**.
+- Semantic cross-repository “go to definition” across roots is **not** implemented.
+- Electron restore spec is **not** in `test:e2e:core` (CI does not pack Electron). Proven locally when `electron/node_modules/electron/dist/electron.exe` exists.
+- Live GitHub push/PR for the multi-repo WorkItem path remains `BLOCKED_EXTERNAL` when tokens/network are absent (unit/headed fixtures still fail-closed).
+- This tranche does **not** make overall ZECT production-grade.
 
-## Proof this PR
+## Screenshots / traces
 
-- Vitest: `workspaceRoots.test.ts`, `WorkspaceRootsRail.test.tsx`
-- Pytest: `test_repo_onboarding_ux.py` including `ROOT_UNAVAILABLE`
-- Hygiene: roots rail visible when explorer file tree is shown
-- Headed 3-root: `frontend/e2e/workspace-multi-root.spec.ts` (not in `test:e2e:core`)
+- Headed: `frontend/test-results/workspace-multi-root/01-three-roots.png`, `02-removed-zoas-disk-kept.png`
+- Electron: `test-results/workspace-electron-restore/01-before-restart.png`, `02-after-restart.png`
 
 ## Gate
 
-**READY_TO_MERGE** for the rail slice only (human merge). Full multi-root IDE remains **PARTIAL**.
+Human-merge this PR. Do not start Companion or later tranches in the same run.

@@ -129,14 +129,14 @@ export function ActiveProjectProvider({ children }: { children: ReactNode }) {
         total_files: r.total_files || 0,
         total_lines: r.total_lines || 0,
       }));
-      setProjects(projectRows);
-      setRepos(repoRows);
       if (projectsOk) {
+        setProjects(projectRows);
         setActiveProjectId((prev) =>
           prev == null || projectRows.some((p) => p.id === prev) ? prev : null,
         );
       }
       if (reposOk) {
+        setRepos(repoRows);
         setActiveRepoId((prev) =>
           prev == null || repoRows.some((r) => r.repo_id === prev) ? prev : null,
         );

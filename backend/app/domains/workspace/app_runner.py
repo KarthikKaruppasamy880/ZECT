@@ -22,19 +22,39 @@ from app.infrastructure.database import get_db
 router = APIRouter(prefix="/api/runner", tags=["app-runner"])
 
 
-def _validate_cwd(raw: Optional[str]) -> str:
+def _validate_cwd(raw: Optional[str], bound_root: Optional[str] = None) -> str:
     """Resolve and enforce the same filesystem allowlist git_ops.py and
     file_explorer.py already use — previously this only checked the
     directory existed, so an arbitrary-shell-command endpoint could also
-    target any directory on the host, not just the workspace root."""
-    candidate = raw or os.path.expanduser("~")
+    target any directory on the host, not just the workspace root.
+
+    When bound_root is set (per-root terminal), cwd must stay inside that root
+    after symlink resolve.
+    """
+    candidate = raw or bound_root or os.path.expanduser("~")
     try:
         p = path_under_allowed_roots(candidate)
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     if not p.is_dir():
         raise HTTPException(status_code=400, detail=f"Directory not found: {candidate}")
+    if bound_root:
+        try:
+            root = path_under_allowed_roots(bound_root)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e)) from e
+        try:
+            p.resolve().relative_to(root.resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="cwd_outside_bound_root") from exc
     return str(p)
+
+
+def _reject_command_escape(command: str, bound_root: Optional[str]) -> None:
+    if not bound_root:
+        return
+    if ".." in command:
+        raise HTTPException(status_code=403, detail="path_escape")
 
 _IS_WINDOWS = sys.platform.startswith("win")
 
@@ -132,12 +152,14 @@ _bg_tasks: Dict[str, asyncio.Task] = {}
 class ExecuteRequest(BaseModel):
     command: str
     cwd: Optional[str] = None
+    bound_root: Optional[str] = None
     timeout: int = 30  # seconds
 
 
 class StartRequest(BaseModel):
     command: str
     cwd: Optional[str] = None
+    bound_root: Optional[str] = None
     label: Optional[str] = None
     env_vars: Optional[Dict[str, str]] = None
 
@@ -197,7 +219,8 @@ async def execute_command(
     from app.security.emergency_stop import require_not_emergency_stopped
 
     require_not_emergency_stopped(db)
-    cwd = _validate_cwd(req.cwd)
+    _reject_command_escape(req.command, req.bound_root)
+    cwd = _validate_cwd(req.cwd, req.bound_root)
     log_audit(
         db=db,
         user_id=current_user.user_id,
@@ -246,7 +269,8 @@ async def start_process(
     from app.security.emergency_stop import require_not_emergency_stopped
 
     require_not_emergency_stopped(db)
-    cwd = _validate_cwd(req.cwd)
+    _reject_command_escape(req.command, req.bound_root)
+    cwd = _validate_cwd(req.cwd, req.bound_root)
     log_audit(
         db=db,
         user_id=current_user.user_id,

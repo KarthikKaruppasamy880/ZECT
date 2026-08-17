@@ -1,23 +1,42 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Play, Square, Terminal } from "lucide-react";
+import { Loader2, Play, Plus, Square, Terminal } from "lucide-react";
 import { runnerExecute, runnerStart, runnerStop } from "@/lib/api";
+import type { WorkspaceTerminalSession } from "@/lib/workspaceSession";
+
+type RootChoice = { repoId: number; rootPath: string; label: string };
 
 type WorkspaceTerminalProps = {
-  /** Active Mentrix / Active Project root — commands run with this cwd only. */
+  /** @deprecated Prefer sessions; kept so a locked session cwd never silently retargets. */
   workspaceRoot: string;
+  sessions?: WorkspaceTerminalSession[];
+  activeSessionId?: string | null;
+  roots?: RootChoice[];
+  onSelectSession?: (id: string) => void;
+  onCreateSession?: (root: RootChoice) => void;
 };
 
 /**
- * Phase 3 Stage B — workspace-scoped terminal via App Runner APIs.
- * Always passes workspaceRoot as cwd; refuses to run without a root.
+ * Per-root terminals: each session cwd is locked. Switching the Explorer root
+ * does not retarget an existing terminal.
  */
-export default function WorkspaceTerminal({ workspaceRoot }: WorkspaceTerminalProps) {
-  const root = (workspaceRoot || "").trim();
+export default function WorkspaceTerminal({
+  workspaceRoot,
+  sessions,
+  activeSessionId,
+  roots = [],
+  onSelectSession,
+  onCreateSession,
+}: WorkspaceTerminalProps) {
+  const active = sessions?.find((s) => s.id === activeSessionId) || sessions?.[0] || null;
+  const root = (active?.rootPath || workspaceRoot || "").trim();
+  const label = active?.label || "";
   const [command, setCommand] = useState("");
-  const [lines, setLines] = useState<string[]>([]);
+  const [linesById, setLinesById] = useState<Record<string, string[]>>({});
   const [busy, setBusy] = useState(false);
   const [bgId, setBgId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const key = active?.id || "default";
+  const lines = linesById[key] || [];
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -27,20 +46,20 @@ export default function WorkspaceTerminal({ workspaceRoot }: WorkspaceTerminalPr
 
   const append = (chunk: string | string[]) => {
     const next = Array.isArray(chunk) ? chunk : [chunk];
-    setLines((prev) => [...prev, ...next]);
+    setLinesById((prev) => ({ ...prev, [key]: [...(prev[key] || []), ...next] }));
   };
 
   const runOnce = async () => {
     const cmd = command.trim();
     if (!cmd || busy) return;
     if (!root) {
-      append("[error] No workspace root — set Active Project or Mentrix workspace");
+      append("[error] No workspace root — pick an authorized root for this terminal");
       return;
     }
     setBusy(true);
     append(["", `$ ${cmd}`]);
     try {
-      const result = await runnerExecute(cmd, root, 30);
+      const result = await runnerExecute(cmd, root, 30, root);
       if (result.stdout) append(String(result.stdout).split("\n"));
       if (result.stderr) {
         append(String(result.stderr).split("\n").map((l: string) => `[stderr] ${l}`));
@@ -60,7 +79,7 @@ export default function WorkspaceTerminal({ workspaceRoot }: WorkspaceTerminalPr
     setBusy(true);
     append(["", `[starting] ${cmd}`]);
     try {
-      const result = await runnerStart(cmd, root, "workspace-terminal");
+      const result = await runnerStart(cmd, root, "workspace-terminal", undefined, root);
       setBgId(result.id);
       append(`[started] ${result.id}${result.pid != null ? ` pid=${result.pid}` : ""}`);
     } catch (e) {
@@ -86,23 +105,68 @@ export default function WorkspaceTerminal({ workspaceRoot }: WorkspaceTerminalPr
     <div
       className="flex flex-col h-full min-h-[180px] rounded-lg border border-slate-200 bg-slate-950 text-slate-100"
       data-testid="workspace-terminal"
+      data-locked-root={root || ""}
     >
       <div className="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-400">
         <span className="inline-flex items-center gap-1.5 font-medium text-slate-300">
           <Terminal className="h-3.5 w-3.5" />
           Terminal
         </span>
-        <span className="truncate font-mono" title={root || undefined}>
-          cwd: {root || "(none)"}
+        <span
+          className="truncate font-mono"
+          title={root || undefined}
+          data-testid="workspace-terminal-cwd"
+        >
+          {label ? `${label} · ` : ""}cwd: {root || "(none)"}
         </span>
       </div>
+      {sessions && sessions.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-800 px-2 py-1">
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              data-testid={`workspace-terminal-tab-${s.repoId}`}
+              onClick={() => onSelectSession?.(s.id)}
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                s.id === key ? "bg-teal-800 text-white" : "text-slate-400 hover:bg-slate-800"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+          {roots.length ? (
+            <label className="ml-auto inline-flex items-center gap-1 text-[10px] text-slate-400">
+              <Plus className="h-3 w-3" />
+              <select
+                data-testid="workspace-terminal-new-root"
+                className="bg-slate-900 text-slate-200 text-[10px] rounded border border-slate-700"
+                defaultValue=""
+                onChange={(e) => {
+                  const repoId = Number(e.target.value);
+                  const hit = roots.find((r) => r.repoId === repoId);
+                  if (hit) onCreateSession?.(hit);
+                  e.target.value = "";
+                }}
+              >
+                <option value="">New terminal…</option>
+                {roots.map((r) => (
+                  <option key={r.repoId} value={r.repoId}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : null}
       <div
         ref={scrollRef}
         className="flex-1 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
         data-testid="workspace-terminal-output"
       >
         {lines.length === 0 ? (
-          <span className="text-slate-500">Commands run only under the workspace root via App Runner.</span>
+          <span className="text-slate-500">Commands run only under this terminal's locked root via App Runner.</span>
         ) : (
           lines.map((line, i) => <div key={`${i}-${line.slice(0, 24)}`}>{line}</div>)
         )}

@@ -1525,15 +1525,32 @@ export const checkTokenLimit = (userId?: number) =>
   request<any>(`/api/tokens/check-limit${userId ? `?user_id=${userId}` : ""}`);
 
 // App Runner
-export const runnerExecute = (command: string, cwd?: string, timeout?: number) =>
+export const runnerExecute = (command: string, cwd?: string, timeout?: number, boundRoot?: string) =>
   request<any>("/api/runner/execute", {
     method: "POST",
-    body: JSON.stringify({ command, ...(cwd ? { cwd } : {}), ...(timeout ? { timeout } : {}) }),
+    body: JSON.stringify({
+      command,
+      ...(cwd ? { cwd } : {}),
+      ...(boundRoot || cwd ? { bound_root: boundRoot || cwd } : {}),
+      ...(timeout ? { timeout } : {}),
+    }),
   });
-export const runnerStart = (command: string, cwd?: string, label?: string, env_vars?: Record<string, string>) =>
+export const runnerStart = (
+  command: string,
+  cwd?: string,
+  label?: string,
+  env_vars?: Record<string, string>,
+  boundRoot?: string,
+) =>
   request<any>("/api/runner/start", {
     method: "POST",
-    body: JSON.stringify({ command, ...(cwd ? { cwd } : {}), ...(label ? { label } : {}), ...(env_vars ? { env_vars } : {}) }),
+    body: JSON.stringify({
+      command,
+      ...(cwd ? { cwd } : {}),
+      ...(boundRoot || cwd ? { bound_root: boundRoot || cwd } : {}),
+      ...(label ? { label } : {}),
+      ...(env_vars ? { env_vars } : {}),
+    }),
   });
 export const runnerStop = (processId: string) =>
   request<any>(`/api/runner/stop/${processId}`, { method: "POST" });
@@ -1991,15 +2008,54 @@ export const rotateSecret = (id: number, newValue: string) =>
   request<any>(`/api/secrets/${id}/rotate?new_value=${encodeURIComponent(newValue)}`, { method: "POST" });
 
 // Code Index
-export const searchCodeSymbols = (query: string, symbolType?: string, language?: string, repoId?: number, limit = 50) => {
+export const searchCodeSymbols = (
+  query: string,
+  symbolType?: string,
+  language?: string,
+  repoId?: number,
+  limit = 50,
+  repoIds?: number[],
+) => {
   const params = new URLSearchParams();
   params.set("query", query);
   if (symbolType) params.set("symbol_type", symbolType);
   if (language) params.set("language", language);
-  if (repoId) params.set("repo_id", String(repoId));
+  if (repoIds?.length) params.set("repo_ids", repoIds.join(","));
+  else if (repoId) params.set("repo_id", String(repoId));
   params.set("limit", String(limit));
   return request<any[]>(`/api/code-index/search?${params}`);
 };
+
+export type WorkspaceSearchHit = {
+  repo_id?: number;
+  project_id?: number;
+  workspace_id?: string;
+  commit_sha?: string;
+  path?: string;
+  abs_path?: string;
+  line?: number;
+  content?: string;
+  root_label?: string;
+};
+
+export const workspaceSearch = (body: {
+  pattern: string;
+  scope?: "file" | "root" | "workspace";
+  repo_ids: number[];
+  active_repo_id?: number | null;
+  current_file?: string;
+  max_results?: number;
+}) =>
+  request<{
+    ok: boolean;
+    hits: WorkspaceSearchHit[];
+    skipped: { repo_id?: number; reason?: string }[];
+    truncated?: boolean;
+    limitation?: string;
+  }>("/api/workspace/search", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 export const indexRepo = (repoPath: string, repoId?: number, fileExtensions?: string[]) =>
   request<any>("/api/code-index/index", {
     method: "POST",

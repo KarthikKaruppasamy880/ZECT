@@ -28,8 +28,8 @@
 
 - Headed P0: Context Used tab + Lattice state chip **passed**.
 - `core-ux-hygiene.spec.ts`: maximize/hide/context **passed**.
-- Viewport sweep at 1280×720 / 1366×768 / 1440×900 / 1920×1080: **not** re-run this session.
-- Electron `/workspace` parity: **not** this PR (Electron proof is Present Generate → Review → Export).
+- Viewport sweep at 1280×720 / 1366×768 / 1440×900 / 1920×1080: **PASS** on headed `workspace-multi-root.spec.ts` (this PR).
+- Electron `/workspace` restore of ≥3 roots: **PASS** locally (`e2e/workspace-electron-restore.spec.ts`). See `ZECT_MULTI_ROOT_DEVELOPER_WORKSPACE_ACCEPTANCE.md`.
 
 ## Gate
 

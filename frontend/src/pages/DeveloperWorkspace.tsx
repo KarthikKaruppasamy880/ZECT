@@ -26,6 +26,7 @@ import WorkspaceSymbolsPanel, { type SymbolJumpTarget } from "@/components/Works
 import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
+import WorkspaceSearchPanel from "@/components/WorkspaceSearchPanel";
 import SplitPane, { resetSplitLayout } from "@/components/SplitPane";
 import {
   DEFAULT_WORKSPACE_CHROME,
@@ -40,12 +41,19 @@ import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
 import WorkspaceRootsRail from "@/components/WorkspaceRootsRail";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
+import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
 import {
   excludeWorkspaceRoot,
   excludedRootIds,
   includeWorkspaceRoot,
   visibleProjectRepos,
 } from "@/lib/workspaceRoots";
+import {
+  loadWorkspaceSession,
+  newTerminalSession,
+  saveWorkspaceSession,
+} from "@/lib/workspaceSession";
 import {
   fileList,
   fileRead,
@@ -143,9 +151,10 @@ export default function DeveloperWorkspace() {
   const deepSession = searchParams.get("session") || "";
   const deepGoal = searchParams.get("goal") || "";
   const deepWorkItem = searchParams.get("work_item_id");
-  const workItemId = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
-  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos, setActiveRepo } =
+  const urlWorkItem = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
+  const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos, setActiveRepo, setActiveProject } =
     useActiveProject();
+  const { latticeStatus: latticeIdx, loadingStatus: latticeLoading } = useWorkspaceRepoContext();
   const [excludedRoots, setExcludedRoots] = useState(() => excludedRootIds(activeProjectId));
   useEffect(() => {
     setExcludedRoots(excludedRootIds(activeProjectId));
@@ -160,6 +169,17 @@ export default function DeveloperWorkspace() {
   const visibleRoots = useMemo(
     () => visibleProjectRepos(activeProjectId, repos, excludedRoots),
     [activeProjectId, repos, excludedRoots],
+  );
+  const termRoots = useMemo(
+    () =>
+      visibleRoots
+        .filter((r) => r.local_path)
+        .map((r) => ({
+          repoId: r.repo_id,
+          rootPath: r.local_path as string,
+          label: `${r.owner}/${r.repo_name}`,
+        })),
+    [visibleRoots],
   );
   const mentrix = readMentrixWorkspace();
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
@@ -233,6 +253,7 @@ export default function DeveloperWorkspace() {
     saveWorkspaceChrome(chrome);
   }, [chrome]);
   const [tree, setTree] = useState<TreeNode[]>([]);
+  const [treesByRepo, setTreesByRepo] = useState<Record<number, TreeNode[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selectedPath, setSelectedPath] = useState("");
   const [browsingDir, setBrowsingDir] = useState<string>("");
@@ -255,6 +276,29 @@ export default function DeveloperWorkspace() {
   const [revealLine, setRevealLine] = useState<number | null>(null);
   const [worktrees, setWorktrees] = useState<{ path?: string; branch?: string; is_current?: boolean }[]>([]);
   const [agentModel, setAgentModel] = useState("gpt-4o-mini");
+  const [wsSession, setWsSession] = useState(() => loadWorkspaceSession());
+  const workItemId = urlWorkItem || wsSession.workItemId;
+  useEffect(() => {
+    saveWorkspaceSession(wsSession);
+  }, [wsSession]);
+  useEffect(() => {
+    if (urlWorkItem && wsSession.workItemId !== urlWorkItem) {
+      setWsSession((prev) => ({ ...prev, workItemId: urlWorkItem }));
+    }
+  }, [urlWorkItem, wsSession.workItemId]);
+  useEffect(() => {
+    if (!activeProjectId) return;
+    setWsSession((prev) =>
+      prev.projectId === activeProjectId && prev.activeRepoId === (activeRepoId || null)
+        ? prev
+        : { ...prev, projectId: activeProjectId, activeRepoId: activeRepoId || null },
+    );
+  }, [activeProjectId, activeRepoId]);
+  useEffect(() => {
+    if (activeProjectId || !wsSession.projectId) return;
+    setActiveProject(wsSession.projectId);
+    if (wsSession.activeRepoId) setActiveRepo(wsSession.activeRepoId);
+  }, [activeProjectId, wsSession.projectId, wsSession.activeRepoId, setActiveProject, setActiveRepo]);
 
   const dirty = content !== baseline && Boolean(selectedPath);
   const sideOpen = showDiff || showInline;
@@ -304,42 +348,70 @@ export default function DeveloperWorkspace() {
   }, [deepRunId]);
 
   const treeGen = useRef(0);
-  const loadTree = useCallback(async () => {
+  const rootCatalog = useMemo(
+    () => visibleRoots.map((r) => `${r.repo_id}:${r.local_path || ""}`).join("|"),
+    [visibleRoots],
+  );
+
+  const loadAllTrees = useCallback(async () => {
     const gen = ++treeGen.current;
-    if (!rootPath) {
-      if (gen === treeGen.current) setTree([]);
-      return;
-    }
     if (typeof localStorage !== "undefined" && !localStorage.getItem("zect_token")) {
-      if (gen === treeGen.current) setTree([]);
+      setTreesByRepo({});
+      setTree([]);
       return;
     }
     setLoadingTree(true);
     setError("");
     try {
-      const nodes = await fileTree(rootPath, 5);
+      const pairs = await Promise.all(
+        visibleRoots.map(async (repo) => {
+          if (!repo.local_path) return [repo.repo_id, [] as TreeNode[]] as const;
+          try {
+            const nodes = await fileTree(repo.local_path, 4);
+            return [repo.repo_id, normalizeTreeNodes(Array.isArray(nodes) ? nodes : [])] as const;
+          } catch {
+            return [repo.repo_id, [] as TreeNode[]] as const;
+          }
+        }),
+      );
       if (gen !== treeGen.current) return;
-      const normalized = normalizeTreeNodes(Array.isArray(nodes) ? nodes : []);
-      setTree(normalized);
-      setExpanded(new Set([normalizePath(rootPath)]));
-      setBrowsingDir("");
-      setSelectedPath("");
-      setContent("");
-      setBaseline("");
-      setLoadingTree(false);
-      await Promise.all([refreshGit(rootPath), refreshAgentMarkers()]);
+      const next = Object.fromEntries(pairs);
+      setTreesByRepo(next);
+      setTree(activeRepoId != null ? next[activeRepoId] || [] : []);
+      setExpanded((prev) => {
+        const copy = new Set(prev);
+        for (const repo of visibleRoots) {
+          if (repo.local_path) copy.add(normalizePath(repo.local_path));
+        }
+        return copy;
+      });
+      if (rootPath) await Promise.all([refreshGit(rootPath), refreshAgentMarkers()]);
     } catch (e) {
       if (gen !== treeGen.current) return;
       setError(e instanceof Error ? e.message : "Failed to load tree");
-      setTree([]);
     } finally {
       if (gen === treeGen.current) setLoadingTree(false);
     }
-  }, [rootPath, refreshGit, refreshAgentMarkers]);
+  }, [visibleRoots, activeRepoId, rootPath, refreshGit, refreshAgentMarkers]);
+
+  const loadTree = loadAllTrees;
 
   useEffect(() => {
-    void loadTree();
-  }, [loadTree]);
+    void loadAllTrees();
+  }, [loadAllTrees]);
+
+  useEffect(() => {
+    if (!visibleRoots.length) return;
+    setWsSession((prev) => {
+      if (prev.terminals.length) return prev;
+      const repo =
+        visibleRoots.find((r) => r.repo_id === activeRepoId && r.local_path) ||
+        visibleRoots.find((r) => r.local_path);
+      if (!repo?.local_path) return prev;
+      const term = newTerminalSession(repo.repo_id, repo.local_path, `${repo.owner}/${repo.repo_name}`);
+      return { ...prev, terminals: [term], activeTerminalId: term.id };
+    });
+  }, [rootCatalog, visibleRoots, activeRepoId]);
 
   const handleSelectRoot = (repoId: number) => {
     const nextId = Number(repoId);
@@ -392,6 +464,13 @@ export default function DeveloperWorkspace() {
         c.is_dir ? { ...c, children: [], childrenLoaded: false } : { ...c, childrenLoaded: undefined },
       );
       setTree((prev) => upsertChildren(prev, norm, children));
+      setTreesByRepo((prev) => {
+        const next: Record<number, TreeNode[]> = {};
+        for (const [key, nodes] of Object.entries(prev)) {
+          next[Number(key)] = upsertChildren(nodes, norm, children);
+        }
+        return next;
+      });
       return children;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to list directory");
@@ -402,12 +481,16 @@ export default function DeveloperWorkspace() {
     }
   }, []);
 
-  const openFile = async (path: string, line?: number) => {
+  const openFile = async (path: string, line?: number, repoId?: number) => {
     const norm = normalizePath(path);
-    if (!rootPath || !isPathInsideRoot(norm, rootPath)) {
-      setError("File is outside the active workspace root");
+    const owner =
+      (repoId != null ? visibleRoots.find((r) => r.repo_id === repoId) : undefined) ||
+      visibleRoots.find((r) => r.local_path && isPathInsideRoot(norm, r.local_path));
+    if (!owner?.local_path || !isPathInsideRoot(norm, owner.local_path)) {
+      setError("File is outside authorized workspace roots");
       return;
     }
+    if (Number(owner.repo_id) !== Number(activeRepoId)) setActiveRepo(owner.repo_id);
     setBrowsingDir("");
     setLoadingFile(true);
     setError("");
@@ -419,12 +502,33 @@ export default function DeveloperWorkspace() {
       setBaseline(text);
       setSelection(null);
       setRevealLine(line && line > 0 ? line : null);
+      setWsSession((prev) => ({
+        ...prev,
+        openEditors: [{ repoId: owner.repo_id, path: norm }, ...prev.openEditors.filter((e) => e.path !== norm)].slice(
+          0,
+          12,
+        ),
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read file");
     } finally {
       setLoadingFile(false);
     }
   };
+
+  const restoredEditors = useRef(false);
+  useEffect(() => {
+    if (restoredEditors.current || !visibleRoots.length) return;
+    const first = wsSession.openEditors[0];
+    if (!first?.path) {
+      restoredEditors.current = true;
+      return;
+    }
+    const owner = visibleRoots.find((r) => r.repo_id === first.repoId && r.local_path);
+    if (!owner) return;
+    restoredEditors.current = true;
+    void openFile(first.path, undefined, first.repoId);
+  }, [visibleRoots, wsSession.openEditors]);
 
   const openAgentPath = (relOrAbs: string) => {
     if (!rootPath) return;
@@ -540,14 +644,14 @@ export default function DeveloperWorkspace() {
     void openDirectory(path);
   };
 
-  const renderTree = (nodes: TreeNode[], depth = 0): ReactNode =>
+  const renderTree = (nodes: TreeNode[], depth = 0, repoId?: number): ReactNode =>
     nodes.map((node) => {
       const path = normalizePath(node.path);
       const isOpen = expanded.has(path);
       if (node.is_dir) {
         const childCount = node.children?.length;
         return (
-          <div key={path}>
+          <div key={`${repoId || 0}:${path}`}>
             <button
               type="button"
               className={`w-full flex items-center gap-1 px-2 py-1 text-left text-xs hover:bg-slate-100 ${
@@ -576,7 +680,7 @@ export default function DeveloperWorkspace() {
             </button>
             {isOpen ? (
               node.children && node.children.length > 0 ? (
-                renderTree(node.children, depth + 1)
+                renderTree(node.children, depth + 1, repoId)
               ) : node.childrenLoaded ? (
                 <p className="px-2 py-1 text-[10px] text-slate-400" style={{ paddingLeft: 20 + depth * 12 }}>
                   Empty folder
@@ -594,14 +698,15 @@ export default function DeveloperWorkspace() {
       const isAgent = pathMatchesMarker(path, rootNorm || rootPath, agentFiles);
       return (
         <button
-          key={path}
+          key={`${repoId || 0}:${path}`}
           type="button"
           className={`w-full flex items-center gap-1 px-2 py-1 text-left text-xs hover:bg-slate-100 ${
             selectedPath === path ? "bg-teal-50 text-teal-900 font-medium" : "text-slate-700"
           }`}
           style={{ paddingLeft: 8 + depth * 12 }}
-          onClick={() => void openFile(node.path)}
-          data-testid={`workspace-file-${node.name}`}
+          onClick={() => void openFile(node.path, undefined, repoId)}
+          data-testid={repoId != null ? `workspace-file-${repoId}-${node.name}` : `workspace-file-${node.name}`}
+          data-file={node.name}
           title={[isAgent ? "agent-written" : "", isGit ? "git-changed" : ""].filter(Boolean).join(" · ") || undefined}
         >
           <span className="w-3 flex justify-center">
@@ -756,6 +861,20 @@ export default function DeveloperWorkspace() {
             {activeRepo.owner}/{activeRepo.repo_name}
           </span>
         )}
+        <span
+          data-testid="workspace-git-lattice"
+          data-lattice-state={latticeLoading ? "" : canonicalLatticeState(latticeIdx?.state)}
+          className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+          title={[
+            latticeIdx?.project_key,
+            latticeIdx?.live_commit_sha && `head=${String(latticeIdx.live_commit_sha).slice(0, 12)}`,
+            latticeIdx?.indexed_commit_sha && `indexed=${String(latticeIdx.indexed_commit_sha).slice(0, 12)}`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        >
+          {latticeLoading ? "Lattice …" : latticeHeaderLabel(canonicalLatticeState(latticeIdx?.state))}
+        </span>
         <span className="ml-auto inline-flex items-center gap-2 text-[10px] text-slate-500">
           <span className="inline-flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-teal-500" /> agent
@@ -765,8 +884,6 @@ export default function DeveloperWorkspace() {
           </span>
         </span>
       </div>
-
-      <DeveloperMultiRepoStatus workItemId={workItemId} projectId={activeProjectId} />
 
       <PhaseErrorBanner error={error} testId="workspace-error" density="compact" />
 
@@ -813,13 +930,13 @@ export default function DeveloperWorkspace() {
                   onRemoveRoot={handleRemoveRoot}
                   onAddRoot={handleAddRoot}
                   onRepairRoot={handleRepairRoot}
+                  fileTree={(repoId) => renderTree(treesByRepo[repoId] || [], 1, repoId)}
                 />
                 <div
-                  className="flex-1 overflow-auto min-h-0"
+                  className="flex items-center justify-between border-t border-slate-100 px-2 py-1"
                   data-testid="workspace-file-tree"
                 >
-                <div className="px-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-100 flex items-center justify-between">
-                  <span>Files</span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-400">Merged explorer</span>
                   <button
                     type="button"
                     className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
@@ -829,20 +946,6 @@ export default function DeveloperWorkspace() {
                     {maximized === "explorer" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                   </button>
                 </div>
-                {!rootPath ? (
-                  <p className="p-3 text-xs text-amber-800" data-testid="workspace-root-unavailable-active">
-                    ROOT_UNAVAILABLE. Repair this root or switch to another authorized folder.
-                  </p>
-                ) : loadingTree ? (
-                  <div className="p-4 flex items-center gap-2 text-xs text-slate-500">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
-                  </div>
-                ) : tree.length === 0 ? (
-                  <p className="p-3 text-xs text-slate-500">Empty or inaccessible tree.</p>
-                ) : (
-                  <div className="py-1">{renderTree(tree)}</div>
-                )}
-                </div>
               </div>
               {showSymbols ? (
                 <div className="h-56 shrink-0">
@@ -850,6 +953,7 @@ export default function DeveloperWorkspace() {
                     workspaceRoot={rootPath}
                     openFilePath={selectedPath}
                     repoId={activeRepoId}
+                    repositoryIds={projectRepoIds}
                     onJump={jumpToSymbol}
                   />
                 </div>
@@ -1059,8 +1163,12 @@ export default function DeveloperWorkspace() {
                 {(
                   [
                     ["terminal", "Terminal"],
+                    ["problems", "Problems"],
+                    ["tests", "Tests"],
                     ["timeline", "Timeline"],
+                    ["evidence", "Evidence"],
                     ["context", "Context"],
+                    ["search", "Search"],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -1085,9 +1193,52 @@ export default function DeveloperWorkspace() {
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-auto p-2">
-                {bottomTab === "terminal" ? <WorkspaceTerminal workspaceRoot={rootPath} /> : null}
+                {bottomTab === "terminal" ? (
+                  <WorkspaceTerminal
+                    workspaceRoot={
+                      wsSession.terminals.find((t) => t.id === wsSession.activeTerminalId)?.rootPath || rootPath
+                    }
+                    sessions={wsSession.terminals}
+                    activeSessionId={wsSession.activeTerminalId}
+                    roots={termRoots}
+                    onSelectSession={(id) => setWsSession((prev) => ({ ...prev, activeTerminalId: id }))}
+                    onCreateSession={(root) => {
+                      const term = newTerminalSession(root.repoId, root.rootPath, root.label);
+                      setWsSession((prev) => ({
+                        ...prev,
+                        terminals: [...prev.terminals, term],
+                        activeTerminalId: term.id,
+                      }));
+                    }}
+                  />
+                ) : null}
                 {bottomTab === "timeline" ? <WorkspaceMentrixTimeline workspaceRoot={rootPath} /> : null}
                 {bottomTab === "context" ? contextPanel : null}
+                {bottomTab === "search" ? (
+                  <WorkspaceSearchPanel
+                    repoIds={visibleRoots.map((r) => r.repo_id)}
+                    activeRepoId={activeRepoId}
+                    currentFile={selectedPath}
+                    onOpen={(abs, repoId) => void openFile(abs, undefined, repoId)}
+                  />
+                ) : null}
+                {bottomTab === "problems" ? (
+                  <div data-testid="workspace-problems-panel" className="text-[11px] text-slate-600 space-y-1">
+                    {error ? <p className="text-rose-700">{error}</p> : null}
+                    <p>Active git: {gitSummary || "—"}</p>
+                    {gitChanged.slice(0, 20).map((p) => (
+                      <p key={p} className="font-mono text-[10px]">
+                        {p}
+                      </p>
+                    ))}
+                    {!error && !gitChanged.length ? <p className="text-slate-400">No problems</p> : null}
+                  </div>
+                ) : null}
+                {bottomTab === "tests" || bottomTab === "evidence" ? (
+                  <div data-testid={bottomTab === "tests" ? "workspace-tests-panel" : "workspace-evidence-panel"}>
+                    <DeveloperMultiRepoStatus workItemId={workItemId} projectId={activeProjectId} />
+                  </div>
+                ) : null}
               </div>
             </div>
           );
@@ -1113,9 +1264,9 @@ export default function DeveloperWorkspace() {
               <SplitPane
                 axis="horizontal"
                 storageKey="zect_ws_h"
-                initial={16}
-                min={10}
-                max={32}
+                initial={22}
+                min={14}
+                max={40}
                 testId="workspace-split-h"
               >
                 {explorerPane}

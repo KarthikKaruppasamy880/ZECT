@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
-import { getRepoIdentity, latticeStatus, type RepoIdentity } from "@/lib/api";
+import { getRepoIdentity, latticeIngest, latticeStatus, type RepoIdentity } from "@/lib/api";
 import { canonicalLatticeState, latticeHeaderLabel, type LatticeState } from "@/lib/contextUsed";
 import { deriveProjectKey } from "@/lib/workspaceContext";
 
@@ -20,6 +20,12 @@ type RootRow = {
   dirty: boolean;
   remote: string;
   lattice: LatticeState;
+  liveSha: string;
+  indexedSha: string;
+  latticeAction: string;
+  latticeActionLabel: string;
+  projectKey: string;
+  localPath: string;
   rootState: "READY" | "ROOT_UNAVAILABLE";
   detail: string;
 };
@@ -32,6 +38,7 @@ type Props = {
   onRemoveRoot: (repoId: number) => void;
   onAddRoot: () => void;
   onRepairRoot?: (repoId: number) => void;
+  fileTree?: (repoId: number) => ReactNode;
 };
 
 function emptyRow(repo: WorkspaceRootRepo): RootRow {
@@ -43,9 +50,19 @@ function emptyRow(repo: WorkspaceRootRepo): RootRow {
     dirty: false,
     remote: "",
     lattice: "NOT_APPLICABLE",
+    liveSha: "",
+    indexedSha: "",
+    latticeAction: "",
+    latticeActionLabel: "",
+    projectKey: deriveProjectKey(repo.owner, repo.repo_name),
+    localPath: repo.local_path || "",
     rootState: missing ? "ROOT_UNAVAILABLE" : "READY",
     detail: missing ? "Missing local path" : "",
   };
+}
+
+function shortSha(sha: string): string {
+  return sha ? sha.slice(0, 7) : "—";
 }
 
 export default function WorkspaceRootsRail({
@@ -56,6 +73,7 @@ export default function WorkspaceRootsRail({
   onRemoveRoot,
   onAddRoot,
   onRepairRoot,
+  fileTree,
 }: Props) {
   const [rows, setRows] = useState<RootRow[]>(() => repos.map(emptyRow));
   const reposRef = useRef(repos);
@@ -65,6 +83,7 @@ export default function WorkspaceRootsRail({
     [repos],
   );
 
+  const [indexingId, setIndexingId] = useState<number | null>(null);
   const loadGen = useRef(0);
   const loadRows = useCallback(async () => {
     const current = reposRef.current;
@@ -97,8 +116,15 @@ export default function WorkspaceRootsRail({
           const key = deriveProjectKey(repo.owner, repo.repo_name);
           const lat = await latticeStatus(key, repo.repo_id);
           base.lattice = canonicalLatticeState(lat.state || (lat.indexed ? "READY" : "NOT_INDEXED"));
+          base.liveSha = String(lat.live_commit_sha || "");
+          base.indexedSha = String(lat.indexed_commit_sha || "");
+          base.latticeAction = String(lat.action || "");
+          base.latticeActionLabel = String(lat.action_label || "");
+          base.projectKey = lat.project_key || key;
         } catch {
           base.lattice = "ERROR";
+          base.latticeAction = "reindex";
+          base.latticeActionLabel = "Re-index repository";
         }
         return base;
       }),
@@ -113,11 +139,11 @@ export default function WorkspaceRootsRail({
 
   return (
     <section
-      className="shrink-0 border-b border-slate-100 bg-slate-50/80"
+      className="shrink-0 flex flex-col h-full min-h-0 border-b border-slate-100 bg-slate-50/80"
       data-testid="workspace-roots-rail"
     >
       <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Workspace roots</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">WORKSPACE</p>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -147,7 +173,7 @@ export default function WorkspaceRootsRail({
           No authorized roots. Add a local folder, clone, or attach a registered repo.
         </p>
       ) : (
-        <ul className="max-h-40 overflow-auto pb-1">
+        <ul className="flex-1 overflow-auto pb-1 min-h-0">
           {rows.map((row) => {
             const active = Number(row.repoId) === Number(activeRepoId);
             const unavailable = row.rootState === "ROOT_UNAVAILABLE";
@@ -178,6 +204,13 @@ export default function WorkspaceRootsRail({
                       </span>
                       <span>{row.dirty ? "dirty" : "clean"}</span>
                       <span data-testid={`workspace-root-lattice-${row.repoId}`}>{latticeHeaderLabel(row.lattice)}</span>
+                      <span
+                        className="font-mono text-slate-400"
+                        data-testid={`workspace-root-sha-${row.repoId}`}
+                        title={`live=${row.liveSha || "—"} indexed=${row.indexedSha || "—"}`}
+                      >
+                        head {shortSha(row.liveSha)} · idx {shortSha(row.indexedSha)}
+                      </span>
                       <span className="text-slate-400">authorized</span>
                     </span>
                     {unavailable ? (
@@ -189,6 +222,50 @@ export default function WorkspaceRootsRail({
                       </span>
                     ) : null}
                   </button>
+                  {!unavailable ? (
+                    <span className="flex shrink-0 flex-col items-end gap-0.5">
+                      {row.latticeAction === "index_repository" ||
+                      row.latticeAction === "reindex" ||
+                      row.latticeAction === "clone_or_index" ? (
+                        <button
+                          type="button"
+                          className="rounded border border-teal-200 bg-teal-50 px-1 py-0.5 text-[10px] text-teal-900 disabled:opacity-40"
+                          data-testid={`workspace-root-index-${row.repoId}`}
+                          disabled={indexingId === row.repoId || !row.localPath}
+                          onClick={async () => {
+                            if (!row.localPath) return;
+                            setIndexingId(row.repoId);
+                            try {
+                              await latticeIngest(row.localPath, row.projectKey, true);
+                              await loadRows();
+                            } finally {
+                              setIndexingId(null);
+                            }
+                          }}
+                        >
+                          {indexingId === row.repoId
+                            ? "Indexing…"
+                            : row.latticeAction === "reindex"
+                              ? "Re-index"
+                              : "Index"}
+                        </button>
+                      ) : null}
+                      {row.latticeAction === "view_intelligence" || row.lattice === "READY" || row.lattice === "STALE" ? (
+                        <a
+                          href={`/lattice?project_key=${encodeURIComponent(row.projectKey)}`}
+                          className="rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] text-slate-700"
+                          data-testid={`workspace-root-view-lattice-${row.repoId}`}
+                        >
+                          View
+                        </a>
+                      ) : null}
+                      {row.lattice === "ERROR" ? (
+                        <span className="text-[10px] text-rose-700" data-testid={`workspace-root-lattice-error-${row.repoId}`}>
+                          Error
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
                   {unavailable && onRepairRoot ? (
                     <button
                       type="button"
@@ -209,6 +286,9 @@ export default function WorkspaceRootsRail({
                     <X className="h-3 w-3" />
                   </button>
                 </div>
+                {!unavailable && fileTree ? (
+                  <div data-testid={`workspace-root-tree-${row.repoId}`}>{fileTree(row.repoId)}</div>
+                ) : null}
               </li>
             );
           })}

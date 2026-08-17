@@ -2125,8 +2125,23 @@ export const cloneRepoFromUrl = (
     }),
   });
 
+export type RepoIdentity = {
+  ok?: boolean;
+  repo_id?: number;
+  cloned?: boolean;
+  root_state?: "READY" | "ROOT_UNAVAILABLE" | "ERROR" | string;
+  error?: string;
+  branch?: string;
+  dirty?: boolean;
+  origin_url?: string;
+  local_path?: string | null;
+  head_sha?: string;
+  owner?: string;
+  name?: string;
+};
+
 export const getRepoIdentity = (repoId: number) =>
-  request<any>(`/api/repos/${repoId}/identity`);
+  request<RepoIdentity>(`/api/repos/${repoId}/identity`);
 
 export const openPrWorktree = (
   repoId: number,

@@ -46,6 +46,10 @@ test.describe("Core UX hygiene", () => {
     await expect(page.getByTestId("process-ingest-form")).toBeVisible();
 
     await gotoAuthed(page, "/workspace", "developer-workspace");
+    if (await page.getByTestId("workspace-file-tree").isVisible().catch(() => false)) {
+      await expect(page.getByTestId("workspace-roots-rail")).toBeVisible();
+      await expect(page.getByTestId("workspace-add-root")).toBeVisible();
+    }
     const maxEditor = page.getByTestId("workspace-maximize-editor");
     if (await maxEditor.isVisible().catch(() => false)) {
       await maxEditor.click();

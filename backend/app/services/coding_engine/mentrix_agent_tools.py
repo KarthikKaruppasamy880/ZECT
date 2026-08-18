@@ -382,6 +382,7 @@ def _execute_tool_inner(
             }
         timeout = min(int(args.get("timeout") or 60), 180)
         try:
+            child_env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST")}
             completed = subprocess.run(
                 cmd,
                 shell=True,
@@ -389,6 +390,7 @@ def _execute_tool_inner(
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                env=child_env,
             )
             out = (completed.stdout or "")[-6000:]
             err = (completed.stderr or "")[-2000:]

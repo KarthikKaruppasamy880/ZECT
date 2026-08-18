@@ -34,7 +34,7 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. This tranche does not start so
 
 ## Fixes in this PR
 
-1. **High — coding-agent missions were in-memory.** Missions now persist as redacted JSON under `ZECT_CODING_MISSIONS_DIR` / `ZECT_USER_DATA/data/coding_missions`. `get_mission` reloads after process restart. Mission ids are UUID-shaped (no path traversal). Corrupt files fail closed (`409 mission_corrupt`).
+1. **High — coding-agent missions were in-memory.** Missions now persist as JSON under `ZECT_CODING_MISSIONS_DIR` / `ZECT_USER_DATA/data/coding_missions` (internal state, not whole-blob `redact_secrets`, so resume/repair can still apply patches). `get_mission` reloads after process restart. Mission ids are UUID-shaped (no path traversal). Corrupt files fail closed (`409 mission_corrupt`). API `_public` remains the redaction boundary.
 2. **Occupied-port policy is explicit** in `electron/service-lifecycle.js` (`sidecarStartDecision`). Packaged Electron already skipped sidecar when `/docs` was up; the helper is now unit-tested.
 
 ## Honest limits

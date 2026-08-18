@@ -36,8 +36,10 @@ def missions_dir() -> Path:
     user = (os.getenv("ZECT_USER_DATA") or "").strip()
     if user:
         return Path(user) / "data" / "coding_missions"
-    if (os.getenv("ZECT_PYTEST") or "").strip():
-        return Path(tempfile.gettempdir()) / "zect-pytest-coding-missions"
+    if (os.getenv("ZECT_PYTEST") or "").strip() or os.getenv("PYTEST_CURRENT_TEST"):
+        current = (os.getenv("PYTEST_CURRENT_TEST") or "session").split(" ")[0]
+        safe = re.sub(r"[^0-9a-zA-Z._-]+", "_", current)[:80] or "session"
+        return Path(tempfile.gettempdir()) / "zect-pytest-coding-missions" / safe
     return Path(__file__).resolve().parents[3] / "data" / "coding_missions"
 
 
@@ -54,20 +56,25 @@ def _safe_mission_id(mission_id: str) -> str:
     return mid
 
 
+def _persistable(mission: dict[str, Any]) -> dict[str, Any]:
+    """JSON snapshot of internal mission state.
+
+    Do not round-trip through ``redact_secrets`` here: that rewrites patch
+    bodies and test paths, so resume/repair after restart would re-apply ``***``.
+    API responses still go through ``_public`` + companion redaction.
+    """
+    return json.loads(json.dumps(mission, default=str))
+
+
 def _save_mission(mission: dict[str, Any]) -> None:
     mid = _safe_mission_id(str(mission.get("id") or ""))
     dest = missions_dir()
     try:
         dest.mkdir(parents=True, exist_ok=True)
-        blob = json.dumps(mission, default=str)
-        from app.security.redact import redact_secrets
-
-        redacted = redact_secrets(blob)
-        if not isinstance(redacted, str):
-            redacted = json.dumps(redacted, default=str)
-        (dest / f"{mid}.json").write_text(redacted, encoding="utf-8")
+        payload = _persistable(mission)
+        (dest / f"{mid}.json").write_text(json.dumps(payload), encoding="utf-8")
         mission.pop("persist_error", None)
-    except OSError:
+    except (OSError, TypeError, ValueError):
         mission["persist_error"] = "persist_failed"
 
 
@@ -92,11 +99,14 @@ def _lookup(mission_id: str) -> dict[str, Any]:
         if cached:
             return cached
     loaded = _load_mission_from_disk(mid)
-    if not loaded:
-        raise KeyError("mission_not_found")
     with _LOCK:
+        cached = _MISSIONS.get(mid)
+        if cached:
+            return cached
+        if not loaded:
+            raise KeyError("mission_not_found")
         _MISSIONS[mid] = loaded
-        return _MISSIONS[mid]
+        return loaded
 
 
 def _now() -> str:
@@ -276,7 +286,10 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
     out = execute_tool(
         "run_command",
         {
-            "command": f'"{sys.executable}" -m pytest -q --tb=short --noconftest tests',
+            "command": (
+                f'"{sys.executable}" -m pytest -q --tb=short --noconftest '
+                f"--rootdir=. -o addopts= -o testpaths=tests -p no:cacheprovider tests"
+            ),
             "timeout": 90,
         },
         workspace=root,
@@ -546,10 +559,9 @@ def start_mission(
         "created_at": _now(),
         "updated_at": _now(),
     }
-    _emit(mission, "plan", "PLAN ready — approve before isolated worktrees or edits.")
     with _LOCK:
         _MISSIONS[mid] = mission
-    _save_mission(mission)
+    _emit(mission, "plan", "PLAN ready — approve before isolated worktrees or edits.")
     return _public(mission)
 
 
@@ -590,15 +602,30 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
     return _run_edit_test_review(mission)
 
 
+def _stringify_patch_map(patches: dict[str, Any] | None) -> dict[str, list[Any]]:
+    out: dict[str, list[Any]] = {}
+    for key, value in (patches or {}).items():
+        out[str(key)] = list(value or [])
+    return out
+
+
+def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list[Any]:
+    rid = repo.get("repository_id")
+    for key in (str(rid), rid):
+        got = patches_map.get(key) if isinstance(patches_map, dict) else None
+        if got:
+            return list(got)
+    return []
+
+
 def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
-    patches_map = mission.get("patches_by_repo") or {}
+    patches_map = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
     diffs: list[str] = []
     per_repo_status: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         if mission.get("status") == "cancelled":
             return _public(mission)
-        rid = str(repo.get("repository_id"))
-        patches = patches_map.get(rid) or patches_map.get(str(rid)) or []
+        patches = _patches_for_repo(patches_map, repo)
         wt = Path(repo["worktree_path"])
         applied = _apply_patches(wt, patches)
         if not applied.get("ok"):
@@ -619,6 +646,8 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):
             repo["blocker"] = f"tests_{tests.get('status')}"
+        else:
+            repo["blocker"] = ""
         diff = _collect_diff(wt)
         if diff:
             repo["diff"] = diff
@@ -754,9 +783,13 @@ def retry_mission(mission_id: str) -> dict[str, Any]:
 
 def repair_and_retry(mission_id: str, patches_by_repo: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     mission = _lookup(mission_id)
-    merged = dict(mission.get("patches_by_repo") or {})
-    merged.update(patches_by_repo or {})
+    merged = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
+    merged.update(_stringify_patch_map(patches_by_repo))
     mission["patches_by_repo"] = merged
     mission["status"] = "running"
+    mission["sibling"] = {}
+    mission["review"] = {}
+    for repo in mission.get("repos") or []:
+        repo["blocker"] = ""
     _emit(mission, "repair", "Applying sibling repair patches.")
     return _run_edit_test_review(mission)

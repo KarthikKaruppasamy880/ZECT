@@ -123,6 +123,56 @@ def test_coding_mission_survives_backend_restart(tmp_path, monkeypatch):
     assert recovered["persistence"] == "durable_json"
 
 
+def test_sibling_repair_survives_backend_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("ZECT_CODING_MISSIONS_DIR", str(tmp_path / "missions"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from app.services.coding_engine.lifecycle import approve_plan, repair_and_retry
+
+    def _repo(name: str) -> Path:
+        root = tmp_path / name
+        root.mkdir(parents=True)
+        (root / "protocol.py").write_text("PROTOCOL = 1\n", encoding="utf-8")
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / f"test_{name}.py").write_text(
+            "import protocol\n\ndef test_proto():\n    assert protocol.PROTOCOL == 2\n",
+            encoding="utf-8",
+        )
+        _git(root, "init", "-b", "main")
+        _git(root, "config", "user.email", "rec@zect.local")
+        _git(root, "config", "user.name", "ZECT Rec")
+        _git(root, "add", ".")
+        _git(root, "commit", "-m", "init")
+        return root
+
+    a = _repo("alpha")
+    b = _repo("beta")
+    started = start_mission(
+        goal="Bump protocol to 2 in both roots",
+        roots=[
+            {"id": 10, "label": "alpha", "path": str(a)},
+            {"id": 11, "label": "beta", "path": str(b)},
+        ],
+        patches_by_repo={"10": [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]},
+        workspace_parent=str(tmp_path / "wt"),
+    )
+    blocked = approve_plan(started["id"])
+    assert blocked["phase"] == "blocked"
+    reset_mission_cache()
+    repaired = repair_and_retry(
+        started["id"],
+        {"11": [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]},
+    )
+    assert repaired["phase"] == "awaiting_git_approval", (
+        repaired.get("phase"),
+        repaired.get("tests"),
+        repaired.get("blockers"),
+        repaired.get("review"),
+    )
+
+
 def test_corrupt_mission_file_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("ZECT_CODING_MISSIONS_DIR", str(tmp_path / "missions"))

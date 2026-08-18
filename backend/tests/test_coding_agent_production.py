@@ -57,9 +57,12 @@ def _add_origin(repo: Path, bare: Path) -> None:
 @pytest.fixture()
 def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("ZECT_CODING_MISSIONS_DIR", str(tmp_path / "missions"))
     monkeypatch.setenv("MENTRIX_PR_DRY_RUN", "0")
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return tmp_path
 
 
@@ -270,7 +273,13 @@ def test_mission_f_sibling_failure_blocks_then_repair(ws):
         m["id"],
         {"11": [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]},
     )
-    assert m["phase"] == "awaiting_git_approval"
+    assert m["phase"] == "awaiting_git_approval", (
+        m.get("phase"),
+        m.get("tests"),
+        m.get("blockers"),
+        m.get("sibling"),
+        m.get("review"),
+    )
     m = approve_git(m["id"], push=False)
     assert m["phase"] == "ready_to_merge"
     assert all(r["test_ok"] for r in m["repos"])

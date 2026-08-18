@@ -1,6 +1,8 @@
 # ZECT Runtime Architecture
 
-**Canonical parent:** [`ZECT_SYSTEM_ARCHITECTURE.md`](../../ZECT_SYSTEM_ARCHITECTURE.md)  
+> **HISTORICAL supporting note.** Canonical parent is now [`ZECT_CANONICAL_ARCHITECTURE.md`](../../ZECT_CANONICAL_ARCHITECTURE.md). Dual-mode `desktop_sqlite` / `server_postgres` is documented there.
+
+**Former parent:** [`ZECT_SYSTEM_ARCHITECTURE.md`](../../ZECT_SYSTEM_ARCHITECTURE.md)  
 **Evidence:** [`ZECT_PRODUCT_ACCEPTANCE.md`](../../ZECT_PRODUCT_ACCEPTANCE.md)
 
 ## Runtime topology

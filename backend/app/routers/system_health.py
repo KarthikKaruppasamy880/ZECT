@@ -24,6 +24,53 @@ def system_health(
     return build_system_health(db)
 
 
+@router.get("/telemetry")
+def system_telemetry(
+    correlation_id: str = Query(""),
+    run_id: str = Query(""),
+    operation: str = Query(""),
+    failure_class: str = Query(""),
+    limit: int = Query(50, ge=1, le=200),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Query redacted structured telemetry. Never returns secrets or bodies."""
+    from fastapi import HTTPException
+    from app.infrastructure.observability import diagnose, query_events, snapshot_summary
+
+    try:
+        rows = query_events(
+            correlation_id=correlation_id,
+            run_id=run_id,
+            operation=operation,
+            failure_class=failure_class,
+            limit=limit,
+        )
+        return {
+            "ok": True,
+            "snapshot": snapshot_summary(),
+            "events": rows,
+            "diagnose": diagnose(correlation_id=correlation_id, run_id=run_id) if (correlation_id or run_id) else None,
+        }
+    except Exception as exc:  # noqa: BLE001 — fail-soft; never leak internals
+        raise HTTPException(status_code=500, detail="telemetry_unavailable") from exc
+
+
+class CancelOperationIn(BaseModel):
+    run_id: str
+
+
+@router.post("/operations/cancel")
+def cancel_system_operation(body: CancelOperationIn, _user: CurrentUser = Depends(get_current_user)):
+    from fastapi import HTTPException
+    from app.infrastructure.observability import cancel_operation
+
+    if not (body.run_id or "").strip():
+        raise HTTPException(status_code=400, detail="run_id required")
+    if not cancel_operation(body.run_id, user_id=_user.user_id):
+        raise HTTPException(status_code=403, detail="not_operation_owner")
+    return {"ok": True, "run_id": body.run_id, "cancelled": True}
+
+
 @router.get("/model-readiness")
 def model_readiness(_user: CurrentUser = Depends(get_current_user)):
     """Local/cloud model gateway readiness + per-profile matrix (no secrets)."""

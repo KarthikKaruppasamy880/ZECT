@@ -14,6 +14,9 @@ from app.services.coding_engine.lifecycle import (
     repair_and_retry,
     resume_mission,
     start_mission,
+    _patches_for_repo,
+    _persistable,
+    _stringify_patch_map,
 )
 from app.services.coding_engine.mentrix_agent_tools import execute_tool, resolve_workspace
 from sqlalchemy import create_engine
@@ -64,6 +67,17 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return tmp_path
+
+
+def test_patch_lookup_survives_json_persist_and_int_keys():
+    raw = {11: [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]}
+    persisted = _persistable({"patches_by_repo": raw})["patches_by_repo"]
+    merged = _stringify_patch_map(persisted)
+    merged.update(
+        _stringify_patch_map({"11": [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]})
+    )
+    assert _patches_for_repo(merged, {"repository_id": 11})[0]["new"] == "PROTOCOL = 2"
+    assert _patches_for_repo(merged, {"repository_id": "11"})[0]["path"] == "protocol.py"
 
 
 def test_git_commit_always_needs_approval(ws):
@@ -277,6 +291,16 @@ def test_mission_f_sibling_failure_blocks_then_repair(ws):
         m.get("phase"),
         m.get("tests"),
         m.get("blockers"),
+        m.get("files"),
+        [
+            {
+                "label": r.get("label"),
+                "patches_applied": r.get("patches_applied"),
+                "blocker": r.get("blocker"),
+                "test_stdout": r.get("test_stdout"),
+            }
+            for r in m.get("repos") or []
+        ],
         m.get("sibling"),
         m.get("review"),
     )

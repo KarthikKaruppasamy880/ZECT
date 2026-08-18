@@ -82,6 +82,19 @@ class ZectNativePresentationProvider:
         import time
 
         t0 = time.perf_counter()
+        if req.run_id:
+            from app.infrastructure.observability import is_cancelled
+
+            if is_cancelled(req.run_id):
+                return {
+                    "ok": False,
+                    "error": "generation_cancelled",
+                    "http_status": 409,
+                    "lifecycle": "GENERATION_CANCELLED",
+                    "provider": self.name,
+                    "block_code": "generation_cancelled",
+                    "run_id": req.run_id,
+                }
         planned = build_presentation_plan(
             prompt=req.content,
             n_slides=req.n_slides,
@@ -124,6 +137,20 @@ class ZectNativePresentationProvider:
         from app.services.mentrix.presentation.quality_repair import repair_until_pass
 
         degraded = bool(planned.get("degraded"))
+        if req.run_id:
+            from app.infrastructure.observability import is_cancelled
+
+            if is_cancelled(req.run_id):
+                return {
+                    "ok": False,
+                    "error": "generation_cancelled",
+                    "http_status": 409,
+                    "lifecycle": "GENERATION_CANCELLED",
+                    "provider": self.name,
+                    "block_code": "generation_cancelled",
+                    "run_id": req.run_id,
+                    "planner_mode": planned.get("planner_mode") or "",
+                }
         plan, quality = repair_until_pass(
             plan,
             definition,

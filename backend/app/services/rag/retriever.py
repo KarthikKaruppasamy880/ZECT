@@ -1,4 +1,8 @@
-"""RAG retriever — pgvector when available, JSON cosine fallback for SQLite."""
+"""RAG retriever — bag-of-tokens vectors in embedding_chunks (JSON TEXT).
+
+pgvector / Chroma / FAISS are not used. Same application DB as Projects/WorkItems
+(desktop_sqlite or server_postgres). Retrieval is in-process cosine similarity.
+"""
 
 from __future__ import annotations
 
@@ -59,10 +63,16 @@ def index_directory(
     repo_id: int | None = None,
     project_key: str = "",
     max_files: int = 500,
+    cancel_check=None,
 ) -> dict[str, Any]:
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
+
+    if cancel_check is not None and cancel_check():
+        from app.services.lattice.indexer import LatticeCancelled
+
+        raise LatticeCancelled("lattice_cancelled")
 
     # Clear prior chunks for this project_key scope
     q = db.query(EmbeddingChunk)
@@ -88,6 +98,11 @@ def index_directory(
                 content = fpath.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
+            if cancel_check is not None and cancel_check():
+                from app.services.lattice.indexer import LatticeCancelled
+
+                db.rollback()
+                raise LatticeCancelled("lattice_cancelled")
             files += 1
             for text, line_start in _chunk_file(rel, content):
                 emb = _tokenize(text)

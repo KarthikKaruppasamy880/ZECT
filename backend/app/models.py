@@ -1333,7 +1333,7 @@ class SessionMessage(Base):
 # ---------------------------------------------------------------------------
 
 class EmbeddingChunk(Base):
-    """RAG chunk with embedding JSON (pgvector-ready; SQLite stores JSON vector)."""
+    """RAG chunk. embedding_json is a JSON list[float]; no pgvector column/extension."""
     __tablename__ = "embedding_chunks"
 
     id = Column(Integer, primary_key=True, index=True)

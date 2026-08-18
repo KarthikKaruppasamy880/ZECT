@@ -21,6 +21,7 @@ class PresentationGenerateRequest:
     context_items: list[dict[str, Any]] = field(default_factory=list)
     asset_ids: list[str] = field(default_factory=list)
     require_llm: bool = False
+    run_id: str = ""
     fast_basic: bool = False
 
 

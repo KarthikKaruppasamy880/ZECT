@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from app.services.lattice.indexer import (
     get_lattice_status,
     god_nodes as lattice_god_nodes,
     ingest_path,
+    LatticeCancelled,
     neighbors as lattice_neighbors,
     query_graph,
 )
@@ -46,6 +48,7 @@ class IngestPathRequest(BaseModel):
     index_docs: bool = True
     max_files: int = 2000
     build_blueprint: bool = True
+    run_id: str = ""
 
 
 class QueryRequest(BaseModel):
@@ -104,20 +107,62 @@ def ingest(
     if os.getenv("LATTICE_ENABLED", "true").lower() in ("0", "false"):
         raise HTTPException(status_code=503, detail="Lattice is disabled")
     key = req.project_key or req.path
+    from app.infrastructure.observability import (
+        begin_operation,
+        cancel_check_for,
+        emit_event,
+        new_id,
+    )
+
+    run_id = (req.run_id or "").strip() or new_id()
+    t0 = time.perf_counter()
+    begin_operation(
+        run_id,
+        kind="lattice_ingest",
+        extra={"project_key": key[:120]},
+        user_id=_user.user_id,
+    )
+    check = cancel_check_for(run_id)
     try:
-        graph = ingest_path(req.path, project_key=key, max_files=req.max_files, index_docs=req.index_docs)
+        graph = ingest_path(
+            req.path,
+            project_key=key,
+            max_files=req.max_files,
+            index_docs=req.index_docs,
+            cancel_check=check,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LatticeCancelled as exc:
+        emit_event(
+            operation="lattice_ingest",
+            stage="cancelled",
+            run_id=run_id,
+            failure_class="cancelled",
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+        )
+        raise HTTPException(status_code=409, detail={"error": "cancelled", "run_id": run_id}) from exc
     rag_stats = {}
     if req.index_rag and os.getenv("RAG_ENABLED", "true").lower() not in ("0", "false"):
-        rag_stats = index_directory(
-            db,
-            req.path,
-            project_id=req.project_id,
-            repo_id=req.repo_id,
-            project_key=graph.project_key,
-            max_files=min(req.max_files, 500),
-        )
+        try:
+            rag_stats = index_directory(
+                db,
+                req.path,
+                project_id=req.project_id,
+                repo_id=req.repo_id,
+                project_key=graph.project_key,
+                max_files=min(req.max_files, 500),
+                cancel_check=check,
+            )
+        except LatticeCancelled as exc:
+            emit_event(
+                operation="lattice_ingest",
+                stage="rag_cancelled",
+                run_id=run_id,
+                failure_class="cancelled",
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+            )
+            raise HTTPException(status_code=409, detail={"error": "cancelled", "run_id": run_id}) from exc
     blueprint_summary = None
     if req.build_blueprint:
         try:
@@ -137,12 +182,35 @@ def ingest(
             }
         except Exception as exc:  # noqa: BLE001 — ingest must still succeed
             blueprint_summary = {"error": str(exc)}
+    emit_event(
+        operation="lattice_ingest",
+        stage="complete",
+        run_id=run_id,
+        duration_ms=int((time.perf_counter() - t0) * 1000),
+        extra={"files_indexed": graph.files_indexed},
+    )
     return {
         "graph": graph.to_dict(),
         "rag": rag_stats,
         "blueprint": blueprint_summary,
         "god_nodes": lattice_god_nodes(graph.project_key, limit=10),
+        "run_id": run_id,
     }
+
+
+class CancelIngestRequest(BaseModel):
+    run_id: str
+
+
+@router.post("/ingest/cancel")
+def ingest_cancel(req: CancelIngestRequest, _user: CurrentUser = Depends(get_current_user)):
+    from app.infrastructure.observability import cancel_operation
+
+    if not (req.run_id or "").strip():
+        raise HTTPException(status_code=400, detail="run_id required")
+    if not cancel_operation(req.run_id, user_id=_user.user_id):
+        raise HTTPException(status_code=403, detail="not_operation_owner")
+    return {"ok": True, "run_id": req.run_id, "cancelled": True}
 
 
 @router.post("/ingest/upload")

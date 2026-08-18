@@ -383,6 +383,9 @@ def _execute_tool_inner(
         timeout = min(int(args.get("timeout") or 60), 180)
         try:
             child_env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST")}
+            # Pin child PYTHONPATH to this workspace so nested pytest cannot
+            # import a sibling worktree's modules (CI pytest 9 / Linux).
+            child_env["PYTHONPATH"] = str(root)
             completed = subprocess.run(
                 cmd,
                 shell=True,

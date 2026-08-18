@@ -33,6 +33,17 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
   if (token && !headers.Authorization) {
     headers.Authorization = `Bearer ${token}`;
   }
+  try {
+    const key = "zect-correlation-id";
+    let cid = typeof sessionStorage !== "undefined" ? sessionStorage.getItem(key) : null;
+    if (!cid) {
+      cid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `zect-${Date.now()}`;
+      if (typeof sessionStorage !== "undefined") sessionStorage.setItem(key, cid);
+    }
+    if (!headers["X-Correlation-Id"]) headers["X-Correlation-Id"] = cid;
+  } catch {
+    /* sessionStorage may be unavailable */
+  }
   return headers;
 }
 

@@ -7,6 +7,7 @@ Cancel/resume skips already-recorded commit SHAs so retries cannot duplicate the
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -146,6 +147,8 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "head_sha": r.get("head_sha"),
                 "test_ok": r.get("test_ok"),
                 "test_status": r.get("test_status"),
+                "patches_applied": r.get("patches_applied"),
+                "test_stdout": str((r.get("test") or {}).get("stdout") or "")[-800:] if not r.get("test_ok") else "",
                 "files": list(r.get("files") or []),
                 "commands": list(r.get("commands") or []),
                 "blocker": r.get("blocker") or "",
@@ -177,6 +180,9 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "review": mission.get("review") or {},
         "pr": next((r.get("pr") for r in repos if (r.get("pr") or {}).get("url")), {}) or {},
         "ci": mission.get("ci") or {},
+        "correlation_id": mission.get("correlation_id") or "",
+        "work_item_id": mission.get("work_item_id"),
+        "project_id": mission.get("project_id"),
         "sibling": sibling,
         "ready_to_merge": mission.get("phase") == "ready_to_merge",
         "companion_edits_code": False,
@@ -193,11 +199,40 @@ def get_mission(mission_id: str) -> dict[str, Any]:
 
 
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
+    # Copy scalars only — never share the live kwargs dict with redact/telemetry
+    # (that dict is also stored on the mission and JSON-persisted).
+    extra: dict[str, Any] = {}
+    for key, value in data.items():
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            extra[key] = value
+        else:
+            extra[key] = str(value)[:200]
     mission.setdefault("events", []).append(
-        {"event": event, "message": message, "data": data, "at": _now()}
+        {"event": event, "message": message, "data": extra, "at": _now()}
     )
     mission["updated_at"] = _now()
     _save_mission(mission)
+    try:
+        from app.infrastructure.observability import emit_event
+
+        fail = ""
+        if event in ("cancelled",):
+            fail = "cancelled"
+        elif event in ("blocked",):
+            fail = "blocked"
+        emit_event(
+            operation="coding_agent",
+            stage=event,
+            message=message,
+            run_id=str(mission.get("id") or ""),
+            correlation_id=str(mission.get("correlation_id") or ""),
+            work_item_id=mission.get("work_item_id") if isinstance(mission.get("work_item_id"), int) else None,
+            project_id=mission.get("project_id") if isinstance(mission.get("project_id"), int) else None,
+            failure_class=fail,
+            extra=dict(extra),
+        )
+    except Exception:
+        pass
 
 
 def _write_checkpoint(repo: dict[str, Any]) -> None:
@@ -425,6 +460,11 @@ def _apply_patches(worktree: Path, patches: list[dict[str, Any]]) -> dict[str, A
                     continue
         if out.get("ok") and out.get("path"):
             files.append(out["path"])
+            expected = str(patch.get("content") or patch.get("new_text") or patch.get("new") or "")
+            if expected:
+                check = execute_tool("read_file", {"path": path}, workspace=root, auto_approve_edits=True)
+                if expected not in str(check.get("content") or ""):
+                    return {"ok": False, "error": "patch_not_visible", "path": path, "files": files}
         elif not out.get("ok"):
             return {"ok": False, "error": out.get("error") or "patch_failed", "path": path, "files": files}
         if patch.get("command"):
@@ -523,6 +563,9 @@ def start_mission(
     if not roots:
         raise ValueError("authorized_roots_required")
     mid = str(uuid.uuid4())
+    from app.infrastructure.observability import current_correlation, new_id
+
+    correlation_id = current_correlation() or new_id()
     plan_text = (plan or "").strip() or (
         f"# PLAN\n\nGoal: {goal.strip()}\n\n"
         f"Affected roots: {', '.join(str(r.get('label') or r.get('id')) for r in roots)}\n\n"
@@ -535,6 +578,7 @@ def start_mission(
     mission = {
         "id": mid,
         "goal": goal.strip(),
+        "correlation_id": correlation_id,
         "phase": "awaiting_plan_approval",
         "status": "awaiting_plan_approval",
         "plan": plan_text,
@@ -542,7 +586,7 @@ def start_mission(
         "git_approved": False,
         "project_id": project_id,
         "work_item_id": work_item_id,
-        "patches_by_repo": patches_by_repo or {},
+        "patches_by_repo": _stringify_patch_map(patches_by_repo),
         "workspace_parent": str(parent),
         "repos": [
             {
@@ -603,29 +647,58 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
 
 
 def _stringify_patch_map(patches: dict[str, Any] | None) -> dict[str, list[Any]]:
+    raw: Any = patches
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
     out: dict[str, list[Any]] = {}
-    for key, value in (patches or {}).items():
-        out[str(key)] = list(value or [])
+    if not isinstance(raw, dict):
+        return out
+    for key, value in raw.items():
+        if isinstance(value, list):
+            items = value
+        elif isinstance(value, dict):
+            items = [value]
+        else:
+            items = []
+        out[str(key)] = copy.deepcopy(list(items))
     return out
 
 
 def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list[Any]:
     rid = repo.get("repository_id")
-    for key in (str(rid), rid):
-        got = patches_map.get(key) if isinstance(patches_map, dict) else None
-        if got:
-            return list(got)
+    keys: list[Any] = [str(rid), rid]
+    try:
+        keys.append(int(str(rid).strip()))
+    except (TypeError, ValueError):
+        pass
+    seen: set[str] = set()
+    for key in keys:
+        marker = f"{type(key).__name__}:{key}"
+        if marker in seen or not isinstance(patches_map, dict):
+            continue
+        seen.add(marker)
+        if key not in patches_map:
+            continue
+        got = patches_map.get(key)
+        if isinstance(got, list):
+            return copy.deepcopy(got)
+        if isinstance(got, dict):
+            return [copy.deepcopy(got)]
     return []
 
 
 def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
-    patches_map = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
+    patches_map = _stringify_patch_map(mission.get("patches_by_repo"))
     diffs: list[str] = []
     per_repo_status: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         if mission.get("status") == "cancelled":
             return _public(mission)
         patches = _patches_for_repo(patches_map, repo)
+        repo["patches_applied"] = len(patches)
         wt = Path(repo["worktree_path"])
         applied = _apply_patches(wt, patches)
         if not applied.get("ok"):
@@ -712,6 +785,17 @@ def approve_git(mission_id: str, *, commit: bool = True, push: bool = True) -> d
     mission["git_approved"] = True
     mission["phase"] = "committing"
     _emit(mission, "git_approved", "Git approval recorded.")
+    try:
+        from app.infrastructure.observability import emit_privileged
+
+        emit_privileged(
+            action="coding_mission_git_approve",
+            resource_type="coding_mission",
+            resource_name=str(mission_id),
+            details={"phase": mission.get("phase")},
+        )
+    except Exception:
+        pass
     if commit:
         for repo in mission["repos"]:
             result = _commit_if_needed(repo, f"zect coding-agent: {mission.get('goal', '')[:72]}")
@@ -755,6 +839,17 @@ def cancel_mission(mission_id: str) -> dict[str, Any]:
     mission["status"] = "cancelled"
     mission["phase"] = "cancelled"
     _emit(mission, "cancelled", "Mission cancelled. Worktrees and recorded commits preserved.")
+    try:
+        from app.infrastructure.observability import emit_privileged
+
+        emit_privileged(
+            action="coding_mission_cancel",
+            resource_type="coding_mission",
+            resource_name=str(mission_id),
+            details={"phase": mission.get("phase"), "status": "cancelled"},
+        )
+    except Exception:
+        pass
     for repo in mission.get("repos") or []:
         if repo.get("worktree_path"):
             _write_checkpoint(repo)
@@ -783,7 +878,7 @@ def retry_mission(mission_id: str) -> dict[str, Any]:
 
 def repair_and_retry(mission_id: str, patches_by_repo: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     mission = _lookup(mission_id)
-    merged = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
+    merged = _stringify_patch_map(mission.get("patches_by_repo"))
     merged.update(_stringify_patch_map(patches_by_repo))
     mission["patches_by_repo"] = merged
     mission["status"] = "running"

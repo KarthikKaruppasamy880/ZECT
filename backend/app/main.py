@@ -75,6 +75,7 @@ from app.models import Project, Repo, Rule
 from app.api import register_routers
 from app.middleware.rate_limiter import RateLimitMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
+from app.middleware.correlation import CorrelationIdMiddleware
 
 app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 
@@ -82,6 +83,7 @@ app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 # NOTE: added BEFORE CORS so CORS wraps everything (middleware order is LIFO)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 # CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.
 # This ensures CORS headers are present on ALL responses including 500 errors.
@@ -104,19 +106,24 @@ app.add_middleware(
     allow_origins=_ALLOWED_ORIGINS,  # ✅ Whitelist only
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # ✅ Explicit methods
-    allow_headers=["Content-Type", "Authorization", "Accept"],  # ✅ Explicit headers
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Correlation-Id"],
     # Browsers only expose a small safe-listed set of response headers to JS
     # by default (Cache-Control, Content-Type, etc.) — any custom header,
     # like X-Mentrix-TTS-Engine, is invisible to fetch()'s res.headers.get()
     # unless explicitly exposed here, even though the server did send it.
-    expose_headers=["X-Mentrix-TTS-Engine", "X-Mentrix-TTS-Content-Type"],
+    expose_headers=["X-Mentrix-TTS-Engine", "X-Mentrix-TTS-Content-Type", "X-Correlation-Id"],
 )
 
 # ✅ Add additional security headers
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to all responses."""
+    from app.infrastructure.observability import bind_correlation, current_correlation, new_id
+
+    cid = (request.headers.get("x-correlation-id") or current_correlation() or "").strip() or new_id()
+    bind_correlation(cid)
     response = await call_next(request)
+    response.headers.setdefault("X-Correlation-Id", cid)
 
     # Prevent MIME type sniffing
     response.headers["X-Content-Type-Options"] = "nosniff"

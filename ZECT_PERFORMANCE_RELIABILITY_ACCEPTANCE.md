@@ -59,6 +59,7 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Live GitHub / Jira / Camunda | **BLOCKED_EXTERNAL** when unset — does not block ZECT-native perf tests |
 | Mentrix Ultra Review | **PASS** (score 85, 0 critical; medium telemetry fail-soft applied) |
 | CodeRabbit | **SKIPPED** until triggered; skip ≠ PASS |
+| GitHub Actions backend (PR #164 `dad338f`) | **FAIL** — `test_mission_f_sibling_failure_blocks_then_repair` on Linux/pytest 9.1.1 (repo 11 tests still fail after repair). Follow-up commit isolates nested pytest + hardens patch lookup. skip ≠ PASS until that SHA is green |
 
 ## Observability (implemented)
 

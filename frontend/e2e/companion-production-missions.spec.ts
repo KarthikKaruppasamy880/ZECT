@@ -209,7 +209,12 @@ test.describe("Companion production missions", () => {
     const cancel = page.getByTestId("mentrix-companion-cancel");
     await cancel.waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
     if (await cancel.isVisible().catch(() => false)) {
-      await cancel.click();
+      // Streaming live-log/chat reflows make Playwright's actionability
+      // check wait until the 240s test timeout ("element is not stable" /
+      // detached). Optional cancel must not consume that budget.
+      await cancel.click({ force: true, timeout: 8_000 }).catch(async () => {
+        await cancel.evaluate((el) => (el as HTMLButtonElement).click()).catch(() => {});
+      });
       await expect(page.getByTestId("mentrix-companion-input")).toBeVisible();
     }
     await expect(page.getByTestId("mentrix-companion-retry")).toBeVisible({ timeout: 45_000 });

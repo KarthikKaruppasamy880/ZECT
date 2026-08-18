@@ -525,7 +525,7 @@ export default function MentrixCompanion() {
                       type="button"
                       data-testid="mentrix-companion-cancel"
                       onClick={() => s.cancelTurn()}
-                      className="rounded-lg border border-amber-700 px-3 py-2.5 text-xs text-amber-200"
+                      className="shrink-0 rounded-lg border border-amber-700 px-3 py-2.5 text-xs text-amber-200"
                     >
                       Cancel
                     </button>
@@ -535,7 +535,7 @@ export default function MentrixCompanion() {
                       type="button"
                       data-testid="mentrix-companion-retry"
                       onClick={() => s.retryTurn()}
-                      className="rounded-lg border border-slate-600 px-3 py-2.5 text-xs"
+                      className="shrink-0 rounded-lg border border-slate-600 px-3 py-2.5 text-xs"
                     >
                       Retry
                     </button>

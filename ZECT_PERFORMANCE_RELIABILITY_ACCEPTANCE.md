@@ -3,7 +3,7 @@
 **Date:** 2026-08-18  
 **Canonical develop (pre-PR):** `962bb6b58e1108b2a3d697419a82351723baa317` (PR **#163** human-merged)  
 **Branch:** `feat/performance-reliability-architecture`  
-**PR HEAD:** `d49a928` — [PR #164](https://github.com/KarthikKaruppasamy880/ZECT/pull/164)  
+**PR HEAD:** follow-up after `895fa68` — [PR #164](https://github.com/KarthikKaruppasamy880/ZECT/pull/164)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md`  
 **Stop label:** `READY_TO_MERGE_PERFORMANCE_RELIABILITY_ARCHITECTURE` — human merge only, no auto-merge.  
 **Do not start** S8C/S8D, Graphify, KV-cache, OCR/XLSX, broader Web, new agents, or tranche G a11y until this PR is human-merged.
@@ -60,7 +60,7 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Live GitHub / Jira / Camunda | **BLOCKED_EXTERNAL** when unset — does not block ZECT-native perf tests |
 | Mentrix Ultra Review | **PASS** (score 85, 0 critical; medium telemetry fail-soft applied) |
 | CodeRabbit | **PARTIAL** — Majors on `d49a928` addressed in follow-up (bounded `_OPS`, no tracemalloc start, cancel owner check, RAG cancel-before-delete, fuller ultra-review FILES). Overlapping-thread isolation remains PARTIAL. A later review of the new SHA is skip ≠ PASS until posted. |
-| GitHub Actions (PR #164) | **PASS** on `d49a928` — [run 32179569950](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32179569950) backend/frontend/e2e success. `dad338f` backend **FAIL** on mission F is superseded. Follow-up SHA must be green before merge; skip ≠ PASS for an unrun SHA. |
+| GitHub Actions (PR #164) | `d49a928` **PASS** — [run 32179569950](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32179569950). `895fa68` backend/frontend **PASS**, e2e **FAIL** — [run 32183364369](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32183364369): companion cancel click waited on an unstable/detached control until the 240s test timeout (44 passed). Follow-up SHA must be green before merge; skip ≠ PASS. |
 
 ## Observability (implemented)
 

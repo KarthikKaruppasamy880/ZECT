@@ -18,6 +18,8 @@ export default function MentrixFabric() {
   const [text, setText] = useState("");
   const [classify, setClassify] = useState<Record<string, unknown> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [jiraStatus, setJiraStatus] = useState("unknown");
+  const [camundaStatus, setCamundaStatus] = useState("unknown");
 
   const refresh = async () => {
     const res = await apiFetch("/api/fabric/surfaces");
@@ -29,6 +31,25 @@ export default function MentrixFabric() {
 
   useEffect(() => {
     refresh().catch(() => showToast("error", "Failed to load surfaces"));
+    (async () => {
+      try {
+        const [integ, proc] = await Promise.all([
+          apiFetch("/api/mentrix/companion/integrations"),
+          apiFetch("/api/process/status"),
+        ]);
+        if (integ.ok) {
+          const body = (await integ.json()) as { jira_status?: string; jira?: boolean };
+          setJiraStatus(body.jira_status || (body.jira ? "ready" : "BLOCKED_EXTERNAL"));
+        }
+        if (proc.ok) {
+          const body = (await proc.json()) as { ready?: boolean; status?: string };
+          setCamundaStatus(body.ready ? "ready" : body.status === "degraded" ? "BLOCKED_EXTERNAL" : String(body.status || "BLOCKED_EXTERNAL"));
+        }
+      } catch {
+        setJiraStatus("unknown");
+        setCamundaStatus("unknown");
+      }
+    })().catch(() => undefined);
   }, []);
 
   const runClassify = async () => {
@@ -92,6 +113,22 @@ export default function MentrixFabric() {
           <p className="text-sm text-slate-500">
             External process → Connector → ZECT WorkItem → Project → ASK/PLAN/AGENT. Ticket text is untrusted.
           </p>
+          <div className="mt-2 flex flex-wrap gap-2" data-testid="process-connector-status">
+            <span
+              className="rounded px-2 py-0.5 text-[11px] font-medium uppercase bg-slate-100 text-slate-700"
+              data-testid="process-connector-jira"
+              data-status={jiraStatus}
+            >
+              Jira {jiraStatus}
+            </span>
+            <span
+              className="rounded px-2 py-0.5 text-[11px] font-medium uppercase bg-slate-100 text-slate-700"
+              data-testid="process-connector-camunda"
+              data-status={camundaStatus}
+            >
+              Camunda {camundaStatus}
+            </span>
+          </div>
         </div>
         <button type="button" onClick={() => refresh()} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />

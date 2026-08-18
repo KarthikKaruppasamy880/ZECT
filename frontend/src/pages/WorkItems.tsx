@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { authHeaders, createSampleProcess, getApiBase } from "@/lib/api";
 import LongRunningRunPanel from "@/components/LongRunningRunPanel";
+import WorkItemDetailPanel from "@/components/WorkItemDetailPanel";
 
 type WorkItem = {
   id: number;
@@ -63,11 +64,13 @@ export default function WorkItems() {
         className="mt-3 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs text-teal-900"
         onClick={async () => {
           const out = await createSampleProcess();
+          const wi = out.work_item as WorkItem;
           setItems((prev) => {
-            const wi = out.work_item;
             if (prev.some((p) => p.id === wi.id)) return prev;
-            return [wi as WorkItem, ...prev];
+            return [wi, ...prev];
           });
+          setSelectedId(wi.id);
+          setLoading(false);
         }}
       >
         Create sample process WorkItem
@@ -94,8 +97,12 @@ export default function WorkItems() {
       )}
       <ul className="mt-6 space-y-2">
         {visible.map((wi) => (
-          <li key={wi.id} className="rounded-lg border border-slate-200 px-4 py-3 flex items-center justify-between gap-4">
-            <button type="button" className="text-left" onClick={() => setSelectedId(wi.id)}>
+          <li
+            key={wi.id}
+            className="rounded-lg border border-slate-200 px-4 py-3 flex items-center justify-between gap-4"
+            data-testid={`work-item-row-${wi.id}`}
+          >
+            <button type="button" className="text-left" data-testid={`work-item-select-${wi.id}`} onClick={() => setSelectedId(wi.id)}>
               <p className="font-medium text-slate-900">#{wi.id} {wi.title}</p>
               <p className="text-xs text-slate-500">
                 {wi.source || "user"}
@@ -109,6 +116,7 @@ export default function WorkItems() {
           </li>
         ))}
       </ul>
+      {selected && <WorkItemDetailPanel workItemId={selected.id} />}
       {selected && <LongRunningRunPanel workItemId={selected.id} title={selected.title} />}
       <p className="mt-8 text-sm">
         <Link className="text-teal-700 hover:underline" to="/workspace">Open Developer Workspace</Link>

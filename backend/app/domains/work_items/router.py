@@ -396,18 +396,27 @@ def ingest_external(
 ):
     from app.domains.work_items.ingest import ingest_work_item
 
-    return ingest_work_item(
-        db,
-        source=body.source,
-        external_id=body.external_id,
-        raw=body.raw,
-        project_id=body.project_id,
-        repository_id=body.repository_id,
-        repository_ref=body.repository_ref,
-        base_commit_sha=body.base_commit_sha,
-        created_by=getattr(user, "email", "") or "",
-        require_repo=body.require_repo,
-    )
+    try:
+        return ingest_work_item(
+            db,
+            source=body.source,
+            external_id=body.external_id,
+            raw=body.raw,
+            project_id=body.project_id,
+            repository_id=body.repository_id,
+            repository_ref=body.repository_ref,
+            base_commit_sha=body.base_commit_sha,
+            created_by=getattr(user, "email", "") or "",
+            require_repo=body.require_repo,
+        )
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "not_configured" in msg:
+            raise HTTPException(
+                status_code=503,
+                detail={"status": "BLOCKED_EXTERNAL", "error": msg},
+            ) from exc
+        raise HTTPException(status_code=502, detail=msg) from exc
 
 
 class FabricHandoffIn(BaseModel):

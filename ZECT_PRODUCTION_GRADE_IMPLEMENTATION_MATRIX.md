@@ -34,7 +34,7 @@ Nothing local-only is called complete. Missing evidence is not PASS.
 | Install / recovery | Sidecar, mission persist, occupied port | `lifecycle.py`, `service-lifecycle.js` | **#162** | **yes** | `runtime-recovery-production.spec.ts` | electron skip ≠ core | mission id jail | NSIS unproven | **PARTIAL** | Clean-machine NSIS |
 | Runtime / DB | sqlite desktop + Alembic postgres | `database.py`, `alembic/env.py` | **this PR** | **no** until merge | healthz + System Health | sidecar sqlite default | no URL in healthz | live PG unset | **PASS** (desktop + boot contract) | Live Postgres / NSIS `BLOCKED_EXTERNAL` |
 | Performance / soak | LRR endurance script | `live_lrr_endurance.py` | prior | yes | n/a | n/a | n/a | no CI soak | **FAIL** (evidence) | Tranche F — **not started** |
-| Accessibility | SplitPane ARIA | #154 | yes | not audited | not audited | n/a | n/a | **PARTIAL** | Tranche G |
+| Accessibility | SplitPane ARIA | SplitPane | #154 | yes | not audited | not audited | n/a | n/a | **PARTIAL** | Tranche G |
 
 ## Suggested PR sequence (human-merge each)
 

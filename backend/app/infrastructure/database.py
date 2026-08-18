@@ -6,6 +6,8 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
+from app.infrastructure.db_url import is_postgres_url, normalize_database_url
+
 # Load backend/.env before DATABASE_URL is read (matches main.py; works when importing database alone).
 # Packaged sidecar: skip installer .env; honor ZECT_USER_DATA sqlite path.
 # database.py lives at backend/app/infrastructure/ — parents[2] is backend/.
@@ -32,18 +34,6 @@ else:
     _default_db = "sqlite:///./zect.db"
 
 
-def is_postgres_url(url: str) -> bool:
-    scheme = (url or "").strip().lower().split(":", 1)[0]
-    return scheme.startswith("postgres")
-
-
-def normalize_database_url(url: str) -> str:
-    raw = (url or "").strip()
-    if raw.startswith("postgresql://"):
-        return raw.replace("postgresql://", "postgresql+psycopg://", 1)
-    return raw
-
-
 def database_mode(url: str | None = None) -> str:
     """desktop_sqlite | server_postgres — never infer a third silent hybrid."""
     raw = DATABASE_URL if url is None else url
@@ -67,6 +57,7 @@ def connect_engine(url: str):
     """Create and ping an engine. Postgres URLs fail closed (no SQLite fallback)."""
     normalized = normalize_database_url(url)
     connect_args = {"check_same_thread": False} if normalized.startswith("sqlite") else {}
+    eng = None
     try:
         eng = create_engine(normalized, connect_args=connect_args, pool_pre_ping=True)
         if normalized.startswith("sqlite"):
@@ -74,6 +65,8 @@ def connect_engine(url: str):
         with eng.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception as exc:
+        if eng is not None:
+            eng.dispose()
         safe = normalized.split("@")[-1] if "@" in normalized else normalized
         print(f"[ZECT DB] Could not connect to {safe}: {exc}")
         if is_postgres_url(normalized):

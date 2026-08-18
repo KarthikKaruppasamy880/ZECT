@@ -6,6 +6,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, inspect as sa_inspect, pool
 from alembic import context
 
+from app.infrastructure.db_url import normalize_database_url
+
 # this is the Alembic Config object
 config = context.config
 
@@ -28,8 +30,7 @@ if _placeholder:
     )
 else:
     database_url = _configured
-if database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+database_url = normalize_database_url(database_url)
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Import all models so Alembic can detect them for autogenerate

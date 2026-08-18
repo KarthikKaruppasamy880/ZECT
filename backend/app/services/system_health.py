@@ -13,20 +13,27 @@ def build_system_health(db: Any = None) -> dict[str, Any]:
     components.append({"id": "api", "name": "API", "status": "ok", "detail": "healthz"})
 
     try:
+        from sqlalchemy import inspect, text
+
         from app.infrastructure.database import database_mode, engine as _db_engine
 
         mode = database_mode()
+        with _db_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        tables = inspect(_db_engine).get_table_names()
+        ready = "users" in tables
         components.append(
             {
                 "id": "database",
                 "name": "Database",
-                "status": "ok",
+                "status": "ok" if ready else "degraded",
                 "detail": {
                     "mode": mode,
                     "dialect": _db_engine.dialect.name,
                     "lifecycle": (
                         "alembic_upgrade_heads" if mode == "server_postgres" else "create_all_additive"
                     ),
+                    "ready": ready,
                 },
             }
         )

@@ -63,7 +63,7 @@ Canonical `origin/develop` = `0e730ac3b9397d5b9c638669017c59a19d82e821` (`Merge 
 - Finding marked **high** (“no SQLite fallback / unhandled exception”) is **rejected**. Fail-closed with no SQLite fallback is the server_postgres contract.
 - Finding marked **medium** (bind defaulting to module `engine`) is accepted as the module-level `init_db()` path; tests pass an explicit bind.
 
-CodeRabbit / other external review: **SKIPPED** until the PR exists; skip ≠ PASS.
+CodeRabbit on PR **#163** (triggered review): valid Majors fixed (`postgres://` normalization, System Health DB ping, Ultra Review full `origin/develop...HEAD` diff). Moving `Base` out of `database.py` is a pre-existing import-time engine pattern — **not** done in this PR (heavy lift / regression risk). Skip ≠ PASS for the original auto-skip comment; the triggered review is the external review.
 
 ## Stop
 

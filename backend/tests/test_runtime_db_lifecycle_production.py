@@ -35,9 +35,11 @@ def test_modes_are_explicit():
     assert database_mode("sqlite:///C:/Users/x/zect.db") == "desktop_sqlite"
     assert database_mode("postgresql://u:p@localhost:5432/zect_db") == "server_postgres"
     assert database_mode("postgresql+psycopg://u:p@localhost:5432/zect_db") == "server_postgres"
+    assert database_mode("postgres://u:p@localhost:5432/zect_db") == "server_postgres"
     assert is_postgres_url("postgres://u:p@h/db") is True
     assert is_postgres_url("sqlite:///x") is False
     assert normalize_database_url("postgresql://u:p@h/db").startswith("postgresql+psycopg://")
+    assert normalize_database_url("postgres://u:p@h/db").startswith("postgresql+psycopg://")
 
 
 def test_postgres_unreachable_does_not_fallback_sqlite(tmp_path, monkeypatch):
@@ -178,6 +180,13 @@ def test_sqlite_backup_and_wal_concurrent_access(tmp_path):
     eng_b = create_engine(f"sqlite:///{dest.as_posix()}", connect_args={"check_same_thread": False})
     names = inspect(eng_b).get_table_names()
     assert "users" in names
+    from app.models import User as UserModel
+
+    db_b = sessionmaker(bind=eng_b)()
+    try:
+        assert db_b.query(UserModel).filter(UserModel.email == "wal@zect.local").one().name == "Wal"
+    finally:
+        db_b.close()
     eng_b.dispose()
 
     eng2, _ = connect_engine(url)
@@ -207,14 +216,22 @@ def test_postgres_backup_helper_refuses_file_copy():
 def test_server_postgres_init_db_uses_alembic_not_create_all(monkeypatch):
     from app.infrastructure import database as dbmod
 
-    calls: list[str] = []
-    monkeypatch.setattr(dbmod, "apply_alembic", lambda *a, **k: calls.append("alembic") or "alembic_ok")
-    monkeypatch.setattr(dbmod.Base.metadata, "create_all", lambda **kw: calls.append("create_all"))
+    calls: list[tuple] = []
+
+    def _alembic(*args, **kwargs):
+        calls.append((args, kwargs))
+        return "alembic_ok"
+
+    monkeypatch.setattr(dbmod, "apply_alembic", _alembic)
+    monkeypatch.setattr(dbmod.Base.metadata, "create_all", lambda **kw: calls.append(("create_all", {})))
     insp = MagicMock()
     insp.get_table_names.return_value = ["users"]
     monkeypatch.setattr(dbmod, "inspect", lambda _bind: insp)
     dbmod.init_db(bind=MagicMock(), url="postgresql+psycopg://u:p@localhost:5432/zect_db")
-    assert calls == ["alembic"]
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[1] == "heads"
+    assert kwargs.get("required") is True
 
 
 def test_server_postgres_init_db_missing_users_fails_closed(monkeypatch):
@@ -260,6 +277,8 @@ def test_healthz_exposes_database_mode_not_url(client):
     assert body["database_lifecycle"] == "create_all_additive"
     blob = res.text.lower()
     assert "postgresql://" not in blob
+    assert "postgresql+psycopg://" not in blob
+    assert "postgres://" not in blob
     assert "password" not in blob
 
 

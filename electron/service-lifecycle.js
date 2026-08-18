@@ -122,6 +122,16 @@ async function waitForApi(timeoutMs = 45000) {
   return last;
 }
 
+function sidecarStartDecision({ apiOk, shouldManage, packaged } = {}) {
+  if (apiOk) {
+    return { start: false, reason: "api_already_listening" };
+  }
+  if (!(packaged || shouldManage)) {
+    return { start: false, reason: "manage_services_disabled" };
+  }
+  return { start: true, reason: "api_down" };
+}
+
 function startBackendSidecar({ resourcesPath, userData, packaged } = {}) {
   const dir = backendDir(resourcesPath);
   const script = path.join(dir, "run-api.ps1");
@@ -237,6 +247,7 @@ function stopManagedChildren() {
 
 module.exports = {
   checkReadiness,
+  sidecarStartDecision,
   tryStartLocalScript,
   startBackendSidecar,
   waitForApi,

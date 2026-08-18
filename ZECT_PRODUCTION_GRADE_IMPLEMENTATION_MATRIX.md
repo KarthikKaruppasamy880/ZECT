@@ -1,21 +1,21 @@
 # ZECT Production-Grade Implementation Matrix
 
 **Date:** 2026-08-18  
-**Canonical develop:** `origin/develop` = `071028e290817a22ea1be0ab3944af3d3822e1de` (PR **#160** human-merged).  
-**This working branch:** `feat/security-production`  
+**Canonical develop:** `origin/develop` = `9394508ba6f6f024a240c12dd294d626036afc7d` (PR **#161** human-merged).  
+**This working branch:** `feat/runtime-recovery`  
 **Prompt:** `prompts/ZECT_REMAINING_PRODUCTION_GRADE_MASTER_CLOSURE.md`  
 **No auto-merge.** S8C / S8D / Graphify / KV-cache / OCR-XLSX / broader Web / new-agent roadmap: **not started**.
 
-Companion PASS, Coding Agent PASS, Present/Voice PARTIAL, Work intelligence PASS (lifecycle), and this Security campaign do **not** make overall ZECT production-ready.
+Companion PASS, Coding Agent PASS (lifecycle), Present/Voice PARTIAL, Work intelligence PASS (lifecycle), Security campaign PASS, and this recovery campaign do **not** make overall ZECT production-ready.
 
 ## Git truth
 
 | Item | Value |
 |------|--------|
-| Merged | #156 Developer multi-root; #157 Companion; **#158 Coding Agent**; **#159 Present + Voice**; **#160 Work intelligence** |
-| This PR | Security / governance threat campaign + path-jail prefix fix |
+| Merged | #156–**#161** (Security on develop) |
+| This PR | Install / upgrade / migration / recovery proof + durable coding-agent missions |
 | Unrelated WIP | leftover acceptance markdown / `prompts/` / `.zect/skills/` — **not** claimed complete |
-| Presenton | Product default (`:8000`). Native Present opt-in. **Not flipped.** |
+| Presenton | Product default. Native Present opt-in. **Not flipped.** |
 
 Nothing local-only is called complete. Missing evidence is not PASS.
 
@@ -23,42 +23,34 @@ Nothing local-only is called complete. Missing evidence is not PASS.
 
 | Surface | Capability | files | commit / PR | on develop? | browser | Electron | security | operational | status | blocker |
 |---------|------------|-------|-------------|-------------|---------|----------|----------|-------------|--------|---------|
-| Companion | HUD/dock orchestration, provenance, canonical handoffs | `MentrixCompanion.tsx`, `companion.py` | **#157** | **yes** | headed missions A–G **PASS** | Electron HUD/handoff **PASS** | broker | Local Jira env; Camunda unset | **PASS** (orchestration) | Live Jira create-issue not in Companion |
-| Developer chrome | Explorer \| Editor \| Agent + bottom tabs | `DeveloperWorkspace.tsx` | #154+#156 | **yes** | headed | Electron restore #156 | path jail | layout persist | **PASS** (chrome) | Overall ZECT still PARTIAL |
-| Developer multi-root | Merged explorer, terminals, search, git jail | `WorkspaceRootsRail.tsx` | #156 | **yes** | headed | headed restore **PASS** | bound_root | ROOT_UNAVAILABLE | **PASS** | Semantic cross-repo refs; live GitHub `BLOCKED_EXTERNAL` |
-| Lattice / context | Canonical states + SHA STALE per root | `indexer.py`, `lattice.py`, roots rail | **#160** | **yes** | header + per-root SHA | skip ≠ core | repo-scoped keys | STALE on commit | **PASS** (per-root; no Graphify) | Graphify out of scope |
-| Coding Agent | PLAN → worktree → edit/test/review/git | `lifecycle.py`, `MentrixCodingAgentPanel.tsx` | **#158** | **yes** | `coding-agent-production.spec.ts` | `coding-agent-electron.spec.ts` | git always-confirm | in-memory missions | **PASS** (lifecycle) | Live GitHub `BLOCKED_EXTERNAL`; restart persistence tranche E |
-| WorkItem / multi-repo agent | ASK/PLAN/AGENT + isolated worktrees + UI detail | `multi_repo_agent.py`, `WorkItemDetailPanel.tsx` | **#160** | **yes** | `work-intelligence-production.spec.ts` | `work-intelligence-electron.spec.ts` (skip ≠ core) | authorized repo ids; 403 without verifier | aggregate READY | **PASS** (lifecycle + UI) | Live GitHub `BLOCKED_EXTERNAL` |
-| Ultra Review | Findings + closed loop | `ultrareview.py` | #138+#158+#159+#160 | yes | unit | n/a | MERGE_ELIGIBLE | fixture git | **PARTIAL** | CodeRabbit skip ≠ PASS |
-| Present | Dashboard→Create→Review→Export Quality/Fast | Present pages, inspector, import fail-closed | **#159** | **yes** | `present-voice-production.spec.ts` | `present-voice-electron.spec.ts` (skip ≠ core) | 409 critical block; invalid PPTX 400 | Presenton default | **PARTIAL** | Live Generate `BLOCKED_EXTERNAL` without Presenton; COM opt-in |
-| Voice | Clone / stock / none, overlap, cancel | `CloneVoicePanel.tsx`, `speak.ts`, `voice_clone.py` | **#159** | **yes** | selectors + engine status | Electron clone panel | cross-user 404 | Voicebox | **PARTIAL** | Voicebox/stock live speak `BLOCKED_EXTERNAL` |
-| Projects / Processes | Fixture isolation, sample + ingest, connector chips | `fixture_isolation.py`, `MentrixFabric.tsx` | **#160** | **yes** | hygiene + work-intelligence e2e | Electron processes | provenance hide | sample + fixture ingest | **PARTIAL** | Real Jira/Camunda `BLOCKED_EXTERNAL` |
-| Security | Threat campaign, path jail, broker, SSRF | `allowed_paths.py`, `permission_broker.py`, `test_security_production.py` | **this PR** | **no** until merge | `security-production.spec.ts` | `security-electron.spec.ts` (skip ≠ core) | prefix jail closed; git always-confirm | no live OAuth/GitHub pentest | **PASS** (campaign) | Live OAuth/GitHub/Voicebox `BLOCKED_EXTERNAL` |
-| Install / recovery | Alembic, sidecar | `alembic/` | #146 | yes | n/a | sidecar exists | n/a | NSIS unproven | **PARTIAL** | Clean-machine NSIS; coding-agent in-memory (tranche E) |
-| Performance / soak | LRR endurance script | `live_lrr_endurance.py` | prior | script only | n/a | n/a | n/a | no CI soak | **FAIL** (evidence) | No bounded soak (tranche F) |
-| Observability | Some correlation | SecurityFinding | prior | yes | n/a | n/a | avoid secret logs | not global | **PARTIAL** | No repo-wide `x-correlation-id` |
-| Accessibility | SplitPane ARIA | scattered | #154 | yes | not audited | not audited | n/a | n/a | **PARTIAL** | No WCAG sweep (tranche G) |
+| Companion | HUD/dock orchestration | `MentrixCompanion.tsx` | **#157** | **yes** | headed **PASS** | Electron **PASS** | broker | Camunda unset | **PASS** (orchestration) | Live Jira create |
+| Developer multi-root | Explorer, terminals, git jail | `WorkspaceRootsRail.tsx` | #156 | **yes** | headed | restore **PASS** | bound_root | ROOT_UNAVAILABLE | **PASS** | Live GitHub `BLOCKED_EXTERNAL` |
+| Lattice | Per-root SHA / STALE | `indexer.py` | **#160** | **yes** | headed | skip ≠ core | repo-scoped | STALE | **PASS** | Graphify out of scope |
+| Coding Agent | PLAN → worktree → review → git | `lifecycle.py` | **#158** + **this PR** | **no** until merge | coding-agent e2e | electron skip ≠ core | git confirm | **durable JSON** | **PASS** (lifecycle + restart) | Live GitHub `BLOCKED_EXTERNAL` |
+| WorkItem | ASK/PLAN/AGENT + UI | `WorkItemDetailPanel.tsx` | **#160** | **yes** | headed | skip ≠ core | verifier 403 | aggregate READY | **PASS** | Live GitHub `BLOCKED_EXTERNAL` |
+| Present / Voice | Dashboard→Export; clone | Present pages | **#159** | **yes** | headed | skip ≠ core | 409 overlap | Presenton default | **PARTIAL** | Live Generate / Voicebox `BLOCKED_EXTERNAL` |
+| Security | Threat campaign + path jail | `allowed_paths.py` | **#161** | **yes** | headed | Electron **PASS** | prefix jail | OAuth unset | **PASS** (campaign) | Live OAuth/GitHub/Voicebox |
+| Install / recovery | Alembic chain, sidecar, mission persist | `lifecycle.py`, `service-lifecycle.js` | **this PR** | **no** until merge | `runtime-recovery-production.spec.ts` | electron skip ≠ core | mission id jail | NSIS unproven | **PARTIAL** | Clean-machine NSIS |
+| Performance / soak | LRR endurance script | `live_lrr_endurance.py` | prior | yes | n/a | n/a | n/a | no CI soak | **FAIL** (evidence) | Tranche F |
+| Accessibility | SplitPane ARIA | #154 | yes | not audited | not audited | n/a | n/a | **PARTIAL** | Tranche G |
 
 ## Suggested PR sequence (human-merge each)
 
 | PR | Topic | This session |
 |----|--------|----------------|
-| A | Coding-agent missions A–G | **#158 merged** |
-| B | Present + Voice re-proof | **#159 merged** |
-| C | WorkItems / Processes / Lattice per-root | **#160 merged** |
-| D | Security / governance threat campaign | **this PR — stop at READY_TO_MERGE_SECURITY, no auto-merge** |
-| E–I | Recovery, soak, a11y, full-release E2E, final audit | not started |
+| A–D | Coding Agent, Present/Voice, Work intelligence, Security | **#158–#161 merged** |
+| E | Install / upgrade / recovery | **this PR — stop at READY_TO_MERGE_RECOVERY, no auto-merge** |
+| F–I | Soak, a11y, full-release E2E, final audit | not started |
 
-## This PR (Security)
+## This PR (Recovery)
 
 Human-merge after CI. Remaining **outside** this tranche:
 
-- Live Entra OAuth / live GitHub PR (`BLOCKED_EXTERNAL` when unset)
-- Live Voicebox reconnect campaign (`BLOCKED_EXTERNAL` when engine offline)
-- Live Jira / Camunda
+- Clean-machine Windows NSIS (`BLOCKED_EXTERNAL`)
+- Live Postgres Alembic cutover (packaged sqlite `create_all`)
+- Soak / a11y / full-release E2E (tranches F–H)
 - Graphify / S8C / S8D
-- Recovery, soak, a11y, full-release E2E (tranches E–H)
 
 ## Verdict so far
 
-**ZECT_PRODUCTION_PARTIAL.** Canonical develop is healthy post-#160. This PR closes the path-jail prefix bypass and records an honest threat campaign; it does **not** make overall ZECT production-grade.
+**ZECT_PRODUCTION_PARTIAL.** Canonical develop is healthy post-#161. This PR makes coding-agent missions survive backend restart and records honest recovery gates; it does **not** make overall ZECT production-grade.

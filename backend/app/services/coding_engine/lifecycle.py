@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -22,9 +23,90 @@ from app.services.coding_engine.mentrix_agent_tools import execute_tool, resolve
 from app.services.mentrix.companion_scope import aggregate_sibling_status, redact_secrets
 
 CHECKPOINT = ".zect/coding-agent-checkpoint.json"
+_MISSION_ID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 
 _LOCK = threading.Lock()
 _MISSIONS: dict[str, dict[str, Any]] = {}
+
+
+def missions_dir() -> Path:
+    override = (os.getenv("ZECT_CODING_MISSIONS_DIR") or "").strip()
+    if override:
+        return Path(override)
+    user = (os.getenv("ZECT_USER_DATA") or "").strip()
+    if user:
+        return Path(user) / "data" / "coding_missions"
+    if (os.getenv("ZECT_PYTEST") or "").strip() or os.getenv("PYTEST_CURRENT_TEST"):
+        current = (os.getenv("PYTEST_CURRENT_TEST") or "session").split(" ")[0]
+        safe = re.sub(r"[^0-9a-zA-Z._-]+", "_", current)[:80] or "session"
+        return Path(tempfile.gettempdir()) / "zect-pytest-coding-missions" / safe
+    return Path(__file__).resolve().parents[3] / "data" / "coding_missions"
+
+
+def reset_mission_cache() -> None:
+    """Simulate a backend process restart (in-memory map is empty)."""
+    with _LOCK:
+        _MISSIONS.clear()
+
+
+def _safe_mission_id(mission_id: str) -> str:
+    mid = (mission_id or "").strip()
+    if not _MISSION_ID_RE.fullmatch(mid):
+        raise KeyError("mission_not_found")
+    return mid
+
+
+def _persistable(mission: dict[str, Any]) -> dict[str, Any]:
+    """JSON snapshot of internal mission state.
+
+    Do not round-trip through ``redact_secrets`` here: that rewrites patch
+    bodies and test paths, so resume/repair after restart would re-apply ``***``.
+    API responses still go through ``_public`` + companion redaction.
+    """
+    return json.loads(json.dumps(mission, default=str))
+
+
+def _save_mission(mission: dict[str, Any]) -> None:
+    mid = _safe_mission_id(str(mission.get("id") or ""))
+    dest = missions_dir()
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        payload = _persistable(mission)
+        (dest / f"{mid}.json").write_text(json.dumps(payload), encoding="utf-8")
+        mission.pop("persist_error", None)
+    except (OSError, TypeError, ValueError):
+        mission["persist_error"] = "persist_failed"
+
+
+def _load_mission_from_disk(mission_id: str) -> dict[str, Any] | None:
+    mid = _safe_mission_id(mission_id)
+    path = missions_dir() / f"{mid}.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("mission_corrupt") from exc
+    if not isinstance(data, dict) or str(data.get("id") or "") != mid:
+        raise ValueError("mission_corrupt")
+    return data
+
+
+def _lookup(mission_id: str) -> dict[str, Any]:
+    mid = _safe_mission_id(mission_id)
+    with _LOCK:
+        cached = _MISSIONS.get(mid)
+        if cached:
+            return cached
+    loaded = _load_mission_from_disk(mid)
+    with _LOCK:
+        cached = _MISSIONS.get(mid)
+        if cached:
+            return cached
+        if not loaded:
+            raise KeyError("mission_not_found")
+        _MISSIONS[mid] = loaded
+        return loaded
 
 
 def _now() -> str:
@@ -99,7 +181,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "ready_to_merge": mission.get("phase") == "ready_to_merge",
         "companion_edits_code": False,
         "no_auto_merge": True,
-        "persistence": "in_memory",
+        "persistence": "durable_json",
         "updated_at": mission.get("updated_at"),
         "events": list(mission.get("events") or [])[-40:],
         "evidence": list(mission.get("events") or [])[-40:],
@@ -107,11 +189,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_mission(mission_id: str) -> dict[str, Any]:
-    with _LOCK:
-        m = _MISSIONS.get(mission_id)
-    if not m:
-        raise KeyError("mission_not_found")
-    return _public(m)
+    return _public(_lookup(mission_id))
 
 
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
@@ -119,6 +197,7 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
         {"event": event, "message": message, "data": data, "at": _now()}
     )
     mission["updated_at"] = _now()
+    _save_mission(mission)
 
 
 def _write_checkpoint(repo: dict[str, Any]) -> None:
@@ -207,7 +286,10 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
     out = execute_tool(
         "run_command",
         {
-            "command": f'"{sys.executable}" -m pytest -q --tb=short --noconftest tests',
+            "command": (
+                f'"{sys.executable}" -m pytest -q --tb=short --noconftest '
+                f"--rootdir=. -o addopts= -o testpaths=tests -p no:cacheprovider tests"
+            ),
             "timeout": 90,
         },
         workspace=root,
@@ -477,9 +559,9 @@ def start_mission(
         "created_at": _now(),
         "updated_at": _now(),
     }
-    _emit(mission, "plan", "PLAN ready — approve before isolated worktrees or edits.")
     with _LOCK:
         _MISSIONS[mid] = mission
+    _emit(mission, "plan", "PLAN ready — approve before isolated worktrees or edits.")
     return _public(mission)
 
 
@@ -489,10 +571,7 @@ def tempfile_parent(root: dict[str, Any]) -> Path:
 
 
 def approve_plan(mission_id: str) -> dict[str, Any]:
-    with _LOCK:
-        mission = _MISSIONS.get(mission_id)
-    if not mission:
-        raise KeyError("mission_not_found")
+    mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
     mission["plan_approved"] = True
@@ -523,15 +602,30 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
     return _run_edit_test_review(mission)
 
 
+def _stringify_patch_map(patches: dict[str, Any] | None) -> dict[str, list[Any]]:
+    out: dict[str, list[Any]] = {}
+    for key, value in (patches or {}).items():
+        out[str(key)] = list(value or [])
+    return out
+
+
+def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list[Any]:
+    rid = repo.get("repository_id")
+    for key in (str(rid), rid):
+        got = patches_map.get(key) if isinstance(patches_map, dict) else None
+        if got:
+            return list(got)
+    return []
+
+
 def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
-    patches_map = mission.get("patches_by_repo") or {}
+    patches_map = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
     diffs: list[str] = []
     per_repo_status: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         if mission.get("status") == "cancelled":
             return _public(mission)
-        rid = str(repo.get("repository_id"))
-        patches = patches_map.get(rid) or patches_map.get(str(rid)) or []
+        patches = _patches_for_repo(patches_map, repo)
         wt = Path(repo["worktree_path"])
         applied = _apply_patches(wt, patches)
         if not applied.get("ok"):
@@ -552,6 +646,8 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):
             repo["blocker"] = f"tests_{tests.get('status')}"
+        else:
+            repo["blocker"] = ""
         diff = _collect_diff(wt)
         if diff:
             repo["diff"] = diff
@@ -604,10 +700,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
 
 
 def approve_git(mission_id: str, *, commit: bool = True, push: bool = True) -> dict[str, Any]:
-    with _LOCK:
-        mission = _MISSIONS.get(mission_id)
-    if not mission:
-        raise KeyError("mission_not_found")
+    mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
     if mission.get("phase") == "blocked":
@@ -658,10 +751,7 @@ def approve_git(mission_id: str, *, commit: bool = True, push: bool = True) -> d
 
 
 def cancel_mission(mission_id: str) -> dict[str, Any]:
-    with _LOCK:
-        mission = _MISSIONS.get(mission_id)
-    if not mission:
-        raise KeyError("mission_not_found")
+    mission = _lookup(mission_id)
     mission["status"] = "cancelled"
     mission["phase"] = "cancelled"
     _emit(mission, "cancelled", "Mission cancelled. Worktrees and recorded commits preserved.")
@@ -672,15 +762,14 @@ def cancel_mission(mission_id: str) -> dict[str, Any]:
 
 
 def resume_mission(mission_id: str) -> dict[str, Any]:
-    with _LOCK:
-        mission = _MISSIONS.get(mission_id)
-    if not mission:
-        raise KeyError("mission_not_found")
+    mission = _lookup(mission_id)
     if mission.get("phase") == "ready_to_merge":
+        _save_mission(mission)
         return _public(mission)
     mission["status"] = "running"
     if not mission.get("plan_approved"):
         mission["phase"] = "awaiting_plan_approval"
+        _save_mission(mission)
         return _public(mission)
     if not all(r.get("worktree_path") for r in mission["repos"]):
         return approve_plan(mission_id)
@@ -693,13 +782,14 @@ def retry_mission(mission_id: str) -> dict[str, Any]:
 
 
 def repair_and_retry(mission_id: str, patches_by_repo: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
-    with _LOCK:
-        mission = _MISSIONS.get(mission_id)
-    if not mission:
-        raise KeyError("mission_not_found")
-    merged = dict(mission.get("patches_by_repo") or {})
-    merged.update(patches_by_repo or {})
+    mission = _lookup(mission_id)
+    merged = _stringify_patch_map(mission.get("patches_by_repo") if isinstance(mission.get("patches_by_repo"), dict) else {})
+    merged.update(_stringify_patch_map(patches_by_repo))
     mission["patches_by_repo"] = merged
     mission["status"] = "running"
+    mission["sibling"] = {}
+    mission["review"] = {}
+    for repo in mission.get("repos") or []:
+        repo["blocker"] = ""
     _emit(mission, "repair", "Applying sibling repair patches.")
     return _run_edit_test_review(mission)

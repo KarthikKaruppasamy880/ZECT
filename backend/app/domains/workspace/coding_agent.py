@@ -230,6 +230,8 @@ def read_mission(mission_id: str, _user: CurrentUser = Depends(get_current_user)
         return get_mission(mission_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="mission_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/missions/{mission_id}/approve-plan")

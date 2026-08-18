@@ -82,6 +82,10 @@ def test_thresholds_are_declared_before_results():
     assert T.SOAK_ITERATIONS == 8
     assert T.ISOLATION_LEAKS_ALLOWED == 0
     assert T.SOAK_MAX_RSS_GROWTH_BYTES == 96 * 1024 * 1024
+    assert T.COMPANION_CONCURRENT_SESSIONS == 3
+    assert T.OVERLAPPING_THREADS == 2
+    assert T.PRESENT_NATIVE_QUALITY_MAX_MS == 45_000
+    assert T.TERMINAL_CONCURRENT == 2
 
 
 def test_lattice_ingest_large_repo_under_threshold(tmp_path):

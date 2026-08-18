@@ -5,7 +5,11 @@ import os
 
 import pytest
 
-from app.infrastructure.allowed_paths import allowed_roots, path_under_allowed_roots
+from app.infrastructure.allowed_paths import (
+    allowed_roots,
+    is_path_under_root,
+    path_under_allowed_roots,
+)
 
 
 def test_allowed_roots_includes_zect_workspace_root(monkeypatch, tmp_path):
@@ -46,3 +50,46 @@ def test_home_and_tempdir_allowed_without_any_env_var(monkeypatch):
     roots = allowed_roots()
     assert str(Path.home()) in roots
     assert str(Path(tempfile.gettempdir())) in roots
+
+
+def test_prefix_sibling_is_not_inside_root(tmp_path, monkeypatch):
+    """Classic startswith jail bypass: ``ws-evil`` must not match root ``ws``."""
+    ws = tmp_path / "ws"
+    evil = tmp_path / "ws-evil"
+    ws.mkdir()
+    evil.mkdir()
+    (ws / "ok.txt").write_text("inside\n", encoding="utf-8")
+    (evil / "secret.txt").write_text("outside\n", encoding="utf-8")
+    assert str(evil.resolve()).startswith(str(ws.resolve()))
+    assert is_path_under_root(ws / "ok.txt", ws) is True
+    assert is_path_under_root(evil, ws) is False
+    monkeypatch.setattr(
+        "app.infrastructure.allowed_paths.allowed_roots",
+        lambda: [str(ws.resolve())],
+    )
+    assert path_under_allowed_roots(str(ws / "ok.txt")).name == "ok.txt"
+    with pytest.raises(ValueError, match="Access denied"):
+        path_under_allowed_roots(str(evil))
+    with pytest.raises(ValueError, match="Access denied"):
+        path_under_allowed_roots(str(evil / "secret.txt"))
+
+
+def test_symlink_escape_is_denied(tmp_path, monkeypatch):
+    ws = tmp_path / "jail"
+    outside = tmp_path / "outside"
+    ws.mkdir()
+    outside.mkdir()
+    (outside / "secret.txt").write_text("leak\n", encoding="utf-8")
+    link = ws / "escape"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("OS cannot create directory symlinks (Windows without privilege)")
+    monkeypatch.setattr(
+        "app.infrastructure.allowed_paths.allowed_roots",
+        lambda: [str(ws.resolve())],
+    )
+    with pytest.raises(ValueError, match="Access denied"):
+        path_under_allowed_roots(str(link))
+    with pytest.raises(ValueError, match="Access denied"):
+        path_under_allowed_roots(str(link / "secret.txt"))

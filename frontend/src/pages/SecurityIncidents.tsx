@@ -128,7 +128,7 @@ export default function SecurityIncidents() {
         : "bg-slate-100 text-slate-600";
 
   return (
-    <div>
+    <div data-testid="security-incidents-page">
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">

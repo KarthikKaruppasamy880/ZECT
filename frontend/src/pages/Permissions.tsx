@@ -263,7 +263,7 @@ export default function Permissions() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-64" data-testid="permissions-page">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600" />
       </div>
     );
@@ -298,7 +298,7 @@ export default function Permissions() {
   };
 
   return (
-    <div>
+    <div data-testid="permissions-page">
       <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">

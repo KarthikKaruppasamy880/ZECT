@@ -448,10 +448,11 @@ class MentrixNativeCodingRuntime:
             elif not approved:
                 result = {"ok": False, "error": "approval_timeout"}
             else:
-                # Re-run with forced approve
+                payload_args = dict(payload.get("args") or {})
+                payload_args["_approved"] = True
                 result = execute_tool(
                     payload["tool"],
-                    payload["args"],
+                    payload_args,
                     workspace=workspace,
                     auto_approve_edits=True,
                 )

@@ -129,6 +129,26 @@ TOOL_SPECS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit",
+            "description": "Commit workspace changes. Always requires approval. Never auto-merge.",
+            "parameters": {
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_push",
+            "description": "Push current branch to origin. Always requires approval. Unset GitHub is BLOCKED_EXTERNAL.",
+            "parameters": {"type": "object", "properties": {"branch": {"type": "string"}}},
+        },
+    },
 ]
 
 
@@ -412,5 +432,37 @@ def _execute_tool_inner(
             }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)}
+
+    if name == "git_commit":
+        if not args.pop("_approved", False):
+            return {
+                "ok": False,
+                "needs_approval": True,
+                "action": "git_commit",
+                "args": {"message": str(args.get("message") or "zect coding-agent")},
+                "summary": "git commit (never auto-merge)",
+            }
+        from app.services.coding_engine.lifecycle import _commit_if_needed
+
+        fake = {"worktree_path": str(root), "committed_shas": []}
+        return _commit_if_needed(fake, str(args.get("message") or "zect coding-agent"))
+
+    if name == "git_push":
+        if not args.pop("_approved", False):
+            return {
+                "ok": False,
+                "needs_approval": True,
+                "action": "git_push",
+                "args": {"branch": str(args.get("branch") or "")},
+                "summary": "git push (BLOCKED_EXTERNAL without GitHub)",
+            }
+        from app.services.coding_engine.lifecycle import _push_or_block
+
+        fake = {
+            "worktree_path": str(root),
+            "branch": str(args.get("branch") or ""),
+            "head_sha": "",
+        }
+        return _push_or_block(fake)
 
     return {"ok": False, "error": f"unknown_tool:{name}"}

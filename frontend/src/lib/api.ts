@@ -1743,6 +1743,97 @@ export async function codingAgentStream(
   }
 }
 
+export type CodingAgentMissionRoot = {
+  id: number;
+  label: string;
+  path: string;
+};
+
+export type CodingAgentMission = {
+  id: string;
+  goal: string;
+  phase: string;
+  status: string;
+  plan: string;
+  plan_approved: boolean;
+  git_approved: boolean;
+  repos: Array<{
+    repository_id?: number;
+    label?: string;
+    worktree_path?: string;
+    branch?: string;
+    test_ok?: boolean;
+    test_status?: string;
+    files?: string[];
+    commands?: string[];
+    blocker?: string;
+    committed_shas?: string[];
+    diff?: string;
+    push?: Record<string, unknown>;
+    pr?: Record<string, unknown>;
+  }>;
+  files: string[];
+  commands: string[];
+  tests: Record<string, string | undefined>;
+  blockers: string[];
+  approvals: { plan: boolean; git: boolean };
+  review: {
+    passed?: boolean;
+    summary?: string;
+    critical_findings?: number;
+    findings?: Array<{ severity?: string; message?: string }>;
+  };
+  pr: Record<string, unknown>;
+  ci: Record<string, unknown>;
+  sibling?: { blocked?: boolean; blocker?: string };
+  ready_to_merge: boolean;
+  no_auto_merge: boolean;
+  events?: Array<{ event?: string; message?: string; at?: string }>;
+  evidence?: Array<{ event?: string; message?: string; at?: string }>;
+};
+
+export const codingAgentCreateMission = (body: {
+  goal: string;
+  project_id?: number | null;
+  work_item_id?: number | null;
+  roots?: CodingAgentMissionRoot[];
+  patches_by_repo?: Record<string, Array<Record<string, string>>>;
+  plan?: string;
+  workspace_parent?: string;
+}) =>
+  request<CodingAgentMission>("/api/coding-agent/missions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const codingAgentGetMission = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}`);
+
+export const codingAgentApprovePlan = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/approve-plan`, {
+    method: "POST",
+  });
+
+export const codingAgentApproveGit = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/approve-git`, {
+    method: "POST",
+  });
+
+export const codingAgentCancelMission = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/cancel`, {
+    method: "POST",
+  });
+
+export const codingAgentResumeMission = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/resume`, {
+    method: "POST",
+  });
+
+export const codingAgentRetryMission = (missionId: string) =>
+  request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/retry`, {
+    method: "POST",
+  });
+
 // Git Operations
 export const gitStatus = (repoPath: string) =>
   request<any>(`/api/git/status?repo_path=${encodeURIComponent(repoPath)}`);

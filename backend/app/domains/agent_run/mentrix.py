@@ -1654,6 +1654,7 @@ async def present_import_deck(
     _user: CurrentUser = Depends(get_current_user),
 ):
     from app.services.mentrix.presentation.deck_catalog import import_pptx_bytes
+    from app.services.mentrix.presentation.template_importer import UnsafePptxError
 
     name = (file.filename or "imported.pptx").lower()
     if not name.endswith(".pptx"):
@@ -1661,7 +1662,10 @@ async def present_import_deck(
     data = await file.read()
     if not data or len(data) > 40_000_000:
         raise HTTPException(status_code=400, detail="invalid_pptx")
-    dest = import_pptx_bytes(data, filename=file.filename or "imported.pptx")
+    try:
+        dest = import_pptx_bytes(data, filename=file.filename or "imported.pptx")
+    except UnsafePptxError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "invalid_pptx") from exc
     return {"ok": True, "path": str(dest), "filename": dest.name}
 
 

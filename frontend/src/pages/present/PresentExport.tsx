@@ -26,7 +26,19 @@ export default function PresentExport() {
 
   useEffect(() => {
     if (!path) return;
-    mentrixPresentQualityGate(path).then(setGate).catch(() => setGate(null));
+    mentrixPresentQualityGate(path)
+      .then(setGate)
+      .catch(() =>
+        setGate({
+          export_blocked: true,
+          hard_blocked: true,
+          quality_passed: false,
+          slide_count: 0,
+          overlap_count: 0,
+          clipped_text_count: 0,
+          hard_findings: ["quality_gate_unavailable"],
+        }),
+      );
   }, [path]);
 
   const hardBlocked = Boolean(gate?.export_blocked || gate?.hard_blocked);

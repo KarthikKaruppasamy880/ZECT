@@ -41,7 +41,7 @@ from app.infrastructure.observability import (
     reset_observability,
 )
 from app.models import Project, Repo, User, WorkItem
-from app.services.coding_engine.lifecycle import isolate_worktree, start_mission
+from app.services.coding_engine.lifecycle import isolate_worktree, reset_mission_cache, start_mission
 from app.services.mentrix.companion import run_companion_turn
 from app.services.mentrix.companion_scope import build_companion_scope, open_or_create_work_item
 from app.services.mentrix.org_policy import ensure_companion_rules
@@ -202,29 +202,32 @@ def test_overlapping_thread_coding_mission_worktrees(tmp_path, monkeypatch):
             errors.append(f"{idx}:{exc}")
 
     threads = [threading.Thread(target=_run, args=(i,)) for i in range(T.OVERLAPPING_THREADS)]
-    t0 = time.perf_counter()
-    for th in threads:
-        th.start()
-    for th in threads:
-        th.join(timeout=25)
-    ms = int((time.perf_counter() - t0) * 1000)
-    emit_event(operation="isolation", stage="coding_threads", duration_ms=ms)
-    assert not errors, errors
-    assert len(boxed) == T.OVERLAPPING_THREADS
-    assert ms <= T.OVERLAPPING_ISOLATE_MAX_MS
-    m0, m1 = boxed[0]["mission"], boxed[1]["mission"]
-    i0, i1 = boxed[0]["iso"], boxed[1]["iso"]
-    assert m0["id"] != m1["id"]
-    assert m0["project_id"] != m1["project_id"]
-    assert i0.get("ok") and i1.get("ok")
-    wt0 = Path(i0["worktree_path"]).resolve()
-    wt1 = Path(i1["worktree_path"]).resolve()
-    assert wt0 != wt1
-    assert i0.get("branch") != i1.get("branch")
-    assert (repos[0] / "a.py").read_text(encoding="utf-8") == "A=1\n"
-    assert (repos[1] / "b.py").read_text(encoding="utf-8") == "B=1\n"
-    assert "B=1" not in (wt0 / "a.py").read_text(encoding="utf-8")
-    assert "A=1" not in (wt1 / "b.py").read_text(encoding="utf-8")
+    try:
+        t0 = time.perf_counter()
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(timeout=25)
+        ms = int((time.perf_counter() - t0) * 1000)
+        emit_event(operation="isolation", stage="coding_threads", duration_ms=ms)
+        assert not errors, errors
+        assert len(boxed) == T.OVERLAPPING_THREADS
+        assert ms <= T.OVERLAPPING_ISOLATE_MAX_MS
+        m0, m1 = boxed[0]["mission"], boxed[1]["mission"]
+        i0, i1 = boxed[0]["iso"], boxed[1]["iso"]
+        assert m0["id"] != m1["id"]
+        assert m0["project_id"] != m1["project_id"]
+        assert i0.get("ok") and i1.get("ok")
+        wt0 = Path(i0["worktree_path"]).resolve()
+        wt1 = Path(i1["worktree_path"]).resolve()
+        assert wt0 != wt1
+        assert i0.get("branch") != i1.get("branch")
+        assert (repos[0] / "a.py").read_text(encoding="utf-8") == "A=1\n"
+        assert (repos[1] / "b.py").read_text(encoding="utf-8") == "B=1\n"
+        assert "B=1" not in (wt0 / "a.py").read_text(encoding="utf-8")
+        assert "A=1" not in (wt1 / "b.py").read_text(encoding="utf-8")
+    finally:
+        reset_mission_cache()
 
 
 def test_companion_concurrent_session_isolation_and_soak(tmp_path):

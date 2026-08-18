@@ -322,7 +322,7 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
         "run_command",
         {
             "command": (
-                f'"{sys.executable}" -m pytest -q --tb=short --noconftest '
+                f'"{sys.executable}" -m pytest -q --tb=short --noconftest --confcutdir=. '
                 f"--rootdir=. -o addopts= -o testpaths=tests -p no:cacheprovider tests"
             ),
             "timeout": 90,
@@ -715,6 +715,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         repo["test_ok"] = bool(tests.get("ok"))
         repo["test_status"] = tests.get("status")
         repo["test"] = tests
+        repo["test_stdout"] = tests.get("stdout")
         if tests.get("command"):
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):

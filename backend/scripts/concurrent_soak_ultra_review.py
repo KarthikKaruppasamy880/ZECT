@@ -18,6 +18,8 @@ from app.services.phases.review_phase_svc import run_ultra_review  # noqa: E402
 
 FILES = [
     "backend/app/infrastructure/perf_thresholds.py",
+    "backend/app/services/coding_engine/lifecycle.py",
+    "backend/app/services/coding_engine/mentrix_agent_tools.py",
     "backend/tests/test_concurrent_soak_isolation_production.py",
     "backend/tests/test_performance_reliability_production.py",
     "frontend/e2e/concurrent-isolation-production.spec.ts",

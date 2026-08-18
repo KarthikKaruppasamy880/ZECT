@@ -110,10 +110,11 @@ def authorized_roots(db: Session, project_id: int | None) -> list[dict[str, Any]
         sha = _git_head(path) or ""
         label = f"{repo.owner}/{repo.repo_name}".strip("/") or f"repo-{repo.id}"
         lattice_state = "NOT_APPLICABLE"
-        try:
-            from app.services.lattice.indexer import get_lattice_status
+        from app.services.lattice.indexer import derive_project_key, get_lattice_status
 
-            st = get_lattice_status(str(project.name or ""), db=db, repository_id=int(repo.id))
+        lattice_key = derive_project_key(str(repo.owner or ""), str(repo.repo_name or ""))
+        try:
+            st = get_lattice_status(lattice_key, db=db, repository_id=int(repo.id))
             lattice_state = str(st.get("state") or "NOT_APPLICABLE")
         except Exception:  # noqa: BLE001
             lattice_state = "NOT_APPLICABLE"
@@ -126,6 +127,7 @@ def authorized_roots(db: Session, project_id: int | None) -> list[dict[str, Any]
                 "indexed_at": repo.indexed_at.isoformat() if getattr(repo, "indexed_at", None) else "",
                 "clone_status": str(repo.clone_status or ""),
                 "lattice_state": lattice_state,
+                "lattice_project_key": lattice_key,
                 "authorized": True,
             }
         )

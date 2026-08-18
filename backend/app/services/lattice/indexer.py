@@ -79,6 +79,12 @@ class LatticeGraph:
 _GRAPH_CACHE: dict[str, LatticeGraph] = {}
 _FILE_HASH: dict[str, str] = {}
 
+
+def derive_project_key(owner: str, repo_name: str) -> str:
+    """Per-root Lattice key. Must match frontend deriveProjectKey(owner, repo)."""
+    raw = f"{(owner or '').strip()}-{(repo_name or '').strip()}".lower()
+    return re.sub(r"[^a-z0-9._-]+", "-", raw).strip("-") or "repo"
+
 _TS_CLASS = re.compile(r"(?:export\s+)?(?:abstract\s+)?class\s+(\w+)")
 _TS_FUNC = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)")
 _TS_IMPORT = re.compile(r"""import\s+.*?from\s+['"]([^'"]+)['"]""")

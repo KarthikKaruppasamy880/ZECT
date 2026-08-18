@@ -1422,11 +1422,12 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     from app.services.mentrix.presentation.service import PresentationService
 
     slack = bool((os.getenv("SLACK_BOT_TOKEN") or "").strip())
-    jira = bool(
-        (os.getenv("MCP_JIRA_URL") or os.getenv("JIRA_BASE_URL") or "").strip()
-        and (os.getenv("JIRA_EMAIL") or "").strip()
-        and (os.getenv("JIRA_API_TOKEN") or "").strip()
-    )
+    from app.services.mentrix.companion_scope import external_connectors
+
+    connectors = external_connectors()
+    jira_conn = connectors.get("jira") or {}
+    camunda_conn = connectors.get("camunda") or {}
+    jira = bool(jira_conn.get("ready"))
     openai = bool((os.getenv("OPENAI_API_KEY") or "").strip())
     from app.adapters.llm.openai_compat import mentrix_local_llm_configured, probe_mentrix_local_llm
 
@@ -1452,6 +1453,11 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     return {
         "slack": slack,
         "jira": jira,
+        "jira_status": jira_conn.get("status") or ("ready" if jira else "BLOCKED_EXTERNAL"),
+        "jira_detail": jira_conn.get("detail") or "",
+        "camunda": bool(camunda_conn.get("ready")),
+        "camunda_status": camunda_conn.get("status") or "BLOCKED_EXTERNAL",
+        "camunda_detail": camunda_conn.get("detail") or "",
         "openai": openai,
         "mentrix_local": bool(local_probe.get("online")),
         "mentrix_local_configured": bool(local_probe.get("configured")),

@@ -113,6 +113,54 @@ export const ingestWorkItem = (body: {
     needs_human: boolean;
     missing_repository_identity: boolean;
   }>("/api/work-items/ingest", { method: "POST", body: JSON.stringify(body) });
+
+export type WorkItemRecord = {
+  id: number;
+  title: string;
+  status: string;
+  source?: string;
+  external_id?: string;
+  project_id?: number | null;
+  repository_id?: number | null;
+  repository_ref?: string;
+  base_commit_sha?: string;
+  plan_hash?: string;
+  plan_version?: number;
+  approved_plan_hash?: string;
+  mentrix_run_id?: number | null;
+  worktree_path?: string;
+  current_commit_sha?: string;
+  description?: string;
+};
+
+export const getWorkItem = (id: number) => request<WorkItemRecord>(`/api/work-items/${id}`);
+
+export const getWorkItemEvents = (id: number) =>
+  request<{
+    events: Array<{ id: number; event_type: string; payload?: Record<string, unknown>; created_at?: string | null }>;
+  }>(`/api/work-items/${id}/events`);
+
+export const developerAsk = (body: {
+  question: string;
+  work_item_id?: number;
+  project_id?: number | null;
+  repository_id?: number | null;
+}) =>
+  request<{ work_item_id: number; answer?: string; status?: string }>("/api/mentrix/developer/ask", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const developerPlan = (body: {
+  goal: string;
+  work_item_id?: number;
+  project_id?: number | null;
+  repository_id?: number | null;
+}) =>
+  request<{ work_item_id: number; plan_hash?: string; plan_version?: number; status?: string }>(
+    "/api/mentrix/developer/plan",
+    { method: "POST", body: JSON.stringify(body) },
+  );
 export const getProjects = (status?: string, opts?: { includeFixtures?: boolean }) => {
   const params = new URLSearchParams();
   if (status) params.set("status", status);

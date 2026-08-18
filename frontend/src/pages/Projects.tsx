@@ -131,6 +131,8 @@ export default function Projects() {
           <Link
             key={p.id}
             to={`/projects/${p.id}`}
+            data-testid={`project-card-${p.id}`}
+            data-project-name={p.name}
             className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between mb-2">

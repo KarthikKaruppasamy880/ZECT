@@ -207,6 +207,9 @@ export default function WorkspaceRootsRail({
                       <span
                         className="font-mono text-slate-400"
                         data-testid={`workspace-root-sha-${row.repoId}`}
+                        data-live-sha={row.liveSha || ""}
+                        data-indexed-sha={row.indexedSha || ""}
+                        data-lattice-state={row.lattice}
                         title={`live=${row.liveSha || "—"} indexed=${row.indexedSha || "—"}`}
                       >
                         head {shortSha(row.liveSha)} · idx {shortSha(row.indexedSha)}

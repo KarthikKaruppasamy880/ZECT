@@ -15,7 +15,7 @@ Local pytest: **7 passed, 1 skipped** (`PRESENTON_BASE_URL` unset = **BLOCKED_EX
 
 Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. Tranche G–I are not in this PR. CI on this SHA must be green before merge; skip ≠ PASS.
 
-CI run on `b12befc` (frontend success, backend fail): Linux pytest 9 nested worktree tests imported a sibling via parent `conftest` / plugin autoload. That skip/rerun is not PASS. Nested `run_repo_tests` now uses `--confcutdir=.`; `run_command` sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` **only** when the command contains pytest (not globally — a prior global `-c NUL` / autoload-off broke every mission locally). Public dump copies `test_stdout`. Overlapping coding-mission test resets the mission cache.
+CI run on `b12befc` failed two sibling tests; `dcc968b` left mission F failing on Linux pytest 9 (`1 failed, 1155 passed`). Nested `run_repo_tests` now launches argv pytest (no shell) with a temp ini, `--import-mode=prepend`, worktree-only `PYTHONPATH`, and pytest-plugin autoload disabled. Skip/rerun of that SHA is not PASS.
 
 ## Gates
 

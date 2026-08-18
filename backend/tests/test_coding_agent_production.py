@@ -80,6 +80,26 @@ def test_patch_lookup_survives_json_persist_and_int_keys():
     assert _patches_for_repo(merged, {"repository_id": "11"})[0]["path"] == "protocol.py"
 
 
+def test_nested_pytest_uses_worktree_protocol_not_poison_pythonpath(ws, monkeypatch):
+    poison = ws / "poison"
+    poison.mkdir()
+    (poison / "protocol.py").write_text("PROTOCOL = 0\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", str(poison))
+    repo = _init_repo(
+        ws / "app",
+        {
+            "protocol.py": "PROTOCOL = 2\n",
+            "tests/test_p.py": "import protocol\n\ndef test_proto():\n    assert protocol.PROTOCOL == 2\n",
+        },
+    )
+    from app.services.coding_engine.lifecycle import isolate_worktree, run_repo_tests
+
+    iso = isolate_worktree(repo, branch="zect-ca-nested-p", dest=ws / "wt" / "app-nested")
+    assert iso.get("ok"), iso
+    out = run_repo_tests(Path(iso["worktree_path"]))
+    assert out["ok"], (out.get("exit_code"), out.get("stdout"), out.get("stderr"))
+
+
 def test_git_commit_always_needs_approval(ws):
     repo = _init_repo(ws / "r", {"a.txt": "x\n"})
     (repo / "a.txt").write_text("y\n", encoding="utf-8")
@@ -287,23 +307,31 @@ def test_mission_f_sibling_failure_blocks_then_repair(ws):
         m["id"],
         {"11": [{"path": "protocol.py", "old": "PROTOCOL = 1", "new": "PROTOCOL = 2"}]},
     )
-    assert m["phase"] == "awaiting_git_approval", (
-        m.get("phase"),
-        m.get("tests"),
-        m.get("blockers"),
-        m.get("files"),
-        [
+    dump = []
+    for r in m.get("repos") or []:
+        proto = ""
+        wt = r.get("worktree_path")
+        if wt:
+            p = Path(wt) / "protocol.py"
+            if p.is_file():
+                proto = p.read_text(encoding="utf-8")[:80]
+        dump.append(
             {
+                "id": r.get("repository_id"),
                 "label": r.get("label"),
-                "patches_applied": r.get("patches_applied"),
+                "patches": r.get("patches_applied"),
                 "blocker": r.get("blocker"),
-                "test_stdout": r.get("test_stdout"),
+                "stdout": (r.get("test_stdout") or "")[-300:],
+                "stderr": (r.get("test_stderr") or "")[-200:],
+                "protocol": proto,
             }
-            for r in m.get("repos") or []
-        ],
-        m.get("sibling"),
-        m.get("review"),
-    )
+        )
+    assert m["phase"] == "awaiting_git_approval", {
+        "phase": m.get("phase"),
+        "tests": m.get("tests"),
+        "blockers": m.get("blockers"),
+        "repos": dump,
+    }
     m = approve_git(m["id"], push=False)
     assert m["phase"] == "ready_to_merge"
     assert all(r["test_ok"] for r in m["repos"])

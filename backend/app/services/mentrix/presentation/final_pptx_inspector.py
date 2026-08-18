@@ -109,6 +109,10 @@ def _resolved_slide_geoms(data: bytes) -> list[dict[str, dict[str, int]]]:
     """Placeholder xfrms often live on the layout; python-pptx resolves on-slide positions."""
     out: list[dict[str, dict[str, int]]] = []
     try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = [i.filename.replace("\\", "/") for i in zf.infolist()]
+        if not any(n.startswith("ppt/slideLayouts/") for n in names):
+            return out
         prs = Presentation(io.BytesIO(data))
     except Exception:
         return out
@@ -141,6 +145,27 @@ def _fill_missing_geom(shapes: list[dict[str, Any]], resolved: dict[str, dict[st
             shape["geometry"] = hit
 
 
+def _slide_size_from_ooxml(data: bytes) -> tuple[int, int] | None:
+    """Read p:sldSz from the package so 4:3 blanks are not judged against a 16:9 fallback."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            raw = zf.read("ppt/presentation.xml")
+        root = ET.fromstring(raw)
+    except Exception:
+        return None
+    for el in root.iter():
+        if not str(el.tag).endswith("sldSz"):
+            continue
+        try:
+            cx = int(el.get("cx") or 0)
+            cy = int(el.get("cy") or 0)
+        except (TypeError, ValueError):
+            return None
+        if cx > 0 and cy > 0:
+            return cx, cy
+    return None
+
+
 def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None) -> dict[str, Any]:
     if not data:
         return {
@@ -154,6 +179,10 @@ def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None)
         }
     names: list[str] = []
     resolved_geoms = _resolved_slide_geoms(data)
+    if definition is None:
+        actual = _slide_size_from_ooxml(data)
+        if actual:
+            definition = {"slide_size": {"cx": actual[0], "cy": actual[1]}}
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = [i.filename.replace("\\", "/") for i in zf.infolist()]

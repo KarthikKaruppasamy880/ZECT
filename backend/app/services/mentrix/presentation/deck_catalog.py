@@ -53,6 +53,17 @@ def create_blank_pptx(*, filename: str = "untitled.pptx") -> Path:
 
 
 def import_pptx_bytes(data: bytes, *, filename: str) -> Path:
+    """Copy an uploaded PPTX into the allowlisted deck dir after archive + OOXML checks."""
+    from app.services.mentrix.presentation.template_importer import UnsafePptxError, inspect_pptx_archive
+
+    with inspect_pptx_archive(data) as zf:
+        names = {info.filename.replace("\\", "/") for info in zf.infolist()}
+        if "[Content_Types].xml" not in names or "ppt/presentation.xml" not in names:
+            raise UnsafePptxError("not_a_pptx")
+    try:
+        Presentation(io.BytesIO(data))
+    except Exception as exc:  # noqa: BLE001 — invalid OOXML must fail closed
+        raise UnsafePptxError("unreadable_pptx") from exc
     dest = _unique_pptx_path(default_pptx_save_dir(), filename or "imported.pptx")
     dest.write_bytes(data)
     return dest
@@ -62,7 +73,26 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
     from app.services.mentrix.presentation.final_pptx_inspector import inspect_pptx_bytes
 
     pptx = resolve_allowlisted_pptx(path_str)
-    report = inspect_pptx_bytes(pptx.read_bytes())
+    try:
+        report = inspect_pptx_bytes(pptx.read_bytes())
+    except Exception as exc:  # noqa: BLE001 — fail closed; never 500 a hang-looking export UI
+        return {
+            "ok": False,
+            "path": str(pptx),
+            "export_blocked": True,
+            "hard_blocked": True,
+            "accept_warnings_allowed": False,
+            "warnings": [],
+            "hard_findings": ["inspect_failed"],
+            "quality_passed": False,
+            "slide_count": 0,
+            "overlap_count": 0,
+            "clipped_text_count": 0,
+            "covering_dump_count": 0,
+            "broken_rel_count": 0,
+            "final_quality_status": "FAIL",
+            "inspector": {"ok": False, "error": str(exc)[:200], "status": "FAIL"},
+        }
     hard = list(report.get("hard_findings") or [])
     blocked = bool(report.get("export_blocked") or hard or report.get("status") == "FAIL")
     warnings: list[str] = []

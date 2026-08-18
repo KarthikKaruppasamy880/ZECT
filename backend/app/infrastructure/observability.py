@@ -12,7 +12,7 @@ import os
 import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextvars import ContextVar
 from typing import Any, Callable
 
@@ -23,7 +23,9 @@ _run: ContextVar[str] = ContextVar("zect_run", default="")
 
 _LOCK = threading.Lock()
 _EVENTS: deque[dict[str, Any]] = deque(maxlen=2000)
-_OPS: dict[str, dict[str, Any]] = {}
+_OPS: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_MAX_OPS = 256
+_OPS_TTL_SEC = 3600.0
 _MAX_MESSAGE = 400
 _MAX_EXTRA_CHARS = 1200
 
@@ -59,6 +61,31 @@ def reset_observability() -> None:
         _OPS.clear()
     bind_correlation("")
     bind_run_id("")
+
+
+def _as_user_id(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def _prune_ops_locked() -> None:
+    now = time.time()
+    stale = [k for k, v in list(_OPS.items()) if now - float(v.get("started") or 0) > _OPS_TTL_SEC]
+    for key in stale:
+        _OPS.pop(key, None)
+    while len(_OPS) > _MAX_OPS:
+        _OPS.popitem(last=False)
+
+
+def ops_size() -> int:
+    with _LOCK:
+        return len(_OPS)
 
 
 def _safe_extra(extra: dict[str, Any] | None) -> dict[str, Any]:
@@ -154,32 +181,53 @@ def begin_operation(
     *,
     kind: str,
     extra: dict[str, Any] | None = None,
+    user_id: int | None = None,
 ) -> str:
     rid = (run_id or "").strip() or new_id()
     bind_run_id(rid)
+    owner = _as_user_id(user_id)
     with _LOCK:
         prev = _OPS.get(rid)
         already = bool(prev and prev.get("cancelled"))
+        prev_owner = _as_user_id((prev or {}).get("user_id"))
         _OPS[rid] = {
             "kind": kind,
             "cancelled": already,
             "started": time.time(),
             "extra": _safe_extra(extra),
+            "user_id": owner if owner is not None else prev_owner,
         }
+        _OPS.move_to_end(rid)
+        _prune_ops_locked()
     emit_event(operation=kind, stage="start", run_id=rid, extra=extra)
     return rid
 
 
-def cancel_operation(run_id: str) -> bool:
+def cancel_operation(run_id: str, *, user_id: int | None = None) -> bool:
     rid = (run_id or "").strip()
     if not rid:
         return False
+    caller = _as_user_id(user_id)
     with _LOCK:
         row = _OPS.get(rid)
+        owner = _as_user_id((row or {}).get("user_id"))
+        if owner is not None and caller is not None and owner != caller:
+            return False
         if row is None:
-            _OPS[rid] = {"kind": "unknown", "cancelled": True, "started": time.time(), "extra": {}}
+            _OPS[rid] = {
+                "kind": "unknown",
+                "cancelled": True,
+                "started": time.time(),
+                "extra": {},
+                "user_id": caller,
+            }
             row = _OPS[rid]
-        row["cancelled"] = True
+        else:
+            row["cancelled"] = True
+            if caller is not None and row.get("user_id") is None:
+                row["user_id"] = caller
+            _OPS.move_to_end(rid)
+        _prune_ops_locked()
     emit_event(operation=str(row.get("kind") or "unknown"), stage="cancel_requested", run_id=rid, failure_class="cancelled")
     return True
 
@@ -264,16 +312,8 @@ def resource_snapshot() -> tuple[int, int | None]:
             rss = int(usage) * 1024 if os.name == "posix" and usage < 10**9 else int(usage)
         except Exception:
             pass
-    if rss <= 0:
-        try:
-            import tracemalloc
-
-            if not tracemalloc.is_tracing():
-                tracemalloc.start()
-            current, _peak = tracemalloc.get_traced_memory()
-            rss = int(current) or 1
-        except Exception:
-            rss = 0
+    # Do not start tracemalloc: process-wide allocation tracing is not an RSS
+    # measurement and never gets stopped. Unmeasured RSS stays 0 (skip ≠ PASS).
     return rss, handles
 
 
@@ -336,7 +376,7 @@ def diagnose(correlation_id: str = "", run_id: str = "") -> dict[str, Any]:
     """Root-stage diagnosis from telemetry (no secrets)."""
     rows = query_events(correlation_id=correlation_id, run_id=run_id, limit=80)
     failures = [r for r in rows if r.get("failure_class")]
-    first = failures[-1] if failures else (rows[0] if rows else None)
+    first = failures[-1] if failures else (rows[-1] if rows else None)
     return {
         "correlation_id": correlation_id or current_correlation(),
         "run_id": run_id or current_run_id(),

@@ -20,19 +20,23 @@ from app.infrastructure import perf_thresholds as T
 from app.infrastructure.database import Base
 from app.infrastructure.observability import (
     bind_correlation,
+    begin_operation,
     cancel_operation,
     diagnose,
     emit_event,
+    is_cancelled,
+    ops_size,
     query_events,
     reset_observability,
     resource_snapshot,
     db_checked_out,
 )
-from app.models import Project, Repo, WorkItem
+from app.models import EmbeddingChunk, Project, Repo, WorkItem
 from app.services.coding_engine.lifecycle import approve_plan, cancel_mission, isolate_worktree, start_mission
 from app.services.lattice.indexer import LatticeCancelled, ingest_path
 from app.services.mentrix.presentation.provider import PresentationGenerateRequest
 from app.services.mentrix.presentation.service import PresentationService
+from app.services.rag.retriever import index_directory
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.workspace_multi_root import search_workspace
 
@@ -391,3 +395,54 @@ def test_live_postgres_unset_is_blocked_external_not_pass():
     if (os.getenv("ZECT_TEST_POSTGRES_URL") or "").strip():
         pytest.skip("live Postgres URL set — exercise belongs to runtime DB suite")
     pytest.skip("BLOCKED_EXTERNAL: ZECT_TEST_POSTGRES_URL unset — skip ≠ PASS")
+
+
+def test_ops_registry_is_bounded():
+    reset_observability()
+    for i in range(300):
+        begin_operation(f"bound-{i}", kind="soak")
+    assert ops_size() <= 256
+    assert is_cancelled("bound-0") is False
+
+
+def test_cancel_rejects_other_user():
+    reset_observability()
+    begin_operation("owned-1", kind="lattice_ingest", user_id=11)
+    assert cancel_operation("owned-1", user_id=22) is False
+    assert is_cancelled("owned-1") is False
+    assert cancel_operation("owned-1", user_id=11) is True
+    assert is_cancelled("owned-1") is True
+
+
+def test_resource_snapshot_does_not_start_tracemalloc():
+    import tracemalloc
+
+    was = tracemalloc.is_tracing()
+    if was:
+        tracemalloc.stop()
+    try:
+        resource_snapshot()
+        assert tracemalloc.is_tracing() is False
+    finally:
+        if was:
+            tracemalloc.start()
+
+
+def test_rag_index_cancel_does_not_delete_chunks(tmp_path):
+    db = _mem_db()
+    db.add(
+        EmbeddingChunk(
+            project_key="keep-me",
+            path="a.py",
+            content="hello",
+            embedding_json="[]",
+        )
+    )
+    db.commit()
+    root = tmp_path / "rag"
+    root.mkdir()
+    (root / "b.py").write_text("def x():\n    return 1\n", encoding="utf-8")
+    with pytest.raises(LatticeCancelled):
+        index_directory(db, str(root), project_key="keep-me", max_files=10, cancel_check=lambda: True)
+    assert db.query(EmbeddingChunk).filter_by(project_key="keep-me").count() == 1
+    db.close()

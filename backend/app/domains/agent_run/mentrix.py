@@ -1582,7 +1582,8 @@ def presenton_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = De
 
     if not (req.run_id or "").strip():
         raise HTTPException(status_code=400, detail="run_id required")
-    cancel_operation(req.run_id)
+    if not cancel_operation(req.run_id, user_id=_user.user_id):
+        raise HTTPException(status_code=403, detail="not_operation_owner")
     return {"ok": True, "run_id": req.run_id, "cancelled": True}
 
 

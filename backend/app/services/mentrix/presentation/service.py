@@ -81,10 +81,15 @@ class PresentationService:
         run_id = (req.run_id or "").strip() or new_id()
         req.run_id = run_id
         t0 = _time.perf_counter()
+        owner = None
+        raw_uid = str(req.user_id or "").strip()
+        if raw_uid.isdigit():
+            owner = int(raw_uid)
         begin_operation(
             run_id,
             kind="present_generate",
             extra={"provider": self.provider_name, "fast_basic": bool(req.fast_basic)},
+            user_id=owner,
         )
         from app.services.mentrix.presentation.sensitivity import classify_deck_material
 

@@ -21,24 +21,35 @@ FILES = [
     "backend/app/infrastructure/perf_thresholds.py",
     "backend/app/middleware/correlation.py",
     "backend/app/main.py",
+    "backend/app/models.py",
     "backend/app/services/system_health.py",
     "backend/app/routers/system_health.py",
     "backend/app/services/mcp/hub.py",
     "backend/app/services/coding_engine/lifecycle.py",
+    "backend/app/services/coding_engine/mentrix_agent_tools.py",
     "backend/app/services/lattice/indexer.py",
     "backend/app/domains/repository/lattice.py",
+    "backend/app/domains/agent_run/mentrix.py",
     "backend/app/services/mentrix/presentation/service.py",
     "backend/app/services/mentrix/presentation/native_provider.py",
+    "backend/app/services/mentrix/presentation/provider.py",
     "backend/app/services/rag/retriever.py",
+    "backend/scripts/performance_reliability_ultra_review.py",
     "backend/tests/test_performance_reliability_production.py",
+    "backend/tests/test_coding_agent_production.py",
     "frontend/src/lib/api.ts",
     "frontend/e2e/runtime-recovery-production.spec.ts",
     "ZECT_CANONICAL_ARCHITECTURE.md",
     "ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md",
     "ZECT_PERFORMANCE_RELIABILITY_ACCEPTANCE.md",
+    "ZECT_PRODUCTION_GRADE_FINAL_ACCEPTANCE.md",
+    "ZECT_PRODUCTION_GRADE_IMPLEMENTATION_MATRIX.md",
+    "ZECT_SYSTEM_ARCHITECTURE.md",
+    "ZECT_ARCHITECTURE_AND_WORKFLOW.md",
+    "docs/architecture/ZECT_RUNTIME_ARCHITECTURE.md",
 ]
 
-MAX_DIFF = 160_000
+MAX_DIFF = 240_000
 
 
 def main() -> int:

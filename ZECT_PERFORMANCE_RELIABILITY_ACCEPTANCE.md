@@ -3,6 +3,7 @@
 **Date:** 2026-08-18  
 **Canonical develop (pre-PR):** `962bb6b58e1108b2a3d697419a82351723baa317` (PR **#163** human-merged)  
 **Branch:** `feat/performance-reliability-architecture`  
+**PR HEAD:** `d49a928` — [PR #164](https://github.com/KarthikKaruppasamy880/ZECT/pull/164)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md`  
 **Stop label:** `READY_TO_MERGE_PERFORMANCE_RELIABILITY_ARCHITECTURE` — human merge only, no auto-merge.  
 **Do not start** S8C/S8D, Graphify, KV-cache, OCR/XLSX, broader Web, new agents, or tranche G a11y until this PR is human-merged.
@@ -25,7 +26,7 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Coding isolate 2 missions | ≤ 20_000 ms | two disposable repos |
 | Present RESTRICTED fail-closed | ≤ 3_000 ms | Presenton path, no engine call |
 | Present Fast plan | ≤ 8_000 ms | `fast_basic` heuristic |
-| Soak | 8 iterations × 16 files; RSS growth ≤ 96 MiB; DB checked-out ≤ 8; handle growth ≤ 200 if measured |
+| Soak | RSS growth ≤ 96 MiB; DB checked-out ≤ 8; handle growth ≤ 200 if measured | 8 iterations × 16 files |
 | Cancel index / present / mission | ≤ 8s / 3s / 5s | cooperative cancel |
 | Isolation leaks | 0 | 3 WorkItems + 2 coding missions |
 
@@ -36,8 +37,8 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Thresholds declared before results | **PASS** |
 | Large-repo Lattice ingest (120 files) | **PASS** (`test_lattice_ingest_large_repo_under_threshold`) |
 | ≥3-root workspace search | **PASS** |
-| Concurrent WorkItem artifact isolation | **PASS** |
-| Concurrent Coding Agent missions / worktrees | **PASS** |
+| Concurrent WorkItem artifact isolation | **PASS** for distinct WorkItem/project paths in one test; **PARTIAL** vs in-time overlapping threads (not proven here) |
+| Concurrent Coding Agent missions / worktrees | **PASS** for distinct worktrees/branches sequentially started in one test; **PARTIAL** vs overlapping-thread collisions |
 | Bounded soak RSS + DB checked-out | **PASS** |
 | File handles | **PASS** when `GetProcessHandleCount` returns; otherwise recorded unmeasured in soak extra — not silently treated as PASS if RSS failed |
 | Cancel Lattice ingest | **PASS** |
@@ -58,8 +59,8 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Clean-machine Windows NSIS | **BLOCKED_EXTERNAL** |
 | Live GitHub / Jira / Camunda | **BLOCKED_EXTERNAL** when unset — does not block ZECT-native perf tests |
 | Mentrix Ultra Review | **PASS** (score 85, 0 critical; medium telemetry fail-soft applied) |
-| CodeRabbit | **SKIPPED** until triggered; skip ≠ PASS |
-| GitHub Actions backend (PR #164 `dad338f`) | **FAIL** — `test_mission_f_sibling_failure_blocks_then_repair` on Linux/pytest 9.1.1 (repo 11 tests still fail after repair). Follow-up commit isolates nested pytest + hardens patch lookup. skip ≠ PASS until that SHA is green |
+| CodeRabbit | **PARTIAL** — Majors on `d49a928` addressed in follow-up (bounded `_OPS`, no tracemalloc start, cancel owner check, RAG cancel-before-delete, fuller ultra-review FILES). Overlapping-thread isolation remains PARTIAL. A later review of the new SHA is skip ≠ PASS until posted. |
+| GitHub Actions (PR #164) | **PASS** on `d49a928` — [run 32179569950](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32179569950) backend/frontend/e2e success. `dad338f` backend **FAIL** on mission F is superseded. Follow-up SHA must be green before merge; skip ≠ PASS for an unrun SHA. |
 
 ## Observability (implemented)
 

@@ -538,9 +538,9 @@ def ingest_path(
                 continue
             digest = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
             cache_key = f"{key}:{rel}"
-            _FILE_HASH[cache_key] = digest
             if cancel_check is not None and cancel_check():
                 raise LatticeCancelled("lattice_cancelled")
+            _FILE_HASH[cache_key] = digest
             if lang == "python":
                 _parse_python(rel, content, graph, seen)
             else:

@@ -116,7 +116,12 @@ def ingest(
 
     run_id = (req.run_id or "").strip() or new_id()
     t0 = time.perf_counter()
-    begin_operation(run_id, kind="lattice_ingest", extra={"project_key": key[:120]})
+    begin_operation(
+        run_id,
+        kind="lattice_ingest",
+        extra={"project_key": key[:120]},
+        user_id=_user.user_id,
+    )
     check = cancel_check_for(run_id)
     try:
         graph = ingest_path(
@@ -203,7 +208,8 @@ def ingest_cancel(req: CancelIngestRequest, _user: CurrentUser = Depends(get_cur
 
     if not (req.run_id or "").strip():
         raise HTTPException(status_code=400, detail="run_id required")
-    cancel_operation(req.run_id)
+    if not cancel_operation(req.run_id, user_id=_user.user_id):
+        raise HTTPException(status_code=403, detail="not_operation_owner")
     return {"ok": True, "run_id": req.run_id, "cancelled": True}
 
 

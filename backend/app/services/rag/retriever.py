@@ -69,6 +69,11 @@ def index_directory(
     if not root_path.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
 
+    if cancel_check is not None and cancel_check():
+        from app.services.lattice.indexer import LatticeCancelled
+
+        raise LatticeCancelled("lattice_cancelled")
+
     # Clear prior chunks for this project_key scope
     q = db.query(EmbeddingChunk)
     if project_id is not None:

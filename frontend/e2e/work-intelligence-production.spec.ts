@@ -143,8 +143,9 @@ test.describe("work intelligence production", () => {
     await page.screenshot({ path: path.join(ART, "04-lattice.png") });
 
     await gotoAuthed(page, "/projects", "projects-page");
-    await expect(page.getByText(keepName, { exact: true })).toBeVisible();
-    await expect(page.getByText(dropName, { exact: true })).toHaveCount(0);
+    const projectsPage = page.getByTestId("projects-page");
+    await expect(projectsPage.getByRole("heading", { name: keepName, exact: true })).toBeVisible();
+    await expect(projectsPage.getByRole("heading", { name: dropName, exact: true })).toHaveCount(0);
     await page.screenshot({ path: path.join(ART, "01-projects.png") });
 
     await gotoAuthed(page, "/work-items", "work-items-page");

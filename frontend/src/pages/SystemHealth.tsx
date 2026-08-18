@@ -72,7 +72,11 @@ export default function SystemHealth() {
       )}
       <ul className="mt-6 space-y-2">
         {components.map((c) => (
-          <li key={c.id} className="rounded-lg border border-slate-200 px-4 py-3 flex justify-between gap-4">
+          <li
+            key={c.id}
+            className="rounded-lg border border-slate-200 px-4 py-3 flex justify-between gap-4"
+            data-testid={`system-health-component-${c.id}`}
+          >
             <div>
               <p className="font-medium text-slate-900">{c.name}</p>
               <p className="text-xs text-slate-500">{typeof c.detail === "string" ? c.detail : JSON.stringify(c.detail)}</p>

@@ -73,6 +73,7 @@ def test_alembic_revision_chain_is_linear():
     assert revs["d8b02c3e5a21"] == "c7a91e2b4f10"
     assert revs["c7a91e2b4f10"] == "bfe9cfe5fde9"
     assert revs["bfe9cfe5fde9"] is None
+    assert revs["f1a6c7d8e9b0"] == "e9c4a1b2d3f0"
 
 
 def test_alembic_upgrade_heads_when_package_present(tmp_path, monkeypatch):
@@ -267,3 +268,6 @@ def test_present_deck_files_survive_process_simulation(tmp_path, monkeypatch):
 def test_healthz_unauthenticated_ok(client):
     res = client.get("/healthz")
     assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["database_mode"] in ("desktop_sqlite", "server_postgres")

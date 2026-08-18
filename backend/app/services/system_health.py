@@ -12,6 +12,29 @@ def build_system_health(db: Any = None) -> dict[str, Any]:
 
     components.append({"id": "api", "name": "API", "status": "ok", "detail": "healthz"})
 
+    try:
+        from app.infrastructure.database import database_mode, engine as _db_engine
+
+        mode = database_mode()
+        components.append(
+            {
+                "id": "database",
+                "name": "Database",
+                "status": "ok",
+                "detail": {
+                    "mode": mode,
+                    "dialect": _db_engine.dialect.name,
+                    "lifecycle": (
+                        "alembic_upgrade_heads" if mode == "server_postgres" else "create_all_additive"
+                    ),
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(
+            {"id": "database", "name": "Database", "status": "error", "detail": str(exc)[:200]}
+        )
+
     auth_mode = (os.getenv("ZECT_AUTH_MODE") or "local").strip()
     components.append(
         {

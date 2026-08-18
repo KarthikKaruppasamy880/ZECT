@@ -22,6 +22,12 @@ test.describe("runtime recovery production — unauthenticated", () => {
     fs.mkdirSync(ART, { recursive: true });
     const hz = await page.request.get(`${API}/healthz`);
     expect(hz.ok()).toBeTruthy();
+    const health = await hz.json();
+    expect(health.status).toBe("ok");
+    expect(["desktop_sqlite", "server_postgres"]).toContain(health.database_mode);
+    expect(health.database_dialect).toBeTruthy();
+    expect(["create_all_additive", "alembic_upgrade_heads"]).toContain(health.database_lifecycle);
+    expect(JSON.stringify(health).toLowerCase()).not.toContain("postgresql://");
     await page.goto("/system-health");
     await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 20_000 });
     await page.screenshot({ path: path.join(ART, "01-unauth-health.png") });
@@ -39,7 +45,11 @@ test.describe("runtime recovery production — authenticated", () => {
     };
     await gotoAuthed(page, "/system-health", "system-health-page");
     await expect(page.getByTestId("system-health-status")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("system-health-component-database")).toBeVisible({ timeout: 20_000 });
     evidence.health_status = ((await page.getByTestId("system-health-status").innerText()) || "").trim();
+    evidence.database_component = (
+      (await page.getByTestId("system-health-component-database").innerText()) || ""
+    ).trim();
     await page.screenshot({ path: path.join(ART, "02-system-health.png") });
 
     await gotoAuthed(page, "/workspace", "developer-workspace");

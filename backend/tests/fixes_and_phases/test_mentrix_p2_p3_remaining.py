@@ -24,6 +24,7 @@ def test_system_health_components():
     ids = {c["id"] for c in h["components"]}
     assert "api" in ids and "coding_engine" in ids and "model_gateway" in ids
     assert "desktop" in ids and "skills_fs" in ids
+    assert "database" in ids
 
 
 def test_skills_fs_lists_sample_pack():

@@ -22,6 +22,7 @@ foreach ($d in @($dataDir, $logDir, $configDir)) {
 $env:ZECT_USER_DATA = $UserData
 $dbPath = (Join-Path $dataDir "zect.db") -replace "\\", "/"
 if (-not $env:DATABASE_URL) {
+  # Supported packaged mode is desktop_sqlite under userData. Not a Postgres defect.
   $env:DATABASE_URL = "sqlite:///$dbPath"
 }
 

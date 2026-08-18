@@ -19,6 +19,7 @@ def _prepare_paths() -> None:
         data = Path(user_data) / "data"
         data.mkdir(parents=True, exist_ok=True)
         db = data / "zect.db"
+        # Supported packaged mode is desktop_sqlite (not a Postgres defect).
         os.environ.setdefault("DATABASE_URL", f"sqlite:///{db.as_posix()}")
 
 

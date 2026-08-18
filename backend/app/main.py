@@ -176,7 +176,19 @@ register_routers(app)
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok", "product": "ZECT", "agent": "Mentrix"}
+    from app.infrastructure.database import database_mode, engine as _db_engine
+
+    mode = database_mode()
+    return {
+        "status": "ok",
+        "product": "ZECT",
+        "agent": "Mentrix",
+        "database_mode": mode,
+        "database_dialect": _db_engine.dialect.name,
+        "database_lifecycle": (
+            "alembic_upgrade_heads" if mode == "server_postgres" else "create_all_additive"
+        ),
+    }
 
 
 DEMO_PROJECT_NAMES = frozenset(

@@ -92,6 +92,11 @@ def build_desktop_readiness() -> dict[str, Any]:
                 "frontend": "PACKAGED",
                 "backend": "PACKAGED" if runtime else "MANAGED_EXTERNAL",
                 "storage_database": "PACKAGED",
+                "database_mode": (
+                    "server_postgres"
+                    if (os.getenv("DATABASE_URL") or "").strip().lower().startswith("postgres")
+                    else "desktop_sqlite"
+                ),
                 "voicebox": "OPTIONAL",
                 "presentation_provider": "OPTIONAL",
                 "local_model_runtime": "NOT_REQUIRED",

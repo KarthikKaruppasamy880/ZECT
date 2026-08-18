@@ -21,11 +21,25 @@ Install ZECT
 | Electron shell | **PACKAGED** |
 | Frontend `dist` | **PACKAGED** (build before `npm run build:win`) |
 | Backend API sidecar | **PACKAGED** launcher (`run-api.ps1`); runtime via `bundle_sidecar.py` at build |
-| SQLite + encryption key | **PACKAGED** under Electron `userData` (`data/`, `config/`) |
+| SQLite + encryption key | **PACKAGED** under Electron `userData` (`data/`, `config/`) — **desktop_sqlite** is the supported local store |
 | Voicebox / Chatterbox | **OPTIONAL** (extraResources slot; not required for login) |
 | Presenton | **OPTIONAL** / external Docker |
 | Local model runtime | **NOT_REQUIRED** for baseline login |
 | `start-local.ps1` / Vite | Dev-only; not used in packaged launch |
+
+## Supported database modes
+
+These are two intentional deployments — SQLite is not defective because PostgreSQL exists.
+
+| Mode | How it is selected | Schema lifecycle | Backup |
+|------|--------------------|------------------|--------|
+| **desktop_sqlite** | Default; packaged Electron sets `ZECT_PACKAGED=1`, `ZECT_USER_DATA`, `DATABASE_URL=sqlite:///{userData}/data/zect.db` | `create_all` + additive columns at boot. Do not run Alembic against the live sidecar SQLite file (pool + second connection deadlocks). | File copy of `zect.db` after WAL checkpoint |
+| **server_postgres** | `DATABASE_URL=postgresql://...` (or `postgresql+psycopg://...`) | **Required** `alembic upgrade heads` at boot. Connection failure does **not** fall back to SQLite | `pg_dump` / operator recovery — not sqlite file copy |
+
+Production/server PostgreSQL must not use `init_db` `create_all` as the boot path. The empty historical revision `bfe9cfe5fde9` is unchanged; `alembic/env.py` bootstraps ORM tables when `users` is missing so a fresh `upgrade heads` can apply the linear chain. Catch-up revision `f1a6c7d8e9b0` covers databases already stamped at `e9c4a1b2d3f0`.
+
+Live PostgreSQL proof requires `ZECT_TEST_POSTGRES_URL`. Unset = **BLOCKED_EXTERNAL**, not PASS.
+
 
 ## What works today
 

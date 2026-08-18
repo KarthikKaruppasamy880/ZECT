@@ -39,7 +39,7 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. This tranche does not start so
 
 ## Honest limits
 
-- Packaged Windows still uses sqlite `init_db()` / `create_all`, not a live Postgres Alembic cutover.
+- Packaged Windows **intentionally** uses desktop sqlite `init_db()` / `create_all` under Electron `userData`. That is the supported local store, not a Postgres defect. Server Postgres Alembic cutover is a separate mode (`DATABASE_URL=postgresql://...`) — see `ZECT_RUNTIME_DB_LIFECYCLE_ACCEPTANCE.md`.
 - `electron-builder` NSIS target exists (`oneClick: false`) but no clean-machine installer proof was run.
 - Live Presenton / Voicebox / GitHub remain **BLOCKED_EXTERNAL** when unset.
 - Headed e2e does not kill occupying processes or run NSIS.

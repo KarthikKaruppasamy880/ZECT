@@ -44,6 +44,13 @@ COMPANION_SEED_RULES = [
     {"action_pattern": "companion_jira_write", "permission_level": "require_approval", "category": "companion", "description": "Comment on Jira issues (e.g. PR link)"},
     {"action_pattern": "companion_datadog_read", "permission_level": "allow", "category": "companion", "description": "Query Datadog logs for incidents"},
     {"action_pattern": "delete_file", "permission_level": "never", "category": "file", "description": "Delete files from workspace — never allowed"},
+    {"action_pattern": "companion_work_item", "permission_level": "allow", "category": "companion", "description": "Create or open WorkItems from Companion"},
+    {"action_pattern": "companion_developer_ask", "permission_level": "allow", "category": "companion", "description": "Mentrix Developer ASK via Companion"},
+    {"action_pattern": "companion_developer_plan", "permission_level": "allow", "category": "companion", "description": "Mentrix Developer PLAN via Companion"},
+    {"action_pattern": "companion_developer_agent", "permission_level": "require_approval", "category": "companion", "description": "Mentrix Developer AGENT / approve plan"},
+    {"action_pattern": "companion_coding_agent", "permission_level": "require_approval", "category": "companion", "description": "Start Mentrix Coding Agent"},
+    {"action_pattern": "companion_process", "permission_level": "allow", "category": "companion", "description": "Mentrix Process / ticket status"},
+    {"action_pattern": "companion_fabric", "permission_level": "allow", "category": "companion", "description": "Mentrix Fabric classify"},
 ]
 
 

@@ -24,6 +24,7 @@ import {
   mentrixCompanionStreamResume,
   mentrixCompanionTurn,
   mentrixListRuns,
+  type CompanionProvenanceRow,
   type MentrixStreamEvent,
 } from "@/lib/api";
 import type { PendingConfirm } from "@/components/MentrixConfirmModal";
@@ -127,6 +128,12 @@ function readActiveProjectId(): string {
   }
 }
 
+function readActiveProjectNumeric(): number | undefined {
+  const raw = readActiveProjectId();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export function applyNav(path: string | null | undefined, navigate: (to: number | string) => void) {
   if (!path) return;
   if (path === "__back__") {
@@ -176,6 +183,10 @@ type MentrixSessionValue = {
   streamReply: string;
   lastMessage: string;
   setLastMessageKeep: (v: string) => void;
+  lastProvenance: CompanionProvenanceRow[];
+  lastProgress: { task?: string; stage?: string; blocker?: string; affected_repos?: number[] } | null;
+  cancelTurn: () => void;
+  retryTurn: () => void;
   realtimePreflight: RealtimePreflight | null;
   micDevices: MicDevice[];
   micDeviceId: string;
@@ -240,6 +251,13 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const [runsHint, setRunsHint] = useState("");
   const [streamReply, setStreamReply] = useState("");
   const [lastMessage, setLastMessageKeep] = useState("");
+  const [lastProvenance, setLastProvenance] = useState<CompanionProvenanceRow[]>([]);
+  const [lastProgress, setLastProgress] = useState<{
+    task?: string;
+    stage?: string;
+    blocker?: string;
+    affected_repos?: number[];
+  } | null>(null);
   const [realtimePreflight, setRealtimePreflight] = useState<RealtimePreflight | null>(null);
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
   const [micDeviceId, setMicDeviceIdState] = useState(() => getStoredMicDeviceId());
@@ -605,6 +623,24 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         case "tool_start":
           setAvatar("working");
           pushLog(`Tool: ${d.tool}`);
+          if (d.tool) {
+            setLastProgress({
+              task: String(d.tool),
+              stage: "running",
+            });
+          }
+          break;
+        case "progress":
+          setLastProgress({
+            task: String(d.task || ""),
+            stage: String(d.stage || ""),
+            blocker: String(d.blocker || ""),
+            affected_repos: Array.isArray(d.affected_repos) ? d.affected_repos.map((n: unknown) => Number(n)).filter((n) => Number.isFinite(n)) : [],
+          });
+          pushLog(`progress ${d.stage || ""}`);
+          break;
+        case "scope":
+          pushLog(`scope project=${d.project_id || "none"} roots=${(d.repo_ids || []).length}`);
           break;
         case "tool_end":
           pushLog(`Tool end: ${d.tool} ${d.ok ? "ok" : d.error || "fail"}`);
@@ -644,6 +680,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           }
           setStatusLine(d.latency_mode === "fast_tools" ? "Replied (instant)" : "SYSTEMS OPERATIONAL");
           pushLog(`done ${d.latency_ms || 0}ms`);
+          if (Array.isArray(d.provenance)) {
+            setLastProvenance(d.provenance as CompanionProvenanceRow[]);
+          }
+          if (d.progress && typeof d.progress === "object") {
+            setLastProgress(d.progress as { task?: string; stage?: string; blocker?: string; affected_repos?: number[] });
+          }
           break;
         }
         case "error":
@@ -693,6 +735,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           try {
             await mentrixCompanionStream(message, {
               project_key: localStorage.getItem("zect_lattice_key") || "",
+              project_id: readActiveProjectNumeric(),
               confirmed_tools: confirmed,
               agent_context: agentContext,
               skill_id: activeSkillId || undefined,
@@ -706,6 +749,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             const res = await mentrixCompanionTurn(message, {
               confirmed_tools: confirmed,
               project_key: localStorage.getItem("zect_lattice_key") || "",
+              project_id: readActiveProjectNumeric(),
               agent_context: agentContext,
               skill_id: activeSkillId || undefined,
               model: chatModel,
@@ -735,6 +779,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
                 await handleDesktopOutput(t.result as Record<string, unknown>);
               }
             }
+            if (Array.isArray(res.provenance)) {
+              setLastProvenance(res.provenance as CompanionProvenanceRow[]);
+            }
           }
         }
       } catch (e) {
@@ -762,6 +809,21 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setLastMessageKeep(msg);
     await runTurn(msg);
   }, [input, loading, runTurn]);
+
+  const cancelTurn = useCallback(() => {
+    abortRef.current?.abort();
+    setLoading(false);
+    setAvatar("idle");
+    setStreamReply("");
+    setLastProgress((prev) => (prev ? { ...prev, stage: "cancelled", blocker: "user_cancel" } : { stage: "cancelled" }));
+    setStatusLine("Cancelled — session preserved");
+    pushLog("turn cancelled");
+  }, [pushLog]);
+
+  const retryTurn = useCallback(() => {
+    if (!lastMessage || loading) return;
+    void runTurn(lastMessage);
+  }, [lastMessage, loading, runTurn]);
 
   const presentNarrate = useCallback(async () => {
     setDisplayMode(true);
@@ -1057,6 +1119,10 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       streamReply,
       lastMessage,
       setLastMessageKeep,
+      lastProvenance,
+      lastProgress,
+      cancelTurn,
+      retryTurn,
       realtimePreflight,
       micDevices,
       micDeviceId,
@@ -1103,6 +1169,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       runsHint,
       streamReply,
       lastMessage,
+      lastProvenance,
+      lastProgress,
       realtimePreflight,
       micDevices,
       micDeviceId,
@@ -1122,6 +1190,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       toggleVoice,
       runTurn,
       onSend,
+      cancelTurn,
+      retryTurn,
       presentNarrate,
       onAllow,
       applyNavPath,

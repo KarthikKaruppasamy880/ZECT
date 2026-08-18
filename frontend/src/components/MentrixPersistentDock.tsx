@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router-dom";
 import { Bot, Mic, MicOff, Send, X } from "lucide-react";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 import MentrixConfirmModal from "@/components/MentrixConfirmModal";
+import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 
 export default function MentrixPersistentDock() {
   const location = useLocation();
@@ -20,7 +21,7 @@ export default function MentrixPersistentDock() {
   return (
     <>
       <div
-        className={`fixed bottom-4 right-4 z-50 flex flex-col gap-2 ${
+        className={`fixed bottom-4 right-4 z-40 flex max-h-[70vh] flex-col gap-2 ${
           s.dockExpanded ? "w-[min(100vw-2rem,22rem)]" : "w-auto items-end"
         }`}
         data-testid="mentrix-persistent-dock"
@@ -64,6 +65,10 @@ export default function MentrixPersistentDock() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
+            </div>
+
+            <div className="border-b border-slate-800 px-2 py-1">
+              <CompanionScopeStrip compact provenance={s.lastProvenance} progress={s.lastProgress} />
             </div>
 
             <div className="max-h-40 space-y-1.5 overflow-auto px-3 py-2 text-xs" data-testid="mentrix-dock-chat">
@@ -167,6 +172,16 @@ export default function MentrixPersistentDock() {
                     }
                   }}
                 />
+                {s.loading ? (
+                  <button
+                    type="button"
+                    data-testid="mentrix-dock-cancel"
+                    onClick={() => s.cancelTurn()}
+                    className="rounded-lg border border-amber-700 px-2 py-2 text-[10px] text-amber-200"
+                  >
+                    Cancel
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   data-testid="mentrix-dock-send"

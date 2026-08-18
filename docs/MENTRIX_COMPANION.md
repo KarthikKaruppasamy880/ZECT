@@ -23,7 +23,28 @@ ForgeLoop Delivery remains the upgrade **harness**. Mentrix HUD + dock is the al
 
 Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) expands the **persistent dock** and starts Connect Voice (Realtime) without hard-reloading the SPA.
 
-### Navigate intents
+### Orchestration (production)
+
+Companion is the company operator HUD/dock — **not** a second IDE, coding-agent runtime, Present editor, or WorkItem engine.
+
+Canonical flow:
+
+`User → Companion → active Project / authorized roots → PI/Lattice/Knowledge (tagged) → WorkItem → ASK/PLAN → Developer/Coding Agent → Present → Voice → Process/ticket`
+
+Handoff envelope (query params + tool args): `project_id`, `workspace_id`, `work_item_id`, `repo_ids`, commit SHAs, plan/evidence refs.
+
+| Phrase | Tool | Canonical surface |
+|--------|------|-------------------|
+| Architecture of this project | `companion_intelligence` | Provenance chips (unused sources stay `not_used`) |
+| Create/open work item | `work_item_open_or_create` | `/work-items` or `/workspace?…` |
+| Open Developer Workspace | `companion_handoff` | `/workspace` |
+| Create a presentation from this project | `companion_handoff` | `/present/create` (ZECT Present, not Presenton UI) |
+| Create a Jira ticket | `process_ticket_handoff` | If Jira/Camunda ready: WorkItem with source identity + `/work-items?envelope`. If unset: `BLOCKED_EXTERNAL` and **no auto-navigate** |
+| Start coding agent | `coding_agent_start` | Always-ask; without workspace, hand off to Developer (Companion does not edit files) |
+
+`GET /api/mentrix/companion/scope` feeds the HUD/dock identity strip. Semantic cross-repo references are **not implemented**.
+
+## Navigate intents
 
 | Phrase | Behavior |
 |--------|----------|
@@ -90,7 +111,8 @@ Mentrix research uses DuckDuckGo-style lookup — **not Exa**. Never invent Slac
 
 ## Streaming API
 
-- `GET /api/mentrix/companion/stream?message=...` — SSE: `thinking`, `tool_start`, `tool_end`, `artifact`, `token`, `navigate`, `pending_confirm`, `done`, `error` (optional `agent_context`, `skill_id`)
+- `GET /api/mentrix/companion/scope` — Project / authorized roots / WorkItem envelope
+- `GET /api/mentrix/companion/stream?message=...` — SSE: `thinking`, `scope`, `tool_start`, `progress`, `tool_end`, `artifact`, `token`, `navigate`, `pending_confirm`, `done`, `error` (optional `project_id`, `repository_ids`, `work_item_id`, `workspace_id`, `agent_context`, `skill_id`)
 - `GET /api/mentrix/companion/agent-context` — Skills + staged Dream text for injection
 - `POST /api/mentrix/companion/stream/resume` — continue after Allow
 - `POST /api/mentrix/companion/turn` — non-stream fallback (Playwright)

@@ -1025,11 +1025,45 @@ class CompanionTurnRequest(BaseModel):
     agent_context: str = ""
     skill_id: int | None = None
     model: str | None = None
+    repository_ids: list[int] = []
+    work_item_id: int | None = None
+    workspace_id: str = ""
 
 
 class OrgPolicyImportRequest(BaseModel):
     pack: dict
     replace: bool = False
+
+
+@router.get("/companion/scope")
+def companion_scope(
+    project_id: int | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
+    repository_ids: str = "",
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Active Project / authorized roots / WorkItem envelope for HUD + dock."""
+    from app.services.mentrix.companion_scope import build_companion_scope
+
+    ids: list[int] = []
+    for part in (repository_ids or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            ids.append(int(part))
+        except ValueError:
+            continue
+    return build_companion_scope(
+        db,
+        project_id=project_id,
+        repository_ids=ids or None,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id,
+        created_by=getattr(_user, "email", "") or "",
+    )
 
 
 @router.get("/companion/agent-context")
@@ -1135,6 +1169,9 @@ def companion_turn(
         agent_context=req.agent_context or "",
         skill_id=req.skill_id,
         model=req.model,
+        repository_ids=req.repository_ids or None,
+        work_item_id=req.work_item_id,
+        workspace_id=req.workspace_id or "",
     )
 
 
@@ -1153,6 +1190,9 @@ def companion_stream(
     agent_context: str = "",
     skill_id: int | None = None,
     model: str | None = None,
+    repository_ids: str = "",
+    work_item_id: int | None = None,
+    workspace_id: str = "",
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
@@ -1163,6 +1203,15 @@ def companion_stream(
     ensure_companion_rules(db)
     uid = getattr(user, "id", None)
     confirmed = [t.strip() for t in confirmed_tools.split(",") if t.strip()]
+    repo_ids: list[int] = []
+    for part in (repository_ids or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            repo_ids.append(int(part))
+        except ValueError:
+            continue
 
     def gen():
         try:
@@ -1177,6 +1226,9 @@ def companion_stream(
                 agent_context=agent_context or "",
                 skill_id=skill_id,
                 model=model,
+                repository_ids=repo_ids or None,
+                work_item_id=work_item_id,
+                workspace_id=workspace_id or "",
             ):
                 yield sse_pack(ev)
         except Exception as exc:  # noqa: BLE001

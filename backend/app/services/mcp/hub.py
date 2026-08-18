@@ -24,6 +24,16 @@ from app.adapters import (
     slack,
 )
 
+def _redact_args(arguments: Any) -> dict[str, Any]:
+    from app.security.redact import redact_mapping, redact_secrets
+
+    if isinstance(arguments, dict):
+        return redact_mapping(arguments)
+    if arguments is None:
+        return {}
+    return {"value": redact_secrets(arguments)}
+
+
 ADAPTERS = {
     "github": github,
     "jira": jira,
@@ -110,7 +120,7 @@ def execute_tool(
         audit = MCPToolAudit(
             server_id=server_id,
             tool_name=tool_name,
-            arguments_json=json.dumps(arguments),
+            arguments_json=json.dumps(_redact_args(arguments)),
             result_json=json.dumps({"error": block}),
             status="blocked",
             user_email=user_email,
@@ -152,11 +162,13 @@ def execute_tool(
         status = "error"
 
     ms = (time.time() - start) * 1000
+    from app.security.redact import redact_secrets
+
     audit = MCPToolAudit(
         server_id=server_id,
         tool_name=tool_name,
-        arguments_json=json.dumps(arguments),
-        result_json=json.dumps(result)[:20000],
+        arguments_json=json.dumps(_redact_args(arguments)),
+        result_json=json.dumps(redact_secrets(result), default=str)[:20000],
         status=status,
         user_email=user_email,
     )

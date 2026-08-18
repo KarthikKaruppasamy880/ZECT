@@ -30,6 +30,9 @@ test.describe("runtime recovery production — unauthenticated", () => {
     expect(JSON.stringify(health).toLowerCase()).not.toContain("postgresql://");
     expect(JSON.stringify(health).toLowerCase()).not.toContain("postgresql+psycopg://");
     expect(JSON.stringify(health).toLowerCase()).not.toContain("postgres://");
+    expect(JSON.stringify(health).toLowerCase()).not.toContain("sqlite:///");
+    const corr = await page.request.get(`${API}/healthz`, { headers: { "X-Correlation-Id": "e2e-runtime-corr" } });
+    expect(corr.headers()["x-correlation-id"]).toBe("e2e-runtime-corr");
     await page.goto("/system-health");
     await expect(page.getByTestId("login-username")).toBeVisible({ timeout: 20_000 });
     await page.screenshot({ path: path.join(ART, "01-unauth-health.png") });
@@ -48,6 +51,7 @@ test.describe("runtime recovery production — authenticated", () => {
     await gotoAuthed(page, "/system-health", "system-health-page");
     await expect(page.getByTestId("system-health-status")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("system-health-component-database")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("system-health-component-observability")).toBeVisible({ timeout: 20_000 });
     evidence.health_status = ((await page.getByTestId("system-health-status").innerText()) || "").trim();
     evidence.database_component = (
       (await page.getByTestId("system-health-component-database").innerText()) || ""

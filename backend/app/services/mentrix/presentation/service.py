@@ -69,6 +69,23 @@ class PresentationService:
         )
 
     def generate(self, req: PresentationGenerateRequest) -> dict[str, Any]:
+        from app.infrastructure.observability import (
+            begin_operation,
+            emit_event,
+            emit_privileged,
+            is_cancelled,
+            new_id,
+        )
+        import time as _time
+
+        run_id = (req.run_id or "").strip() or new_id()
+        req.run_id = run_id
+        t0 = _time.perf_counter()
+        begin_operation(
+            run_id,
+            kind="present_generate",
+            extra={"provider": self.provider_name, "fast_basic": bool(req.fast_basic)},
+        )
         from app.services.mentrix.presentation.sensitivity import classify_deck_material
 
         if self.provider_name == "presenton":
@@ -78,7 +95,7 @@ class PresentationService:
                     blob += "\n" + str(item.get("content") or "")
             sens = classify_deck_material(blob, hint=req.sensitivity_hint or None)
             if sens.get("forbid_external_retrieval"):
-                return {
+                out = {
                     "ok": False,
                     "error": "restricted_external_provider",
                     "hint": "RESTRICTED/CONFIDENTIAL decks cannot be sent to an external presentation engine",
@@ -89,9 +106,43 @@ class PresentationService:
                     "blocked_external": True,
                     "block_code": "restricted_external_provider",
                     "sensitivity": sens.get("sensitivity"),
+                    "run_id": run_id,
                 }
+                emit_event(
+                    operation="present_generate",
+                    stage="blocked",
+                    run_id=run_id,
+                    failure_class="restricted_external_provider",
+                    duration_ms=int((_time.perf_counter() - t0) * 1000),
+                    model_route=self.provider_name,
+                )
+                emit_privileged(
+                    action="present_generate_blocked",
+                    resource_type="presentation",
+                    details={"block_code": "restricted_external_provider", "provider": self.provider_name},
+                )
+                return out
+        if is_cancelled(run_id):
+            out = {
+                "ok": False,
+                "error": "generation_cancelled",
+                "http_status": 409,
+                "lifecycle": "GENERATION_CANCELLED",
+                "provider": self.provider_name,
+                "block_code": "generation_cancelled",
+                "run_id": run_id,
+            }
+            emit_event(
+                operation="present_generate",
+                stage="cancelled",
+                run_id=run_id,
+                failure_class="cancelled",
+                duration_ms=int((_time.perf_counter() - t0) * 1000),
+            )
+            return out
         out = self._provider.generate(req)
         out.setdefault("provider", self.provider_name)
+        out["run_id"] = run_id
         path = str(out.get("path") or "").strip()
         if out.get("ok") and path:
             try:
@@ -115,4 +166,27 @@ class PresentationService:
                     out["bytes"] = len(data)
             except Exception as exc:  # noqa: BLE001 — inspector must not 500 generate
                 out.setdefault("inspector_error", str(exc)[:200])
+        duration_ms = int((_time.perf_counter() - t0) * 1000)
+        fail = "" if out.get("ok") else (out.get("block_code") or out.get("error") or "present_failed")
+        emit_event(
+            operation="present_generate",
+            stage="complete" if out.get("ok") else "failed",
+            run_id=run_id,
+            failure_class=fail,
+            duration_ms=duration_ms,
+            model_route=str(out.get("provider") or self.provider_name),
+            extra={
+                "planner_mode": out.get("planner_mode") or "",
+                "degraded": bool(out.get("degraded")),
+            },
+        )
+        emit_privileged(
+            action="present_generate",
+            resource_type="presentation",
+            details={
+                "ok": bool(out.get("ok")),
+                "block_code": fail,
+                "provider": out.get("provider") or self.provider_name,
+            },
+        )
         return out

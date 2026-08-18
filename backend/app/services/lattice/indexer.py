@@ -504,7 +504,17 @@ def _node_from_dict(n: dict[str, Any]) -> GraphNode:
     return GraphNode(**{k: v for k, v in n.items() if k in fields_set})
 
 
-def ingest_path(root: str, project_key: str = "", max_files: int = 2000, index_docs: bool = True) -> LatticeGraph:
+class LatticeCancelled(RuntimeError):
+    """Cooperative cancel during lattice ingest — cache is not written."""
+
+
+def ingest_path(
+    root: str,
+    project_key: str = "",
+    max_files: int = 2000,
+    index_docs: bool = True,
+    cancel_check=None,
+) -> LatticeGraph:
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
@@ -529,6 +539,8 @@ def ingest_path(root: str, project_key: str = "", max_files: int = 2000, index_d
             digest = hashlib.sha256(content.encode("utf-8", errors="ignore")).hexdigest()
             cache_key = f"{key}:{rel}"
             _FILE_HASH[cache_key] = digest
+            if cancel_check is not None and cancel_check():
+                raise LatticeCancelled("lattice_cancelled")
             if lang == "python":
                 _parse_python(rel, content, graph, seen)
             else:

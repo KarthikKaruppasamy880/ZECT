@@ -177,6 +177,9 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "review": mission.get("review") or {},
         "pr": next((r.get("pr") for r in repos if (r.get("pr") or {}).get("url")), {}) or {},
         "ci": mission.get("ci") or {},
+        "correlation_id": mission.get("correlation_id") or "",
+        "work_item_id": mission.get("work_item_id"),
+        "project_id": mission.get("project_id"),
         "sibling": sibling,
         "ready_to_merge": mission.get("phase") == "ready_to_merge",
         "companion_edits_code": False,
@@ -198,6 +201,28 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
     )
     mission["updated_at"] = _now()
     _save_mission(mission)
+    try:
+        from app.infrastructure.observability import emit_event
+        from app.security.redact import redact_mapping
+
+        fail = ""
+        if event in ("cancelled",):
+            fail = "cancelled"
+        elif event in ("blocked",):
+            fail = "blocked"
+        emit_event(
+            operation="coding_agent",
+            stage=event,
+            message=message,
+            run_id=str(mission.get("id") or ""),
+            correlation_id=str(mission.get("correlation_id") or ""),
+            work_item_id=mission.get("work_item_id"),
+            project_id=mission.get("project_id"),
+            failure_class=fail,
+            extra=redact_mapping(data) if data else {},
+        )
+    except Exception:
+        pass
 
 
 def _write_checkpoint(repo: dict[str, Any]) -> None:
@@ -523,6 +548,9 @@ def start_mission(
     if not roots:
         raise ValueError("authorized_roots_required")
     mid = str(uuid.uuid4())
+    from app.infrastructure.observability import current_correlation, new_id
+
+    correlation_id = current_correlation() or new_id()
     plan_text = (plan or "").strip() or (
         f"# PLAN\n\nGoal: {goal.strip()}\n\n"
         f"Affected roots: {', '.join(str(r.get('label') or r.get('id')) for r in roots)}\n\n"
@@ -535,6 +563,7 @@ def start_mission(
     mission = {
         "id": mid,
         "goal": goal.strip(),
+        "correlation_id": correlation_id,
         "phase": "awaiting_plan_approval",
         "status": "awaiting_plan_approval",
         "plan": plan_text,
@@ -712,6 +741,17 @@ def approve_git(mission_id: str, *, commit: bool = True, push: bool = True) -> d
     mission["git_approved"] = True
     mission["phase"] = "committing"
     _emit(mission, "git_approved", "Git approval recorded.")
+    try:
+        from app.infrastructure.observability import emit_privileged
+
+        emit_privileged(
+            action="coding_mission_git_approve",
+            resource_type="coding_mission",
+            resource_name=str(mission_id),
+            details={"phase": mission.get("phase")},
+        )
+    except Exception:
+        pass
     if commit:
         for repo in mission["repos"]:
             result = _commit_if_needed(repo, f"zect coding-agent: {mission.get('goal', '')[:72]}")
@@ -755,6 +795,17 @@ def cancel_mission(mission_id: str) -> dict[str, Any]:
     mission["status"] = "cancelled"
     mission["phase"] = "cancelled"
     _emit(mission, "cancelled", "Mission cancelled. Worktrees and recorded commits preserved.")
+    try:
+        from app.infrastructure.observability import emit_privileged
+
+        emit_privileged(
+            action="coding_mission_cancel",
+            resource_type="coding_mission",
+            resource_name=str(mission_id),
+            details={"phase": mission.get("phase"), "status": "cancelled"},
+        )
+    except Exception:
+        pass
     for repo in mission.get("repos") or []:
         if repo.get("worktree_path"):
             _write_checkpoint(repo)

@@ -1,11 +1,11 @@
 # ZECT System Architecture
 
-**Status:** Canonical post-merge source of truth (P0–P3 shipped)  
-**Branch / evidence:** `develop` @ `f80fda4` / `bdd0b35`  
-**Acceptance:** [`ZECT_PRODUCT_ACCEPTANCE.md`](ZECT_PRODUCT_ACCEPTANCE.md) — **RELEASE_READY**  
-**Scope rule:** Do not claim features beyond acceptance. `claim_fully_local: false`.
+> **HISTORICAL.** Canonical current architecture is [`ZECT_CANONICAL_ARCHITECTURE.md`](ZECT_CANONICAL_ARCHITECTURE.md) and storage truth is [`ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md`](ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md). Mentrix spine notes below remain useful; do not treat PostgreSQL as the only DB or as pgvector RAG.
 
-This document is the **only top-level architecture reference**. Supporting docs below are normative details; older planning docs under `docs/architecture/` that still say “MISSING / P0 BUILD” are historical and superseded for Mentrix spine claims.
+**Status:** HISTORICAL (P0–P3 spine)  
+**Branch / evidence:** `develop` @ `f80fda4` / `bdd0b35`  
+**Acceptance:** [`ZECT_PRODUCT_ACCEPTANCE.md`](ZECT_PRODUCT_ACCEPTANCE.md)  
+**Scope rule:** Do not claim features beyond acceptance. `claim_fully_local: false`.
 
 ---
 

@@ -207,6 +207,27 @@ def build_system_health(db: Any = None) -> dict[str, Any]:
             {"id": "connectors", "name": "MentrixConnectors", "status": "unknown", "detail": str(exc)[:200]}
         )
 
+    try:
+        from app.infrastructure.observability import snapshot_summary
+
+        obs = snapshot_summary()
+        components.append(
+            {
+                "id": "observability",
+                "name": "Telemetry",
+                "status": "ok",
+                "detail": {
+                    "event_count": obs.get("event_count"),
+                    "rss_bytes": obs.get("rss_bytes"),
+                    "handle_count": obs.get("handle_count"),
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        components.append(
+            {"id": "observability", "name": "Telemetry", "status": "unknown", "detail": str(exc)[:200]}
+        )
+
     worst = "ok"
     for c in components:
         st = c.get("status")

@@ -1,5 +1,7 @@
 # ZECT — Complete Architecture & Workflow Reference
 
+> **HISTORICAL.** Use [`ZECT_CANONICAL_ARCHITECTURE.md`](ZECT_CANONICAL_ARCHITECTURE.md) as the current architecture. This file is retained for workflow detail and must not override storage/RAG truth.
+
 Status legend used throughout this document:
 
 - ✅ **Implemented** — real, verified end-to-end behavior (DB-backed, real LLM call, or real external API call)

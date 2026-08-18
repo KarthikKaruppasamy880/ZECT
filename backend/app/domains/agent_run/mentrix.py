@@ -1492,6 +1492,7 @@ class PresentonGenerateRequest(BaseModel):
     asset_ids: list[str] = []
     fast_basic: bool = False
     require_llm: bool = False
+    run_id: str = ""
 
 
 @router.get("/presenton/status")
@@ -1533,6 +1534,7 @@ def presenton_generate(
             asset_ids=list(req.asset_ids or []),
             require_llm=bool(req.require_llm),
             fast_basic=bool(req.fast_basic),
+            run_id=(req.run_id or "").strip(),
         )
     )
     if not out.get("ok"):
@@ -1564,9 +1566,24 @@ def presenton_generate(
                 "repair_attempts": out.get("repair_attempts"),
                 "overlap_count": out.get("overlap_count"),
                 "ungrounded_fact_count": out.get("ungrounded_fact_count"),
+                "run_id": out.get("run_id") or req.run_id,
             },
         )
     return out
+
+
+class PresentCancelRequest(BaseModel):
+    run_id: str
+
+
+@router.post("/presenton/generate/cancel")
+def presenton_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = Depends(get_current_user)):
+    from app.infrastructure.observability import cancel_operation
+
+    if not (req.run_id or "").strip():
+        raise HTTPException(status_code=400, detail="run_id required")
+    cancel_operation(req.run_id)
+    return {"ok": True, "run_id": req.run_id, "cancelled": True}
 
 
 @router.post("/present/parse-pptx")

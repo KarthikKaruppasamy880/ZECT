@@ -46,9 +46,34 @@ def allowed_roots() -> list[str]:
     return out
 
 
+def is_path_under_root(candidate: Path, root: Path) -> bool:
+    """True iff resolved candidate is root or a descendant.
+
+    String prefix is not enough: ``C:\\tmp\\ws-evil`` starts with ``C:\\tmp\\ws``.
+    Symlinks are evaluated after ``Path.resolve()`` so a jail-escape link fails.
+    """
+    try:
+        resolved = candidate.resolve()
+        root_resolved = root.resolve()
+    except OSError:
+        return False
+    try:
+        resolved.relative_to(root_resolved)
+        return True
+    except ValueError:
+        pass
+    if os.name == "nt":
+        child = os.path.normcase(os.path.normpath(str(resolved)))
+        parent = os.path.normcase(os.path.normpath(str(root_resolved)))
+        if child == parent:
+            return True
+        return child.startswith(parent + os.sep)
+    return False
+
+
 def path_under_allowed_roots(raw: str) -> Path:
     p = Path(raw).resolve()
     roots = allowed_roots()
-    if not any(str(p).startswith(root) for root in roots):
+    if not any(is_path_under_root(p, Path(root)) for root in roots):
         raise ValueError(f"Access denied: path must be under {roots}")
     return p

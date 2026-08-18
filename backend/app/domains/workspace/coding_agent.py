@@ -9,9 +9,11 @@ from typing import Iterator
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.adapters.coding_runtime import get_mentrix_native_runtime
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.database import get_db
 
 router = APIRouter(prefix="/api/coding-agent", tags=["coding-agent"])
 
@@ -164,3 +166,139 @@ def session_cancel(session_id: str, _user: CurrentUser = Depends(get_current_use
         return rt.get_run(session_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="session_not_found") from None
+
+
+class MissionCreate(BaseModel):
+    goal: str = Field(..., min_length=1)
+    project_id: int | None = None
+    work_item_id: int | None = None
+    roots: list[dict] = Field(default_factory=list)
+    patches_by_repo: dict[str, list] | None = None
+    plan: str = ""
+    workspace_parent: str = ""
+
+
+class MissionRepair(BaseModel):
+    patches_by_repo: dict[str, list] = Field(default_factory=dict)
+
+
+def _mission_roots(db: Session, req: MissionCreate) -> list[dict]:
+    roots = list(req.roots or [])
+    if roots:
+        return roots
+    if not req.project_id:
+        return []
+    from app.models import Repo
+
+    rows = db.query(Repo).filter(Repo.project_id == int(req.project_id)).all()
+    return [
+        {
+            "id": r.id,
+            "label": r.repo_name or f"repo-{r.id}",
+            "path": r.local_path or "",
+            "local_path": r.local_path or "",
+        }
+        for r in rows
+        if r.local_path
+    ]
+
+
+@router.post("/missions")
+def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import start_mission
+
+    try:
+        roots = _mission_roots(db, req)
+        return start_mission(
+            goal=req.goal.strip(),
+            roots=roots,
+            plan=req.plan,
+            patches_by_repo=req.patches_by_repo,
+            work_item_id=req.work_item_id,
+            project_id=req.project_id,
+            workspace_parent=req.workspace_parent,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/missions/{mission_id}")
+def read_mission(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import get_mission
+
+    try:
+        return get_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+
+
+@router.post("/missions/{mission_id}/approve-plan")
+def mission_approve_plan(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import approve_plan
+
+    try:
+        return approve_plan(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/missions/{mission_id}/approve-git")
+def mission_approve_git(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import approve_git
+
+    try:
+        return approve_git(mission_id, commit=True, push=True)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/missions/{mission_id}/cancel")
+def mission_cancel(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import cancel_mission
+
+    try:
+        return cancel_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+
+
+@router.post("/missions/{mission_id}/resume")
+def mission_resume(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import resume_mission
+
+    try:
+        return resume_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/missions/{mission_id}/retry")
+def mission_retry(mission_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.lifecycle import retry_mission
+
+    try:
+        return retry_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+
+
+@router.post("/missions/{mission_id}/repair")
+def mission_repair(
+    mission_id: str,
+    req: MissionRepair,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.coding_engine.lifecycle import repair_and_retry
+
+    try:
+        return repair_and_retry(mission_id, req.patches_by_repo)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

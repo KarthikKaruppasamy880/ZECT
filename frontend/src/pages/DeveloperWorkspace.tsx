@@ -1139,6 +1139,15 @@ export default function DeveloperWorkspace() {
                 }}
                 initialGoal={deepGoal}
                 initialSessionId={deepSession || null}
+                projectId={activeProjectId}
+                workItemId={workItemId}
+                roots={visibleRoots
+                  .filter((r) => r.local_path)
+                  .map((r) => ({
+                    id: r.repo_id,
+                    label: r.repo_name || `repo-${r.repo_id}`,
+                    path: r.local_path as string,
+                  }))}
               />
               </div>
             </div>

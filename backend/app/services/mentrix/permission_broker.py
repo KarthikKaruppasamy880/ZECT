@@ -75,6 +75,9 @@ TOOL_ACTIONS: dict[str, str] = {
     "coding_engine_status": "companion_diagnose",
     "coding_agent_status": "companion_diagnose",
     "coding_agent_start": "companion_coding_agent",
+    "git_commit": "companion_git_write",
+    "git_push": "companion_git_write",
+    "git_create_pr": "companion_create_pr",
     "note_add": "companion_notes_write",
     "note_list": "companion_notes_read",
     "jira_get_issue": "companion_jira_read",
@@ -139,6 +142,9 @@ ALWAYS_CONFIRM_TOOLS = {
     "process_start",
     "mentrix_developer_approve_plan",
     "mentrix_developer_agent",
+    "git_commit",
+    "git_push",
+    "git_create_pr",
 }
 
 

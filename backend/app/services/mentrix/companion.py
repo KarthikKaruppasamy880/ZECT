@@ -781,9 +781,17 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if any(k in m for k in ("run fabric", "fabric run", "multi-surface run")):
         tools.append({"name": "fabric_run", "args": {"text": message[:800]}})
     if re.search(
-        r"\b(architecture|how is this (project|repo|codebase) (structured|organized)|same[- ]named (file|symbol))\b",
+        r"\b(how is this (project|repo|codebase) (structured|organized)|same[- ]named (file|symbol))\b",
         m,
-    ) or any(k in m for k in ("architecture of this project", "project architecture")):
+    ) or any(
+        k in m
+        for k in (
+            "architecture of this project",
+            "project architecture",
+            "architecture of this codebase",
+            "architecture of this repo",
+        )
+    ):
         tools.append({"name": "companion_intelligence", "args": {"q": message[:400]}})
     if re.search(r"\b(create|open|start)\b.{0,48}\bwork items?\b", m) or "create a work item" in m:
         title_m = re.search(r"titled\s+[\"']?([^\"'\n]+?)[\"']?(?:\s+then\b|$)", message, re.I)
@@ -1086,6 +1094,19 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         if t["name"] not in seen:
             seen.add(t["name"])
             out.append(t)
+    # Specific user actions beat generic keyword digest tools when the cap is hit.
+    priority = {
+        "desktop_write_note": 0,
+        "capability_refuse": 1,
+        "computer_open_app": 2,
+        "process_ticket_handoff": 3,
+        "work_item_open_or_create": 4,
+        "companion_handoff": 5,
+        "companion_intelligence": 6,
+        "coding_agent_start": 7,
+        "desktop_screenshot": 8,
+    }
+    out.sort(key=lambda t: (priority.get(str(t.get("name") or ""), 50), str(t.get("name") or "")))
     return out[:_MAX_TOOLS]
 
 

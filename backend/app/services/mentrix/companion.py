@@ -49,6 +49,9 @@ def _system_prompt(preferred_name: str = "") -> str:
         + " For email compose: use email_send draft + Allow (SMTP), not Outlook typing."
         + " For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
         + " Desktop actions require Electron + Computer Mode on."
+        + " You orchestrate: never claim you edited source files or Present decks."
+        + " Hand off to Developer Workspace, Work Items, and ZECT Present with project/repo identity."
+        + " Never invent unused Lattice, Knowledge, or Memory context."
     )
 
 # In-memory resume store for Allow overlay (turn_id → state)
@@ -91,6 +94,16 @@ NAV_MAP = {
     "knowledge": "/knowledge-base",
     "playbooks": "/playbooks",
     "audit": "/audit-trail",
+    "workspace": "/workspace",
+    "developer": "/workspace",
+    "developer workspace": "/workspace",
+    "work items": "/work-items",
+    "work-items": "/work-items",
+    "present": "/present",
+    "presentation": "/present",
+    "fabric": "/fabric",
+    "projects": "/projects",
+    "processes": "/work-items",
 }
 
 
@@ -328,6 +341,10 @@ def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigati
         elif name == "lattice_query":
             hits = result.get("hits") or []
             parts.append(f"Lattice: {len(hits)} hit(s)." if hits else (result.get("error") or "No hits."))
+        elif name in ("companion_intelligence", "companion_scope", "companion_handoff", "work_item_open_or_create", "process_ticket_handoff", "companion_multi_repo_status"):
+            parts.append((result.get("spoken_summary") or result.get("error") or name)[:400])
+        elif result.get("blocked_external"):
+            parts.append((result.get("spoken_summary") or "BLOCKED_EXTERNAL — connector not configured.")[:400])
     if board_items and not parts:
         parts.append(f"Posted {board_items[0].get('title') or 'artifact'}.")
     if navigations and not any(p.startswith("Opening") or p.startswith("Going") for p in parts):
@@ -396,6 +413,12 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
                 "mentrix_developer_plan",
                 "mentrix_developer_approve_plan",
                 "mentrix_developer_agent",
+                "companion_intelligence",
+                "companion_scope",
+                "companion_handoff",
+                "work_item_open_or_create",
+                "process_ticket_handoff",
+                "companion_multi_repo_status",
             }
         )
         prompt = (
@@ -541,6 +564,13 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
 
     # Longer NAV keys first so "desktop app" wins over accidental short matches.
+    envelope_surfaces = {
+        "/workspace": "workspace",
+        "/present": "present",
+        "/work-items": "work_items",
+        "/projects": "projects",
+        "/fabric": "fabric",
+    }
     nav_keys = sorted(NAV_MAP.keys(), key=len, reverse=True)
     for key in nav_keys:
         path = NAV_MAP[key]
@@ -549,7 +579,11 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         if os_desktop and path == "/":
             continue
         if key in m and any(w in m for w in ("open", "go to", "show", "navigate", "take me")):
-            tools.append({"name": "navigate", "args": {"path": path, "label": key}})
+            surface = envelope_surfaces.get(path)
+            if surface:
+                tools.append({"name": "companion_handoff", "args": {"surface": surface}})
+            else:
+                tools.append({"name": "navigate", "args": {"path": path, "label": key}})
             break
     if "open lattice" in m or "lattice graph" in m:
         tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
@@ -746,6 +780,63 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         tools.append({"name": "fabric_classify", "args": {"text": message[:800]}})
     if any(k in m for k in ("run fabric", "fabric run", "multi-surface run")):
         tools.append({"name": "fabric_run", "args": {"text": message[:800]}})
+    if re.search(
+        r"\b(how is this (project|repo|codebase) (structured|organized)|same[- ]named (file|symbol))\b",
+        m,
+    ) or any(
+        k in m
+        for k in (
+            "architecture of this project",
+            "project architecture",
+            "architecture of this codebase",
+            "architecture of this repo",
+        )
+    ):
+        tools.append({"name": "companion_intelligence", "args": {"q": message[:400]}})
+    if re.search(r"\b(create|open|start)\b.{0,48}\bwork items?\b", m) or "create a work item" in m:
+        title_m = re.search(r"titled\s+[\"']?([^\"'\n]+?)[\"']?(?:\s+then\b|$)", message, re.I)
+        tools.append(
+            {
+                "name": "work_item_open_or_create",
+                "args": {"title": (title_m.group(1).strip() if title_m else message[:180])},
+            }
+        )
+    if any(
+        k in m
+        for k in (
+            "open developer",
+            "open workspace",
+            "open coding workspace",
+            "developer workspace",
+            "open the developer",
+        )
+    ):
+        tools.append({"name": "companion_handoff", "args": {"surface": "workspace"}})
+    if re.search(r"\b(create|make|generate|build)\b.{0,48}\b(presentation|deck|slides)\b", m) or (
+        "presentation from this project" in m
+    ):
+        tools.append({"name": "companion_handoff", "args": {"surface": "present_create"}})
+    elif any(k in m for k in ("open present", "go to present", "open zect present")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "present"}})
+    if any(
+        k in m
+        for k in (
+            "create a jira",
+            "open jira ticket",
+            "create a ticket",
+            "open processes",
+            "process ticket",
+        )
+    ):
+        issue_m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", message)
+        tools.append({"name": "process_ticket_handoff", "args": {"issue_key": issue_m.group(1) if issue_m else ""}})
+    if any(k in m for k in ("multi-repo status", "affected repos", "sibling failure", "which repos")):
+        tools.append({"name": "companion_multi_repo_status", "args": {}})
+    if any(k in m for k in ("open work items", "go to work items")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "work_items"}})
+    if any(k in m for k in ("open projects", "go to projects")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "projects"}})
+
     if any(k in m for k in ("mentrix ask", "developer ask", "ask this work item")):
         tools.append({"name": "mentrix_developer_ask", "args": {"question": message[:800]}})
     if any(k in m for k in ("mentrix plan", "developer plan", "write a plan for this work")):
@@ -1003,6 +1094,19 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         if t["name"] not in seen:
             seen.add(t["name"])
             out.append(t)
+    # Specific user actions beat generic keyword digest tools when the cap is hit.
+    priority = {
+        "desktop_write_note": 0,
+        "capability_refuse": 1,
+        "computer_open_app": 2,
+        "process_ticket_handoff": 3,
+        "work_item_open_or_create": 4,
+        "companion_handoff": 5,
+        "companion_intelligence": 6,
+        "coding_agent_start": 7,
+        "desktop_screenshot": 8,
+    }
+    out.sort(key=lambda t: (priority.get(str(t.get("name") or ""), 50), str(t.get("name") or "")))
     return out[:_MAX_TOOLS]
 
 
@@ -1018,6 +1122,149 @@ def _exec_tool(
 ) -> dict[str, Any]:
     if name == "navigate":
         return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
+    if name in (
+        "companion_scope",
+        "companion_handoff",
+        "companion_intelligence",
+        "work_item_open_or_create",
+        "process_ticket_handoff",
+        "companion_multi_repo_status",
+    ):
+        from app.services.mentrix.companion_scope import (
+            build_companion_scope,
+            handoff_url,
+            intelligence_pack,
+            open_or_create_work_item,
+            process_ticket_handoff,
+            progress_snapshot,
+        )
+
+        requested_ids = args.get("repository_ids")
+        if not isinstance(requested_ids, list):
+            requested_ids = None
+        envelope = build_companion_scope(
+            db,
+            project_id=args.get("project_id") or project_id,
+            repository_ids=requested_ids,
+            work_item_id=args.get("work_item_id"),
+            workspace_id=str(args.get("project_key") or project_key or ""),
+            active_root_id=args.get("repository_id") if args.get("repository_id") else None,
+            created_by=created_by,
+        )
+        if name == "companion_scope":
+            return {
+                "ok": True,
+                "scope": envelope,
+                "spoken_summary": (
+                    f"Active project {envelope.get('project_name') or 'none'}; "
+                    f"{len(envelope.get('repo_ids') or [])} authorized root(s)."
+                ),
+            }
+        if name == "companion_handoff":
+            surface = str(args.get("surface") or "workspace")
+            extra = {}
+            if args.get("goal"):
+                extra["goal"] = str(args.get("goal"))[:200]
+            if args.get("audience"):
+                extra["audience"] = str(args.get("audience"))[:80]
+            nav = handoff_url(surface, envelope, extra=extra or None)
+            labels = {
+                "workspace": "Developer Workspace — Companion does not edit code.",
+                "present": "ZECT Present.",
+                "present_create": "ZECT Present create — Companion does not edit decks.",
+                "work_items": "Work Items.",
+                "projects": "Projects.",
+                "fabric": "Mentrix Fabric.",
+                "processes": "Work Items / process tickets.",
+            }
+            return {
+                "ok": True,
+                "navigate": nav,
+                "surface": surface,
+                "envelope": {
+                    "project_id": envelope.get("project_id"),
+                    "workspace_id": envelope.get("workspace_id"),
+                    "work_item_id": envelope.get("work_item_id"),
+                    "repo_ids": envelope.get("repo_ids"),
+                    "commit_shas": envelope.get("commit_shas"),
+                    "plan_ref": envelope.get("plan_ref"),
+                    "evidence_ref": envelope.get("evidence_ref"),
+                },
+                "spoken_summary": f"Opening {labels.get(surface) or surface}",
+                "progress": progress_snapshot(stage=f"handoff:{surface}", envelope=envelope),
+            }
+        if name == "companion_intelligence":
+            pack = intelligence_pack(db, envelope, str(args.get("q") or args.get("question") or ""))
+            return pack
+        if name == "work_item_open_or_create":
+            return open_or_create_work_item(
+                db,
+                envelope,
+                title=str(args.get("title") or args.get("goal") or "Companion work item"),
+                description=str(args.get("description") or ""),
+                source=str(args.get("source") or "companion"),
+                external_id=str(args.get("external_id") or args.get("issue_key") or ""),
+                created_by=created_by,
+            )
+        if name == "process_ticket_handoff":
+            return process_ticket_handoff(
+                envelope,
+                issue_key=str(args.get("issue_key") or ""),
+                db=db,
+                created_by=created_by,
+            )
+        # companion_multi_repo_status
+        wid = envelope.get("work_item_id") or args.get("work_item_id")
+        if not wid:
+            return {
+                "ok": True,
+                "spoken_summary": (
+                    f"{len(envelope.get('repo_ids') or [])} authorized root(s) in scope. "
+                    "Create or open a WorkItem to run multi-repo AGENT."
+                ),
+                "scope": envelope,
+                "sibling": {"aggregate": "PENDING", "ready": False, "per_repo": envelope.get("roots") or []},
+            }
+        from app.services.work_items.artifact_store import ArtifactStore
+        from app.services.work_items.multi_repo_agent import read_multi_repo_status
+        from app.services.mentrix.companion_scope import aggregate_sibling_status
+
+        wi_status = ""
+        try:
+            from app.models import WorkItem as _WI
+
+            row = db.query(_WI).filter(_WI.id == int(wid)).first()
+            wi_status = str(getattr(row, "status", "") or "")
+        except Exception:  # noqa: BLE001
+            wi_status = ""
+        store = ArtifactStore(int(wid))
+        raw = read_multi_repo_status(store, work_item_id=int(wid), wi_status=wi_status)
+        per = []
+        for r in raw.get("affected_repos") or []:
+            per.append(
+                {
+                    "repository_id": r.get("repository_id"),
+                    "label": r.get("label") or "",
+                    "status": r.get("status") or "pending",
+                    "evidence": r.get("evidence") or r.get("error") or "",
+                }
+            )
+        sibling = aggregate_sibling_status(per)
+        spoken = f"Multi-repo aggregate {sibling['aggregate']}."
+        if sibling.get("blocked"):
+            spoken += " Sibling failure is not hidden — aggregate stays BLOCKED until repair."
+        return {
+            "ok": True,
+            "spoken_summary": spoken,
+            "multi_repo": raw,
+            "sibling": sibling,
+            "progress": progress_snapshot(
+                stage="multi_repo",
+                envelope=envelope,
+                blocker="sibling_failure" if sibling.get("blocked") else "",
+                per_repo=per,
+            ),
+        }
     if name in ("browser_navigate", "browser_snapshot", "browser_fill"):
         from app.services.browser.allowlist import host_allowed
         from app.services.browser.runtime import get_browser_runtime
@@ -1123,10 +1370,22 @@ def _exec_tool(
         spoken = f"Found {len(hits)} Lattice matches"
         if summary.get("docs"):
             spoken += f", including {summary['docs']} documentation nodes."
+        tagged_hits = hits[:15]
+        try:
+            from app.services.mentrix.companion_scope import build_companion_scope, tag_hits_with_identity
+
+            env = build_companion_scope(
+                db,
+                project_id=project_id,
+                workspace_id=str(key or project_key or ""),
+            )
+            tagged_hits = tag_hits_with_identity(list(hits[:15]), env.get("roots") or [])
+        except Exception:  # noqa: BLE001
+            tagged_hits = hits[:15]
         return {
             "ok": True,
             "project_key": key,
-            "hits": hits[:15],
+            "hits": tagged_hits,
             "summary": summary,
             "board": boards[0],
             "board_extra": boards[1] if len(boards) > 1 else None,
@@ -1223,7 +1482,10 @@ def _exec_tool(
             ):
                 return {
                     "ok": False,
-                    "error": result.get("message") or "Jira not configured — set MCP_JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN",
+                    "blocked_external": True,
+                    "error": "BLOCKED_EXTERNAL",
+                    "spoken_summary": "Jira is not configured — BLOCKED_EXTERNAL, not a fake ticket.",
+                    "detail": result.get("message") or "set MCP_JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN",
                     "result": result,
                 }
             fields = result.get("fields") or {}
@@ -2422,10 +2684,29 @@ def _exec_tool(
             or (os.getenv("ZECT_WORKSPACE_ROOT") or "").strip()
         )
         if not ws:
+            from app.services.mentrix.companion_scope import build_companion_scope, handoff_url
+
+            env = build_companion_scope(
+                db,
+                project_id=args.get("project_id") or project_id,
+                work_item_id=args.get("work_item_id"),
+                workspace_id=str(args.get("project_key") or project_key or ""),
+            )
+            nav = handoff_url("workspace", env, extra={"goal": goal[:200]})
             return {
-                "ok": False,
-                "error": "workspace_required",
-                "spoken_summary": "Set Mentrix workspace or pass workspace path to start Mentrix Coding Agent.",
+                "ok": True,
+                "handoff_only": True,
+                "navigate": nav,
+                "spoken_summary": (
+                    "Opening Developer Workspace — Companion does not edit code. "
+                    "Mentrix Coding Agent runs there."
+                ),
+                "envelope": {
+                    "project_id": env.get("project_id"),
+                    "workspace_id": env.get("workspace_id"),
+                    "work_item_id": env.get("work_item_id"),
+                    "repo_ids": env.get("repo_ids"),
+                },
             }
         rt = get_mentrix_native_runtime()
         try:
@@ -2737,6 +3018,9 @@ def iter_companion_events(
     agent_context: str = "",
     skill_id: int | None = None,
     model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
 ) -> Generator[dict[str, Any], None, dict[str, Any]]:
     """Yield SSE-shaped events; return final turn summary."""
     token = _companion_model_ctx.set((model or "").strip() or None)
@@ -2754,6 +3038,9 @@ def iter_companion_events(
             resume_pending=resume_pending,
             agent_context=agent_context,
             skill_id=skill_id,
+            repository_ids=repository_ids,
+            work_item_id=work_item_id,
+            workspace_id=workspace_id,
         )
         return result
     finally:
@@ -2774,12 +3061,40 @@ def _iter_companion_events_inner(
     resume_pending: list[dict] | None = None,
     agent_context: str = "",
     skill_id: int | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
 ) -> Generator[dict[str, Any], None, dict[str, Any]]:
     """Yield SSE-shaped events; return final turn summary."""
     t0 = time.time()
     tid = turn_id or str(uuid.uuid4())
     confirmed = set(confirmed_tools or [])
     yield {"event": "thinking", "turn_id": tid, "data": {"message": "Mentrix thinking…"}}
+
+    from app.services.mentrix.companion_scope import bind_tool_args, build_companion_scope, provenance_rows
+
+    envelope = build_companion_scope(
+        db,
+        project_id=project_id,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id or project_key,
+        created_by=created_by,
+    )
+    yield {
+        "event": "scope",
+        "turn_id": tid,
+        "data": {
+            "project_id": envelope.get("project_id"),
+            "project_name": envelope.get("project_name"),
+            "workspace_id": envelope.get("workspace_id"),
+            "work_item_id": envelope.get("work_item_id"),
+            "repo_ids": envelope.get("repo_ids"),
+            "roots": envelope.get("roots"),
+            "semantic_cross_repo_references": envelope.get("semantic_cross_repo_references"),
+            "skipped_unauthorized_repo_ids": envelope.get("skipped_unauthorized_repo_ids"),
+        },
+    }
 
     intents = resume_pending or _merge_intents(message)
     from app.services.mentrix.preferred_name import resolve_preferred_name
@@ -2801,11 +3116,23 @@ def _iter_companion_events_inner(
     from app.services.mentrix.orchestrator import MentrixOrchestrator, pa1_orchestrator_enabled
 
     orch = MentrixOrchestrator() if pa1_orchestrator_enabled() else None
+    last_provenance: list[dict[str, Any]] = []
+    last_progress: dict[str, Any] | None = None
 
     for intent in intents[:_MAX_TOOLS]:
         name = intent["name"]
-        args = intent.get("args") or {}
+        args = bind_tool_args(name, intent.get("args") or {}, envelope)
         yield {"event": "tool_start", "turn_id": tid, "data": {"tool": name, "args": {k: v for k, v in args.items() if "password" not in k.lower() and "token" not in k.lower()}}}
+        if args.get("repo_authorization") == "denied":
+            result = {
+                "ok": False,
+                "error": "unauthorized_repository",
+                "spoken_summary": "That repository is not in the authorized project — skipped.",
+                "skipped_unauthorized_repo_ids": args.get("skipped_unauthorized_repo_ids") or [],
+            }
+            tool_results.append({"tool": name, "denied": True, "result": result})
+            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "unauthorized_repository"}}
+            continue
 
         if orch is not None:
             outcome = orch.execute_tool(
@@ -2894,6 +3221,16 @@ def _iter_companion_events_inner(
             tool_results.append({"tool": name, "result": result, "permission": perm})
             log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
 
+        if result.get("work_item_id"):
+            envelope["work_item_id"] = result["work_item_id"]
+            wi = (result.get("work_item") or {}) if isinstance(result.get("work_item"), dict) else {}
+            if wi.get("title"):
+                envelope["work_item_title"] = wi.get("title")
+        if result.get("provenance"):
+            last_provenance = list(result.get("provenance") or [])
+        if result.get("progress"):
+            last_progress = result["progress"]
+            yield {"event": "progress", "turn_id": tid, "data": last_progress}
         if result.get("board"):
             board_items.append(result["board"])
             yield {"event": "artifact", "turn_id": tid, "data": result["board"]}
@@ -2904,7 +3241,7 @@ def _iter_companion_events_inner(
             board_items.append(result["board_progress"])
             yield {"event": "artifact", "turn_id": tid, "data": result["board_progress"]}
         nav = result.get("navigate")
-        if nav:
+        if nav and not result.get("blocked_external"):
             navigations.append(nav)
             yield {"event": "navigate", "turn_id": tid, "data": {"path": nav}}
         if result.get("run_id"):
@@ -2935,7 +3272,10 @@ def _iter_companion_events_inner(
             + ". Allow to continue."
         )
     elif any(tr.get("denied") for tr in tool_results) and not any(not tr.get("denied") for tr in tool_results):
-        reply = "Org policy blocked that action."
+        if any((tr.get("result") or {}).get("error") == "unauthorized_repository" for tr in tool_results):
+            reply = "That repository is not in the authorized project — skipped."
+        else:
+            reply = "Org policy blocked that action."
     else:
         # Spoken clarification when OS-desktop intent opened Explorer (not Dashboard).
         if any(
@@ -2970,6 +3310,28 @@ def _iter_companion_events_inner(
             yield {"event": "token", "turn_id": tid, "data": {"text": reply[i : i + chunk]}}
             time.sleep(0.02)
 
+    if any((tr.get("result") or {}).get("blocked_external") for tr in tool_results):
+        navigations = []
+
+    used_tool_names = [str(tr.get("tool") or "") for tr in tool_results if not tr.get("denied")]
+    lattice_hits: list[dict[str, Any]] = []
+    knowledge_hits: list[dict[str, Any]] = []
+    memory_hits: list[dict[str, Any]] = []
+    for tr in tool_results:
+        res = tr.get("result") or {}
+        if tr.get("tool") in ("lattice_query", "companion_intelligence"):
+            lattice_hits.extend(list(res.get("lattice_hits") or res.get("hits") or []))
+            knowledge_hits.extend(list(res.get("knowledge_hits") or []))
+            memory_hits.extend(list(res.get("memory_hits") or []))
+    if not last_provenance:
+        last_provenance = provenance_rows(
+            envelope=envelope,
+            lattice_hits=lattice_hits,
+            knowledge_hits=knowledge_hits,
+            memory_hits=memory_hits,
+            used_tools=used_tool_names,
+        )
+
     summary = {
         "reply": reply,
         "avatar_state": "needs_permission" if pending else ("speaking" if reply else "idle"),
@@ -2983,6 +3345,11 @@ def _iter_companion_events_inner(
         "latency_ms": int((time.time() - t0) * 1000),
         "history_tail": (history or [])[-6:]
         + [{"role": "user", "content": message}, {"role": "assistant", "content": reply}],
+        "scope": envelope,
+        "provenance": last_provenance,
+        "progress": last_progress,
+        "companion_edits_code": False,
+        "companion_edits_present": False,
     }
 
     if pending:
@@ -2994,6 +3361,9 @@ def _iter_companion_events_inner(
             "created_by": created_by,
             "pending": pending,
             "history": history or [],
+            "repository_ids": envelope.get("repo_ids") or [],
+            "work_item_id": envelope.get("work_item_id"),
+            "workspace_id": envelope.get("workspace_id") or "",
         }
 
     _auto_log_exchange(message, reply, pending=bool(pending))
@@ -3010,6 +3380,20 @@ def _iter_companion_events_inner(
             "board": board_items,
             "avatar_state": summary["avatar_state"],
             "latency_mode": summary["latency_mode"],
+            "scope": {
+                "project_id": envelope.get("project_id"),
+                "project_name": envelope.get("project_name"),
+                "workspace_id": envelope.get("workspace_id"),
+                "work_item_id": envelope.get("work_item_id"),
+                "work_item_title": envelope.get("work_item_title"),
+                "repo_ids": envelope.get("repo_ids"),
+                "roots": envelope.get("roots"),
+                "semantic_cross_repo_references": envelope.get("semantic_cross_repo_references"),
+                "handoffs": envelope.get("handoffs"),
+            },
+            "provenance": last_provenance,
+            "progress": last_progress,
+            "companion_edits_code": False,
         },
     }
     return summary
@@ -3028,6 +3412,9 @@ def run_companion_turn_v2(
     agent_context: str = "",
     skill_id: int | None = None,
     model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
 ) -> dict[str, Any]:
     """Non-streaming turn that executes once and returns full payload."""
     events: list[dict] = []
@@ -3043,6 +3430,9 @@ def run_companion_turn_v2(
         agent_context=agent_context,
         skill_id=skill_id,
         model=model,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id,
     )
     final: dict[str, Any] | None = None
     try:
@@ -3078,6 +3468,10 @@ def run_companion_turn_v2(
         "turn_id": done.get("turn_id"),
         "run_id": d.get("run_id"),
         "latency_ms": d.get("latency_ms"),
+        "scope": d.get("scope"),
+        "provenance": d.get("provenance") or [],
+        "progress": d.get("progress"),
+        "companion_edits_code": False,
         "history_tail": (history or [])[-6:]
         + [{"role": "user", "content": message}, {"role": "assistant", "content": d.get("reply") or ""}],
     }
@@ -3097,6 +3491,9 @@ def run_companion_turn(
     agent_context: str = "",
     skill_id: int | None = None,
     model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
 ) -> dict[str, Any]:
     return run_companion_turn_v2(
         db,
@@ -3110,6 +3507,9 @@ def run_companion_turn(
         agent_context=agent_context,
         skill_id=skill_id,
         model=model,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id,
     )
 
 
@@ -3136,6 +3536,9 @@ def resume_companion_turn(
         history=state.get("history"),
         turn_id=turn_id,
         resume_pending=pending_intents,
+        repository_ids=state.get("repository_ids"),
+        work_item_id=state.get("work_item_id"),
+        workspace_id=state.get("workspace_id") or "",
     )
 
 

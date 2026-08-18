@@ -26,6 +26,7 @@ import PresentDeckPanel from "@/components/PresentDeckPanel";
 import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
 import CloneVoicePanel from "@/components/CloneVoicePanel";
 import ModelSelector from "@/components/ModelSelector";
+import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
@@ -110,8 +111,11 @@ export default function MentrixCompanion() {
             <p className="text-[10px] uppercase tracking-[0.25em] text-teal-500/80">Mentrix Operator</p>
             <h1 className="text-3xl font-bold tracking-tight text-teal-100">MENTRIX</h1>
             <p className="text-sm text-slate-400">
-              Company personal agent — research, content, reporting, docs, Delivery
+              Company orchestrator — Project, WorkItem, Developer, Present, Voice, Process. Companion does not edit code or decks.
             </p>
+            <div className="mt-2 max-w-3xl">
+              <CompanionScopeStrip provenance={s.lastProvenance} progress={s.lastProgress} />
+            </div>
             <div
               className="mt-3 flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/80 p-1"
               data-testid="mentrix-companion-modes"
@@ -253,7 +257,7 @@ export default function MentrixCompanion() {
                 <CloneVoicePanel variant="dark" defaultExpanded />
                 <div>
                   <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-teal-400">
-                    Present deck — PPTX + Zoom
+                    Present — hand off to ZECT Present (not a second editor)
                   </p>
                   <PresentDeckPanel variant="dark" mode="companion" />
                 </div>
@@ -501,14 +505,14 @@ export default function MentrixCompanion() {
                   <div ref={s.chatEndRef} />
                 </div>
 
-                <div className="mt-3 flex items-end gap-2">
+                <div className="mt-3 flex min-w-0 items-end gap-2">
                   <textarea
                     data-testid="mentrix-companion-input"
                     value={s.input}
                     onChange={(e) => s.setInput(e.target.value)}
                     rows={2}
                     placeholder="Ask Mentrix…"
-                    className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
@@ -516,6 +520,26 @@ export default function MentrixCompanion() {
                       }
                     }}
                   />
+                  {s.loading ? (
+                    <button
+                      type="button"
+                      data-testid="mentrix-companion-cancel"
+                      onClick={() => s.cancelTurn()}
+                      className="rounded-lg border border-amber-700 px-3 py-2.5 text-xs text-amber-200"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                  {!s.loading && s.lastMessage ? (
+                    <button
+                      type="button"
+                      data-testid="mentrix-companion-retry"
+                      onClick={() => s.retryTurn()}
+                      className="rounded-lg border border-slate-600 px-3 py-2.5 text-xs"
+                    >
+                      Retry
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     data-testid="mentrix-companion-send"
@@ -529,6 +553,7 @@ export default function MentrixCompanion() {
                 <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-500">
                   <input
                     type="checkbox"
+                    data-testid="mentrix-tts-toggle"
                     checked={s.tts}
                     onChange={(e) => s.setTts(e.target.checked)}
                   />

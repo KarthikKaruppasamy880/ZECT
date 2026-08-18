@@ -66,6 +66,10 @@ MUTATING_INTENTS = frozenset(
         "media_generate",
         "media_edit",
         "image_avatar",
+        "work_item_open_or_create",
+        "coding_agent_start",
+        "mentrix_developer_agent",
+        "fabric_run",
     }
 )
 

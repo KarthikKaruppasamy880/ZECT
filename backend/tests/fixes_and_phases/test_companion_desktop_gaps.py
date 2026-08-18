@@ -60,5 +60,8 @@ def test_coding_agent_start_requires_workspace(monkeypatch):
     monkeypatch.delenv("MENTRIX_WORKSPACE", raising=False)
     monkeypatch.delenv("ZECT_WORKSPACE_ROOT", raising=False)
     out = c._exec_tool(db=None, name="coding_agent_start", args={"goal": "add file"})  # type: ignore[arg-type]
-    assert out.get("ok") is False
-    assert out.get("error") == "workspace_required"
+    assert out.get("ok") is True
+    assert out.get("handoff_only") is True
+    assert "/workspace" in (out.get("navigate") or "")
+    spoken = (out.get("spoken_summary") or "").lower()
+    assert "does not edit" in spoken or "developer workspace" in spoken

@@ -469,6 +469,49 @@ export const latticeGodNodes = (project_key: string, limit = 20) =>
 
 // Mentrix
 export const mentrixAgents = () => request<any>("/api/mentrix/agents");
+export type CompanionProvenanceRow = {
+  id: string;
+  label: string;
+  status: string;
+  detail: string;
+};
+
+export type CompanionScopeEnvelope = {
+  project_id: number | null;
+  project_name: string;
+  workspace_id: string;
+  work_item_id: number | null;
+  work_item_title: string;
+  repo_ids: number[];
+  active_root_id: number | null;
+  roots: Array<{
+    id: number;
+    label: string;
+    path: string;
+    commit_sha: string;
+    lattice_state: string;
+    authorized: boolean;
+  }>;
+  semantic_cross_repo_references: boolean;
+  skipped_unauthorized_repo_ids: number[];
+  handoffs: Record<string, string>;
+};
+
+export const mentrixCompanionScope = (opts?: {
+  projectId?: number | null;
+  workItemId?: number | null;
+  repositoryId?: number | null;
+  workspaceId?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (opts?.projectId) params.set("project_id", String(opts.projectId));
+  if (opts?.workItemId) params.set("work_item_id", String(opts.workItemId));
+  if (opts?.workspaceId) params.set("workspace_id", opts.workspaceId);
+  if (opts?.repositoryId) params.set("repository_ids", String(opts.repositoryId));
+  const qs = params.toString();
+  return request<CompanionScopeEnvelope>(`/api/mentrix/companion/scope${qs ? `?${qs}` : ""}`);
+};
+
 export const mentrixCompanionTurn = (
   message: string,
   opts?: {
@@ -480,6 +523,9 @@ export const mentrixCompanionTurn = (
     skill_id?: number | string;
     model?: string;
     signal?: AbortSignal;
+    repository_ids?: number[];
+    work_item_id?: number;
+    workspace_id?: string;
   },
 ) =>
   request<any>("/api/mentrix/companion/turn", {
@@ -492,6 +538,9 @@ export const mentrixCompanionTurn = (
       confirmed_tools: opts?.confirmed_tools || [],
       history: opts?.history || [],
       agent_context: opts?.agent_context || "",
+      repository_ids: opts?.repository_ids || [],
+      work_item_id: opts?.work_item_id ?? null,
+      workspace_id: opts?.workspace_id || "",
       ...(opts?.skill_id != null && opts.skill_id !== ""
         ? { skill_id: Number(opts.skill_id) }
         : {}),
@@ -510,18 +559,26 @@ export async function mentrixCompanionStream(
   message: string,
   opts: {
     project_key?: string;
+    project_id?: number;
     confirmed_tools?: string[];
     agent_context?: string;
     skill_id?: number | string;
     model?: string;
     signal?: AbortSignal;
     onEvent: (ev: MentrixStreamEvent) => void;
+    repository_ids?: number[];
+    work_item_id?: number;
+    workspace_id?: string;
   },
 ): Promise<void> {
   const params = new URLSearchParams({
     message,
     project_key: opts.project_key || "",
   });
+  if (opts.project_id) params.set("project_id", String(opts.project_id));
+  if (opts.repository_ids?.length) params.set("repository_ids", opts.repository_ids.join(","));
+  if (opts.work_item_id) params.set("work_item_id", String(opts.work_item_id));
+  if (opts.workspace_id) params.set("workspace_id", opts.workspace_id);
   if (opts.confirmed_tools?.length) {
     params.set("confirmed_tools", opts.confirmed_tools.join(","));
   }

@@ -92,6 +92,16 @@ TOOL_ACTIONS: dict[str, str] = {
     "process_start": "companion_process",
     "process_incidents": "companion_process",
     "process_open_cockpit": "companion_process",
+    "companion_scope": "companion_navigate",
+    "companion_handoff": "companion_navigate",
+    "companion_intelligence": "companion_lattice_query",
+    "work_item_open_or_create": "companion_work_item",
+    "process_ticket_handoff": "companion_process",
+    "companion_multi_repo_status": "companion_work_item",
+    "mentrix_developer_ask": "companion_developer_ask",
+    "mentrix_developer_plan": "companion_developer_plan",
+    "mentrix_developer_approve_plan": "companion_developer_agent",
+    "mentrix_developer_agent": "companion_developer_agent",
 }
 
 ALWAYS_CONFIRM_TOOLS = {
@@ -127,6 +137,8 @@ ALWAYS_CONFIRM_TOOLS = {
     "fabric_run",
     "process_deploy",
     "process_start",
+    "mentrix_developer_approve_plan",
+    "mentrix_developer_agent",
 }
 
 

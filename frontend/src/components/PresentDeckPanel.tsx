@@ -24,6 +24,7 @@ import {
   type VoiceEngineStatus,
 } from "@/lib/api";
 import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
+import { pickLocalFile } from "@/lib/pickLocalFile";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -1279,6 +1280,23 @@ export default function PresentDeckPanel({
               : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
           }
         />
+        {isDesktop ? (
+          <button
+            type="button"
+            className="mt-1 rounded border border-teal-700 px-2 py-1 text-[11px]"
+            data-testid="present-deck-browse"
+            onClick={() => {
+              void pickLocalFile({
+                title: "Select PowerPoint (.pptx)",
+                filters: [{ name: "PowerPoint", extensions: ["pptx", "ppt"] }],
+              }).then((picked) => {
+                if (picked?.path) persistPath(picked.path);
+              });
+            }}
+          >
+            Browse
+          </button>
+        ) : null}
       </label>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         Upload .pptx (required for Present in browser)

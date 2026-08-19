@@ -396,6 +396,24 @@ ipcMain.handle("zect-select-directory", async (_e, opts = {}) => {
   }
   return { ok: true, path: result.filePaths[0] };
 });
+ipcMain.handle("zect-select-file", async (_e, opts = {}) => {
+  const filters = Array.isArray(opts.filters) && opts.filters.length
+    ? opts.filters
+    : [{ name: "All files", extensions: ["*"] }];
+  const result = await dialog.showOpenDialog(mainWindow || undefined, {
+    title: opts.title || "Select file",
+    defaultPath: opts.defaultPath || app.getPath("desktop"),
+    properties: ["openFile"],
+    filters,
+  });
+  if (result.canceled || !result.filePaths?.length) {
+    return { ok: false, canceled: true };
+  }
+  return { ok: true, path: result.filePaths[0] };
+});
+ipcMain.handle("zect-read-presentation-file", async (_e, filePath) => {
+  return computer.readPresentationBytes(filePath || "");
+});
 ipcMain.handle("zect-shortcut-status", () => shortcuts.getDesktopShortcutStatus());
 ipcMain.handle("zect-shortcut-create", () => shortcuts.createOrUpdateDesktopShortcut());
 ipcMain.handle("zect-relaunch", () => shortcuts.relaunchApp());

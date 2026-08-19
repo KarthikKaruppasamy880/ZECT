@@ -18,6 +18,10 @@ describe("allowlisted", () => {
     assert.equal(computer.allowlisted("ms-teams"), true);
     assert.equal(computer.allowlisted("Teams.exe"), true);
   });
+  it("matches PowerPoint", () => {
+    assert.equal(computer.allowlisted("powerpnt.exe"), true);
+    assert.equal(computer.allowlisted("POWERPNT"), true);
+  });
   it("rejects unknown apps", () => {
     assert.equal(computer.allowlisted("malware.exe"), false);
   });
@@ -63,6 +67,16 @@ describe("processMatchesIntended", () => {
         "notepad++.exe",
       ),
       true,
+    );
+  });
+});
+
+describe("readPresentationBytes", () => {
+  it("does not read outside Desktop/Documents/Downloads", () => {
+    const out = computer.readPresentationBytes("C:\\\\Windows\\\\Temp\\\\deck.pptx");
+    assert.equal(out.ok, false);
+    assert.ok(
+      ["path_outside_allowlist", "not_found", "unsupported_presentation_type", "path_blocked"].includes(out.error),
     );
   });
 });

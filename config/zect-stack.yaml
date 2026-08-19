@@ -1,0 +1,106 @@
+# ZECT local stack — non-secret controller config.
+# Ports here match scripts/start-local.ps1 (dev). CI / packaged Electron API remains :8000.
+# zect down never uses scripts/stop-local.ps1 (that script kills by port / all electron).
+version: 1
+state_dir: .zect/stack
+notes:
+  local_api: "http://127.0.0.1:8020"
+  local_ui: "http://127.0.0.1:5173"
+  ci_packaged_api: "http://127.0.0.1:8000"
+profiles:
+  core:
+    - backend
+    - frontend
+  desktop:
+    - backend
+    - frontend
+    - electron
+  full:
+    - backend
+    - frontend
+    - electron
+    - presenton
+    - voicebox
+services:
+  backend:
+    cwd: backend
+    port: 8020
+    health_url: http://127.0.0.1:8020/healthz
+    required: true
+    depends_on: []
+    existing_reference: scripts/start-local.ps1
+    argv:
+      - "{python}"
+      - "-m"
+      - "uvicorn"
+      - "app.main:app"
+      - "--host"
+      - "127.0.0.1"
+      - "--port"
+      - "8020"
+      - "--reload"
+      - "--reload-dir"
+      - "{backend}"
+  frontend:
+    cwd: frontend
+    port: 5173
+    health_url: http://127.0.0.1:5173/
+    required: true
+    depends_on:
+      - backend
+    existing_reference: scripts/start-local.ps1
+    argv:
+      - "npm"
+      - "run"
+      - "dev"
+      - "--"
+      - "--host"
+      - "127.0.0.1"
+      - "--port"
+      - "5173"
+  electron:
+    cwd: electron
+    port: null
+    health_url: null
+    required: true
+    depends_on:
+      - backend
+      - frontend
+    existing_reference: scripts/start-local.ps1
+    argv:
+      - "npm"
+      - "run"
+      - "start:dev"
+    env:
+      ZECT_DEV: "true"
+      NODE_ENV: "development"
+      ZECT_DEV_URL: "http://127.0.0.1:5173"
+      ZECT_API_URL: "http://127.0.0.1:8020"
+      VITE_API_URL: "http://127.0.0.1:8020"
+  presenton:
+    cwd: .
+    port: 5000
+    health_url: http://127.0.0.1:5000/
+    required: false
+    depends_on: []
+    existing_reference: docs/PRESENTON_LOCAL.md
+    argv: []
+  voicebox:
+    cwd: services/zect-voicebox
+    port: 17493
+    health_url: http://127.0.0.1:17493/health
+    required: false
+    depends_on: []
+    existing_reference: services/zect-voicebox/scripts/up.ps1
+    argv: []
+doctor:
+  required_env_names:
+    - DATABASE_URL
+    - ZECT_AUTH_MODE
+  optional_env_names:
+    - GITHUB_TOKEN
+    - OPENAI_API_KEY
+    - PRESENTON_BASE_URL
+    - CHATTERBOX_BASE_URL
+    - JIRA_API_TOKEN
+    - CAMUNDA_BASE_URL

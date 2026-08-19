@@ -1,54 +1,47 @@
 # ZECT Production-Grade Implementation Matrix
 
 **Date:** 2026-08-19  
-**Canonical develop:** `origin/develop` = `797534df747ce7f5e41412273bd5965a32220fe3` (PR **#167** human-merged).  
-**This working branch:** `feat/final-release-audit`  
-**Prompt:** `prompts/ZECT_REMAINING_PRODUCTION_GRADE_MASTER_CLOSURE.md`  
-**No auto-merge.** S8C / S8D / Graphify / KV-cache / OCR-XLSX / broader Web / new-agent roadmap: **not started**.
+**Canonical develop:** `origin/develop` = `394cf272c9332754ad9b0b9d5819921ad81fccd6` (PR **#168** human-merged).  
+**This working branch:** `feat/release-profile-reconciliation`  
+**No auto-merge.** Graphify / Desktop Control / Present Advanced / `zect.ps1`: **not started**.
 
-Companion PASS. Coding Agent PASS. Present/Voice PARTIAL (live Generate/Voicebox external). Work intelligence PASS (live Jira ingest not executed; Camunda unset). Security campaign PASS. Recovery PARTIAL (NSIS). Runtime/DB PASS. Performance PARTIAL (Voice/PG external). Accessibility PASS (#166). Full-release E2E PASS (#167). Final audit **this PR**. Overall ZECT is **ZECT_PRODUCTION_PARTIAL**, not ZECT_PRODUCTION_READY.
+## Profile summary
+
+| Profile | Verdict |
+|---------|---------|
+| ZECT_CORE | **ZECT_CORE_READY** |
+| ZECT_DESKTOP_WINDOWS | **ZECT_DESKTOP_WINDOWS_PARTIAL** |
+| GitHub / Jira / Camunda / Presenton / Voicebox | **BLOCKED_EXTERNAL** each |
+| Monolith ZECT_PRODUCTION_READY | **not awarded** |
+
+Optional connectors do not block Core. PostgreSQL does not block Core (sqlite default; postgres mandatory only for `server_postgres`).
 
 ## Git truth
 
 | Item | Value |
 |------|--------|
-| Merged | #156–**#167** (full-release E2E on develop) |
-| This PR | Tranche I final review / release audit |
-| Unrelated WIP | leftover gap markdown / `prompts/` / `.zect/skills/` — **not** claimed complete |
-| Presenton | Product default. Native Present opt-in. **Not flipped.** |
-
-Nothing local-only is called complete. Missing evidence is not PASS. Skip ≠ PASS.
+| Merged | #156–**#168** |
+| This PR | Release-profile reconciliation + Windows Electron CI job |
+| Presenton | Product default. Live Generate optional certification. **Not flipped.** |
 
 ## Matrix
 
 | Surface | Capability | files | commit / PR | on develop? | browser | Electron | security | operational | status | blocker |
 |---------|------------|-------|-------------|-------------|---------|----------|----------|-------------|--------|---------|
-| Companion | HUD/dock orchestration | `MentrixCompanion.tsx` | **#157** + **#165** | **yes** | headed **PASS** | Electron **PASS** | broker | Camunda unset | **PASS** (orchestration) | Live Jira create |
-| Developer multi-root | Explorer, terminals, git jail | `WorkspaceRootsRail.tsx` | #156 | **yes** | headed | restore **PASS** | bound_root | ROOT_UNAVAILABLE | **PASS** | Live GitHub `BLOCKED_EXTERNAL` |
-| Lattice | Per-root SHA / STALE | `indexer.py` | **#160** | **yes** | headed | skip ≠ core | repo-scoped | STALE | **PASS** | Graphify out of scope |
-| Coding Agent | PLAN → worktree → review → git | `lifecycle.py` | **#158** + **#165** | **yes** | coding-agent e2e | electron skip ≠ core | git confirm | **durable JSON** | **PASS** | Live GitHub `BLOCKED_EXTERNAL` |
-| WorkItem | ASK/PLAN/AGENT + UI | `WorkItemDetailPanel.tsx` | **#160** | **yes** | headed | skip ≠ core | verifier 403 | aggregate READY | **PASS** | Live GitHub `BLOCKED_EXTERNAL` |
-| Present / Voice | Dashboard→Export; clone | Present pages | **#159** | **yes** | headed | skip ≠ core | 409 overlap | Presenton default | **PARTIAL** | Live Generate / Voicebox `BLOCKED_EXTERNAL` |
-| Security | Threat campaign + path jail | `allowed_paths.py` | **#161** | **yes** | headed | Electron **PASS** | prefix jail | OAuth unset | **PASS** (campaign) | Live OAuth/GitHub/Voicebox |
-| Install / recovery | Sidecar, mission persist, occupied port | `lifecycle.py`, `service-lifecycle.js` | **#162** | **yes** | runtime-recovery e2e | electron skip ≠ core | mission id jail | NSIS unproven | **PARTIAL** | Clean-machine NSIS |
-| Runtime / DB | sqlite desktop + Alembic postgres | `database.py` | **#163** | **yes** | healthz | sidecar sqlite | no URL in healthz | live PG unset | **PASS** | Live Postgres / NSIS `BLOCKED_EXTERNAL` |
-| Performance / soak | Thresholds + telemetry + isolation | `observability.py`, soak tests | **#164** + **#165** | **yes** | concurrent e2e | electron skip ≠ core | redact MCP/telemetry | Voice/PG unset | **PARTIAL** | Voicebox / live PG |
-| Accessibility / UX | Skip, keyboard, 1280–1920, named controls | Layout, Sidebar, SplitPane, pages | **#166** | **yes** | headed **PASS** CI e2e | local Electron **PASS** | no new attack surface | n/a | **PASS** | Live connectors; CodeRabbit **SKIPPED** |
-| Full-release E2E | Coherent browser + Electron journey | `full-release-e2e-*.spec.ts` | **#167** | **yes** | headed journey + frozen core **PASS** CI | local Electron journey **PASS** | no new attack surface | n/a | **PASS** | Live Generate/Voice/COM; CI Electron not in core |
-| Final review / audit | Gate table + blocker register | `ZECT_PRODUCTION_GRADE_*` | **this PR** | **no** until merge | re-ran journey 36.8s | re-ran Electron 33.5s | security pytest | n/a | **PARTIAL** (verdict) | See blocker register; CodeRabbit **SKIPPED** |
-| Architecture | Canonical + RAG/DB truth | architecture md | SHA bump this PR | **yes** after merge | n/a | n/a | no pgvector claim | dual-mode DB | **PASS** (docs=code) | Graphify PLANNED |
+| Companion | HUD/dock | `MentrixCompanion.tsx` | **#157** + **#165** | **yes** | Core **PASS** | Desktop | broker | Camunda unset | **PASS** Core | Live Jira create **BLOCKED_EXTERNAL** |
+| Developer multi-root | Explorer, terminals | `WorkspaceRootsRail.tsx` | #156 | **yes** | Core **PASS** | restore | bound_root | sqlite | **PASS** Core | Live GitHub **BLOCKED_EXTERNAL** |
+| Lattice | Per-root SHA | `indexer.py` | **#160** | **yes** | Core **PASS** | n/a | repo-scoped | STALE | **PASS** Core | Graphify not started |
+| Coding Agent | PLAN → review | `lifecycle.py` | **#158** + **#165** | **yes** | Core **PASS** | Windows CI | git confirm | durable JSON | **PASS** Core | GitHub cert **BLOCKED_EXTERNAL** |
+| WorkItem | ASK/PLAN/AGENT | `WorkItemDetailPanel.tsx` | **#160** | **yes** | Core **PASS** | skip ≠ ubuntu core | verifier | READY | **PASS** Core | GitHub/Jira/Camunda certs |
+| Present / Voice | Dashboard→Export | Present pages | **#159** | **yes** | Core blank/export **PASS** | Windows CI | 409 | Presenton default | **PASS** Core; certs external | Presenton/Voicebox **BLOCKED_EXTERNAL** |
+| Security | Threat campaign | `allowed_paths.py` | **#161** | **yes** | Core **PASS** | Desktop | prefix jail | OAuth unset | **PASS** Core | Live OAuth external |
+| Install / NSIS | One-click | `electron/package.json` | **#162** | **yes** | n/a | n/a | n/a | unproven | **BLOCKED_EXTERNAL** | Desktop PARTIAL |
+| Runtime / DB | Dual mode | `database.py` | **#163** | **yes** | healthz sqlite | sidecar sqlite | no URL in healthz | postgres fail-closed | **PASS** Core | Live PG does not block Core |
+| Performance / soak | Thresholds | soak tests | **#164** + **#165** | **yes** | Core **PASS** | skip ≠ ubuntu | redact | Voice/PG unset | **PASS** Core internals | Voice/PG certs |
+| Accessibility | Keyboard/a11y | Layout, Sidebar | **#166** | **yes** | Core **PASS** | local PASS | n/a | n/a | **PASS** Core | CodeRabbit **SKIPPED** |
+| Full-release E2E | Coherent journey | `full-release-e2e-*.spec.ts` | **#167** + this PR | **yes** / Electron CI this PR | Ubuntu core **PASS** | `e2e-electron` Windows | n/a | n/a | Core **PASS**; Desktop CI this job | NSIS |
+| Architecture | RAG/DB truth | architecture md | SHA bump this PR | after merge | n/a | n/a | no pgvector | dual-mode | **PASS** | Graphify PLANNED |
 
-## Suggested PR sequence (human-merge each)
+## This PR
 
-| PR | Topic | This session |
-|----|--------|----------------|
-| A–H leftover | through #167 full-release E2E | **merged** |
-| I | Final review / release audit | **this PR — stop for human merge** |
-
-## This PR (Tranche I)
-
-Human-merge after CI. No roadmap work. Remaining **open** blockers are in `ZECT_PRODUCTION_GRADE_BLOCKER_REGISTER.md`.
-
-## Verdict
-
-**ZECT_PRODUCTION_PARTIAL.** Canonical develop is `797534d` post-#167. This PR records the final audit; it does **not** make overall ZECT production-grade.
+Human-merge after CI (including `e2e-electron`). Do not start roadmap prompts until merge.

@@ -41,6 +41,8 @@ Ubuntu `test:e2e:core` cannot run `electron.exe`. This PR adds job `e2e-electron
 
 If that job fails, **ZECT_DESKTOP_WINDOWS** stays PARTIAL with the job log as the exact blocker. Do not treat a skip as PASS.
 
+CI (PR **#169**, SHA `1a4e4b66afbb`): run **32260773891** backend / frontend / e2e / **e2e-electron** **success**.
+
 ## Mandatory dependencies not weakened
 
 Auth enforcement, Permission Broker, sqlite Core store, postgres fail-closed for server mode, headed `test:e2e:core`, security pytest. Presenton remains the Present **default provider** until S8C; live Generate is still an optional certification.

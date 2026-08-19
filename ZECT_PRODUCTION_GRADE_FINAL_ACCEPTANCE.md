@@ -49,7 +49,7 @@ Not a Core mandatory dependency. `desktop_sqlite` is Core/CI/packaged Electron. 
 | Install / NSIS | **BLOCKED_EXTERNAL** — Desktop profile only |
 | Runtime / DB dual mode | **PASS** (sqlite Core; postgres fail-closed when URL set) |
 | Browser core E2E | **PASS** in Ubuntu CI `test:e2e:core` |
-| Electron release E2E | Windows CI job `e2e-electron` (required binary; skip ≠ PASS) |
+| Electron release E2E | **PASS** — Windows CI job `e2e-electron` [run 32260773891](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32260773891) (`1a4e4b6`, skip ≠ PASS) |
 | Review discipline | Mentrix Ultra Review **PASS** (85, 0 critical, `gpt-4o-mini`); CodeRabbit **SKIPPED** never PASS |
 
 ## Stop

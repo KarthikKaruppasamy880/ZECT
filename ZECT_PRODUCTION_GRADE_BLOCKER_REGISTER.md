@@ -45,4 +45,4 @@ Remain **BLOCKED_EXTERNAL** until live proof. Not Core mandatory dependencies.
 
 | ID | Gate | Result |
 |----|------|--------|
-| CI_ELECTRON_NOT_IN_CORE | Electron in GitHub Actions | **closed as a Core/ubuntu gap**. Supported journey is `e2e-electron` on `windows-latest` with `ZECT_REQUIRE_ELECTRON=1` (missing binary fails; skip ≠ PASS). Ubuntu `test:e2e:core` still does not launch Electron (correct). |
+| CI_ELECTRON_WINDOWS | Electron in GitHub Actions | **PASS** — `e2e-electron` on `windows-latest` with `ZECT_REQUIRE_ELECTRON=1`. [run 32260773891](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32260773891). Ubuntu `test:e2e:core` still does not launch Electron (correct). |

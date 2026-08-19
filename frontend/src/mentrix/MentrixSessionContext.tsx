@@ -50,7 +50,7 @@ import {
   isOpenAiQuotaError,
   OPENAI_QUOTA_STATUS,
 } from "@/mentrix/desktopBridge";
-import { cancelBrowserSpeech, speakMentrix } from "@/mentrix/speak";
+import { cancelBrowserSpeech, speakMentrix, speakMentrixAwait } from "@/mentrix/speak";
 import { createVoiceHoldOff } from "@/mentrix/voiceHoldOff";
 
 export type AvatarState =
@@ -80,6 +80,14 @@ export const ORB: Record<AvatarState, string> = {
   working: "from-sky-950 to-slate-950 border-sky-400 shadow-sky-500/40 animate-pulse",
   needs_permission: "from-amber-950 to-slate-950 border-amber-500 shadow-amber-600/60",
 };
+
+function setDesktopWakeEnabled(enabled: boolean) {
+  try {
+    void window.zectDesktop?.mentrix?.setWakeEnabled?.(enabled);
+  } catch {
+    /* ignore — browser or older preload */
+  }
+}
 
 function speak(text: string, enabled: boolean, onFail?: (err: string) => void) {
   // Companion chat: prefer clone, but fall back to OpenAI/browser if Voicebox profile is stale.
@@ -444,6 +452,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setVoiceConnecting(false);
     setVoiceConnected(false);
     setAvatar("idle");
+    setDesktopWakeEnabled(true);
   }, []);
 
   const startVoice = useCallback(async () => {
@@ -461,6 +470,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setAvatar("listening");
     setStatusLine("Connect Voice…");
     setDockExpanded(true);
+    setDesktopWakeEnabled(false);
     cancelBrowserSpeech();
     try {
       const preflight = await refreshRealtimePreflight();
@@ -558,6 +568,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             realtimeRef.current = null;
             setVoiceConnected(false);
             setAvatar("idle");
+            setDesktopWakeEnabled(true);
             if (!isOpenAiQuotaError(String(reason))) {
               setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
             }
@@ -607,6 +618,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     } finally {
       voiceConnectingRef.current = false;
       setVoiceConnecting(false);
+      if (!realtimeRef.current) setDesktopWakeEnabled(true);
     }
   }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakChat, stopVoice]);
 
@@ -858,8 +870,11 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     }
     let lastErr = "";
     for (const chunk of chunks) {
-      const result = await speakMentrix(chunk, true);
-      if (!result.ok) lastErr = result.error;
+      const result = await speakMentrixAwait(chunk, true);
+      if (!result.ok) {
+        lastErr = result.error;
+        if (result.error === "cancelled") break;
+      }
     }
     setAvatar("idle");
     if (lastErr) setStatusLine(`Voice: ${lastErr}`);

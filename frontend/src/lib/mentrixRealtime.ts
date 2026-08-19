@@ -12,6 +12,7 @@ import {
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
 } from "@/lib/mentrixRealtimeFinalize";
+import { registerSpeechCancelListener } from "@/mentrix/speak";
 
 export type RealtimeHandlers = {
   onOrb?: (state: string) => void;
@@ -386,6 +387,8 @@ export async function startMentrixRealtime(
     }
   };
 
+  const unregisterSpeechCancel = registerSpeechCancelListener(stopClonedSpeakEl);
+
   const requestResponse = () => {
     if (stopped || ws.readyState !== WebSocket.OPEN) return;
     if (responseInFlight) {
@@ -444,6 +447,7 @@ export async function startMentrixRealtime(
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    unregisterSpeechCancel();
     stopClonedSpeakEl();
     sentenceQueue.length = 0;
     lookahead = null;

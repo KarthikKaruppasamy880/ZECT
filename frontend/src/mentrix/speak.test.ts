@@ -9,7 +9,9 @@ import { mentrixSpeakClonedDetailed } from "@/lib/api";
 import {
   cancelMentrixSpeech,
   playMentrixPrefetch,
+  registerSpeechCancelListener,
   requireCloneSpeech,
+  speakMentrix,
   speakMentrixAwait,
   speakMentrixStreamedAwait,
 } from "./speak";
@@ -246,5 +248,47 @@ describe("speakMentrixStreamedAwait", () => {
     const result = await run;
     expect(result.ok).toBe(true);
     expect(Math.max(...maxConcurrent)).toBe(1);
+  });
+});
+
+describe("speakMentrix exclusive playback", () => {
+  beforeEach(() => {
+    vi.stubGlobal("Audio", FakeAudio as unknown as typeof Audio);
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call audio.play after cancel during fetch", async () => {
+    const play = vi.fn(() => Promise.resolve());
+    class GuardedAudio extends FakeAudio {
+      play() {
+        play();
+        return super.play();
+      }
+    }
+    vi.stubGlobal("Audio", GuardedAudio as unknown as typeof Audio);
+    const gate = deferred<{ url: string; engine: string }>();
+    (mentrixSpeakClonedDetailed as ReturnType<typeof vi.fn>).mockImplementationOnce(() => gate.promise);
+
+    const resultPromise = speakMentrix("Hello world.", true);
+    cancelMentrixSpeech();
+    gate.resolve({ url: "blob:late", engine: "chatterbox" });
+    const result = await resultPromise;
+
+    expect(result).toEqual({ ok: false, error: "cancelled" });
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("cancelMentrixSpeech stops registered Realtime clone playback", () => {
+    const stopClone = vi.fn();
+    const unreg = registerSpeechCancelListener(stopClone);
+    cancelMentrixSpeech();
+    expect(stopClone).toHaveBeenCalledTimes(1);
+    unreg();
+    cancelMentrixSpeech();
+    expect(stopClone).toHaveBeenCalledTimes(1);
   });
 });

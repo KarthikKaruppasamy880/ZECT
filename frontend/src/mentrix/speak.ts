@@ -6,6 +6,15 @@ export type { SpeakVoiceOptions };
 
 let lastAudio: HTMLAudioElement | null = null;
 let awaitGeneration = 0;
+const speechCancelListeners = new Set<() => void>();
+
+/** Realtime clone `<audio>` (and similar) must stop when Present/chat TTS cancels. */
+export function registerSpeechCancelListener(fn: () => void): () => void {
+  speechCancelListeners.add(fn);
+  return () => {
+    speechCancelListeners.delete(fn);
+  };
+}
 
 export type SpeakResult = { ok: true; engine: string } | { ok: false; error: string };
 
@@ -28,6 +37,13 @@ export function requireCloneSpeech(voiceOpts?: SpeakVoiceOptions): boolean {
 
 export function cancelBrowserSpeech() {
   awaitGeneration += 1;
+  for (const fn of [...speechCancelListeners]) {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
   try {
     window.speechSynthesis?.cancel();
   } catch {
@@ -142,6 +158,7 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
   if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
   if (!text.trim()) return { ok: false, error: "Nothing to speak" };
   cancelBrowserSpeech();
+  const gen = awaitGeneration;
   const mustClone = requireCloneSpeech(voiceOpts);
 
   let apiError = "";
@@ -153,11 +170,13 @@ export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: S
         error: `Expected your clone (ZECT Voicebox), got ${engine} — start local ZECT Voicebox to narrate in your voice`,
       };
     }
+    if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
     if (url && typeof Audio !== "undefined") {
       const audio = new Audio(url);
       lastAudio = audio;
       try {
         await audio.play();
+        if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
         return { ok: true, engine };
       } catch (playErr) {
         const msg = playErr instanceof Error ? playErr.message : String(playErr);

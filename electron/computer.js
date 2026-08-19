@@ -24,6 +24,8 @@ const WIN_APPS = [
   "outlook.exe",
   "ms-teams.exe",
   "teams.exe",
+  "snippingtool.exe",
+  "screenclippinghost.exe",
 ];
 const MAC_APPS = [
   "TextEdit",

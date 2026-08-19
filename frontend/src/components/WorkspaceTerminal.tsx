@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Loader2, Play, Plus, Square, Terminal } from "lucide-react";
 import { runnerExecute, runnerStart, runnerStop } from "@/lib/api";
 import type { WorkspaceTerminalSession } from "@/lib/workspaceSession";
@@ -103,7 +104,7 @@ export default function WorkspaceTerminal({
 
   return (
     <div
-      className="flex flex-col h-full min-h-[180px] rounded-lg border border-slate-200 bg-slate-950 text-slate-100"
+      className="flex flex-col h-full min-h-[180px] min-w-0 rounded-lg border border-slate-200 bg-slate-950 text-slate-100"
       data-testid="workspace-terminal"
       data-locked-root={root || ""}
     >
@@ -162,17 +163,32 @@ export default function WorkspaceTerminal({
       ) : null}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
+        className="flex-1 min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
         data-testid="workspace-terminal-output"
       >
-        {lines.length === 0 ? (
+        {!root ? (
+          <div className="text-amber-200/90 space-y-2" data-testid="workspace-terminal-no-root">
+            <p>This is a command form (not a Cursor-style PTY). Input stays disabled until a workspace root is attached.</p>
+            <p>
+              Cursor-style “Add folder to workspace” is <strong>Project → Open local git</strong>{" "}
+              (register-local), not an untitled multi-root IDE window.
+            </p>
+            <Link
+              to="/projects"
+              className="inline-flex items-center rounded border border-teal-700 px-2 py-1 text-[11px] text-teal-200 hover:bg-teal-950"
+              data-testid="workspace-terminal-attach-root"
+            >
+              Attach a git root
+            </Link>
+          </div>
+        ) : lines.length === 0 ? (
           <span className="text-slate-500">Commands run only under this terminal's locked root via App Runner.</span>
         ) : (
           lines.map((line, i) => <div key={`${i}-${line.slice(0, 24)}`}>{line}</div>)
         )}
       </div>
       <form
-        className="flex items-center gap-1 border-t border-slate-800 p-2"
+        className="flex shrink-0 items-center gap-1 border-t border-slate-800 p-2"
         onSubmit={(e) => {
           e.preventDefault();
           void runOnce();
@@ -183,7 +199,8 @@ export default function WorkspaceTerminal({
           value={command}
           onChange={(e) => setCommand(e.target.value)}
           disabled={!root || busy}
-          placeholder={root ? "command…" : "set workspace root first"}
+          placeholder={root ? "command…" : "No workspace root — attach a git folder on the Project"}
+          title={!root ? "Attach a git root: Project → Open local git (register-local)" : undefined}
           className="flex-1 min-w-0 bg-transparent text-xs font-mono text-slate-100 outline-none placeholder:text-slate-600"
           data-testid="workspace-terminal-input"
           autoComplete="off"

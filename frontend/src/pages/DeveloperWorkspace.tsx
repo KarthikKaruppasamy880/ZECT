@@ -1205,7 +1205,7 @@ export default function DeveloperWorkspace() {
                   {maximized === "bottom" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                 </button>
               </div>
-              <div className="min-h-0 flex-1 overflow-auto p-2">
+              <div className={`min-h-0 flex-1 p-2 ${bottomTab === "terminal" ? "overflow-hidden flex flex-col" : "overflow-auto"}`}>
                 {bottomTab === "terminal" ? (
                   <WorkspaceTerminal
                     workspaceRoot={

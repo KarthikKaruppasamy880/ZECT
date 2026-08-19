@@ -1,8 +1,9 @@
 # ZECT Graphify / Lattice Acceptance (G1–G5)
 
 **Date:** 2026-08-19  
-**Branch:** `feat/graphify-lattice-spine`  
-**Stop:** `READY_TO_MERGE_GRAPHIFY_SPINE` — human merge only.
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2`  
+**Branch:** merged via PR **#170**  
+**Stop:** human merge only.
 
 ## Verdict
 

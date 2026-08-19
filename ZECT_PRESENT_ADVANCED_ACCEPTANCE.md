@@ -1,7 +1,8 @@
 # ZECT Present Advanced Acceptance (P1–P3)
 
 **Date:** 2026-08-19  
-**Branch:** `feat/desktop-present-control`
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2`  
+**Branch:** merged via PR **#172**
 
 ## Verdict
 

@@ -2,9 +2,9 @@
 
 **Status:** Canonical current architecture (code-backed)  
 **Date:** 2026-08-19  
-**Canonical develop:** `394cf272c9332754ad9b0b9d5819921ad81fccd6` (PR **#168** human-merged)  
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2` (PRs **#170** Graphify/Lattice spine, **#171** local stack, **#172** desktop/Present control — human-merged)  
 **Storage truth:** [`ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md`](ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md)  
-**Do not start:** S8C/S8D, Graphify, KV-cache expansion, OCR/XLSX, broader Web, new agents.
+**Do not start:** S8C Presenton-default-flip, KV-cache expansion, OCR/XLSX, broader Web, extra agent frameworks. Graphify is **not** a second store — it is the Lattice ingest + `GraphifySnapshot` adapter.
 
 This file is the **only current** top-level architecture truth. Historical docs that contradict it are marked HISTORICAL below.
 
@@ -19,8 +19,10 @@ User
   → Present (PresentationService + Presenton default / zect_native opt-in)
   → Projects / WorkItems / Processes (work_items, Fabric, Jira/Camunda OPTIONAL)
   → PI / Lattice (indexer.py JSON graphs + lattice_structural_blueprints)
+       Graphify ingest / GraphifySnapshot adapter (same Lattice store — not a second RAG)
   → Knowledge (knowledge_entries ILIKE — not a vector DB)
   → Learning / Skills / Playbooks (SkillDefinition DB + .zect/skills FS packs)
+  → Local stack (`zect.ps1` / `scripts/zect_stack.py`: API :8020, UI :5173; CI/packaged API :8000)
 ```
 
 Companion does **not** silently edit code. Coding Agent owns worktrees/tests/review/git. Presenton remains the product default until an explicit S8C decision (out of scope).
@@ -67,15 +69,21 @@ RESTRICTED/CONFIDENTIAL decks cannot be sent to Presenton (`restricted_external_
 ## RAG / intelligence (actual path)
 
 ```text
-Sources → ingest (lattice ingest_path / index_directory / document|web ingest)
+Sources → Graphify ingest (lattice ingest_path; files/symbols/refs/imports/calls/deps/APIs/tests/ownership)
+  → GraphifySnapshot(repo, SHA) adapter over Lattice JSON + get_lattice_status
+  → Lattice states: NOT_CONFIGURED|NOT_INDEXED|INDEXING|READY|STALE|ERROR|NOT_APPLICABLE
+  → ContextEngine (permission/provenance; graph evidence never grants write)
+  → Companion lattice_query / Developer PLAN / Coding Agent / PI
+Parallel retrieval (not Graphify):
   → parse/chunk
   → embeddings: bag-of-tokens in embedding_chunks OR OpenAI JSON in code_embeddings
   → STORE: same application DB (desktop_sqlite | server_postgres) as TEXT JSON
   → retrieval: in-process cosine (not pgvector)
-  → ContextEngine → Permission Broker / provenance → model/agent
 ```
 
-**Not implemented:** pgvector, Chroma, FAISS, Qdrant, Redis, Graphify.
+**Not implemented:** pgvector, Chroma, FAISS, Qdrant, Redis, a second Graphify database, a second agent framework.
+
+**Cross-repo edges:** evidence required (`package_dependency`, `api_contract`, `import`, `schema`, `test_fixture`, `configured`). Name similarity is rejected.
 
 ## Data / storage
 
@@ -94,7 +102,11 @@ User / project / repo boundaries; Permission Broker; untrusted context; secrets 
 
 ## Runtime / deployment
 
-Browser frontend (Vite), Electron shell + sidecar, FastAPI, native Present renderer, Voicebox OPTIONAL, DBs as dual-mode, Presenton OPTIONAL, GitHub/Jira/Camunda/model/image/web providers OPTIONAL.
+Browser frontend (Vite :5173 local), Electron shell + sidecar, FastAPI (:8020 local via `./zect.ps1`; :8000 CI/packaged), native Present renderer, Voicebox OPTIONAL, DBs as dual-mode, Presenton OPTIONAL, GitHub/Jira/Camunda/model/image/web providers OPTIONAL.
+
+`zect.ps1` owns only PIDs in `.zect/stack/`. It never kill-by-port and does not call `scripts/stop-local.ps1`. Presenton `:5000` and Voicebox `:17493` are OPTIONAL_UNAVAILABLE when argv is empty and the port is not already healthy.
+
+Electron Computer Mode allowlists PowerPoint; native file dialogs (`zect-select-file`, PPTX read jail). Live COM / NSIS installer remain OPTIONAL / BLOCKED_EXTERNAL until proven.
 
 ## Evidence / release
 
@@ -141,13 +153,13 @@ flowchart LR
 ```mermaid
 flowchart TB
   ui[frontend/src MentrixCompanion DeveloperWorkspace Present SystemHealth]
-  elec[electron/main.js service-lifecycle.js]
+  elec[electron/main.js service-lifecycle.js computer.js]
   api[backend/app/main.py]
   mw[Auth RateLimit CorrelationId]
   domains[domains: work_items coding_agent lattice mentrix]
-  svc[services: ContextEngine PermissionBroker PresentationService]
+  svc[services: ContextEngine PermissionBroker PresentationService GraphifySnapshot]
   db[(SQLAlchemy engine desktop_sqlite or server_postgres)]
-  fs[.zect work lattice missions present]
+  fs[.zect work lattice missions present stack]
   ui --> api
   elec --> api
   api --> mw --> domains --> svc
@@ -239,6 +251,22 @@ sequenceDiagram
   Note over DB: Not pgvector. Same sqlite or postgres as WorkItems.
 ```
 
+### 6b. Graphify → Lattice (implemented adapter)
+
+```mermaid
+sequenceDiagram
+  participant R as Authorized repo SHA
+  participant G as ingest_path Graphify
+  participant S as GraphifySnapshot
+  participant L as Lattice status query
+  participant C as ContextEngine
+  R->>G: files symbols refs tests ownership
+  G->>S: JSON graph commit_sha
+  S->>L: READY or STALE at SHA
+  L->>C: hits with provenance
+  Note over C: lattice_query is not git write
+```
+
 ### 7. Multi-repo WorkItem sequence
 
 ```mermaid
@@ -320,4 +348,4 @@ Contradictions rejected from older docs:
 - PostgreSQL is **not** the only application DB (desktop SQLite is intentional).
 - PostgreSQL is **not** a pgvector RAG store.
 - Presenton is still default; native Present is opt-in.
-- Graphify / S8C / KV-cache / OCR-XLSX / extra agents are **PLANNED / out of scope**.
+- Graphify is the Lattice ingest + `GraphifySnapshot` adapter — **not** a second RAG/index/agent. S8C / KV-cache / OCR-XLSX / extra agents remain **PLANNED / out of scope**.

@@ -1,7 +1,7 @@
 # ZECT Graphify / Lattice Contract
 
 **Date:** 2026-08-19  
-**Canonical develop:** `8c18b83b981f71a4e6e318923d35a78c8e1fe79e` (PR **#169** human-merged)  
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2` (PRs **#169–#172** human-merged)  
 **Rule:** Graphify constructs repository intelligence. Lattice remains the governed provenance/query/context layer. **No second RAG, index, or agent framework.**
 
 Graphify = what exists / how connected.  

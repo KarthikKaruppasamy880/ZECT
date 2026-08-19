@@ -29,8 +29,8 @@ Release-critical internal gates are not all PASS. Tranche H (full-release E2E) i
 | Performance / soak / observability | **PARTIAL** (#165 isolation PASS; Voice/PG external) |
 | Canonical architecture | **PASS** (code-backed RAG/DB; SHA bump this PR) |
 | Accessibility / UX sweep | **PASS** (#166) |
-| Browser + Electron release E2E | **this PR** — local journey required; Electron skip ≠ PASS; **PARTIAL** until CI |
-| Review discipline | Ultra Review this SHA; CodeRabbit **SKIPPED** until triggered |
+| Browser + Electron release E2E | **PASS** locally + CI e2e (`a583feb` / run 32251437033); Electron not in CI core (skip ≠ PASS); human merge pending |
+| Review discipline | Mentrix Ultra Review **PASS** (85, 0 critical); CodeRabbit **SKIPPED** (0 reviews on #167; skip ≠ PASS) |
 
 ## Blockers (exact)
 

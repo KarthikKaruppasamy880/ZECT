@@ -13,6 +13,8 @@ One coherent headed journey **PASS** (29s). Local Electron journey **PASS** (32s
 
 Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. Tranche I is not in this PR.
 
+CI (PR **#167**, SHA `a583feb751bb`): run **32251437033** backend / frontend / e2e **success**. CodeRabbit **SKIPPED** (0 reviews; skip-review widget ≠ PASS).
+
 ## Browser journey (required)
 
 `Login → Project → multi-root Developer → Companion → WorkItem → Coding Agent (tests/review) → Present → Voice → Process/status`

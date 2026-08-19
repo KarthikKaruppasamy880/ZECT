@@ -34,7 +34,7 @@ Nothing local-only is called complete. Missing evidence is not PASS.
 | Runtime / DB | sqlite desktop + Alembic postgres | `database.py` | **#163** | **yes** | healthz | sidecar sqlite | no URL in healthz | live PG unset | **PASS** | Live Postgres / NSIS `BLOCKED_EXTERNAL` |
 | Performance / soak | Thresholds + telemetry + isolation | `observability.py`, soak tests | **#164** + **#165** | **yes** | concurrent e2e | electron skip ≠ core | redact MCP/telemetry | Voice/PG unset | **PARTIAL** | Voicebox / live PG |
 | Accessibility / UX | Skip, keyboard, 1280–1920, named controls | Layout, Sidebar, SplitPane, pages | **#166** | **yes** | headed **PASS** CI e2e | local Electron **PASS** | no new attack surface | n/a | **PASS** | Live connectors; CodeRabbit **SKIPPED** |
-| Full-release E2E | Coherent browser + Electron journey | `full-release-e2e-*.spec.ts` | **this PR** | **no** until merge | headed journey + frozen core | local Electron journey | no new attack surface | n/a | **PARTIAL** until CI/human merge | Live Generate/Voice/COM; Electron not in CI core |
+| Full-release E2E | Coherent browser + Electron journey | `full-release-e2e-*.spec.ts` | **this PR #167** | **no** until merge | headed journey + frozen core **PASS** CI | local Electron journey **PASS** | no new attack surface | n/a | **PASS** pending human merge | Live Generate/Voice/COM; CodeRabbit **SKIPPED** |
 | Architecture | Canonical + RAG/DB truth | architecture md | **#165** SHA bump | **yes** | n/a | n/a | no pgvector claim | dual-mode DB | **PASS** (docs=code) | Graphify PLANNED |
 
 ## Suggested PR sequence (human-merge each)

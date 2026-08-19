@@ -33,7 +33,7 @@ Nothing local-only is called complete. Missing evidence is not PASS.
 | Install / recovery | Sidecar, mission persist, occupied port | `lifecycle.py`, `service-lifecycle.js` | **#162** | **yes** | runtime-recovery e2e | electron skip ≠ core | mission id jail | NSIS unproven | **PARTIAL** | Clean-machine NSIS |
 | Runtime / DB | sqlite desktop + Alembic postgres | `database.py` | **#163** | **yes** | healthz | sidecar sqlite | no URL in healthz | live PG unset | **PASS** | Live Postgres / NSIS `BLOCKED_EXTERNAL` |
 | Performance / soak | Thresholds + telemetry + isolation | `observability.py`, soak tests | **#164** + **#165** | **yes** | concurrent e2e | electron skip ≠ core | redact MCP/telemetry | Voice/PG unset | **PARTIAL** | Voicebox / live PG |
-| Accessibility / UX | Skip, keyboard, 1280–1920, named controls | Layout, Sidebar, SplitPane, pages | **this PR** | **no** until merge | headed **PASS** | local Electron **PASS** | no new attack surface | n/a | **PARTIAL** until CI/human merge | Live connectors; CI Electron not in core e2e |
+| Accessibility / UX | Skip, keyboard, 1280–1920, named controls | Layout, Sidebar, SplitPane, pages | **this PR #166** | **no** until merge | headed **PASS** CI e2e | local Electron **PASS** | no new attack surface | n/a | **PASS** pending human merge | Live connectors; CodeRabbit **SKIPPED** |
 | Architecture | Canonical + RAG/DB truth | architecture md | **#165** SHA bump | **yes** | n/a | n/a | no pgvector claim | dual-mode DB | **PASS** (docs=code) | Graphify PLANNED |
 
 ## Suggested PR sequence (human-merge each)

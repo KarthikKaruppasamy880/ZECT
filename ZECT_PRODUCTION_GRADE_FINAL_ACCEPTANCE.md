@@ -28,9 +28,9 @@ Release-critical internal gates are not all PASS. Tranche G (accessibility + UX)
 | Runtime / DB dual mode | **PASS** (desktop + Postgres boot contract; live PG unset) |
 | Performance / soak / observability | **PARTIAL** (#165 isolation PASS; Voice/PG external) |
 | Canonical architecture | **PASS** (code-backed RAG/DB; SHA bump this PR) |
-| Accessibility / UX sweep | **PASS** locally (headed + Electron); **PARTIAL** until this PR CI is green |
+| Accessibility / UX sweep | **PASS** locally + CI e2e (`13cff5c` / run 32207406545); human merge pending |
 | Browser + Electron release E2E | **PARTIAL** (tranche H not started; Electron skip ≠ PASS) |
-| Review discipline | Mentrix Ultra Review **PASS** (85, 0 critical); CodeRabbit **SKIPPED** until triggered |
+| Review discipline | Mentrix Ultra Review **PASS** (85, 0 critical); CodeRabbit **SKIPPED** (0 reviews on #166; skip ≠ PASS) |
 
 ## Blockers (exact)
 

@@ -13,7 +13,9 @@ Leftover untracked markdown from 2026-08-14 is **not** evidence. This file is th
 
 Local headed browser sweep **PASS**. Local Electron Companion/Present/Developer/Knowledge **PASS** (`electron.exe` present). Live Presenton / Voicebox / Jira / Camunda / GitHub were not clicked and remain **BLOCKED_EXTERNAL**.
 
-Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. Tranche H–I are not in this PR. CI on the focused PR is required before human merge.
+Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**. Tranche H–I are not in this PR.
+
+CI (PR **#166**, SHA `13cff5cfe28a`): run **32207406545** backend / frontend / e2e **success**. CodeRabbit **SKIPPED** (0 reviews; skip ≠ PASS).
 
 ## Fixes (code, not docs-only)
 

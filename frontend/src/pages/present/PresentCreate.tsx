@@ -37,8 +37,19 @@ export default function PresentCreate() {
   const [orgScope, setOrgScope] = useState(false);
   const [lifecycle, setLifecycle] = useState("STARTING");
   const [panelKey, setPanelKey] = useState(0);
+  const evidencePrompt = params.get("prompt") || params.get("goal") || "";
+  const evidenceAudience = params.get("audience") || "";
+  const evidenceProject = params.get("project_id") || "";
+  const evidenceWorkItem = params.get("work_item_id") || "";
 
   useEffect(() => {
+    if (evidenceAudience) {
+      try {
+        localStorage.setItem("zect_mentrix_present_audience", evidenceAudience);
+      } catch {
+        /* ignore */
+      }
+    }
     mentrixPresentationTemplates()
       .then((r) => {
         setZinnia(r.zinnia || []);
@@ -49,7 +60,7 @@ export default function PresentCreate() {
     mentrixPresentonStatus()
       .then((s) => setLifecycle(String(s.lifecycle || (s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE"))))
       .catch(() => setLifecycle("PROVIDER_UNAVAILABLE"));
-  }, []);
+  }, [evidenceAudience]);
 
   const selectTemplate = async (id: string) => {
     const canonical = migrateTemplateId(id);
@@ -92,6 +103,15 @@ export default function PresentCreate() {
       <p className="text-xs text-slate-500">
         Selected template: <strong data-testid="zect-present-selected">{selected}</strong>
       </p>
+      {evidenceProject || evidenceWorkItem || evidencePrompt ? (
+        <p className="text-xs text-slate-600" data-testid="present-create-evidence">
+          Evidence
+          {evidenceProject ? ` · project ${evidenceProject}` : ""}
+          {evidenceWorkItem ? ` · work item ${evidenceWorkItem}` : ""}
+          {evidenceAudience ? ` · audience ${evidenceAudience}` : ""}
+          {evidencePrompt ? ` · ${evidencePrompt.slice(0, 160)}` : ""}
+        </p>
+      ) : null}
 
       <section className="space-y-4" data-testid="zect-present-gallery">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -197,7 +217,7 @@ export default function PresentCreate() {
         variant="light"
         mode="create"
         initialTemplateId={selected}
-        initialPrompt={params.get("prompt") || undefined}
+        initialPrompt={evidencePrompt || params.get("prompt") || undefined}
         toneHint={rewrite}
         onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}`)}
       />

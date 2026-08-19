@@ -590,6 +590,25 @@ function resolvePresentationPath(filePath, { pptxOnly = false } = {}) {
   return { ok: true, path: resolved, ext };
 }
 
+function readPresentationBytes(filePath) {
+  const check = resolvePresentationPath(filePath, { pptxOnly: true });
+  if (!check.ok) return check;
+  try {
+    const buf = fs.readFileSync(check.path);
+    if (!buf.length || buf.length > 40_000_000) {
+      return { ok: false, error: "invalid_pptx", path: check.path };
+    }
+    return {
+      ok: true,
+      path: check.path,
+      name: path.basename(check.path),
+      base64: buf.toString("base64"),
+    };
+  } catch (err) {
+    return { ok: false, error: String(err), path: check.path };
+  }
+}
+
 async function openPresentation(filePath) {
   const check = resolvePresentationPath(filePath);
   if (!check.ok) return check;
@@ -908,6 +927,7 @@ module.exports = {
   openApp,
   openZoom,
   openPresentation,
+  readPresentationBytes,
   parsePresentationSlides,
   powerpointKey,
   focusApp,

@@ -97,9 +97,11 @@ def test_handoff_url_preserves_identity_envelope():
     assert "repo_ids=1%2C2" in url or "repo_ids=1,2" in url
     assert "repository_id=2" in url
     assert "plan_ref=abc123" in url
-    present = handoff_url("present_create", env)
+    present = handoff_url("present_create", env, extra={"prompt": "exec status deck", "audience": "exec"})
     assert present.startswith("/present/create")
     assert "project_id=9" in present
+    assert "prompt=exec" in present
+    assert "audience=exec" in present
 
 
 def test_sibling_pass_plus_fail_is_blocked():

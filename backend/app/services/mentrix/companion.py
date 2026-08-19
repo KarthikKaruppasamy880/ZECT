@@ -815,7 +815,7 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     if re.search(r"\b(create|make|generate|build)\b.{0,48}\b(presentation|deck|slides)\b", m) or (
         "presentation from this project" in m
     ):
-        tools.append({"name": "companion_handoff", "args": {"surface": "present_create"}})
+        tools.append({"name": "companion_handoff", "args": {"surface": "present_create", "goal": message[:200], "prompt": message[:500]}})
     elif any(k in m for k in ("open present", "go to present", "open zect present")):
         tools.append({"name": "companion_handoff", "args": {"surface": "present"}})
     if any(
@@ -1167,6 +1167,12 @@ def _exec_tool(
                 extra["goal"] = str(args.get("goal"))[:200]
             if args.get("audience"):
                 extra["audience"] = str(args.get("audience"))[:80]
+            if surface in {"present", "present_create"}:
+                extra["prompt"] = str(args.get("prompt") or extra.get("goal") or "")[:500]
+                if args.get("template"):
+                    extra["template"] = str(args.get("template"))[:80]
+                if args.get("sensitivity"):
+                    extra["sensitivity"] = str(args.get("sensitivity"))[:40]
             nav = handoff_url(surface, envelope, extra=extra or None)
             labels = {
                 "workspace": "Developer Workspace — Companion does not edit code.",

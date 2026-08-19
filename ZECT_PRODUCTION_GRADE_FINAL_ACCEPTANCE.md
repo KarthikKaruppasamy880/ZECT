@@ -1,22 +1,22 @@
 # ZECT Production-Grade Final Acceptance
 
 **Date:** 2026-08-18  
-**Canonical develop:** `962bb6b58e1108b2a3d697419a82351723baa317` (PR **#163** human-merged)  
-**This working branch:** `feat/performance-reliability-architecture`  
+**Canonical develop:** `a73fd02a23827b24d9e5d698a7f9bd29ca31c623` (PR **#164** human-merged)  
+**This working branch:** `feat/concurrent-soak-isolation`  
 **No auto-merge.** S8C/S8D/Graphify/KV/OCR/Web/new agents: **not started**.
 
 ## Verdict
 
 **ZECT_PRODUCTION_PARTIAL**
 
-Release-critical internal gates are not all PASS. Performance/observability/architecture is offered for human merge as **PERFORMANCE_RELIABILITY_PARTIAL** with listed external blockers. Missing clean-machine, Electron, live connectors, live Voicebox, live Postgres, and skipped CodeRabbit cannot become PASS.
+Release-critical internal gates are not all PASS. Post-#164 leftover internals (overlapping threads, Companion soak, native Present Quality, runner cleanup) are this focused PR. Missing clean-machine, Electron, live connectors, live Voicebox, live Postgres, skipped CodeRabbit, and tranche G–I cannot become PASS.
 
 ## Gates
 
 | Gate | Result |
 |------|--------|
-| Canonical develop truth | **PASS** (`962bb6b`, #163 merged) |
-| Mentrix Companion production | **PASS** (prior #157) / concurrent soak **PARTIAL** |
+| Canonical develop truth | **PASS** (`a73fd02`, #164 merged) |
+| Mentrix Companion production | **PASS** (prior #157) / concurrent soak **this PR** |
 | Developer multi-root | **PASS** (prior #156) |
 | Lattice / context | **PASS** (prior #160) + ingest cancel/perf this PR |
 | Coding agent lifecycle | **PASS** (prior #158/#162) |
@@ -26,7 +26,7 @@ Release-critical internal gates are not all PASS. Performance/observability/arch
 | Security campaign | **PASS** (prior #161) |
 | Install / migration / recovery | **PARTIAL** (NSIS `BLOCKED_EXTERNAL`) |
 | Runtime / DB dual mode | **PASS** (desktop + Postgres boot contract; live PG unset) |
-| Performance / soak / observability | **PARTIAL** (bounded soak PASS; Voice/Electron/terminals PARTIAL or external) |
+| Performance / soak / observability | **PARTIAL** (#164 bounded soak PASS; this PR overlapping/Companion/native Quality pending CI) |
 | Canonical architecture | **PASS** (this PR; code-backed RAG/DB) |
 | Accessibility / UX sweep | **PARTIAL** — tranche G not started |
 | Browser + Electron release E2E | **PARTIAL** |

@@ -148,7 +148,14 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "test_ok": r.get("test_ok"),
                 "test_status": r.get("test_status"),
                 "patches_applied": r.get("patches_applied"),
-                "test_stdout": str((r.get("test") or {}).get("stdout") or "")[-800:] if not r.get("test_ok") else "",
+                "test_stdout": (
+                    str(r.get("test_stdout") or (r.get("test") or {}).get("stdout") or "")[-800:]
+                    if not r.get("test_ok")
+                    else ""
+                ),
+                "test_stderr": (
+                    str((r.get("test") or {}).get("stderr") or "")[-400:] if not r.get("test_ok") else ""
+                ),
                 "files": list(r.get("files") or []),
                 "commands": list(r.get("commands") or []),
                 "blocker": r.get("blocker") or "",
@@ -318,27 +325,68 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
     import sys
 
     root = resolve_workspace(str(worktree))
-    out = execute_tool(
-        "run_command",
-        {
-            "command": (
-                f'"{sys.executable}" -m pytest -q --tb=short --noconftest '
-                f"--rootdir=. -o addopts= -o testpaths=tests -p no:cacheprovider tests"
-            ),
-            "timeout": 90,
-        },
-        workspace=root,
-        auto_approve_edits=True,
-    )
-    ok = bool(out.get("ok"))
+    cfg_path = ""
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False, encoding="utf-8") as cfg:
+            cfg.write("[pytest]\naddopts =\npythonpath = .\n")
+            cfg_path = cfg.name
+        child_env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST")}
+        # Worktree only — parent CI PYTHONPATH / pytest 9 importlib must not
+        # import a sibling (or ZECT backend) module named like the fixture.
+        child_env["PYTHONPATH"] = str(root)
+        child_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+        child_env["PYTEST_ADDOPTS"] = ""
+        child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        argv = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "--tb=short",
+            "--noconftest",
+            f"--confcutdir={root}",
+            f"--rootdir={root}",
+            "-c",
+            cfg_path,
+            "--import-mode=prepend",
+            "-p",
+            "no:cacheprovider",
+            str((root / "tests").resolve()),
+        ]
+        completed = subprocess.run(
+            argv,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=child_env,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "pytest",
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "timeout",
+            "command": "pytest",
+        }
+    finally:
+        if cfg_path:
+            try:
+                os.unlink(cfg_path)
+            except OSError:
+                pass
+    ok = completed.returncode == 0
     return {
         "ok": ok,
         "status": "pass" if ok else "fail",
         "kind": "pytest",
-        "exit_code": out.get("exit_code"),
-        "stdout": (out.get("stdout") or "")[-1200:],
-        "stderr": (out.get("stderr") or "")[-600:],
-        "command": out.get("command"),
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": " ".join(argv),
     }
 
 
@@ -715,6 +763,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         repo["test_ok"] = bool(tests.get("ok"))
         repo["test_status"] = tests.get("status")
         repo["test"] = tests
+        repo["test_stdout"] = tests.get("stdout")
         if tests.get("command"):
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):

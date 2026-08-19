@@ -386,6 +386,9 @@ def _execute_tool_inner(
             # Pin child PYTHONPATH to this workspace so nested pytest cannot
             # import a sibling worktree's modules (CI pytest 9 / Linux).
             child_env["PYTHONPATH"] = str(root)
+            if "pytest" in cmd:
+                child_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
+                child_env["PYTEST_ADDOPTS"] = ""
             completed = subprocess.run(
                 cmd,
                 shell=True,

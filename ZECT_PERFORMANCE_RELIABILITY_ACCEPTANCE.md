@@ -1,8 +1,8 @@
 # ZECT Performance / Reliability / Observability Acceptance
 
 **Date:** 2026-08-18  
-**Canonical develop (pre-PR):** `962bb6b58e1108b2a3d697419a82351723baa317` (PR **#163** human-merged)  
-**Branch:** `feat/performance-reliability-architecture`  
+**Canonical develop:** `a73fd02a23827b24d9e5d698a7f9bd29ca31c623` (PR **#164** human-merged)  
+**Follow-on branch:** `feat/concurrent-soak-isolation` (leftover internals)  
 **PR:** [PR #164](https://github.com/KarthikKaruppasamy880/ZECT/pull/164)  
 **Last green CI SHA:** `fe2e9be` — [run 32185053046](https://github.com/KarthikKaruppasamy880/ZECT/actions/runs/32185053046)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md`  
@@ -50,9 +50,9 @@ Overall ZECT remains **ZECT_PRODUCTION_PARTIAL**.
 | Correlation ID echo (`X-Correlation-Id`) | **PASS** (pytest + headed e2e) |
 | Secrets not in telemetry / MCP args | **PASS** |
 | Architecture + storage audit | **PASS** (code-backed; no pgvector claim) |
-| Companion concurrent load/soak | **PARTIAL** — existing `test_companion_production.py` isolation reused; no concurrent-session soak in this PR |
-| Concurrent terminals | **PARTIAL** — coding-agent sibling tests exercise parallel pytest; dedicated multi-terminal soak not added |
-| Present Quality full generate latency | **PARTIAL** — Fast plan timed; live Quality PPTX generate is environment-dependent |
+| Companion concurrent load/soak | **this PR** — overlapping sessions + headed e2e; skip ≠ PASS until CI green |
+| Concurrent terminals | **this PR** — overlapping App Runner bound_root + stop_all cleanup |
+| Present Quality full generate latency | **this PR** — native Quality PPTX (`zect_native`, heuristic planner when LLM unset). Live Presenton Generate remains **BLOCKED_EXTERNAL** when unset |
 | Voice under load | **BLOCKED_EXTERNAL** (`ZECT_VOICEBOX_BASE_URL` / Chatterbox unset) skip ≠ PASS |
 | Live PostgreSQL soak | **BLOCKED_EXTERNAL** (`ZECT_TEST_POSTGRES_URL` unset) skip ≠ PASS |
 | Live Presenton | **BLOCKED_EXTERNAL** when unset — RESTRICTED fail-closed proven without calling it |

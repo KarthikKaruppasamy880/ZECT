@@ -1,7 +1,7 @@
 # ZECT Database / RAG / Storage Architecture
 
 **Date:** 2026-08-18  
-**Canonical develop:** `962bb6b58e1108b2a3d697419a82351723baa317` (PR **#163** human-merged)  
+**Canonical develop:** `a73fd02a23827b24d9e5d698a7f9bd29ca31c623` (PR **#164** human-merged)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md` §7  
 **Rule:** Documentation follows **code**, not assumptions. PostgreSQL/pgvector are not labeled as RAG stores unless implemented.
 

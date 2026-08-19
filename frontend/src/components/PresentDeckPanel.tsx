@@ -25,6 +25,7 @@ import {
 } from "@/lib/api";
 import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
 import { pickLocalFile } from "@/lib/pickLocalFile";
+import { mergePresentTemplateLists } from "@/lib/presentTemplates";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -249,18 +250,9 @@ export default function PresentDeckPanel({
           setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
         }
         const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
-        const byId = new Map<string, PresentonTemplate>();
-        for (const t of BUILTIN_TEMPLATES) {
-          if (t?.id) byId.set(t.id, t);
-        }
-        for (const t of remote) {
-          if (!t?.id) continue;
-          if (/^(zinnia-|org-|user-)/.test(t.id)) continue;
-          byId.set(t.id, t);
-        }
-        const list = Array.from(byId.values());
-        setTemplates(list);
+        setTemplates((prev) => mergePresentTemplateLists(BUILTIN_TEMPLATES, remote, [], prev));
         setTemplateChoice((prev) => {
+          const list = mergePresentTemplateLists(BUILTIN_TEMPLATES, remote, [], []);
           const migrated = migrateTemplateId(prev);
           if (migrated === CUSTOM_TEMPLATE_OPTION) return migrated;
           if (list.some((t) => t.id === migrated)) return migrated;
@@ -272,13 +264,7 @@ export default function PresentDeckPanel({
     mentrixPresentationTemplates()
       .then((r) => {
         const extra = [...(r.zinnia || []), ...(r.organization || []), ...(r.my_templates || [])];
-        setTemplates((prev) => {
-          const byId = new Map(prev.map((t) => [t.id, t]));
-          for (const t of extra) {
-            if (t?.id) byId.set(t.id, { id: t.id, name: t.name });
-          }
-          return Array.from(byId.values());
-        });
+        setTemplates((prev) => mergePresentTemplateLists(BUILTIN_TEMPLATES, [], extra, prev));
       })
       .catch(() => {});
     listMyClonedVoices()
@@ -297,6 +283,17 @@ export default function PresentDeckPanel({
       statusCancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (presentonReady) return;
+    if (templateChoice !== CUSTOM_TEMPLATE_OPTION) return;
+    setTemplateChoice("zinnia-executive-v1");
+    try {
+      localStorage.setItem(TEMPLATE_KEY, "zinnia-executive-v1");
+    } catch {
+      /* ignore */
+    }
+  }, [presentonReady, templateChoice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -951,7 +948,7 @@ export default function PresentDeckPanel({
                 : "border-slate-400 text-slate-600"
           }`}
         >
-          {lifecycle}
+          {lifecycle === "PROVIDER_UNAVAILABLE" ? "BLOCKED_EXTERNAL" : lifecycle}
         </span>
       </div>
       <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
@@ -1038,7 +1035,7 @@ export default function PresentDeckPanel({
                 {t.name}
               </option>
             ))}
-            <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option>
+            {presentonReady ? <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option> : null}
           </select>
         </label>
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
@@ -1154,7 +1151,7 @@ export default function PresentDeckPanel({
         />
         Approve generation (Flow B — review claims first)
       </label>
-      {templateChoice === CUSTOM_TEMPLATE_OPTION && (
+      {presentonReady && templateChoice === CUSTOM_TEMPLATE_OPTION && (
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
           Custom template id (Presenton master)
           <input

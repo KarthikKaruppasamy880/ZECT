@@ -1,7 +1,7 @@
 # ZECT Database / RAG / Storage Architecture
 
 **Date:** 2026-08-19  
-**Canonical develop:** `797534df747ce7f5e41412273bd5965a32220fe3` (PR **#167** human-merged)  
+**Canonical develop:** `394cf272c9332754ad9b0b9d5819921ad81fccd6` (PR **#168** human-merged)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md` §7  
 **Rule:** Documentation follows **code**, not assumptions. PostgreSQL/pgvector are not labeled as RAG stores unless implemented.
 
@@ -49,6 +49,17 @@ otherwise              → desktop_sqlite  → create_all + additive columns
 ```
 
 Packaged Electron (`electron/resources/backend/zect_api_entry.py`) sets `sqlite:///{userData}/data/zect.db`.
+
+### Release profiles (code)
+
+| Profile | Database requirement |
+|---------|----------------------|
+| ZECT_CORE (local, Ubuntu CI, default `.env.example`) | `desktop_sqlite`. PostgreSQL is **not** required. |
+| Packaged Electron | `desktop_sqlite` under `ZECT_USER_DATA`. PostgreSQL is **not** required. |
+| Docker/server when `DATABASE_URL` is `postgres*` | `server_postgres` is **mandatory**. Unreachable Postgres **does not** fall back to SQLite. |
+| Live Alembic against a real server (`ZECT_TEST_POSTGRES_URL`) | **BLOCKED_EXTERNAL** until proven. Does not block ZECT_CORE. |
+
+Optional GitHub / Jira / Camunda / Presenton / Voicebox connectors are not database modes and do not change the above.
 
 ## Rebuildable vs not
 

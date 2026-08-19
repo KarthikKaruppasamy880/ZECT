@@ -21,7 +21,11 @@ test.describe("full release E2E electron", () => {
   test.setTimeout(300_000);
 
   test("login, Companion, multi-root restore, Developer, Present, Voice, recovery", async () => {
-    test.skip(!fs.existsSync(ELECTRON_EXE), "Electron binary is not installed in electron/node_modules");
+    const electronPresent = fs.existsSync(ELECTRON_EXE);
+    if (!electronPresent && process.env.ZECT_REQUIRE_ELECTRON === "1") {
+      throw new Error("ZECT_REQUIRE_ELECTRON=1 but electron.exe is missing — skip ≠ PASS");
+    }
+    test.skip(!electronPresent, "Electron binary is not installed in electron/node_modules");
     fs.mkdirSync(ART, { recursive: true });
     const userData = fs.mkdtempSync(path.join(os.tmpdir(), "zect-electron-h-"));
     const { username, password } = loadEnvCreds();

@@ -1,8 +1,8 @@
 # ZECT Canonical Architecture
 
 **Status:** Canonical current architecture (code-backed)  
-**Date:** 2026-08-18  
-**Canonical develop:** `69816ea0435024a3cf1a441eea71db3fc157d1e2` (PR **#165** human-merged)  
+**Date:** 2026-08-19  
+**Canonical develop:** `55255f0b05240815a1547c0ea33d4317706acc99` (PR **#166** human-merged)  
 **Storage truth:** [`ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md`](ZECT_DATABASE_RAG_STORAGE_ARCHITECTURE.md)  
 **Do not start:** S8C/S8D, Graphify, KV-cache expansion, OCR/XLSX, broader Web, new agents.
 

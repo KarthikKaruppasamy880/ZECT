@@ -60,6 +60,15 @@ test.describe("full release E2E electron", () => {
         await page.getByTestId("login-submit").click();
         await expect(page.getByTestId("login-submit")).toBeHidden({ timeout: 30_000 });
       }
+      await page.getByTestId("auth-checking").waitFor({ state: "hidden", timeout: 12_000 }).catch(() => {});
+      await expect(page.getByTestId("app-sidebar")).toBeVisible({ timeout: 30_000 });
+    };
+
+    const sessionToken = async (page: Page) => {
+      const handle = await page.waitForFunction(() => localStorage.getItem("zect_token"), null, {
+        timeout: 20_000,
+      });
+      return handle.jsonValue();
     };
 
     const first = await launch();
@@ -68,7 +77,7 @@ test.describe("full release E2E electron", () => {
       await loginIfNeeded(page);
       evidence.session_after_login = true;
 
-      const token = await page.evaluate(() => localStorage.getItem("zect_token"));
+      const token = await sessionToken(page);
       const created = await page.request.post(`${API}/api/projects`, {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         data: {

@@ -1,23 +1,23 @@
 # ZECT Production-Grade Implementation Matrix
 
 **Date:** 2026-08-19  
-**Canonical develop:** `origin/develop` = `55255f0b05240815a1547c0ea33d4317706acc99` (PR **#166** human-merged).  
-**This working branch:** `feat/full-release-e2e`  
+**Canonical develop:** `origin/develop` = `797534df747ce7f5e41412273bd5965a32220fe3` (PR **#167** human-merged).  
+**This working branch:** `feat/final-release-audit`  
 **Prompt:** `prompts/ZECT_REMAINING_PRODUCTION_GRADE_MASTER_CLOSURE.md`  
-**No auto-merge.** S8C / S8D / Graphify / KV-cache / OCR-XLSX / broader Web / new-agent roadmap: **not started**. Tranche I **not started**.
+**No auto-merge.** S8C / S8D / Graphify / KV-cache / OCR-XLSX / broader Web / new-agent roadmap: **not started**.
 
-Companion PASS. Coding Agent PASS. Present/Voice PARTIAL (live Generate/Voicebox external). Work intelligence PASS. Security campaign PASS. Recovery PARTIAL (NSIS). Runtime/DB PASS. Performance PARTIAL (Voice/PG external). Accessibility PASS (#166). Full-release E2E **this PR**. Overall ZECT is **not** production-ready.
+Companion PASS. Coding Agent PASS. Present/Voice PARTIAL (live Generate/Voicebox external). Work intelligence PASS (live Jira ingest not executed; Camunda unset). Security campaign PASS. Recovery PARTIAL (NSIS). Runtime/DB PASS. Performance PARTIAL (Voice/PG external). Accessibility PASS (#166). Full-release E2E PASS (#167). Final audit **this PR**. Overall ZECT is **ZECT_PRODUCTION_PARTIAL**, not ZECT_PRODUCTION_READY.
 
 ## Git truth
 
 | Item | Value |
 |------|--------|
-| Merged | #156–**#166** (UX accessibility on develop) |
-| This PR | Tranche H full-release E2E |
+| Merged | #156–**#167** (full-release E2E on develop) |
+| This PR | Tranche I final review / release audit |
 | Unrelated WIP | leftover gap markdown / `prompts/` / `.zect/skills/` — **not** claimed complete |
 | Presenton | Product default. Native Present opt-in. **Not flipped.** |
 
-Nothing local-only is called complete. Missing evidence is not PASS.
+Nothing local-only is called complete. Missing evidence is not PASS. Skip ≠ PASS.
 
 ## Matrix
 
@@ -34,26 +34,21 @@ Nothing local-only is called complete. Missing evidence is not PASS.
 | Runtime / DB | sqlite desktop + Alembic postgres | `database.py` | **#163** | **yes** | healthz | sidecar sqlite | no URL in healthz | live PG unset | **PASS** | Live Postgres / NSIS `BLOCKED_EXTERNAL` |
 | Performance / soak | Thresholds + telemetry + isolation | `observability.py`, soak tests | **#164** + **#165** | **yes** | concurrent e2e | electron skip ≠ core | redact MCP/telemetry | Voice/PG unset | **PARTIAL** | Voicebox / live PG |
 | Accessibility / UX | Skip, keyboard, 1280–1920, named controls | Layout, Sidebar, SplitPane, pages | **#166** | **yes** | headed **PASS** CI e2e | local Electron **PASS** | no new attack surface | n/a | **PASS** | Live connectors; CodeRabbit **SKIPPED** |
-| Full-release E2E | Coherent browser + Electron journey | `full-release-e2e-*.spec.ts` | **this PR #167** | **no** until merge | headed journey + frozen core **PASS** CI | local Electron journey **PASS** | no new attack surface | n/a | **PASS** pending human merge | Live Generate/Voice/COM; CodeRabbit **SKIPPED** |
-| Architecture | Canonical + RAG/DB truth | architecture md | **#165** SHA bump | **yes** | n/a | n/a | no pgvector claim | dual-mode DB | **PASS** (docs=code) | Graphify PLANNED |
+| Full-release E2E | Coherent browser + Electron journey | `full-release-e2e-*.spec.ts` | **#167** | **yes** | headed journey + frozen core **PASS** CI | local Electron journey **PASS** | no new attack surface | n/a | **PASS** | Live Generate/Voice/COM; CI Electron not in core |
+| Final review / audit | Gate table + blocker register | `ZECT_PRODUCTION_GRADE_*` | **this PR** | **no** until merge | re-ran journey 36.8s | re-ran Electron 33.5s | security pytest | n/a | **PARTIAL** (verdict) | See blocker register; CodeRabbit **SKIPPED** |
+| Architecture | Canonical + RAG/DB truth | architecture md | SHA bump this PR | **yes** after merge | n/a | n/a | no pgvector claim | dual-mode DB | **PASS** (docs=code) | Graphify PLANNED |
 
 ## Suggested PR sequence (human-merge each)
 
 | PR | Topic | This session |
 |----|--------|----------------|
-| A–G leftover | through #166 UX sweep | **merged** |
-| H | Full-release E2E | **this PR — stop for human merge** |
-| I | final audit | **not started** |
+| A–H leftover | through #167 full-release E2E | **merged** |
+| I | Final review / release audit | **this PR — stop for human merge** |
 
-## This PR (Tranche H)
+## This PR (Tranche I)
 
-Human-merge after CI. Remaining **outside** this tranche:
+Human-merge after CI. No roadmap work. Remaining **open** blockers are in `ZECT_PRODUCTION_GRADE_BLOCKER_REGISTER.md`.
 
-- Live PostgreSQL / Voicebox / Presenton Generate / GitHub / Jira / Camunda / PowerPoint COM = **BLOCKED_EXTERNAL**
-- Clean-machine Windows NSIS = **BLOCKED_EXTERNAL**
-- Final review / release audit (tranche I)
-- Graphify / S8C / S8D
+## Verdict
 
-## Verdict so far
-
-**ZECT_PRODUCTION_PARTIAL.** Canonical develop is `55255f0` post-#166. This PR closes the full-release E2E journey; it does **not** make overall ZECT production-grade.
+**ZECT_PRODUCTION_PARTIAL.** Canonical develop is `797534d` post-#167. This PR records the final audit; it does **not** make overall ZECT production-grade.

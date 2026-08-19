@@ -158,8 +158,8 @@ export default function Playbooks() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6" data-testid="playbooks-page">
-      <div className="flex items-center justify-between">
+    <div className="zect-page max-w-6xl mx-auto space-y-6" data-testid="playbooks-page">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-purple-600" /> Playbooks
@@ -170,6 +170,7 @@ export default function Playbooks() {
           </p>
         </div>
         <button
+          type="button"
           onClick={() => { setShowCreate(true); setEditId(null); resetForm(); }}
           className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
         >
@@ -178,7 +179,7 @@ export default function Playbooks() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert" data-testid="playbooks-error">{error}</div>
       )}
 
       {lastRun && (

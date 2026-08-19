@@ -38,9 +38,12 @@ export default function Layout({ onLogout }: LayoutProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "b") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         handleToggle();
+      }
+      if (e.key === "Escape") {
+        setMobileOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -49,7 +52,21 @@ export default function Layout({ onLogout }: LayoutProps) {
 
   return (
     <MentrixSessionProvider>
-      <div className={`min-h-screen ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
+      <div className={`min-h-screen overflow-x-hidden ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
+        <a
+          href="#zect-main"
+          className="zect-skip-link"
+          data-testid="skip-to-main"
+          onClick={(e) => {
+            const main = document.getElementById("zect-main");
+            if (!main) return;
+            e.preventDefault();
+            main.focus();
+            main.scrollIntoView({ block: "start" });
+          }}
+        >
+          Skip to main content
+        </a>
         <Sidebar
           onLogout={onLogout}
           collapsed={collapsed}
@@ -58,12 +75,12 @@ export default function Layout({ onLogout }: LayoutProps) {
           onMobileClose={handleMobileClose}
         />
         <div
-          className={`transition-all duration-200 ease-in-out ${
+          className={`min-w-0 transition-all duration-200 ease-in-out ${
             collapsed ? "md:ml-16" : "md:ml-56"
           }`}
         >
           {!mentrixHud && (
-            <div className="hidden md:flex items-center justify-between px-6 py-2 border-b border-slate-200 bg-white">
+            <div className="hidden md:flex min-w-0 items-center justify-between gap-3 overflow-x-auto px-4 py-2 border-b border-slate-200 bg-white lg:px-6">
               <ProjectRepoSelector />
               <div className="flex items-center gap-3">
                 <MentrixWakeBridge />
@@ -84,7 +101,12 @@ export default function Layout({ onLogout }: LayoutProps) {
               <MentrixWakeBridge />
             </div>
           )}
-          <main className={mentrixHud ? "p-0" : "p-4 md:p-6 pt-16 md:pt-4"}>
+          <main
+            id="zect-main"
+            tabIndex={-1}
+            data-testid="zect-main"
+            className={mentrixHud ? "p-0 min-w-0" : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"}
+          >
             <Outlet />
           </main>
         </div>

@@ -219,7 +219,7 @@ export default function LatticeGraph() {
   ).length;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 p-1" data-testid="lattice-page">
+    <div className="max-w-6xl mx-auto space-y-6 p-1 zect-page" data-testid="lattice-page">
       <div className="flex items-start gap-3">
         <div className="p-2 rounded-lg bg-slate-800 border border-slate-700">
           <Network className="h-6 w-6 text-teal-400" />
@@ -334,7 +334,7 @@ export default function LatticeGraph() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" data-testid="lattice-error">
           {error}
         </div>
       )}

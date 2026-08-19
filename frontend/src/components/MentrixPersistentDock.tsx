@@ -2,6 +2,7 @@
  * Floating Mentrix dock — survives route changes; hidden on full HUD path.
  */
 import { Link, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { Bot, Mic, MicOff, Send, X } from "lucide-react";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 import MentrixConfirmModal from "@/components/MentrixConfirmModal";
@@ -11,6 +12,15 @@ export default function MentrixPersistentDock() {
   const location = useLocation();
   const hideChrome = location.pathname === "/mentrix-home";
   const s = useMentrixSession();
+
+  useEffect(() => {
+    if (hideChrome || !s.dockExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") s.setDockExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hideChrome, s.dockExpanded, s.setDockExpanded]);
 
   if (hideChrome) {
     // Full HUD owns chrome; Keep Allow modal available if pending while on HUD
@@ -185,6 +195,7 @@ export default function MentrixPersistentDock() {
                 <button
                   type="button"
                   data-testid="mentrix-dock-send"
+                  aria-label="Send message"
                   disabled={s.loading || !s.input.trim()}
                   onClick={() => void s.onSend()}
                   className="rounded-lg bg-teal-600 p-2 disabled:opacity-40"
@@ -198,6 +209,8 @@ export default function MentrixPersistentDock() {
           <button
             type="button"
             data-testid="mentrix-dock-collapsed"
+            aria-expanded="false"
+            aria-label="Expand Mentrix dock"
             onClick={() => s.setDockExpanded(true)}
             className="ml-auto flex items-center gap-2 rounded-full border border-teal-700/70 bg-slate-950/95 px-3 py-2 text-left shadow-xl backdrop-blur hover:border-teal-500"
           >

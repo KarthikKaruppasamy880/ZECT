@@ -11,7 +11,7 @@
     "test": "vitest run --exclude **/e2e/**",
     "test:watch": "vitest --exclude **/e2e/**",
     "test:e2e": "playwright test",
-    "test:e2e:core": "playwright test e2e/mentrix-smoke.spec.ts e2e/labs-productivity-spine.spec.ts e2e/mentrix-companion.spec.ts e2e/mentrix-incident.spec.ts e2e/agent-workspace-shell.spec.ts e2e/phase-completion-smoke.spec.ts e2e/core-ux-hygiene.spec.ts e2e/workspace-multi-root.spec.ts e2e/companion-production-missions.spec.ts e2e/coding-agent-production.spec.ts e2e/present-voice-production.spec.ts e2e/work-intelligence-production.spec.ts e2e/security-production.spec.ts e2e/runtime-recovery-production.spec.ts e2e/concurrent-isolation-production.spec.ts",
+    "test:e2e:core": "playwright test e2e/mentrix-smoke.spec.ts e2e/labs-productivity-spine.spec.ts e2e/mentrix-companion.spec.ts e2e/mentrix-incident.spec.ts e2e/agent-workspace-shell.spec.ts e2e/phase-completion-smoke.spec.ts e2e/core-ux-hygiene.spec.ts e2e/workspace-multi-root.spec.ts e2e/companion-production-missions.spec.ts e2e/coding-agent-production.spec.ts e2e/present-voice-production.spec.ts e2e/work-intelligence-production.spec.ts e2e/security-production.spec.ts e2e/runtime-recovery-production.spec.ts e2e/concurrent-isolation-production.spec.ts e2e/ux-accessibility-production.spec.ts",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {

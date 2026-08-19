@@ -26,7 +26,7 @@
     --zect-font-xs: 0.75rem;
     --zect-font-sm: 0.875rem;
     --zect-font-md: 1rem;
-    --zect-z-dropdown: 40;
+    --zect-z-dropdown: 45;
     --zect-z-modal: 50;
   }
   :focus-visible {
@@ -121,5 +121,29 @@
   .zect-empty {
     color: var(--zect-muted);
     font-size: var(--zect-font-sm);
+  }
+  .zect-dropdown {
+    z-index: var(--zect-z-dropdown);
+  }
+  .zect-skip-link {
+    position: absolute;
+    left: -10000px;
+    top: 0.75rem;
+    z-index: 60;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius);
+    background: #0f766e;
+    color: #fff;
+    font-size: 0.875rem;
+  }
+  .zect-skip-link:focus,
+  .zect-skip-link:focus-visible {
+    left: 0.75rem;
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+  .zect-page {
+    min-width: 0;
+    max-width: 100%;
   }
 }

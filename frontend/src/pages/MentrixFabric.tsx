@@ -20,12 +20,24 @@ export default function MentrixFabric() {
   const [busy, setBusy] = useState(false);
   const [jiraStatus, setJiraStatus] = useState("unknown");
   const [camundaStatus, setCamundaStatus] = useState("unknown");
+  const [surfacesError, setSurfacesError] = useState("");
+  const [surfacesLoading, setSurfacesLoading] = useState(true);
 
   const refresh = async () => {
-    const res = await apiFetch("/api/fabric/surfaces");
-    if (res.ok) {
-      const body = await res.json();
-      setSurfaces(body.items || []);
+    setSurfacesLoading(true);
+    setSurfacesError("");
+    try {
+      const res = await apiFetch("/api/fabric/surfaces");
+      if (res.ok) {
+        const body = await res.json();
+        setSurfaces(body.items || []);
+      } else {
+        setSurfacesError("Failed to load process surfaces");
+      }
+    } catch {
+      setSurfacesError("Failed to load process surfaces");
+    } finally {
+      setSurfacesLoading(false);
     }
   };
 
@@ -104,7 +116,7 @@ export default function MentrixFabric() {
   };
 
   return (
-    <div data-testid="mentrix-fabric-page">
+    <div className="zect-page" data-testid="mentrix-fabric-page">
       <div className="mb-6 flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -130,7 +142,13 @@ export default function MentrixFabric() {
             </span>
           </div>
         </div>
-        <button type="button" onClick={() => refresh()} className="p-2 rounded hover:bg-slate-100">
+        <button
+          type="button"
+          onClick={() => refresh()}
+          className="p-2 rounded hover:bg-slate-100"
+          aria-label="Refresh process surfaces"
+          data-testid="process-surfaces-refresh"
+        >
           <RefreshCw className="h-4 w-4 text-slate-500" />
         </button>
       </div>
@@ -169,6 +187,16 @@ export default function MentrixFabric() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <h2 className="text-sm font-semibold text-slate-800 mb-3">Surfaces</h2>
+          {surfacesLoading && (
+            <p className="text-xs text-slate-500" role="status" data-testid="process-surfaces-loading">
+              Loading surfaces…
+            </p>
+          )}
+          {surfacesError && (
+            <p className="text-xs text-red-600" role="alert" data-testid="process-surfaces-error">
+              {surfacesError}
+            </p>
+          )}
           <ul className="space-y-2 max-h-80 overflow-y-auto">
             {surfaces.map((s) => (
               <li key={s.surface_id} className="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded-lg">
@@ -182,6 +210,8 @@ export default function MentrixFabric() {
                 <button
                   type="button"
                   onClick={() => toggleActive(s)}
+                  aria-pressed={s.active}
+                  aria-label={`${s.label} ${s.active ? "active" : "inactive"}`}
                   className={`text-xs px-2 py-1 rounded ${
                     s.active ? "bg-teal-100 text-teal-800" : "bg-slate-200 text-slate-600"
                   }`}
@@ -199,6 +229,7 @@ export default function MentrixFabric() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={5}
+            aria-label="Classify process goal"
             placeholder="Describe the goal (e.g. BPMN change plus NGC rules)"
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm mb-3"
           />

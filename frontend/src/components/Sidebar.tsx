@@ -188,6 +188,8 @@ export default function Sidebar({
         <Link
           to={item.href}
           title={collapsed ? item.label : undefined}
+          aria-label={item.label}
+          aria-current={active ? "page" : undefined}
           className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
             collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
           } text-sm transition-colors ${
@@ -196,7 +198,7 @@ export default function Sidebar({
               : "hover:bg-slate-800/60 hover:text-white"
           }`}
         >
-          <Icon className="h-4 w-4 shrink-0" />
+          <Icon className="h-4 w-4 shrink-0" aria-hidden />
           {!collapsed && <span>{item.label}</span>}
         </Link>
       </li>
@@ -206,18 +208,18 @@ export default function Sidebar({
   const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
     <div key={title}>
       {!collapsed ? (
-        <p
+        <h2
           className={`px-2 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 ${
             isFirst ? "" : "mt-6"
           }`}
         >
           {title}
           {title === "Operations" && (
-            <FlaskConical className="inline h-3 w-3 ml-1 opacity-60" />
+            <FlaskConical className="inline h-3 w-3 ml-1 opacity-60" aria-hidden />
           )}
-        </p>
+        </h2>
       ) : (
-        !isFirst && <div className="my-4 border-t border-slate-700" />
+        !isFirst && <div className="my-4 border-t border-slate-700" role="separator" />
       )}
       <ul className="space-y-0.5">
         {items.map((item) => renderNavLink(item))}
@@ -228,11 +230,13 @@ export default function Sidebar({
                 <button
                   type="button"
                   data-testid="sidebar-labs-more"
+                  aria-expanded={settingsMoreOpen}
                   onClick={() => setSettingsMoreOpen((o) => !o)}
                   className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-white"
                 >
                   <ChevronDown
                     className={`h-4 w-4 shrink-0 transition-transform ${settingsMoreOpen ? "" : "-rotate-90"}`}
+                    aria-hidden
                   />
                   <span>More settings</span>
                 </button>
@@ -267,8 +271,11 @@ export default function Sidebar({
             </div>
           )}
           <button
+            type="button"
             onClick={onToggle}
             data-testid="sidebar-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
             className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
             title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
           >
@@ -277,7 +284,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-4">
+      <nav className="flex-1 overflow-y-auto px-2 py-4" aria-label="Primary">
         {navSections.map((section, idx) => renderSection(section.title, section.items, idx === 0))}
       </nav>
 
@@ -288,6 +295,7 @@ export default function Sidebar({
         <Link
           to="/settings"
           title={collapsed ? "Settings" : undefined}
+          aria-label="Settings"
           data-testid="sidebar-user-settings"
           className={`flex items-center ${
             collapsed ? "justify-center" : "gap-2.5"
@@ -315,7 +323,9 @@ export default function Sidebar({
         </Link>
         {onLogout && (
           <button
+            type="button"
             onClick={onLogout}
+            aria-label="Sign out"
             title={collapsed ? "Sign Out" : undefined}
             className={`mt-1 flex w-full items-center ${
               collapsed ? "justify-center" : "gap-2 px-2"
@@ -329,8 +339,11 @@ export default function Sidebar({
 
       <div className="hidden md:block border-t border-slate-700 p-2">
         <button
+          type="button"
           onClick={onToggle}
           data-testid="sidebar-toggle-footer"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
           className="w-full flex items-center justify-center gap-1.5 p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-xs"
           title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >
@@ -350,9 +363,12 @@ export default function Sidebar({
   return (
     <>
       <button
+        type="button"
         onClick={onToggle}
         className="md:hidden fixed top-3 left-3 z-50 p-2.5 bg-slate-900 text-white rounded-xl shadow-lg border border-slate-700"
-        aria-label="Toggle navigation"
+        aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+        aria-expanded={mobileOpen}
+        data-testid="sidebar-mobile-toggle"
       >
         {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </button>
@@ -361,6 +377,7 @@ export default function Sidebar({
         <div
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
           onClick={onMobileClose}
+          data-testid="sidebar-mobile-backdrop"
         />
       )}
 
@@ -368,6 +385,8 @@ export default function Sidebar({
         className={`md:hidden fixed left-0 top-0 z-50 h-screen w-64 bg-slate-900 text-slate-300 flex flex-col transform transition-transform duration-200 ease-in-out ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
+        aria-hidden={!mobileOpen}
+        aria-label="Mobile navigation"
       >
         {sidebarContent}
       </aside>
@@ -377,6 +396,7 @@ export default function Sidebar({
           collapsed ? "w-16" : "w-56"
         }`}
         data-testid="app-sidebar"
+        aria-label="Primary navigation"
       >
         {sidebarContent}
       </aside>

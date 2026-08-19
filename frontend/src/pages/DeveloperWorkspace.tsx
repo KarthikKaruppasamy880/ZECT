@@ -723,7 +723,7 @@ export default function DeveloperWorkspace() {
     });
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100vh-7rem)]" data-testid="developer-workspace">
+    <div className="zect-page flex flex-col gap-3 h-[calc(100vh-7rem)] min-w-0" data-testid="developer-workspace">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
@@ -747,6 +747,7 @@ export default function DeveloperWorkspace() {
           <button
             type="button"
             data-testid="workspace-toggle-explorer"
+            aria-pressed={showExplorer}
             onClick={() => setShowExplorer((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
           >
@@ -755,6 +756,7 @@ export default function DeveloperWorkspace() {
           <button
             type="button"
             data-testid="workspace-toggle-agent"
+            aria-pressed={showAgent}
             onClick={() => setShowAgent((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
           >
@@ -763,6 +765,7 @@ export default function DeveloperWorkspace() {
           <button
             type="button"
             data-testid="workspace-toggle-bottom"
+            aria-pressed={showBottom}
             onClick={() => setShowBottom((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
           >
@@ -771,6 +774,7 @@ export default function DeveloperWorkspace() {
           <button
             type="button"
             data-testid="workspace-toggle-context"
+            aria-pressed={showContext}
             onClick={() => {
               setShowContext((v) => !v);
             }}

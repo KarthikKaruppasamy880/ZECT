@@ -79,8 +79,9 @@ const LazyDeployPhase = lazy(() => import("@/pages/DeployPhase"));
 
 function PageLoader() {
   return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+    <div className="flex items-center justify-center h-64" role="status" aria-live="polite" data-testid="page-loader">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" aria-hidden />
+      <span className="sr-only">Loading</span>
     </div>
   );
 }
@@ -90,18 +91,39 @@ export default function App() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const token = localStorage.getItem("zect_token");
-    if (token) {
-      verifyToken(token)
-        .then(() => setAuthenticated(true))
-        .catch(() => {
-          localStorage.removeItem("zect_token");
-          setAuthenticated(false);
-        })
-        .finally(() => setChecking(false));
-    } else {
+    if (!token) {
       setChecking(false);
+      setAuthenticated(false);
+      return;
     }
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 8_000);
+    verifyToken(token, { signal: ac.signal })
+      .then(() => {
+        if (!cancelled) setAuthenticated(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const aborted = err instanceof Error && err.name === "AbortError";
+        if (aborted) {
+          // Slow API must not trap the operator on an infinite loader.
+          setAuthenticated(true);
+          return;
+        }
+        localStorage.removeItem("zect_token");
+        setAuthenticated(false);
+      })
+      .finally(() => {
+        window.clearTimeout(timer);
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      ac.abort();
+    };
   }, []);
 
   const handleLogin = (token: string) => {
@@ -129,8 +151,14 @@ export default function App() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-white text-lg">Loading...</div>
+      <div
+        className="min-h-screen bg-slate-900 flex items-center justify-center"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        data-testid="auth-checking"
+      >
+        <div className="text-white text-lg">Loading…</div>
       </div>
     );
   }

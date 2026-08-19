@@ -89,6 +89,7 @@ export default function SplitPane({
         aria-valuenow={Math.round(pct)}
         aria-valuemin={min}
         aria-valuemax={max}
+        aria-valuetext={`${Math.round(pct)} percent`}
         aria-label="Resize panels"
         data-testid={`${testId || "split"}-handle`}
         className={
@@ -104,6 +105,21 @@ export default function SplitPane({
         }}
         onKeyDown={(e) => {
           const step = e.shiftKey ? 5 : 2;
+          if (e.key === "Escape") {
+            e.preventDefault();
+            dragging.current = false;
+            return;
+          }
+          if (e.key === "Home") {
+            e.preventDefault();
+            setPct(min);
+            return;
+          }
+          if (e.key === "End") {
+            e.preventDefault();
+            setPct(max);
+            return;
+          }
           if (horizontal && e.key === "ArrowLeft") {
             e.preventDefault();
             nudge(-step);

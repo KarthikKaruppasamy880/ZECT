@@ -1,11 +1,11 @@
 # ZECT Release Profile Acceptance
 
 **Date:** 2026-08-19  
-**Canonical develop:** `394cf272c9332754ad9b0b9d5819921ad81fccd6` (PR **#168** human-merged)  
-**Branch:** `feat/release-profile-reconciliation`  
-**Stop:** `READY_TO_MERGE_RELEASE_PROFILES` — human merge only, no auto-merge.
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2` (PRs **#169–#172** human-merged)  
+**Branch:** `develop` after **#172**  
+**Stop:** human merge only, no auto-merge.
 
-This tranche is profile reconciliation only. Graphify (G1–G7), Desktop Control (D1–D2), Present Advanced (P1–P3), and local stack control (`zect.ps1`) are **not started**.
+Release-profile reconciliation (#169) remains in force. Graphify/Lattice spine (#170), `zect.ps1` (#171), and desktop/Present control (#172) are **on develop**. Optional GitHub / Jira / Camunda / Presenton / Voicebox / NSIS remain **BLOCKED_EXTERNAL** and do not block Core.
 
 ## Verdicts
 

@@ -1,7 +1,7 @@
 # ZECT Database / RAG / Storage Architecture
 
 **Date:** 2026-08-19  
-**Canonical develop:** `394cf272c9332754ad9b0b9d5819921ad81fccd6` (PR **#168** human-merged)  
+**Canonical develop:** `0dd7becb2c98b7e6c368bee10392925d1f3d57f2` (PRs **#170–#172** human-merged)  
 **Prompt:** `prompts/ZECT_PERFORMANCE_RELIABILITY_OBSERVABILITY_AND_ARCHITECTURE_CLOSURE.md` §7  
 **Rule:** Documentation follows **code**, not assumptions. PostgreSQL/pgvector are not labeled as RAG stores unless implemented.
 
@@ -27,7 +27,7 @@ Misleading comments (`pgvector-ready`, “pgvector when available”) were corre
 | Sessions / auth | App DB | `users`, `auth_tokens`, `user_sessions`, `persistent_sessions`, `session_messages` | ORM + catch-up | Both | Durable | DB backup | `models.py` | Implemented |
 | Projects / repos | App DB | `projects`, `repos` | ORM + catch-up | Both | Durable | DB backup | `models.py` | Implemented |
 | WorkItems | App DB + filesystem | `work_items`, `work_item_events`; `.zect/work/{id}/` | ORM + catch-up | Both | DB + PLAN.md / EVIDENCE.json | Rebuild PLAN from DB metadata; artifacts are engineering SoT | `models.py`, `artifact_store.py` | Implemented |
-| Lattice graph | Filesystem JSON + RAM | `{LATTICE_CACHE_DIR}/{sha1}.json`, `_GRAPH_CACHE` | None (rebuildable) | Both | File + RAM | Re-run `/api/lattice/ingest` | `lattice/indexer.py` | Implemented |
+| Lattice graph | Filesystem JSON + RAM | `{LATTICE_CACHE_DIR}/{sha1}.json`, `_GRAPH_CACHE`; `GraphifySnapshot` is an adapter over this store (not a second DB) | None (rebuildable) | Both | File + RAM | Re-run `/api/lattice/ingest` | `lattice/indexer.py`, `graphify_snapshot.py` | Implemented |
 | Lattice blueprint | App DB | `lattice_structural_blueprints` | ORM + catch-up | Both | Durable | Rebuild `build_structural_blueprint` | `structural_blueprint.py` | Implemented |
 | RAG (Lattice path) | App DB | `embedding_chunks` (`embedding_json` TEXT) | ORM | Both | Durable | Re-index `index_directory` | `rag/retriever.py` | Implemented — bag-of-tokens, not pgvector |
 | Build semantic index | App DB | `code_embeddings` (JSON floats) | ORM | Both | Durable | Re-run `index_repo_semantic` | `build_intel/` | Implemented — Python cosine |

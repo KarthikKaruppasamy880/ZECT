@@ -63,10 +63,18 @@ test.describe("Mentrix Companion", () => {
     await expect(page).toHaveURL(/\/sandbox/, { timeout: 45_000 });
   });
 
-  test("Connect Voice button toggles", async ({ page }) => {
+  test("Connect Voice is honest when realtime is unavailable", async ({ page }) => {
     await page.goto("/mentrix-home");
+    const btn = page.getByTestId("mentrix-connect-voice");
+    await expect(btn).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-realtime-status")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("mentrix-connect-voice").click();
+    if (!(await btn.isEnabled())) {
+      await expect(page.getByTestId("mentrix-realtime-status")).toContainText(
+        /Realtime unavailable|OPENAI_API_KEY|Retry|unavailable/i,
+      );
+      return;
+    }
+    await btn.click();
     await expect(page.getByTestId("mentrix-live-log")).toContainText(/Connect Voice|Realtime|fallback|listening/i, {
       timeout: 30_000,
     });

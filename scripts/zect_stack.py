@@ -101,6 +101,35 @@ def redact(text: str) -> str:
     return SECRET_RE.sub(lambda m: m.group(1) + "=[redacted]", text or "")
 
 
+def load_env_file(path: Path) -> dict[str, str]:
+    """Parse KEY=value lines. Never log values."""
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, val = stripped.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        out[key] = val.strip().strip('"').strip("'")
+    return out
+
+
+def ensure_frontend_vite_api_url(root: Path | None = None) -> Path:
+    """Match scripts/start-local.ps1: Vite must call local API :8020, not CI :8000."""
+    frontend = (root or repo_root()) / "frontend"
+    env_local = frontend / ".env.local"
+    env_local.write_text("VITE_API_URL=http://127.0.0.1:8020\n", encoding="utf-8")
+    return env_local
+
+
 def profile_order(cfg: dict[str, Any], profile: str) -> list[str]:
     names = list(cfg.get("profiles", {}).get(profile) or [])
     if not names:
@@ -206,10 +235,12 @@ def resolve_python() -> list[str]:
 
 def expand_argv(argv: list[str], root: Path) -> list[str]:
     python = resolve_python()
+    npm = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
     mapping = {
         "{python}": python,
         "{backend}": [str(root / "backend")],
         "{root}": [str(root)],
+        "npm": [npm],
     }
     py = " ".join(python)
     out: list[str] = []
@@ -370,6 +401,11 @@ def start_service(
     extra = row.get("env") or {}
     if isinstance(extra, dict):
         env.update({str(k): str(v) for k, v in extra.items()})
+    if name == "backend":
+        for key, val in load_env_file(root / "backend" / ".env").items():
+            env.setdefault(key, val)
+    if name == "frontend":
+        ensure_frontend_vite_api_url(root)
     cmd = expand_argv(argv, root)
     flags = 0
     if os.name == "nt":

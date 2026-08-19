@@ -105,3 +105,28 @@ def test_restart_one_service_does_not_stop_others(monkeypatch, tmp_path: Path):
     assert started == ["backend"]
     assert "frontend" not in stopped
     assert "electron" not in started
+
+
+def test_backend_env_file_loaded_without_logging_values(tmp_path: Path):
+    env = tmp_path / ".env"
+    env.write_text("DATABASE_URL=sqlite:///./secret.db\nOPENAI_API_KEY=sk-live-secret\n", encoding="utf-8")
+    parsed = zect_stack.load_env_file(env)
+    assert parsed["DATABASE_URL"].startswith("sqlite:///")
+    assert parsed["OPENAI_API_KEY"] == "sk-live-secret"
+    dumped = zect_stack.redact("OPENAI_API_KEY=" + parsed["OPENAI_API_KEY"])
+    assert "sk-live-secret" not in dumped
+
+
+def test_frontend_vite_url_is_local_8020_not_ci_8000(tmp_path: Path):
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    written = zect_stack.ensure_frontend_vite_api_url(tmp_path)
+    text = written.read_text(encoding="utf-8")
+    assert "127.0.0.1:8020" in text
+    assert "8000" not in text
+
+
+def test_expand_argv_resolves_npm_on_windows():
+    argv = zect_stack.expand_argv(["npm", "run", "dev"], zect_stack.repo_root())
+    assert argv[0].lower().endswith("npm.cmd") or argv[0].lower().endswith("npm")
+    assert argv[1:] == ["run", "dev"]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { authHeaders, getApiBase, indexClonedRepo } from "@/lib/api";
+import { authHeaders, getApiBase, indexClonedRepo, latticeIngest } from "@/lib/api";
 
 type LatticeSnap = {
   state?: string;
@@ -8,7 +8,9 @@ type LatticeSnap = {
   action?: string | null;
   action_label?: string;
   repository_id?: number | null;
-  detail?: { indexed_at?: string | null; files_indexed?: number; reason?: string };
+  project_key?: string;
+  local_path?: string;
+  detail?: { indexed_at?: string | null; files_indexed?: number; reason?: string; local_path?: string };
 };
 
 export default function ProjectIntelligencePage() {
@@ -51,8 +53,15 @@ export default function ProjectIntelligencePage() {
     }
     setIndexNote("Indexing…");
     try {
-      await indexClonedRepo(repoId);
-      setIndexNote("Index requested. Refresh to see READY or STALE.");
+      const localPath = String(lattice.local_path || lattice.detail?.local_path || "").trim();
+      const projectKey = String(lattice.project_key || "").trim();
+      if (localPath) {
+        await latticeIngest(localPath, projectKey || localPath, true, true);
+        setIndexNote("Lattice ingest requested. Refresh to see READY or STALE.");
+      } else {
+        await indexClonedRepo(repoId);
+        setIndexNote("Symbol index requested (no local path). Bind a clone for Lattice ingest.");
+      }
       await load();
     } catch (e: unknown) {
       setIndexNote(e instanceof Error ? e.message : "Index failed");
@@ -76,7 +85,12 @@ export default function ProjectIntelligencePage() {
         {lattice.detail?.indexed_at ? (
           <span className="text-xs text-slate-500">Indexed {lattice.detail.indexed_at}</span>
         ) : null}
-        <button type="button" className="zect-btn zect-btn-secondary text-xs" onClick={() => void handleIndex()}>
+        <button
+          type="button"
+          className="zect-btn zect-btn-secondary text-xs"
+          data-testid="pi-index-repository"
+          onClick={() => void handleIndex()}
+        >
           {state === "READY" || state === "STALE" ? "Re-index" : "Index Repository"}
         </button>
         <Link to="/lattice" className="zect-btn zect-btn-primary text-xs">

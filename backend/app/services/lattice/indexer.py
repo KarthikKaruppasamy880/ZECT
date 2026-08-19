@@ -15,7 +15,15 @@ from typing import Any
 SKIP_DIRS = {
     "node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build",
     ".next", "target", "coverage", ".tox", ".mypy_cache",
+    "vendor", "third_party", "generated", ".zect", "dist-electron", ".eggs",
 }
+
+SKIP_FILE_SUFFIXES = {
+    ".env", ".pem", ".key", ".exe", ".dll", ".so", ".dylib", ".png", ".jpg",
+    ".jpeg", ".gif", ".webp", ".zip", ".pptx", ".ppt", ".pdf", ".woff", ".wasm",
+}
+
+SKIP_FILE_NAMES = {".env", "id_rsa", "credentials.json", "secrets.json"}
 
 LANG_EXTS = {
     ".py": "python",
@@ -60,6 +68,9 @@ class LatticeGraph:
     doc_files_indexed: int = 0
     wikilinks_resolved: int = 0
     wikilinks_unresolved: int = 0
+    commit_sha: str = ""
+    incremental: bool = False
+    cross_repo_edges: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +84,9 @@ class LatticeGraph:
             "doc_files_indexed": self.doc_files_indexed,
             "wikilinks_resolved": self.wikilinks_resolved,
             "wikilinks_unresolved": self.wikilinks_unresolved,
+            "commit_sha": self.commit_sha,
+            "incremental": self.incremental,
+            "cross_repo_edges": list(self.cross_repo_edges),
         }
 
 
@@ -114,6 +128,57 @@ def _cache_dir() -> Path:
 
 def _node_id(path: str, kind: str, name: str) -> str:
     return hashlib.sha1(f"{path}:{kind}:{name}".encode()).hexdigest()[:16]
+
+
+def _is_test_path(rel: str) -> bool:
+    norm = rel.replace("\\", "/").lower()
+    name = Path(norm).name
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or ".spec." in name
+        or ".test." in name
+        or "/tests/" in f"/{norm}/"
+        or "/test/" in f"/{norm}/"
+        or "/__tests__/" in f"/{norm}/"
+    )
+
+
+def _skip_file(fname: str) -> bool:
+    lower = fname.lower()
+    if lower in SKIP_FILE_NAMES or fname in SKIP_FILE_NAMES:
+        return True
+    return Path(lower).suffix in SKIP_FILE_SUFFIXES
+
+
+def _apply_codeowners(root_path: Path, graph: LatticeGraph) -> None:
+    owners = root_path / "CODEOWNERS"
+    if not owners.is_file():
+        owners = root_path / ".github" / "CODEOWNERS"
+    if not owners.is_file():
+        return
+    rules: list[tuple[str, str]] = []
+    try:
+        text = owners.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        parts = stripped.split()
+        if len(parts) >= 2:
+            rules.append((parts[0].lstrip("/"), parts[-1]))
+    if not rules:
+        return
+    for node in graph.nodes:
+        if node.kind != "file":
+            continue
+        path = node.path.replace("\\", "/")
+        for pat, owner in rules:
+            needle = pat.lstrip("*").lstrip("/")
+            if pat == "*" or path.endswith(needle) or needle in path:
+                node.group = owner
 
 
 def _add_node(graph: LatticeGraph, node: GraphNode, seen: set[str]) -> str:
@@ -514,17 +579,32 @@ def ingest_path(
     max_files: int = 2000,
     index_docs: bool = True,
     cancel_check=None,
+    force: bool = False,
 ) -> LatticeGraph:
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
     key = project_key or str(root_path)
-    graph = LatticeGraph(project_key=key)
+    live_sha = ""
+    try:
+        from app.services.work_items.multi_repo_context import git_head_sha
+
+        live_sha = git_head_sha(str(root_path)) or ""
+    except Exception:  # noqa: BLE001
+        live_sha = ""
+    if not force and live_sha:
+        existing = get_graph(key)
+        if existing and existing.commit_sha and existing.commit_sha == live_sha:
+            existing.incremental = True
+            return existing
+    graph = LatticeGraph(project_key=key, commit_sha=live_sha, incremental=False)
     seen: set[str] = set()
     count = 0
     for dirpath, dirnames, filenames in os.walk(root_path):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
         for fname in filenames:
+            if _skip_file(fname):
+                continue
             ext = Path(fname).suffix.lower()
             lang = LANG_EXTS.get(ext)
             if not lang:
@@ -541,10 +621,29 @@ def ingest_path(
             if cancel_check is not None and cancel_check():
                 raise LatticeCancelled("lattice_cancelled")
             _FILE_HASH[cache_key] = digest
-            if lang == "python":
-                _parse_python(rel, content, graph, seen)
-            else:
-                _parse_regex(rel, content, lang, graph, seen)
+            try:
+                if lang == "python":
+                    _parse_python(rel, content, graph, seen)
+                else:
+                    _parse_regex(rel, content, lang, graph, seen)
+            except Exception as exc:  # noqa: BLE001
+                graph.errors.append(f"{rel}: parse {exc}")
+                continue
+            if _is_test_path(rel):
+                test_id = _add_node(
+                    graph,
+                    GraphNode(
+                        id=_node_id(rel, "test", Path(rel).name),
+                        kind="test",
+                        name=Path(rel).name,
+                        path=rel,
+                        language=lang,
+                    ),
+                    seen,
+                )
+                graph.edges.append(
+                    GraphEdge(source=_node_id(rel, "file", rel), target=test_id, kind="test_of")
+                )
             graph.languages[lang] = graph.languages.get(lang, 0) + 1
             count += 1
             if count >= max_files:
@@ -553,6 +652,7 @@ def ingest_path(
         if count >= max_files:
             break
     graph.files_indexed = count
+    _apply_codeowners(root_path, graph)
     _resolve_imports(graph, seen)
     if index_docs and os.getenv("LATTICE_INDEX_DOCS", "1").strip().lower() not in ("0", "false", "off"):
         from app.services.lattice.markdown_graph import ingest_markdown_graph
@@ -586,7 +686,11 @@ def get_graph(project_key: str) -> LatticeGraph | None:
         g = LatticeGraph(
             project_key=data["project_key"],
             nodes=[_node_from_dict(n) for n in data.get("nodes", [])],
-            edges=[GraphEdge(**e) for e in data.get("edges", [])],
+            edges=[
+                GraphEdge(source=e["source"], target=e["target"], kind=e["kind"])
+                for e in data.get("edges", [])
+                if e.get("source") and e.get("target") and e.get("kind")
+            ],
             files_indexed=data.get("files_indexed", 0),
             symbols=data.get("symbols", 0),
             languages=data.get("languages", {}),
@@ -594,10 +698,24 @@ def get_graph(project_key: str) -> LatticeGraph | None:
             doc_files_indexed=data.get("doc_files_indexed", 0),
             wikilinks_resolved=data.get("wikilinks_resolved", 0),
             wikilinks_unresolved=data.get("wikilinks_unresolved", 0),
+            commit_sha=str(data.get("commit_sha") or ""),
+            incremental=bool(data.get("incremental")),
+            cross_repo_edges=list(data.get("cross_repo_edges") or []),
         )
         _GRAPH_CACHE[project_key] = g
         return g
     return None
+
+
+def attach_cross_repo_edge(project_key: str, edge: dict[str, Any]) -> LatticeGraph:
+    g = get_graph(project_key)
+    if g is None:
+        raise FileNotFoundError(f"No Lattice graph for {project_key}; ingest first")
+    g.cross_repo_edges.append(edge)
+    _GRAPH_CACHE[project_key] = g
+    out = _cache_dir() / f"{hashlib.sha1(project_key.encode()).hexdigest()}.json"
+    out.write_text(json.dumps(g.to_dict()), encoding="utf-8")
+    return g
 
 
 LATTICE_STATES = (
@@ -640,6 +758,7 @@ def get_lattice_status(
             repo = None
 
     clone_status = str(getattr(repo, "clone_status", "") or "")
+    local_path = str(getattr(repo, "local_path", "") or "") if repo is not None else ""
     stats = getattr(repo, "index_stats", None) if repo is not None else None
     indexing_flag = str(stats.get("indexing") or "") if isinstance(stats, dict) else ""
     if clone_status == "cloning" or indexing_flag.lower() in {"1", "true"}:
@@ -651,6 +770,8 @@ def get_lattice_status(
             "action": "wait",
             "action_label": "Indexing in progress",
             "clone_status": clone_status,
+            "local_path": local_path,
+            "repository_id": repository_id,
         }
     if graph and graph.errors and int(graph.files_indexed or 0) == 0:
         return {
@@ -672,6 +793,7 @@ def get_lattice_status(
                 "action": "clone_or_index",
                 "action_label": "Clone or index repository",
                 "repository_id": repository_id,
+                "local_path": local_path,
             }
         return {
             "state": "NOT_INDEXED",
@@ -681,6 +803,7 @@ def get_lattice_status(
             "action": "index_repository",
             "action_label": "Index repository",
             "repository_id": repository_id,
+            "local_path": local_path,
         }
 
     stale = False
@@ -701,8 +824,9 @@ def get_lattice_status(
             indexed_sha = str(getattr(bp_row, "indexed_commit_sha", "") or "")
         except Exception:  # noqa: BLE001
             indexed_sha = ""
+    if not indexed_sha and graph is not None:
+        indexed_sha = str(graph.commit_sha or "")
     live_sha = ""
-    local_path = str(getattr(repo, "local_path", "") or "") if repo is not None else ""
     if local_path:
         try:
             from app.services.work_items.multi_repo_context import git_head_sha
@@ -737,6 +861,7 @@ def get_lattice_status(
         "repository_id": repository_id,
         "indexed_commit_sha": indexed_sha,
         "live_commit_sha": live_sha,
+        "local_path": local_path,
     }
 
 

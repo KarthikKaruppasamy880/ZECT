@@ -1390,6 +1390,7 @@ def _exec_tool(
             "board": boards[0],
             "board_extra": boards[1] if len(boards) > 1 else None,
             "spoken_summary": spoken,
+            "ux_label": "Lattice",
         }
     if name == "research_news":
         topic = args.get("topic") or "technology"

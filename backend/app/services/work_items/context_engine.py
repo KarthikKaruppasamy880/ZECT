@@ -1,4 +1,8 @@
-"""MentrixContextEngine — bounded ContextPack with full provenance."""
+"""MentrixContextEngine — bounded ContextPack with full provenance.
+
+Lattice / Graphify hits are evidence for PLAN and impact analysis only.
+Graph evidence never grants edit, git write, or coding-agent permission.
+"""
 
 from __future__ import annotations
 

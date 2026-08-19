@@ -436,11 +436,16 @@ export const reviewFixPrompt = (code: string, findings: any[], language?: string
   });
 
 // Lattice
-export const latticeIngest = (path: string, project_key?: string, index_rag = true) =>
+export const latticeIngest = (path: string, project_key?: string, index_rag = true, force = false) =>
   request<any>("/api/lattice/ingest", {
     method: "POST",
-    body: JSON.stringify({ path, project_key: project_key || path, index_rag }),
+    body: JSON.stringify({ path, project_key: project_key || path, index_rag, force }),
   });
+export const latticeSnapshot = (project_key: string, repository_id?: number) => {
+  const qs = new URLSearchParams({ project_key });
+  if (repository_id) qs.set("repository_id", String(repository_id));
+  return request<any>(`/api/lattice/snapshot?${qs.toString()}`);
+};
 export const latticeGraph = (project_key: string, layer = "combined") =>
   request<any>(
     `/api/lattice/graph?project_key=${encodeURIComponent(project_key)}&layer=${encodeURIComponent(layer)}`,

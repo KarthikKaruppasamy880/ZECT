@@ -414,7 +414,7 @@ export default function ZectLearning() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6" data-testid="zect-learning-page">
+    <div className="zect-page p-6 max-w-5xl mx-auto space-y-6" data-testid="zect-learning-page">
       <div className="flex items-center gap-3">
         <GraduationCap className="h-7 w-7 text-teal-700" />
         <div>
@@ -484,7 +484,11 @@ export default function ZectLearning() {
       </div>
 
       {status && (
-        <p className="text-sm text-slate-600" data-testid="learning-status">
+        <p
+          className="text-sm text-slate-600"
+          data-testid="learning-status"
+          role={/fail|error|blocked/i.test(status) ? "alert" : "status"}
+        >
           {status}
         </p>
       )}

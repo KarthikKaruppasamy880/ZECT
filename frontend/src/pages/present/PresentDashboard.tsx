@@ -15,11 +15,13 @@ export default function PresentDashboard() {
   const [decks, setDecks] = useState<Array<{ name: string; path: string; slide_count: number }>>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [zinnia, setZinnia] = useState<PresentTemplateCard[]>([]);
+  const [decksLoading, setDecksLoading] = useState(true);
 
   useEffect(() => {
     mentrixPresentDecks()
       .then((r) => setDecks(r.items || []))
-      .catch(() => setDecks([]));
+      .catch(() => setDecks([]))
+      .finally(() => setDecksLoading(false));
     mentrixPresentationTemplates()
       .then((r) => setZinnia(r.zinnia || []))
       .catch(() => undefined);
@@ -80,8 +82,14 @@ export default function PresentDashboard() {
 
       <section>
         <h2 className="text-sm font-semibold text-slate-800 mb-2">Recent presentations</h2>
-        {decks.length === 0 ? (
-          <p className="text-xs text-slate-500">No generated decks in your Documents folder yet.</p>
+        {decksLoading ? (
+          <p className="text-xs text-slate-500" role="status" data-testid="present-decks-loading">
+            Loading presentations…
+          </p>
+        ) : decks.length === 0 ? (
+          <p className="text-xs text-slate-500" data-testid="present-decks-empty">
+            No generated decks in your Documents folder yet.
+          </p>
         ) : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3" data-testid="present-recent-decks">
             {decks.map((d) => (

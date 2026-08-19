@@ -58,15 +58,15 @@ export default function AgentWorkspaceShell() {
   const steps = agentModeOn ? [...BASE_STEPS, AGENT_MODE_STEP] : BASE_STEPS;
 
   return (
-    <div className="flex flex-col gap-4 lg:flex-row" data-testid="agent-workspace">
+    <div className="zect-page flex flex-col gap-4 lg:flex-row" data-testid="agent-workspace">
       <aside
         className="lg:w-44 shrink-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
         data-testid="agent-workspace-rail"
       >
         <div className="mb-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Agent Workspace
-          </p>
+          </h2>
           <p className="text-[11px] leading-snug text-slate-500" data-testid="agent-workspace-spine-hint">
             <strong className="font-semibold text-slate-700">Ship here:</strong> Mentrix Delivery.{" "}
             <strong className="font-semibold text-slate-700">Prep:</strong> Ask / Plan / Build forms.{" "}
@@ -77,7 +77,7 @@ export default function AgentWorkspaceShell() {
             . One goal → one Mentrix run — do not run classic Build in parallel.
           </p>
         </div>
-        <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1">
+        <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1" aria-label="Agent Workspace">
           {steps.map((step) => {
             const Icon = step.icon;
             return (

@@ -53,7 +53,7 @@ export default function WorkItems() {
     : items;
 
   return (
-    <div className="p-6 max-w-5xl mx-auto" data-testid="work-items-page">
+    <div className="p-6 max-w-5xl mx-auto zect-page" data-testid="work-items-page">
       <h1 className="text-2xl font-semibold text-slate-900">Work Items</h1>
       <p className="mt-1 text-sm text-slate-600">
         Project → WorkItem → ASK/PLAN/AGENT. Sources: user, Jira, Camunda, GitHub, sample.
@@ -82,6 +82,7 @@ export default function WorkItems() {
             type="button"
             data-testid={src ? `work-items-filter-${src}` : "work-items-filter-all"}
             onClick={() => setSourceFilter(src)}
+            aria-pressed={sourceFilter === src}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium ${
               sourceFilter === src ? "bg-teal-700 text-white" : "border border-slate-200 bg-white text-slate-600"
             }`}
@@ -90,10 +91,20 @@ export default function WorkItems() {
           </button>
         ))}
       </div>
-      {loading && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
-      {error && <p className="mt-6 text-sm text-red-600">{error}</p>}
+      {loading && (
+        <p className="mt-6 text-sm text-slate-500" role="status" aria-live="polite" data-testid="work-items-loading">
+          Loading…
+        </p>
+      )}
+      {error && (
+        <p className="mt-6 text-sm text-red-600" role="alert" data-testid="work-items-error">
+          {error}
+        </p>
+      )}
       {!loading && !error && items.length === 0 && (
-        <p className="mt-6 text-sm text-slate-500">No work items yet. Ingest from Jira/Camunda or create via Mentrix Developer.</p>
+        <p className="mt-6 text-sm text-slate-500" data-testid="work-items-empty">
+          No work items yet. Ingest from Jira/Camunda or create via Mentrix Developer.
+        </p>
       )}
       <ul className="mt-6 space-y-2">
         {visible.map((wi) => (

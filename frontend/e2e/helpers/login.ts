@@ -27,17 +27,19 @@ export async function ensureLoggedIn(page: Page) {
 
 /** Navigate to an authed route; re-login if the app bounced to the login form. */
 export async function gotoAuthed(page: Page, path: string, readyTestId: string, timeout = 25_000) {
-  await ensureLoggedIn(page);
-  await page.goto(path);
+  await page.goto(path, { waitUntil: "domcontentloaded" });
   const ready = page.getByTestId(readyTestId);
   const loginForm = page.getByTestId("login-username");
+  const checking = page.getByTestId("auth-checking");
+  await checking.waitFor({ state: "hidden", timeout: Math.min(timeout, 12_000) }).catch(() => {});
   const seen = await Promise.race([
     ready.waitFor({ state: "visible", timeout }).then(() => "ready" as const),
     loginForm.waitFor({ state: "visible", timeout }).then(() => "login" as const),
   ]).catch(() => "none" as const);
   if (seen === "login" || (await loginForm.isVisible().catch(() => false))) {
     await submitLogin(page);
-    await page.goto(path);
+    await page.goto(path, { waitUntil: "domcontentloaded" });
+    await checking.waitFor({ state: "hidden", timeout: Math.min(timeout, 12_000) }).catch(() => {});
   }
   await expect(page.getByTestId(readyTestId)).toBeVisible({ timeout });
 }

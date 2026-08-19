@@ -49,6 +49,17 @@ export default function ProjectRepoSelector() {
   }, []);
 
   useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setShowProjectDD(false);
+      setShowRepoDD(false);
+      setShowBranchDD(false);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, []);
+
+  useEffect(() => {
     setPendingBranch(null);
     setBranchError("");
     setHeadSha("");
@@ -133,6 +144,10 @@ export default function ProjectRepoSelector() {
     <div className="flex items-center gap-2 text-sm flex-wrap">
       <div ref={projectRef} className="relative">
         <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={showProjectDD}
+          data-testid="select-project-button"
           onClick={() => setShowProjectDD(!showProjectDD)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors max-w-[180px]"
         >
@@ -141,7 +156,10 @@ export default function ProjectRepoSelector() {
           <ChevronDown size={12} className="shrink-0 text-slate-400" />
         </button>
         {showProjectDD && (
-          <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+          <div
+            data-testid="select-project-dropdown"
+            className="zect-dropdown absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
+          >
             <button
               onClick={() => {
                 setActiveProject(null);
@@ -179,7 +197,10 @@ export default function ProjectRepoSelector() {
 
       <div ref={repoRef} className="relative">
         <button
+          type="button"
           data-testid="select-repo-button"
+          aria-haspopup="listbox"
+          aria-expanded={showRepoDD}
           onClick={() => setShowRepoDD(!showRepoDD)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors max-w-[200px]"
         >
@@ -192,7 +213,7 @@ export default function ProjectRepoSelector() {
         {showRepoDD && (
           <div
             data-testid="select-repo-dropdown"
-            className="absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-72 overflow-y-auto"
+            className="zect-dropdown absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-72 overflow-y-auto"
           >
             <button
               onClick={() => {
@@ -247,7 +268,10 @@ export default function ProjectRepoSelector() {
       {activeRepoId && (
         <div ref={branchRef} className="relative">
           <button
+            type="button"
             data-testid="select-branch-button"
+            aria-haspopup="listbox"
+            aria-expanded={showBranchDD}
             onClick={() => setShowBranchDD(!showBranchDD)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors max-w-[160px]"
           >
@@ -263,7 +287,7 @@ export default function ProjectRepoSelector() {
           {showBranchDD && (
             <div
               data-testid="select-branch-dropdown"
-              className="absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
+              className="zect-dropdown absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
             >
               {branches.map((b) => (
                 <button

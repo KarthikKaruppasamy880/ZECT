@@ -91,13 +91,18 @@ export default function MentrixCompanion() {
         ? "incident"
         : "chat";
 
-  const setMode = (next: CompanionMode) => {
+  const setMode = (next: CompanionMode, focusTab = false) => {
     const sp = new URLSearchParams(searchParams);
     sp.delete("voice");
     sp.delete("incident");
     if (next === "voice") sp.set("voice", "1");
     if (next === "incident") sp.set("incident", "1");
     setSearchParams(sp, { replace: true });
+    if (focusTab) {
+      requestAnimationFrame(() => {
+        document.getElementById(`mentrix-tab-${next}`)?.focus();
+      });
+    }
   };
 
   return (
@@ -120,6 +125,24 @@ export default function MentrixCompanion() {
               className="mt-3 flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/80 p-1"
               data-testid="mentrix-companion-modes"
               role="tablist"
+              aria-label="Companion modes"
+              onKeyDown={(e) => {
+                const order = ["chat", "incident", "voice"] as const;
+                const idx = order.indexOf(mode);
+                if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMode(order[(idx + 1) % order.length], true);
+                } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMode(order[(idx + order.length - 1) % order.length], true);
+                } else if (e.key === "Home") {
+                  e.preventDefault();
+                  setMode("chat", true);
+                } else if (e.key === "End") {
+                  e.preventDefault();
+                  setMode("voice", true);
+                }
+              }}
             >
               {(
                 [
@@ -132,7 +155,10 @@ export default function MentrixCompanion() {
                   key={id}
                   type="button"
                   role="tab"
+                  id={`mentrix-tab-${id}`}
                   aria-selected={mode === id}
+                  aria-controls={`mentrix-panel-${id}`}
+                  tabIndex={mode === id ? 0 : -1}
                   data-testid={`mentrix-mode-${id}`}
                   onClick={() => setMode(id)}
                   className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -196,7 +222,12 @@ export default function MentrixCompanion() {
               : "grid-cols-1"
           }`}
         >
-          <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+          <section
+            id={`mentrix-panel-${mode}`}
+            role="tabpanel"
+            aria-labelledby={`mentrix-tab-${mode}`}
+            className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-teal-900/40 bg-gradient-to-b from-slate-900 to-slate-950 p-4"
+          >
             {!s.displayMode && mode === "incident" && (
               <div
                 id="mentrix-incident-runbook"

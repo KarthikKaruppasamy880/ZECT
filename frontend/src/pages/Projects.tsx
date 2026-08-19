@@ -67,15 +67,17 @@ export default function Projects() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-800" />
+      <div className="zect-page flex flex-col items-center justify-center h-64 gap-3" role="status" data-testid="projects-page">
+        <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-800" aria-hidden />
+        <span className="sr-only">Loading projects</span>
       </div>
     );
   }
 
   return (
-    <div data-testid="projects-page">
-      <div className="flex items-start justify-between gap-4 mb-6">
+    <div className="zect-page" data-testid="projects-page">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
           <p className="text-slate-500 text-sm">Authorized projects you can access. Test fixtures are hidden by provenance.</p>
@@ -106,6 +108,7 @@ export default function Projects() {
       <div className="flex gap-2 mb-6 flex-wrap items-center">
         <input
           data-testid="projects-search"
+          aria-label="Search projects"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search projects"

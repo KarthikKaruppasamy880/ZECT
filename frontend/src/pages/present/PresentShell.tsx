@@ -12,13 +12,13 @@ const NAV = [
 
 export default function PresentShell() {
   return (
-    <div className="space-y-4" data-testid="zect-present-page">
+    <div className="zect-page space-y-4" data-testid="zect-present-page">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] uppercase tracking-wide text-teal-800">ZECT Present</p>
           <h1 className="text-2xl font-semibold text-slate-900">Presentations</h1>
         </div>
-        <nav className="flex flex-wrap gap-1.5">
+        <nav className="flex flex-wrap gap-1.5" aria-label="Present">
           {NAV.map((item) => (
             <NavLink
               key={item.to}

@@ -193,8 +193,10 @@ export default function SkillsEngine() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+      <div className="zect-page flex flex-col items-center justify-center h-64 gap-3" role="status" aria-live="polite" data-testid="skills-engine-page">
+        <h1 className="text-2xl font-bold text-slate-900">Skills Engine</h1>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" aria-hidden />
+        <span className="sr-only">Loading skills</span>
       </div>
     );
   }
@@ -207,8 +209,8 @@ export default function SkillsEngine() {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="zect-page" data-testid="skills-engine-page">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Wrench className="h-6 w-6 text-emerald-600" /> Skills Engine

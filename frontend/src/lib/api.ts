@@ -2451,8 +2451,11 @@ export const login = (username: string, password: string) =>
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
-export const verifyToken = (token: string) =>
-  request<{ valid: boolean; username: string }>(`/api/auth/verify?token=${token}`);
+export const verifyToken = (token: string, opts?: RequestInit) =>
+  request<{ valid: boolean; username: string }>(
+    `/api/auth/verify?token=${encodeURIComponent(token)}`,
+    opts,
+  );
 export const logout = (token: string) =>
   request<{ status: string }>(`/api/auth/logout?token=${token}`, { method: "POST" });
 

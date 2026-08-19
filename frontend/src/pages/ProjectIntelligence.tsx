@@ -60,7 +60,7 @@ export default function ProjectIntelligencePage() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto" data-testid="project-intelligence-page">
+    <div className="zect-page p-6 max-w-5xl mx-auto" data-testid="project-intelligence-page">
       <h1 className="text-2xl font-semibold text-slate-900">Project Intelligence</h1>
       <p className="mt-1 text-sm text-slate-600">
         Lattice, Blueprint, Knowledge, Memory, Skills, and Playbooks — fed into Mentrix Ask/Plan/Agent.
@@ -90,6 +90,7 @@ export default function ProjectIntelligencePage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Query"
+          aria-label="Project intelligence query"
           data-testid="pi-query"
         />
         <button
@@ -101,8 +102,16 @@ export default function ProjectIntelligencePage() {
           Refresh
         </button>
       </div>
-      {loading && <p className="mt-4 text-sm text-slate-500">Loading…</p>}
-      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+      {loading && (
+        <p className="mt-4 text-sm text-slate-500" role="status">
+          Loading…
+        </p>
+      )}
+      {error && (
+        <p className="mt-4 text-sm text-red-600" role="alert" data-testid="pi-error">
+          {error}
+        </p>
+      )}
       {snap && (
         <pre className="mt-6 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100" data-testid="pi-snapshot">
           {JSON.stringify(snap, null, 2)}

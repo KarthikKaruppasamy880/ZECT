@@ -1,7 +1,7 @@
 /**
  * ZECT architecture flows (Labs). Capability diagrams only — no third-party product names.
  */
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Workflow, ArrowRight, Map } from "lucide-react";
 
@@ -93,6 +93,33 @@ const USER_PATHS = [
   },
 ];
 
+const ARCH_EXPLAIN = [
+  {
+    id: "client",
+    title: "ZECT client",
+    body: "React UI + Mentrix Voice. ZECT owns UX, permissions, and audit. OpenHands is coding runtime only — not a second agent.",
+    to: "/mentrix-home",
+  },
+  {
+    id: "lattice",
+    title: "Lattice = Graphify ingest",
+    body: "Graphify is Lattice ingest (symbols, imports, calls). Header STALE means re-index. Not a second knowledge base.",
+    to: "/lattice",
+  },
+  {
+    id: "control",
+    title: "Ask → Plan → Agent",
+    body: "WorkItems and Mentrix runs follow Ask, then Plan, then Agent. Gates, audit, and emergency stop sit on the control plane.",
+    to: "/work-items",
+  },
+  {
+    id: "docs",
+    title: "Canonical architecture",
+    body: "Click a card for a short explain (CSS + mermaid — no 3D engine). Full write-up lives in ZECT_CANONICAL_ARCHITECTURE.md.",
+    to: "/docs",
+  },
+];
+
 function MermaidDiagram({ body, title }: { body: string; title: string }) {
   const id = useId().replace(/:/g, "");
   const ref = useRef<HTMLDivElement>(null);
@@ -130,6 +157,9 @@ function MermaidDiagram({ body, title }: { body: string; title: string }) {
 }
 
 export default function ToolComparison() {
+  const [explainId, setExplainId] = useState<string | null>(null);
+  const selected = ARCH_EXPLAIN.find((c) => c.id === explainId) || null;
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6" data-testid="architecture-guide">
       <header className="space-y-2">
@@ -155,6 +185,50 @@ export default function ToolComparison() {
       </section>
 
       <MermaidDiagram title="System architecture — where your clicks go" body={SYSTEM_FLOW} />
+
+      <section className="space-y-3" data-testid="architecture-explain">
+        <h2 className="text-lg font-semibold text-slate-900">Click a layer to explain</h2>
+        <p className="text-sm text-slate-600">
+          Short CSS animation only — not a 3D engine. Companion “architecture” opens this page and{" "}
+          <Link to="/lattice" className="text-indigo-700 underline">
+            Lattice
+          </Link>{" "}
+          (Graphify ingest).
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {ARCH_EXPLAIN.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              data-testid={`architecture-card-${card.id}`}
+              onClick={() => setExplainId(card.id === explainId ? null : card.id)}
+              className={`rounded-xl border p-3 text-left transition-all duration-300 ${
+                explainId === card.id
+                  ? "border-indigo-400 bg-indigo-50 scale-[1.02] shadow-md"
+                  : "border-slate-200 bg-white hover:border-indigo-200"
+              }`}
+            >
+              <p className="text-sm font-semibold text-slate-900">{card.title}</p>
+            </button>
+          ))}
+        </div>
+        <div
+          className={`overflow-hidden transition-all duration-300 ${
+            selected ? "max-h-40 opacity-100" : "max-h-0 opacity-0"
+          }`}
+          data-testid="architecture-explain-panel"
+        >
+          {selected ? (
+            <div className="rounded-xl border border-indigo-200 bg-white p-4 text-sm text-slate-700">
+              <p>{selected.body}</p>
+              <Link to={selected.to} className="mt-2 inline-flex items-center gap-1 text-indigo-700">
+                Open {selected.title} <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <MermaidDiagram title="Mentrix run — step order" body={MENTRIX_FLOW} />
       <MermaidDiagram title="Labs productivity loop" body={LABS_FLOW} />
       <MermaidDiagram title="Security incident response" body={IR_FLOW} />

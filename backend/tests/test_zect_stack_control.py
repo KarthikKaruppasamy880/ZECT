@@ -130,3 +130,26 @@ def test_expand_argv_resolves_npm_on_windows():
     argv = zect_stack.expand_argv(["npm", "run", "dev"], zect_stack.repo_root())
     assert argv[0].lower().endswith("npm.cmd") or argv[0].lower().endswith("npm")
     assert argv[1:] == ["run", "dev"]
+
+
+def test_find_powerpoint_uses_which(monkeypatch):
+    monkeypatch.setattr(
+        zect_stack.shutil,
+        "which",
+        lambda name: r"C:\Office\POWERPNT.EXE" if "powerpnt" in name.lower() else None,
+    )
+    found = zect_stack.find_powerpoint()
+    assert found and found.lower().endswith("powerpnt.exe")
+
+
+def test_find_powerpoint_office16_path_when_not_on_path(monkeypatch):
+    monkeypatch.setattr(zect_stack.shutil, "which", lambda name: None)
+    monkeypatch.setattr(zect_stack.os, "name", "nt")
+    target = r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE"
+
+    def fake_is_file(self):
+        return str(self) == target
+
+    monkeypatch.setattr(zect_stack.Path, "is_file", fake_is_file)
+    found = zect_stack.find_powerpoint()
+    assert found == target

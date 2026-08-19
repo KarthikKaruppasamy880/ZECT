@@ -28,7 +28,7 @@ export default function WorkItems() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${getApiBase()}/api/work-items?limit=50`, { headers: authHeaders() });
+        const res = await fetch(`${getApiBase()}/api/work-items?limit=50&exclude_fixtures=1`, { headers: authHeaders() });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         if (!cancelled) {
@@ -55,8 +55,9 @@ export default function WorkItems() {
   return (
     <div className="p-6 max-w-5xl mx-auto zect-page" data-testid="work-items-page">
       <h1 className="text-2xl font-semibold text-slate-900">Work Items</h1>
-      <p className="mt-1 text-sm text-slate-600">
-        Project → WorkItem → ASK/PLAN/AGENT. Sources: user, Jira, Camunda, GitHub, sample.
+      <p className="mt-1 text-sm text-slate-600" data-testid="work-items-help">
+        Flow: <strong>Ask → Plan → Agent</strong>. Sources: user, Jira, Camunda, GitHub, sample. Fixture
+        rows stay hidden (<code>exclude_fixtures</code>); sample process is a demo, not production Camunda.
       </p>
       <button
         type="button"

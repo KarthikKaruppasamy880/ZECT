@@ -101,6 +101,27 @@ def redact(text: str) -> str:
     return SECRET_RE.sub(lambda m: m.group(1) + "=[redacted]", text or "")
 
 
+def find_powerpoint() -> str | None:
+    """Office often installs POWERPNT.EXE without putting it on PATH."""
+    found = shutil.which("powerpnt") or shutil.which("POWERPNT.EXE")
+    if found:
+        return found
+    if os.name != "nt":
+        return None
+    home = Path.home()
+    candidates = [
+        Path(r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE"),
+        Path(r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE"),
+        Path(r"C:\Program Files\Microsoft Office\Office16\POWERPNT.EXE"),
+        Path(r"C:\Program Files\Microsoft Office\Office15\POWERPNT.EXE"),
+        home / r"AppData\Local\Microsoft\WindowsApps\powerpnt.exe",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return str(path)
+    return None
+
+
 def load_env_file(path: Path) -> dict[str, str]:
     """Parse KEY=value lines. Never log values."""
     out: dict[str, str] = {}
@@ -576,7 +597,7 @@ def cmd_doctor() -> int:
     db_status = _env_names_present(env_file, ["DATABASE_URL"]).get("DATABASE_URL", "missing")
     print("database_url_name", db_status)
     print("electron_dir", "ok" if (repo_root() / "electron" / "package.json").is_file() else "missing")
-    ppt = shutil.which("powerpnt") or shutil.which("POWERPNT.EXE")
+    ppt = find_powerpoint()
     print("powerpoint", "present" if ppt else "OPTIONAL_UNAVAILABLE")
     print("github_token_name", _env_names_present(env_file, ["GITHUB_TOKEN"]).get("GITHUB_TOKEN"))
     print("git_repo", "ok" if (repo_root() / ".git").exists() else "missing")

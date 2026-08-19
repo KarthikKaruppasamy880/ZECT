@@ -16,6 +16,7 @@ from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.budget import enforce_token_budget
 from app.infrastructure.database import get_db
 from app.services.lattice.indexer import (
+    attach_cross_repo_edge,
     communities as lattice_communities,
     explain as lattice_explain,
     find_path,
@@ -49,6 +50,7 @@ class IngestPathRequest(BaseModel):
     max_files: int = 2000
     build_blueprint: bool = True
     run_id: str = ""
+    force: bool = False
 
 
 class QueryRequest(BaseModel):
@@ -98,6 +100,17 @@ class HldRequest(BaseModel):
     goal: str = "Produce a high-level design document for this codebase"
 
 
+class CrossRepoEdgeRequest(BaseModel):
+    project_key: str
+    source_repo: str
+    source_sha: str
+    target_repo: str
+    target_sha: str
+    edge_type: str
+    evidence: str
+    confidence: float = 0.7
+
+
 @router.post("/ingest")
 def ingest(
     req: IngestPathRequest,
@@ -130,6 +143,7 @@ def ingest(
             max_files=req.max_files,
             index_docs=req.index_docs,
             cancel_check=check,
+            force=req.force,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -338,6 +352,43 @@ def blueprint_get(project_key: str, db: Session = Depends(get_db), _user: Curren
     if not bp:
         raise HTTPException(status_code=404, detail="Structural blueprint not found — ingest or build first")
     return bp
+
+
+@router.get("/snapshot")
+def lattice_snapshot_api(
+    project_key: str,
+    repository_id: int | None = None,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.lattice.graphify_snapshot import graphify_snapshot
+
+    return graphify_snapshot(project_key, db=db, repository_id=repository_id)
+
+
+@router.post("/cross-repo-edge")
+def lattice_cross_repo_edge(
+    req: CrossRepoEdgeRequest,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    from app.services.lattice.cross_repo import CrossRepoEdgeError, make_cross_repo_edge
+
+    try:
+        edge = make_cross_repo_edge(
+            source_repo=req.source_repo,
+            source_sha=req.source_sha,
+            target_repo=req.target_repo,
+            target_sha=req.target_sha,
+            edge_type=req.edge_type,
+            evidence=req.evidence,
+            confidence=req.confidence,
+        )
+        graph = attach_cross_repo_edge(req.project_key, edge)
+    except CrossRepoEdgeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "edge": edge, "cross_repo_edges": graph.cross_repo_edges}
 
 
 @router.get("/status")

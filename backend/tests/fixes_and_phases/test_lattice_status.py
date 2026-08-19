@@ -140,3 +140,38 @@ def test_lattice_status_canonical_states():
     missing = get_lattice_status("no-such-project-key-zect-v2")
     assert missing["state"] in {"NOT_INDEXED", "NOT_CONFIGURED"}
     assert missing["indexed"] is False
+
+
+def test_lattice_snapshot_adapter_endpoint(authed_client):
+    r = authed_client.get("/api/lattice/snapshot?project_key=no-such-graphify-key")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["kind"] == "GraphifySnapshot"
+    assert data["adapter"] == "lattice"
+    assert data["ux_label"] == "Lattice"
+    assert data["state"] in {
+        "NOT_INDEXED",
+        "NOT_CONFIGURED",
+        "NOT_APPLICABLE",
+        "READY",
+        "STALE",
+        "ERROR",
+        "INDEXING",
+    }
+
+
+def test_cross_repo_name_similarity_rejected(authed_client):
+    r = authed_client.post(
+        "/api/lattice/cross-repo-edge",
+        json={
+            "project_key": "any",
+            "source_repo": "zoas",
+            "source_sha": "aaa",
+            "target_repo": "zaf",
+            "target_sha": "bbb",
+            "edge_type": "configured",
+            "evidence": "name_similarity",
+        },
+    )
+    assert r.status_code == 400
+    assert "name similarity" in str(r.json()).lower()

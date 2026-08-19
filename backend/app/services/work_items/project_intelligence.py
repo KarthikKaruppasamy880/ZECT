@@ -98,6 +98,7 @@ class ProjectIntelligenceService:
                     "action": detail.get("action"),
                     "action_label": detail.get("action_label"),
                     "repository_id": repository_id,
+                    "local_path": str(detail.get("local_path") or ""),
                     "query_error": query_err,
                 }
             else:

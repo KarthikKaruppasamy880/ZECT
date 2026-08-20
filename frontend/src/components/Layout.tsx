@@ -52,7 +52,11 @@ export default function Layout({ onLogout }: LayoutProps) {
 
   return (
     <MentrixSessionProvider>
-      <div className={`min-h-screen ${mentrixHud ? "h-screen overflow-hidden" : "overflow-x-hidden"} ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
+      <div
+        className={`flex flex-col ${
+          mentrixHud ? "h-dvh overflow-hidden bg-slate-950" : "min-h-screen overflow-x-hidden bg-slate-50"
+        }`}
+      >
         <a
           href="#zect-main"
           className="zect-skip-link"
@@ -75,7 +79,7 @@ export default function Layout({ onLogout }: LayoutProps) {
           onMobileClose={handleMobileClose}
         />
         <div
-          className={`min-w-0 transition-all duration-200 ease-in-out ${
+          className={`min-w-0 flex flex-col ${mentrixHud ? "min-h-0 flex-1" : ""} transition-all duration-200 ease-in-out ${
             collapsed ? "md:ml-16" : "md:ml-56"
           }`}
         >
@@ -97,7 +101,7 @@ export default function Layout({ onLogout }: LayoutProps) {
             </div>
           )}
           {mentrixHud && (
-            <div className="hidden md:flex justify-end px-3 py-1">
+            <div className="hidden md:flex shrink-0 justify-end px-3 py-1">
               <MentrixWakeBridge />
             </div>
           )}
@@ -105,7 +109,11 @@ export default function Layout({ onLogout }: LayoutProps) {
             id="zect-main"
             tabIndex={-1}
             data-testid="zect-main"
-            className={mentrixHud ? "p-0 min-w-0 min-h-0 h-[calc(100vh-2.5rem)] overflow-hidden" : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"}
+            className={
+              mentrixHud
+                ? "p-0 min-w-0 min-h-0 flex-1 overflow-hidden pt-14 md:pt-0"
+                : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"
+            }
           >
             <Outlet />
           </main>

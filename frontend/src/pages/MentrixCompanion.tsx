@@ -107,15 +107,17 @@ export default function MentrixCompanion() {
 
   return (
     <div
-      className={`bg-slate-950 text-slate-100 overflow-hidden ${s.displayMode ? "fixed inset-0 z-40 m-0 p-4" : "h-full"}`}
+      className={`flex min-h-0 flex-col bg-slate-950 text-slate-100 overflow-hidden ${
+        s.displayMode ? "fixed inset-0 z-40 m-0 p-3 sm:p-4" : "h-full"
+      }`}
       data-testid="mentrix-companion-page"
     >
-      <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 p-4">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-2 p-3 sm:gap-3 sm:p-4">
+        <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 sm:gap-3">
+          <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-[0.25em] text-teal-500/80">Mentrix Operator</p>
-            <h1 className="text-3xl font-bold tracking-tight text-teal-100">MENTRIX</h1>
-            <p className="text-sm text-slate-400">
+            <h1 className="text-xl font-bold tracking-tight text-teal-100 sm:text-3xl">MENTRIX</h1>
+            <p className="hidden text-sm text-slate-400 sm:block">
               Company orchestrator — Project, WorkItem, Developer, Present, Voice, Process. Companion does not edit code or decks.
             </p>
             <div className="mt-2 max-w-3xl">
@@ -173,7 +175,7 @@ export default function MentrixCompanion() {
               ))}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="hidden flex-wrap gap-2 text-xs sm:flex">
             <button
               type="button"
               className="rounded-lg border border-slate-700 px-3 py-1.5"
@@ -212,13 +214,17 @@ export default function MentrixCompanion() {
               Mentrix Delivery
             </Link>
           </div>
-          {mode === "chat" && <MentrixDesktopPanel />}
+          {mode === "chat" && (
+            <div className="hidden w-full md:block">
+              <MentrixDesktopPanel />
+            </div>
+          )}
         </header>
 
         <div
           className={`grid min-h-0 flex-1 gap-3 ${
             mode === "chat" && s.showArtifacts && !s.displayMode
-              ? "lg:grid-cols-[1fr_380px]"
+              ? "grid-rows-[minmax(0,1fr)_auto] lg:grid-rows-1 lg:grid-cols-[1fr_minmax(16rem,22rem)]"
               : "grid-cols-1"
           }`}
         >
@@ -296,13 +302,17 @@ export default function MentrixCompanion() {
             )}
             {!s.displayMode && mode === "chat" && (
               <>
-                <div className="flex flex-col items-center gap-2 py-4">
+                <div
+                  className="min-h-0 flex-1 space-y-3 overflow-y-auto"
+                  data-testid="mentrix-companion-scroll"
+                >
+                <div className="flex flex-col items-center gap-2 py-2 sm:py-4">
                   <div
                     data-testid="mentrix-avatar"
                     data-state={s.avatar}
-                    className={`flex h-40 w-40 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl ${ORB[s.avatar]}`}
+                    className={`flex h-24 w-24 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl sm:h-32 sm:w-32 lg:h-40 lg:w-40 ${ORB[s.avatar]}`}
                   >
-                    <Bot className="h-16 w-16 text-teal-300" />
+                    <Bot className="h-10 w-10 text-teal-300 sm:h-16 sm:w-16" />
                   </div>
                   <p className="text-sm font-medium uppercase tracking-widest text-teal-200/90">
                     Good to see you
@@ -508,7 +518,7 @@ export default function MentrixCompanion() {
                 </div>
 
                 <div
-                  className="max-h-36 flex-1 space-y-1 overflow-auto border-t border-slate-800 pt-3 text-[11px] text-slate-400"
+                  className="max-h-28 space-y-1 overflow-auto border-t border-slate-800 pt-3 text-[11px] text-slate-400 sm:max-h-36"
                   data-testid="mentrix-live-log"
                 >
                   {s.log.length === 0 && <p>Live log — tool events stream here</p>}
@@ -520,7 +530,7 @@ export default function MentrixCompanion() {
                 </div>
 
                 <div
-                  className="mt-3 max-h-48 flex-1 space-y-2 overflow-auto border-t border-slate-800 pt-3"
+                  className="mt-3 max-h-48 space-y-2 overflow-auto border-t border-slate-800 pt-3"
                   data-testid="mentrix-companion-chat"
                 >
                   {s.messages.map((m, i) => (
@@ -542,15 +552,34 @@ export default function MentrixCompanion() {
                   ) : null}
                   <div ref={s.chatEndRef} />
                 </div>
-
-                <div className="mt-3 flex min-w-0 items-end gap-2">
+                <p className="mt-3 text-[11px] text-slate-500">
+                  Chat is the personal agent. Use{" "}
+                  <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>
+                    Incident
+                  </button>{" "}
+                  for runbooks or{" "}
+                  <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>
+                    Voice
+                  </button>{" "}
+                  for ZECT Voicebox clone + Present Deck.
+                </p>
+                {s.displayMode && (
+                  <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>
+                )}
+                </div>
+                <div
+                  className="relative z-20 shrink-0 border-t border-slate-800 bg-slate-950 pt-2"
+                  data-testid="mentrix-companion-composer"
+                >
+                <div className="mt-0 flex min-w-0 items-end gap-2">
                   <textarea
                     data-testid="mentrix-companion-input"
                     value={s.input}
                     onChange={(e) => s.setInput(e.target.value)}
                     rows={2}
                     placeholder="Ask Mentrix…"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+                    autoComplete="off"
+                    className="relative z-20 min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white pointer-events-auto"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
@@ -609,25 +638,12 @@ export default function MentrixCompanion() {
                 </div>
                 <p
                   data-testid="mentrix-present-hint"
-                  className="mt-1.5 text-[11px] text-slate-500"
+                  className="mt-1.5 hidden text-[11px] text-slate-500 sm:block"
                 >
                   Uses Mentrix Board artifacts + your default ZECT Voicebox voice (not PowerPoint files).
                   For a prepared deck, open the Voice tab → Present Deck.
                 </p>
-                <p className="mt-3 text-[11px] text-slate-500">
-                  Chat is the personal agent. Use{" "}
-                  <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>
-                    Incident
-                  </button>{" "}
-                  for runbooks or{" "}
-                  <button type="button" className="underline text-teal-400" onClick={() => setMode("voice")}>
-                    Voice
-                  </button>{" "}
-                  for ZECT Voicebox clone + Present Deck.
-                </p>
-                {s.displayMode && (
-                  <div className="mt-2 text-[10px] text-teal-500/80">Present mode uses fullscreen artifacts</div>
-                )}
+                </div>
               </>
             )}
             {mode === "chat" && s.displayMode && (
@@ -656,12 +672,25 @@ export default function MentrixCompanion() {
           </section>
 
           {mode === "chat" && s.showArtifacts && !s.displayMode && (
-            <aside className="flex h-full min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
+            <aside
+              className="flex min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-40"
+              data-testid="mentrix-companion-artifacts"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold text-teal-200">
                   <Sparkles className="h-4 w-4" />
                   ARTIFACTS
                 </div>
+                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-400 hover:text-teal-300 lg:hidden"
+                  title="Close artifacts"
+                  data-testid="mentrix-artifacts-close"
+                  onClick={() => s.setShowArtifacts(false)}
+                >
+                  Close
+                </button>
                 <button
                   type="button"
                   className="text-slate-400 hover:text-teal-300"
@@ -670,6 +699,7 @@ export default function MentrixCompanion() {
                 >
                   <Maximize2 className="h-4 w-4" />
                 </button>
+                </div>
               </div>
               <MentrixArtifacts items={s.board} />
               <div className="space-y-1 border-t border-slate-800 pt-3 text-xs text-slate-400">

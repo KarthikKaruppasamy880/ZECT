@@ -372,6 +372,36 @@ export async function startMentrixRealtime(
   /** HTMLAudio for cloned TTS — never decode MP3 into the 24 kHz Realtime AudioContext. */
   let clonedSpeakEl: HTMLAudioElement | null = null;
   let clonedSpeakUrl: string | null = null;
+  const SILENT_WAV =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+
+  const unlockClonedOutput = async () => {
+    try {
+      const a = new Audio(SILENT_WAV);
+      a.setAttribute("playsinline", "true");
+      a.volume = 0.01;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      await a.play().catch(() => undefined);
+      a.pause();
+      a.remove();
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const mountClonedAudio = (audio: HTMLAudioElement) => {
+    audio.setAttribute("playsinline", "true");
+    audio.preload = "auto";
+    audio.volume = 1;
+    audio.muted = false;
+    audio.style.position = "fixed";
+    audio.style.width = "0";
+    audio.style.height = "0";
+    audio.style.opacity = "0";
+    audio.style.pointerEvents = "none";
+    if (!audio.isConnected) document.body.appendChild(audio);
+  };
 
   const stopClonedSpeakEl = () => {
     try {
@@ -381,6 +411,7 @@ export async function startMentrixRealtime(
         clonedSpeakEl.pause();
         clonedSpeakEl.removeAttribute("src");
         clonedSpeakEl.load();
+        clonedSpeakEl.remove();
       }
     } catch {
       /* ignore */
@@ -542,6 +573,7 @@ export async function startMentrixRealtime(
         settleReady(false);
         return;
       }
+      await unlockClonedOutput();
       audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
       // Some browsers ignore sampleRate hint — always resample from actual rate.
       const attached = await attachMicCapture(audioCtx, mediaStream, (pcm) => {
@@ -741,6 +773,7 @@ export async function startMentrixRealtime(
       const blob = new Blob([arrayBuf], { type: "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      mountClonedAudio(audio);
       clonedSpeakEl = audio;
       clonedSpeakUrl = url;
       audio.onplaying = () => markPerf("playback_started");

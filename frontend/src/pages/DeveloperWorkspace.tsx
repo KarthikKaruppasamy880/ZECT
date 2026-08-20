@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -865,20 +865,15 @@ export default function DeveloperWorkspace() {
             {activeRepo.owner}/{activeRepo.repo_name}
           </span>
         )}
-        <span
+        <Link
+          to="/lattice"
           data-testid="workspace-git-lattice"
           data-lattice-state={latticeLoading ? "" : canonicalLatticeState(latticeIdx?.state)}
-          className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
-          title={[
-            latticeIdx?.project_key,
-            latticeIdx?.live_commit_sha && `head=${String(latticeIdx.live_commit_sha).slice(0, 12)}`,
-            latticeIdx?.indexed_commit_sha && `indexed=${String(latticeIdx.indexed_commit_sha).slice(0, 12)}`,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+          className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-teal-50"
+          title="Graphify is Lattice ingest. STALE means re-index on /lattice."
         >
           {latticeLoading ? "Lattice …" : latticeHeaderLabel(canonicalLatticeState(latticeIdx?.state))}
-        </span>
+        </Link>
         <span className="ml-auto inline-flex items-center gap-2 text-[10px] text-slate-500">
           <span className="inline-flex items-center gap-1">
             <span className="h-1.5 w-1.5 rounded-full bg-teal-500" /> agent
@@ -992,6 +987,7 @@ export default function DeveloperWorkspace() {
                     <Code2 className="h-3.5 w-3.5" />
                     Symbols
                   </button>
+                  <span title={!selectedPath ? "Open a file to Ask Mentrix about it" : undefined}>
                   <button
                     type="button"
                     disabled={!selectedPath}
@@ -1004,6 +1000,7 @@ export default function DeveloperWorkspace() {
                     <Sparkles className="h-3.5 w-3.5" />
                     Ask
                   </button>
+                  </span>
                   <button
                     type="button"
                     disabled={!selectedPath}

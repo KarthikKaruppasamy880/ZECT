@@ -159,7 +159,7 @@ export default function WorkspaceRootsRail({
             className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800"
             data-testid="workspace-add-root"
             onClick={onAddRoot}
-            title="Add local folder, clone, or attach a registered repo"
+            title="Register a local project folder — not a Cursor untitled workspace"
           >
             <FolderPlus className="h-3 w-3" />
             Add
@@ -170,7 +170,7 @@ export default function WorkspaceRootsRail({
         <p className="px-2 pb-2 text-[11px] text-slate-500">Select a project to attach authorized roots.</p>
       ) : !repos.length ? (
         <p className="px-2 pb-2 text-[11px] text-slate-500" data-testid="workspace-roots-empty">
-          No authorized roots. Add a local folder, clone, or attach a registered repo.
+          No authorized roots. Add registers a Project local folder — not a Cursor untitled workspace.
         </p>
       ) : (
         <ul className="flex-1 overflow-auto pb-1 min-h-0">

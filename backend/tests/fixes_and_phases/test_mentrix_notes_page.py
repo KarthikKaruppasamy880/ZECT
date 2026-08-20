@@ -97,11 +97,13 @@ class TestDeleteNotePathTraversalGuard:
 
         assert notes.delete_note("") is False
 
-    def test_deletes_a_real_note_file(self, tmp_path, monkeypatch):
+    def test_keeps_long_text_up_to_50k(self, tmp_path, monkeypatch):
         from app.services.mentrix import notes
 
         monkeypatch.setattr(notes, "NOTES_DIR", tmp_path)
-        note = notes.add_note("hello world")
+        body = "a" * 12_000
+        note = notes.add_note(body)
+        assert len(note["text"]) == 12_000
 
         assert notes.delete_note(note["id"]) is True
         assert not (tmp_path / f"{note['id']}.json").exists()
@@ -112,3 +114,13 @@ class TestDeleteNotePathTraversalGuard:
         monkeypatch.setattr(notes, "NOTES_DIR", tmp_path)
 
         assert notes.delete_note("00000000-0000-0000-0000-000000000000") is False
+
+
+def test_add_note_keeps_long_companion_text(tmp_path, monkeypatch):
+    from app.services.mentrix import notes
+
+    monkeypatch.setattr(notes, "NOTES_DIR", tmp_path)
+    body = "paragraph " * 800
+    note = notes.add_note(body)
+    assert len(note["text"]) > 4000
+    assert len(note["text"]) == len(body.strip())

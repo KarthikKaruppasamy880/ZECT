@@ -68,9 +68,9 @@ function ensureUserDataDirs() {
 }
 
 let mainWindow;
-let wakeEnabled = true;
+let wakeEnabled = false;
 let winWakeHandle = null;
-let wakeStatus = { ok: false, reason: "starting", engine: "" };
+let wakeStatus = { ok: false, reason: "disabled", engine: "" };
 let dictationHandle = null;
 let dictationArmedUntil = 0;
 let dictationPaused = false;
@@ -361,6 +361,17 @@ function createWindow() {
 }
 
 function startNativeWake() {
+  if (!wakeEnabled) {
+    if (winWakeHandle) {
+      winWakeHandle.stop();
+      winWakeHandle = null;
+    }
+    wakeStatus = { ok: false, reason: "disabled", engine: "windows-speech" };
+    if (mainWindow) {
+      mainWindow.webContents.send("mentrix-wake-status", { wakeEnabled, ...wakeStatus });
+    }
+    return;
+  }
   if (winWakeHandle) {
     winWakeHandle.stop();
     winWakeHandle = null;
@@ -925,8 +936,7 @@ app.whenReady().then(async () => {
     emitWake(WAKE_PHRASE, "hotkey");
   });
 
-  // Native Windows wake uses default recording device (set headset mic in Windows Sound settings)
-  startNativeWake();
+  // Hey Mentrix wake stays off until the operator enables it (Companion chip or Mentrix menu).
 
   // Bundled Chatterbox sidecar: auto-start when binary is present (or CHATTERBOX_AUTO_START=1)
   chatterbox.maybeAutoStart().then((out) => {

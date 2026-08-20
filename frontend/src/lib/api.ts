@@ -795,7 +795,7 @@ export const mentrixPresentonStatus = () =>
     blocked_external?: boolean;
     block_code?: string;
   }>("/api/mentrix/presenton/status");
-export type PresentonTemplate = { id: string; name: string };
+export type PresentonTemplate = { id: string; name: string; native_ready?: boolean; visual?: { ready?: boolean } };
 export const mentrixPresentonTemplates = () =>
   request<{
     ok: boolean;
@@ -814,6 +814,8 @@ export const mentrixPresentonGenerate = (data: {
   instructions?: string;
   filename?: string;
   asset_ids?: string[];
+  language?: string;
+  documents?: string[];
   fast_basic?: boolean;
   require_llm?: boolean;
 }) => {
@@ -882,10 +884,13 @@ export const mentrixParsePptxFromPath = (path: string) =>
   });
 
 export const mentrixPresentSaveNotes = (path: string, slides: PresentSlide[]) =>
-  request<{ ok: boolean; notes_path?: string; count?: number }>("/api/mentrix/present/save-notes", {
-    method: "POST",
-    body: JSON.stringify({ path, slides }),
-  });
+  request<{ ok: boolean; notes_path?: string; count?: number; ooxml_roundtrip?: boolean; ooxml_error?: string }>(
+    "/api/mentrix/present/save-notes",
+    {
+      method: "POST",
+      body: JSON.stringify({ path, slides }),
+    },
+  );
 
 export async function mentrixPresentPptxDownload(path: string): Promise<{ blob: Blob; filename: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
@@ -910,6 +915,18 @@ export const mentrixPresentDecks = () =>
   request<{ ok: boolean; items: Array<{ id: string; name: string; path: string; slide_count: number; modified: number; bytes: number }> }>(
     "/api/mentrix/present/decks",
   );
+
+export const mentrixPresentDeckDelete = (path: string) =>
+  request<{ ok: boolean; path: string }>("/api/mentrix/present/decks/delete", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+
+export const mentrixPresentDeckDuplicate = (path: string) =>
+  request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/decks/duplicate", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
 
 export const mentrixPresentBlank = () =>
   request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/blank", { method: "POST" });
@@ -1088,6 +1105,12 @@ export async function mentrixPresentationTemplateUpload(
     error?: string;
   };
 }
+
+export const mentrixPresentationTemplateDelete = (template_id: string) =>
+  request<{ ok: boolean; id?: string; error?: string }>("/api/mentrix/presentation/templates/delete", {
+    method: "POST",
+    body: JSON.stringify({ template_id }),
+  });
 
 export async function mentrixPresentationAssetUpload(file: File) {
   const form = new FormData();

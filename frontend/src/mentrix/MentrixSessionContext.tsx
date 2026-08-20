@@ -287,6 +287,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   );
 
   const realtimeRef = useRef<RealtimeSessionHandle | null>(null);
+  const wakeBeforeVoiceRef = useRef(false);
   const voiceConnectingRef = useRef(false);
   const voiceHoldOffRef = useRef(createVoiceHoldOff());
   const micDeviceIdRef = useRef(micDeviceId);
@@ -452,7 +453,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setVoiceConnecting(false);
     setVoiceConnected(false);
     setAvatar("idle");
-    setDesktopWakeEnabled(true);
+    setDesktopWakeEnabled(wakeBeforeVoiceRef.current);
   }, []);
 
   const startVoice = useCallback(async () => {
@@ -470,6 +471,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setAvatar("listening");
     setStatusLine("Connect Voice…");
     setDockExpanded(true);
+    try {
+      const st = await window.zectDesktop?.mentrix?.getWakeStatus?.();
+      wakeBeforeVoiceRef.current = Boolean(st?.wakeEnabled);
+    } catch {
+      wakeBeforeVoiceRef.current = false;
+    }
     setDesktopWakeEnabled(false);
     cancelBrowserSpeech();
     try {
@@ -545,7 +552,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             });
             setPending(mapped);
             setAvatar("needs_permission");
-            speakChat("I need your permission to continue.");
+            // Realtime speakCue (inside mentrixRealtime) owns this audio — speakChat is a no-op while connected.
           },
           onError: (err) => {
             if (/Voice output:/i.test(String(err))) {
@@ -568,7 +575,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
             realtimeRef.current = null;
             setVoiceConnected(false);
             setAvatar("idle");
-            setDesktopWakeEnabled(true);
+            setDesktopWakeEnabled(wakeBeforeVoiceRef.current);
             if (!isOpenAiQuotaError(String(reason))) {
               setStatusLine(`Realtime unavailable — ${reason}. Use typed Quick asks or Retry.`);
             }
@@ -618,7 +625,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     } finally {
       voiceConnectingRef.current = false;
       setVoiceConnecting(false);
-      if (!realtimeRef.current) setDesktopWakeEnabled(true);
+      if (!realtimeRef.current) setDesktopWakeEnabled(wakeBeforeVoiceRef.current);
     }
   }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakChat, stopVoice]);
 
@@ -686,6 +693,11 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
           if (d.pending_confirmations?.length) {
             setPending(d.pending_confirmations);
             setAvatar("needs_permission");
+            if (realtimeRef.current) {
+              realtimeRef.current.speakCue("I need your permission to continue.");
+            } else {
+              speakChat("I need your permission to continue.");
+            }
           } else {
             setAvatar("speaking");
             speakChat(reply, (err) => setStatusLine(`Voice: ${err}`));

@@ -5,11 +5,13 @@
 import { useEffect, useState } from "react";
 import { Presentation, Sparkles, Upload, FileText, Mic2 } from "lucide-react";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
+import { isGalleryTemplateVisible } from "@/lib/presentTemplates";
 import {
   mentrixPresentonStatus,
   mentrixPresentationTemplates,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplateUpload,
+  mentrixPresentationTemplateDelete,
   type PresentTemplateCard,
 } from "@/lib/api";
 
@@ -52,25 +54,29 @@ function TemplateCard({
   selected,
   testId,
   onSelect,
+  onDelete,
 }: {
   tmpl: Tmpl;
   selected: boolean;
   testId: string;
   onSelect: () => void;
+  onDelete?: () => void;
 }) {
   const colors = tmpl.visual?.colors || [];
   const layouts = tmpl.visual?.layout_names || [];
   const ready = tmpl.visual?.ready ?? tmpl.native_ready;
   const fonts = tmpl.visual?.fonts;
   return (
+    <div
+      className={`relative rounded-xl border p-3 ${
+        selected ? "border-teal-600 bg-teal-50 ring-2 ring-teal-600/30" : "border-slate-200 bg-white"
+      }`}
+    >
     <button
-      key={tmpl.id}
       type="button"
       data-testid={testId}
       onClick={onSelect}
-      className={`text-left rounded-xl border p-3 hover:border-teal-500 ${
-        selected ? "border-teal-600 bg-teal-50 ring-2 ring-teal-600/30" : "border-slate-200 bg-white"
-      }`}
+      className="w-full text-left hover:border-teal-500"
     >
       <div
         className="mb-2 h-16 rounded-lg border border-slate-200 overflow-hidden flex"
@@ -106,6 +112,20 @@ function TemplateCard({
         </p>
       ) : null}
     </button>
+      {onDelete ? (
+        <button
+          type="button"
+          data-testid={`${testId}-delete`}
+          className="absolute top-2 right-2 rounded border border-rose-200 bg-white px-1.5 py-0.5 text-[10px] text-rose-700"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          Delete
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -121,6 +141,7 @@ export default function ZectPresent() {
   const [panelKey, setPanelKey] = useState(0);
   const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
   const [orgScope, setOrgScope] = useState(false);
+  const [hideNotReady, setHideNotReady] = useState(false);
 
   const refresh = () => {
     mentrixPresentationTemplates()
@@ -179,6 +200,22 @@ export default function ZectPresent() {
     setStatus(`Registered “${out.template?.name}” under ${bucket}`);
     refresh();
     if (out.template?.id) await selectTemplate(out.template.id);
+  };
+
+  const visible = (rows: Tmpl[]) => rows.filter((t) => isGalleryTemplateVisible(t, hideNotReady));
+
+  const onDeleteTemplate = async (id: string) => {
+    if (!window.confirm("Remove this uploaded template?")) return;
+    const out = await mentrixPresentationTemplateDelete(id).catch(() => ({
+      ok: false as const,
+      error: "delete_failed",
+    }));
+    if (!out.ok) {
+      setStatus(out.error || "Could not delete template");
+      return;
+    }
+    setStatus("Template removed");
+    refresh();
   };
 
   return (
@@ -265,6 +302,16 @@ export default function ZectPresent() {
                 />
                 Organization scope
               </label>
+              <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                <input
+                  data-testid="zect-present-hide-not-ready"
+                  type="checkbox"
+                  checked={hideNotReady}
+                  onChange={(e) => setHideNotReady(e.target.checked)}
+                  className="rounded border-slate-400"
+                />
+                Ready templates only
+              </label>
               <label className="inline-flex items-center gap-1.5 text-xs text-teal-800 cursor-pointer">
                 <Upload className="h-3.5 w-3.5" />
                 Upload PPTX template
@@ -282,7 +329,7 @@ export default function ZectPresent() {
           <div>
             <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Zinnia</p>
             <div className="grid sm:grid-cols-3 gap-3">
-              {zinnia.map((t) => (
+              {visible(zinnia).map((t) => (
                 <TemplateCard
                   key={t.id}
                   tmpl={t}
@@ -297,13 +344,14 @@ export default function ZectPresent() {
           <div>
             <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Organization</p>
             <div className="grid sm:grid-cols-3 gap-3">
-              {org.map((t) => (
+              {visible(org).map((t) => (
                 <TemplateCard
                   key={`org-${t.id}`}
                   tmpl={t}
                   selected={selected === t.id}
                   testId={`zect-present-template-${t.id}`}
                   onSelect={() => void selectTemplate(t.id)}
+                  onDelete={t.id.startsWith("zinnia-") ? undefined : () => void onDeleteTemplate(t.id)}
                 />
               ))}
             </div>
@@ -315,13 +363,14 @@ export default function ZectPresent() {
               <p className="text-xs text-slate-500">No uploaded PPTX templates yet.</p>
             ) : (
               <div className="grid sm:grid-cols-3 gap-3">
-                {mine.map((t) => (
+                {visible(mine).map((t) => (
                   <TemplateCard
                     key={t.id}
                     tmpl={t}
                     selected={selected === t.id}
                     testId={`zect-present-my-${t.id}`}
                     onSelect={() => void selectTemplate(t.id)}
+                    onDelete={() => void onDeleteTemplate(t.id)}
                   />
                 ))}
               </div>
@@ -357,7 +406,13 @@ export default function ZectPresent() {
           <p className="text-xs text-slate-500">
             Selected template: <strong data-testid="zect-present-selected">{selected}</strong>
           </p>
-          <PresentDeckPanel key={panelKey} variant="light" initialTemplateId={selected} />
+          <PresentDeckPanel
+            key={panelKey}
+            variant="light"
+            mode="create"
+            initialTemplateId={selected}
+            toneHint={rewrite}
+          />
 
           <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
             <div className="flex items-center gap-2 text-sm font-medium text-slate-800">

@@ -115,3 +115,24 @@ def test_append_event_survives_malformed_events_json():
     events = _append_event(run, {"event": "ok", "message": "hi"})  # type: ignore[arg-type]
     assert events[-1]["event"] == "ok"
     assert '"ok"' in run.events_json
+
+
+def test_delete_and_duplicate_deck(tmp_path, monkeypatch):
+    from app.services.mentrix.presentation.deck_catalog import create_blank_pptx, delete_deck, duplicate_deck
+    from app.services.pptx_paths import notes_sidecar_for_pptx
+
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr("app.services.pptx_paths.Path.home", staticmethod(lambda: tmp_path))
+    dest = create_blank_pptx(filename="tiny-deck.pptx")
+    sidecar = notes_sidecar_for_pptx(dest)
+    sidecar.write_text('{"slides": []}', encoding="utf-8")
+    copy = duplicate_deck(str(dest))
+    assert copy.is_file()
+    assert copy != dest
+    assert notes_sidecar_for_pptx(copy).is_file()
+    out = delete_deck(str(dest))
+    assert out["ok"] is True
+    assert not dest.exists()
+    assert not sidecar.exists()
+    assert copy.is_file()

@@ -129,6 +129,13 @@ async def presentation_template_upload(
     return await tmpl.register_user_pptx(uid, file, name=name, scope=scope or "USER")
 
 
+@router.post("/templates/delete")
+@require_authentication
+def presentation_template_delete(body: PreviewIn, current_user: CurrentUser = Depends(get_current_user)):
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
+    return tmpl.delete_uploaded_template(uid, body.template_id)
+
+
 @router.post("/templates/mapping")
 @require_authentication
 def presentation_template_mapping(body: MappingIn, current_user: CurrentUser = Depends(get_current_user)):

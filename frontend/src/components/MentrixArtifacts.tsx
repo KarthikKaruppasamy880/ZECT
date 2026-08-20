@@ -139,7 +139,7 @@ function RecordBlock({ data }: { data?: Record<string, unknown> }) {
 export default function MentrixArtifacts({ items, displayMode }: Props) {
   return (
     <div
-      className={`space-y-3 overflow-auto ${displayMode ? "max-h-[calc(100vh-8rem)]" : "max-h-[520px]"}`}
+      className={`min-h-[4.5rem] space-y-3 overflow-auto ${displayMode ? "max-h-[calc(100vh-8rem)]" : "max-h-[520px]"}`}
       data-testid="mentrix-board"
     >
       {!items.length && (

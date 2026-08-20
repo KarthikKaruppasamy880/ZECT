@@ -107,8 +107,8 @@ export default function MentrixCompanion() {
 
   return (
     <div
-      className={`flex min-h-0 flex-col bg-slate-950 text-slate-100 overflow-hidden ${
-        s.displayMode ? "fixed inset-0 z-40 m-0 p-3 sm:p-4" : "h-full"
+      className={`flex min-h-0 flex-col overflow-hidden bg-slate-950 text-slate-100 ${
+        s.displayMode ? "fixed inset-0 z-40 m-0 p-3 sm:p-4" : "h-full min-h-0 flex-1"
       }`}
       data-testid="mentrix-companion-page"
     >
@@ -116,8 +116,8 @@ export default function MentrixCompanion() {
         <header className="flex shrink-0 flex-wrap items-start justify-between gap-2 sm:gap-3">
           <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-[0.25em] text-teal-500/80">Mentrix Operator</p>
-            <h1 className="text-xl font-bold tracking-tight text-teal-100 sm:text-3xl">MENTRIX</h1>
-            <p className="hidden text-sm text-slate-400 sm:block">
+            <h1 className="text-xl font-bold tracking-tight text-teal-100">MENTRIX</h1>
+            <p className="hidden text-sm text-slate-400 2xl:block">
               Company orchestrator — Project, WorkItem, Developer, Present, Voice, Process. Companion does not edit code or decks.
             </p>
             <div className="mt-2 max-w-3xl">
@@ -175,7 +175,7 @@ export default function MentrixCompanion() {
               ))}
             </div>
           </div>
-          <div className="hidden flex-wrap gap-2 text-xs sm:flex">
+          <div className="hidden flex-wrap gap-2 text-xs 2xl:flex">
             <button
               type="button"
               className="rounded-lg border border-slate-700 px-3 py-1.5"
@@ -303,16 +303,16 @@ export default function MentrixCompanion() {
             {!s.displayMode && mode === "chat" && (
               <>
                 <div
-                  className="min-h-0 flex-1 space-y-3 overflow-y-auto"
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden"
                   data-testid="mentrix-companion-scroll"
                 >
-                <div className="flex flex-col items-center gap-2 py-2 sm:py-4">
+                <div className="flex shrink-0 flex-col items-center gap-1 py-1 sm:gap-2 sm:py-2">
                   <div
                     data-testid="mentrix-avatar"
                     data-state={s.avatar}
-                    className={`flex h-24 w-24 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl sm:h-32 sm:w-32 lg:h-40 lg:w-40 ${ORB[s.avatar]}`}
+                    className={`flex h-16 w-16 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl sm:h-24 sm:w-24 ${ORB[s.avatar]}`}
                   >
-                    <Bot className="h-10 w-10 text-teal-300 sm:h-16 sm:w-16" />
+                    <Bot className="h-8 w-8 text-teal-300 sm:h-12 sm:w-12" />
                   </div>
                   <p className="text-sm font-medium uppercase tracking-widest text-teal-200/90">
                     Good to see you
@@ -341,7 +341,7 @@ export default function MentrixCompanion() {
                         : `Realtime unavailable — ${s.realtimePreflight.reason || "check OPENAI_API_KEY"} · use typed asks or Retry`}
                   </p>
                   {s.integrations ? (
-                    <p className="text-[10px] text-slate-500" data-testid="mentrix-integrations-status">
+                    <p className="hidden max-w-full truncate px-2 text-[10px] text-slate-500 2xl:block" data-testid="mentrix-integrations-status">
                       Mentrix Local{" "}
                       {(s.integrations as { mentrix_local?: boolean }).mentrix_local
                         ? "online"
@@ -452,7 +452,7 @@ export default function MentrixCompanion() {
                           : "Connect Voice"}
                     </button>
                     <p
-                      className="basis-full text-[10px] text-slate-500 px-1"
+                      className="hidden basis-full px-1 text-[10px] text-slate-500 2xl:block"
                       data-testid="mentrix-skills-model-hud"
                     >
                       Skill dropdown = playbook context · Model = chat LLM · Connect Voice = OpenAI
@@ -501,7 +501,7 @@ export default function MentrixCompanion() {
                     {s.computerMode ? (
                       <ComputerTargetChip />
                     ) : null}
-                    <p className="text-[10px] text-slate-500 max-w-[220px]" data-testid="computer-mode-hint">
+                    <p className="hidden max-w-[220px] text-[10px] text-slate-500 2xl:block" data-testid="computer-mode-hint">
                       Desktop actions require Electron + Computer Mode on (allowlisted apps / notes /
                       Present Deck only — never delete).
                     </p>
@@ -518,7 +518,7 @@ export default function MentrixCompanion() {
                 </div>
 
                 <div
-                  className="max-h-28 space-y-1 overflow-auto border-t border-slate-800 pt-3 text-[11px] text-slate-400 sm:max-h-36"
+                  className="max-h-24 shrink-0 space-y-1 overflow-auto border-t border-slate-800 pt-2 text-[11px] text-slate-400"
                   data-testid="mentrix-live-log"
                 >
                   {s.log.length === 0 && <p>Live log — tool events stream here</p>}
@@ -530,7 +530,7 @@ export default function MentrixCompanion() {
                 </div>
 
                 <div
-                  className="mt-3 max-h-48 space-y-2 overflow-auto border-t border-slate-800 pt-3"
+                  className="mt-2 min-h-0 flex-1 space-y-2 overflow-auto border-t border-slate-800 pt-2"
                   data-testid="mentrix-companion-chat"
                 >
                   {s.messages.map((m, i) => (
@@ -552,7 +552,7 @@ export default function MentrixCompanion() {
                   ) : null}
                   <div ref={s.chatEndRef} />
                 </div>
-                <p className="mt-3 text-[11px] text-slate-500">
+                <p className="mt-2 hidden text-[11px] text-slate-500 2xl:block">
                   Chat is the personal agent. Use{" "}
                   <button type="button" className="underline text-teal-400" onClick={() => setMode("incident")}>
                     Incident
@@ -673,7 +673,7 @@ export default function MentrixCompanion() {
 
           {mode === "chat" && s.showArtifacts && !s.displayMode && (
             <aside
-              className="flex min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-40"
+              className="flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-40 lg:h-full lg:min-h-0"
               data-testid="mentrix-companion-artifacts"
             >
               <div className="flex items-center justify-between">

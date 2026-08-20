@@ -111,7 +111,7 @@ export default function Layout({ onLogout }: LayoutProps) {
             data-testid="zect-main"
             className={
               mentrixHud
-                ? "p-0 min-w-0 min-h-0 flex-1 overflow-hidden pt-14 md:pt-0"
+                ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0 pt-14 md:pt-0"
                 : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"
             }
           >

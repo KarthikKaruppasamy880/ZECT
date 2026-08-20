@@ -22,6 +22,20 @@ export function isGenerateTemplateReady(
   return Boolean(t.native_ready || t.visual?.ready);
 }
 
+/**
+ * Gallery list: canonical Zinnia cards stay visible (badge may say TEMPLATE_NOT_READY).
+ * Generate stays READY-gated via isGenerateTemplateReady. hideNotReady only filters org/user uploads.
+ */
+export function isGalleryTemplateVisible(
+  t: PresentTemplateCard,
+  hideNotReady: boolean,
+): boolean {
+  if (!t?.id) return false;
+  if (t.id.startsWith("zinnia-")) return true;
+  if (!hideNotReady) return true;
+  return Boolean(t.visual?.ready ?? t.native_ready);
+}
+
 export function mergePresentTemplateLists(
   builtin: PresentTemplateCard[],
   remotePresenton: PresentTemplateCard[],

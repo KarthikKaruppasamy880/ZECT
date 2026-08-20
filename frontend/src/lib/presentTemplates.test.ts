@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isGenerateTemplateReady, mergePresentTemplateLists } from "./presentTemplates";
+import {
+  isGalleryTemplateVisible,
+  isGenerateTemplateReady,
+  mergePresentTemplateLists,
+} from "./presentTemplates";
 
 const BUILTIN = [
   { id: "general", name: "General" },
@@ -48,5 +52,20 @@ describe("mergePresentTemplateLists", () => {
     ).toBe(true);
     expect(isGenerateTemplateReady({ id: "general", name: "General" }, { presentonReady: true })).toBe(true);
     expect(isGenerateTemplateReady({ id: "general", name: "General" }, { presentonReady: false })).toBe(false);
+  });
+
+  it("gallery always lists canonical Zinnia even when hide-not-ready is on", () => {
+    expect(
+      isGalleryTemplateVisible({ id: "zinnia-executive-v1", name: "Exec", native_ready: false }, true),
+    ).toBe(true);
+    expect(
+      isGalleryTemplateVisible({ id: "user-my-deck", name: "Mine", native_ready: false }, true),
+    ).toBe(false);
+    expect(
+      isGalleryTemplateVisible({ id: "user-my-deck", name: "Mine", native_ready: false }, false),
+    ).toBe(true);
+    expect(
+      isGalleryTemplateVisible({ id: "org-brand", name: "Org", visual: { ready: true } }, true),
+    ).toBe(true);
   });
 });

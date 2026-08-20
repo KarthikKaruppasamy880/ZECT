@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { Presentation, Sparkles, Upload, FileText, Mic2 } from "lucide-react";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
+import { isGalleryTemplateVisible } from "@/lib/presentTemplates";
 import {
   mentrixPresentonStatus,
   mentrixPresentationTemplates,
@@ -140,7 +141,7 @@ export default function ZectPresent() {
   const [panelKey, setPanelKey] = useState(0);
   const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
   const [orgScope, setOrgScope] = useState(false);
-  const [hideNotReady, setHideNotReady] = useState(true);
+  const [hideNotReady, setHideNotReady] = useState(false);
 
   const refresh = () => {
     mentrixPresentationTemplates()
@@ -201,8 +202,7 @@ export default function ZectPresent() {
     if (out.template?.id) await selectTemplate(out.template.id);
   };
 
-  const visible = (rows: Tmpl[]) =>
-    hideNotReady ? rows.filter((t) => Boolean(t.visual?.ready ?? t.native_ready)) : rows;
+  const visible = (rows: Tmpl[]) => rows.filter((t) => isGalleryTemplateVisible(t, hideNotReady));
 
   const onDeleteTemplate = async (id: string) => {
     if (!window.confirm("Remove this uploaded template?")) return;

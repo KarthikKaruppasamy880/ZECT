@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Upload } from "lucide-react";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import PresentTemplateCardView from "@/pages/present/PresentTemplateCardView";
+import { isGalleryTemplateVisible } from "@/lib/presentTemplates";
 import {
   encodeDeckId,
   mentrixPresentonStatus,
@@ -38,7 +39,7 @@ export default function PresentCreate() {
   const [orgScope, setOrgScope] = useState(false);
   const [lifecycle, setLifecycle] = useState("STARTING");
   const [panelKey, setPanelKey] = useState(0);
-  const [hideNotReady, setHideNotReady] = useState(true);
+  const [hideNotReady, setHideNotReady] = useState(false);
   const evidencePrompt = params.get("prompt") || params.get("goal") || "";
   const evidenceAudience = params.get("audience") || "";
   const evidenceProject = params.get("project_id") || "";
@@ -95,7 +96,7 @@ export default function PresentCreate() {
   };
 
   const visible = (rows: PresentTemplateCard[]) =>
-    hideNotReady ? rows.filter((t) => Boolean(t.visual?.ready ?? t.native_ready)) : rows;
+    rows.filter((t) => isGalleryTemplateVisible(t, hideNotReady));
 
   const onDeleteTemplate = async (id: string) => {
     if (!window.confirm("Remove this uploaded template?")) return;

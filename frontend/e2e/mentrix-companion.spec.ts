@@ -65,13 +65,20 @@ test.describe("Mentrix Companion", () => {
 
   test("Connect Voice is honest when realtime is unavailable", async ({ page }) => {
     await page.goto("/mentrix-home");
-    const btn = page.getByTestId("mentrix-connect-voice");
+    const hud = page.getByTestId("mentrix-companion-page");
+    const btn = hud.getByTestId("mentrix-connect-voice");
+    const status = hud.getByTestId("mentrix-realtime-status");
     await expect(btn).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("mentrix-realtime-status")).toBeVisible({ timeout: 30_000 });
+    await expect(status).toBeVisible({ timeout: 30_000 });
+    // Preflight starts as null → button is enabled, then disables when realtime is not ready.
+    // Clicking during "Checking Realtime…" races and times out on a disabled control.
+    await expect(status).not.toContainText(/Checking Realtime/i, { timeout: 30_000 });
+    await expect(status).toContainText(/Realtime ready|Realtime unavailable|OPENAI_API_KEY/i, {
+      timeout: 15_000,
+    });
     if (!(await btn.isEnabled())) {
-      await expect(page.getByTestId("mentrix-realtime-status")).toContainText(
-        /Realtime unavailable|OPENAI_API_KEY|Retry|unavailable/i,
-      );
+      await expect(status).toContainText(/Realtime unavailable|OPENAI_API_KEY|Retry|unavailable/i);
+      await expect(btn).toBeDisabled();
       return;
     }
     await btn.click();

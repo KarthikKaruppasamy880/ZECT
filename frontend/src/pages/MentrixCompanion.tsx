@@ -441,6 +441,13 @@ export default function MentrixCompanion() {
                           ? "Disconnect Voice"
                           : "Connect Voice"}
                     </button>
+                    <p
+                      className="basis-full text-[10px] text-slate-500 px-1"
+                      data-testid="mentrix-skills-model-hud"
+                    >
+                      Skill dropdown = playbook context · Model = chat LLM · Connect Voice = OpenAI
+                      Realtime mic · Local LLM chip = offline gateway (not the same as Realtime).
+                    </p>
                     {!s.realtimePreflight?.ready && s.realtimePreflight !== null ? (
                       <button
                         type="button"

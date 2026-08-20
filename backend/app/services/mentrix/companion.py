@@ -43,6 +43,7 @@ def _system_prompt(preferred_name: str = "") -> str:
         + address
         + " Never claim you sent messages or controlled the desktop without confirmation."
         + " Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing."
+        + " To sort Desktop/Documents/Downloads use file_organize_plan (File Organize UI) — never computer_click and never delete."
         + " computer_type is for short keystrokes only (max ~500 chars); long text must use desktop_write_note."
         + " If type fails with foreground_not_allowlisted, tell the user to focus Notepad/Notepad++ — do not invent that typing succeeded."
         + " For Zoom: open Zoom or a join URL only — Mentrix cannot schedule Zoom meetings (no Zoom schedule API)."
@@ -74,6 +75,8 @@ NAV_MAP = {
     "permissions": "/permissions",
     "dashboard": "/",
     "docs": "/docs",
+    "architecture": "/tool-comparison",
+    "architecture guide": "/tool-comparison",
     "ask": "/ask",
     "plan": "/plan",
     "build": "/build",
@@ -427,6 +430,7 @@ def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
             'Each item: {"name":"...","args":{}}. '
             "Prefer desktop_write_note over computer_type for long text. "
             "Use capability_refuse for Zoom schedule. Use email_send for compose email (not Outlook type). "
+            "For sorting Desktop/Documents/Downloads use file_organize_plan (never delete, never computer_click). "
             "For navigate use args.path like /lattice. Empty array if just chatting.\n"
             f"User: {message[:800]}"
         )
@@ -585,7 +589,7 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             else:
                 tools.append({"name": "navigate", "args": {"path": path, "label": key}})
             break
-    if "open lattice" in m or "lattice graph" in m:
+    if "open lattice" in m or "lattice graph" in m or "open graphify" in m or "graphify lattice" in m:
         tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
     if re.search(r"\b(open|show|go to)\b.*\b(lattice docs|documentation graph|wiki graph|docs graph)\b", m):
         tools.append({"name": "navigate", "args": {"path": "/lattice?layer=docs", "label": "lattice docs"}})
@@ -652,6 +656,8 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         )
     ):
         tools.append({"name": "connector_architecture", "args": {}})
+        tools.append({"name": "navigate", "args": {"path": "/tool-comparison", "label": "architecture"}})
+        tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
 
     if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel", "what's on", "whats on")):
         tools.append({"name": "slack_digest", "args": {}})
@@ -727,13 +733,31 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
         name_hint = re.sub(r"[\\/:*?\"<>|]+", "_", name_hint)[:80] or "Mentrix"
         desk = _os.path.join(_os.path.expanduser("~"), "Desktop", name_hint)
         tools.append({"name": "desktop_mkdir", "args": {"path": desk}})
-    if any(p in m for p in ("organize desktop", "organize my files", "organize downloads", "file organize")):
+    if any(
+        p in m
+        for p in (
+            "organize desktop",
+            "organize my files",
+            "organize downloads",
+            "organize documents",
+            "file organize",
+            "sort desktop",
+            "sort my desktop",
+            "sort documents",
+            "sort my documents",
+            "sort downloads",
+            "tidy desktop",
+            "clean up my desktop",
+        )
+    ) or re.search(r"\b(sort|organize|tidy)\b.{0,32}\b(desktop|documents|downloads)\b", m):
         import os as _os
 
         home = _os.path.expanduser("~")
         src = _os.path.join(home, "Desktop")
         if "download" in m:
             src = _os.path.join(home, "Downloads")
+        elif "document" in m:
+            src = _os.path.join(home, "Documents")
         dest = _os.path.join(home, "Desktop", "MentrixOrganized")
         tools.append(
             {
@@ -1091,8 +1115,12 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for t in tools:
-        if t["name"] not in seen:
-            seen.add(t["name"])
+        name = str(t.get("name") or "")
+        key = name
+        if name == "navigate":
+            key = f"navigate:{(t.get('args') or {}).get('path') or '/'}"
+        if key not in seen:
+            seen.add(key)
             out.append(t)
     # Specific user actions beat generic keyword digest tools when the cap is hit.
     priority = {
@@ -2988,10 +3016,11 @@ def _exec_tool(
 
 def _merge_intents(message: str) -> list[dict[str, Any]]:
     det = _parse_intents(message)
-    if det:
-        return det
-    planned = _llm_plan_tools(message)
-    return planned[:_MAX_TOOLS]
+    planned = det or _llm_plan_tools(message)[:_MAX_TOOLS]
+    names = {str(t.get("name") or "") for t in planned}
+    if "file_organize_plan" in names:
+        planned = [t for t in planned if str(t.get("name") or "") != "computer_click"]
+    return planned
 
 
 def _auto_log_exchange(user_message: str, reply: str, *, pending: bool = False) -> None:

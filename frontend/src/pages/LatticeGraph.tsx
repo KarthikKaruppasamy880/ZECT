@@ -226,9 +226,9 @@ export default function LatticeGraph() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Lattice</h1>
-          <p className="text-sm text-slate-600">
-            Mentrix code intelligence — symbols, imports, calls, path/explain + RAG (Graphify-class,
-            ZECT-native Lattice).
+          <p className="text-sm text-slate-600" data-testid="lattice-graphify-copy">
+            Graphify = Lattice ingest. Mentrix code intelligence — symbols, imports, calls, path/explain
+            + RAG (ZECT-native Lattice, not a second knowledge base).
           </p>
           <p className="text-xs text-slate-500 mt-2 max-w-3xl">
             <strong>Ingest + RAG</strong> indexes a path; <strong>Load graph</strong> reloads an

@@ -22,6 +22,11 @@ describe("allowlisted", () => {
     assert.equal(computer.allowlisted("powerpnt.exe"), true);
     assert.equal(computer.allowlisted("POWERPNT"), true);
   });
+  it("matches Snipping Tool hosts", () => {
+    assert.equal(computer.allowlisted("SnippingTool.exe"), true);
+    assert.equal(computer.allowlisted("snippingtool"), true);
+    assert.equal(computer.allowlisted("ScreenClippingHost.exe"), true);
+  });
   it("rejects unknown apps", () => {
     assert.equal(computer.allowlisted("malware.exe"), false);
   });

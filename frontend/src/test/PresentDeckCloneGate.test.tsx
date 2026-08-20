@@ -59,6 +59,8 @@ import {
   mentrixCompanionIntegrations,
   mentrixPresentonGenerate,
   mentrixPresentonStatus,
+  mentrixPresentonTemplates,
+  mentrixPresentationTemplates,
   mentrixVoiceEngineStatus,
 } from "@/lib/api";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
@@ -141,6 +143,43 @@ describe("PresentDeckPanel clone narrate gate", () => {
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
     });
+  });
+
+  it("shows BLOCKED_EXTERNAL and keeps Zinnia templates when Presenton is down", async () => {
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://localhost:17493",
+      default_voice: null,
+      hint: "online",
+    });
+    (mentrixPresentonTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      reachable: false,
+      templates: [],
+    });
+    (mentrixPresentationTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      zinnia: [{ id: "zinnia-executive-v1", name: "Zinnia — Executive brief" }],
+      organization: [{ id: "org-brand", name: "Org brand" }],
+      my_templates: [{ id: "user-my-deck", name: "My deck" }],
+    });
+
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel mode="create" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("present-lifecycle-state").textContent).toMatch(/BLOCKED_EXTERNAL/);
+    });
+    expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
+    const select = screen.getByTestId("present-deck-template") as HTMLSelectElement;
+    const labels = [...select.options].map((o) => o.textContent || "");
+    expect(labels.some((t) => /Zinnia/i.test(t))).toBe(true);
+    expect(labels.some((t) => /Org brand/i.test(t))).toBe(true);
+    expect(labels.some((t) => /My deck/i.test(t))).toBe(true);
+    expect(labels.some((t) => /Custom template id/i.test(t))).toBe(false);
   });
 
   it("passes selected template and n_slides to generate", async () => {

@@ -6,6 +6,7 @@ import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
 import { GitBranch, FolderOpen, RefreshCw, ChevronDown, Network } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
+import HeaderDropdownPortal from "./HeaderDropdownPortal";
 
 export default function ProjectRepoSelector() {
   const {
@@ -40,9 +41,17 @@ export default function ProjectRepoSelector() {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (projectRef.current && !projectRef.current.contains(e.target as Node)) setShowProjectDD(false);
-      if (repoRef.current && !repoRef.current.contains(e.target as Node)) setShowRepoDD(false);
-      if (branchRef.current && !branchRef.current.contains(e.target as Node)) setShowBranchDD(false);
+      const t = e.target as HTMLElement | null;
+      const inPortal = (id: string) => Boolean(t?.closest?.(`[data-testid="${id}"]`));
+      if (projectRef.current && !projectRef.current.contains(e.target as Node) && !inPortal("select-project-dropdown")) {
+        setShowProjectDD(false);
+      }
+      if (repoRef.current && !repoRef.current.contains(e.target as Node) && !inPortal("select-repo-dropdown")) {
+        setShowRepoDD(false);
+      }
+      if (branchRef.current && !branchRef.current.contains(e.target as Node) && !inPortal("select-branch-dropdown")) {
+        setShowBranchDD(false);
+      }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -155,11 +164,12 @@ export default function ProjectRepoSelector() {
           <span className="truncate">{activeProject?.name || "All Projects"}</span>
           <ChevronDown size={12} className="shrink-0 text-slate-400" />
         </button>
-        {showProjectDD && (
-          <div
-            data-testid="select-project-dropdown"
-            className="zect-dropdown absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
-          >
+        <HeaderDropdownPortal
+          open={showProjectDD}
+          anchorRef={projectRef}
+          testId="select-project-dropdown"
+          className="zect-dropdown w-56 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+        >
             <button
               onClick={() => {
                 setActiveProject(null);
@@ -191,8 +201,7 @@ export default function ProjectRepoSelector() {
             >
               Open / Clone / Discover…
             </Link>
-          </div>
-        )}
+        </HeaderDropdownPortal>
       </div>
 
       <div ref={repoRef} className="relative">
@@ -210,11 +219,12 @@ export default function ProjectRepoSelector() {
           </span>
           <ChevronDown size={12} className="shrink-0 text-slate-400" />
         </button>
-        {showRepoDD && (
-          <div
-            data-testid="select-repo-dropdown"
-            className="zect-dropdown absolute top-full left-0 mt-1 w-72 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-72 overflow-y-auto"
-          >
+        <HeaderDropdownPortal
+          open={showRepoDD}
+          anchorRef={repoRef}
+          testId="select-repo-dropdown"
+          className="zect-dropdown w-72 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-y-auto"
+        >
             <button
               onClick={() => {
                 setActiveRepo(null);
@@ -261,8 +271,7 @@ export default function ProjectRepoSelector() {
             >
               Open Local / Clone / Discover / Attach…
             </Link>
-          </div>
-        )}
+        </HeaderDropdownPortal>
       </div>
 
       {activeRepoId && (
@@ -284,11 +293,12 @@ export default function ProjectRepoSelector() {
             )}
             <ChevronDown size={12} className="shrink-0 text-slate-400" />
           </button>
-          {showBranchDD && (
-            <div
-              data-testid="select-branch-dropdown"
-              className="zect-dropdown absolute top-full left-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto"
-            >
+          <HeaderDropdownPortal
+            open={showBranchDD}
+            anchorRef={branchRef}
+            testId="select-branch-dropdown"
+            className="zect-dropdown w-56 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+          >
               {branches.map((b) => (
                 <button
                   key={b}
@@ -369,8 +379,7 @@ export default function ProjectRepoSelector() {
                   </div>
                 </div>
               )}
-            </div>
-          )}
+          </HeaderDropdownPortal>
         </div>
       )}
 

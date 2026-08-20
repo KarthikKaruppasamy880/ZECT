@@ -109,6 +109,9 @@ export default function ZectLearning() {
     "# Practice: write a function that returns True\ndef ok():\n    return True\n",
   );
   const [practiceResult, setPracticeResult] = useState("");
+  const [firstRunOpen, setFirstRunOpen] = useState(
+    () => localStorage.getItem("zect.learning.firstRunDismissed") !== "1",
+  );
   const busy = op !== "";
 
   const activeProject = projects.find((p) => p.id === activeProjectId) || null;
@@ -424,6 +427,35 @@ export default function ZectLearning() {
           </p>
         </div>
       </div>
+
+      {firstRunOpen ? (
+        <div
+          className="rounded-xl border border-teal-200 bg-teal-50 p-4 text-sm text-slate-800 space-y-2"
+          data-testid="learning-first-run"
+        >
+          <p className="font-semibold text-teal-900">What ZECT Learning is</p>
+          <p>
+            Guided Path → Lesson → Practice. Mentor hints stay <strong>GUIDED</strong> — this is not a
+            general AI university and it does not auto-solve your exercises.
+          </p>
+          <p className="text-slate-600">What it is not: unrestricted tutoring, auto-complete of homework, or a second Mentrix agent.</p>
+          <button
+            type="button"
+            data-testid="learning-first-run-dismiss"
+            className="rounded border border-teal-700 px-2 py-1 text-xs text-teal-900"
+            onClick={() => {
+              setFirstRunOpen(false);
+              try {
+                localStorage.setItem("zect.learning.firstRunDismissed", "1");
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
+            Got it
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 items-center" data-testid="learning-language-chips">
         <button

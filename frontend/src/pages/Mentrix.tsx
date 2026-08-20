@@ -16,6 +16,7 @@ import { useActiveProject } from "@/contexts/ActiveProjectContext";
 const MODES = ["upgrade", "bugfix", "assistant", "chat", "understand", "deliver", "review_only", "ops"];
 
 function speakStatus(text: string, enabled: boolean) {
+  // Yield the speaker while Connect Voice owns getUserMedia (wake + Chromium unmute fight).
   if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
   try {
     window.speechSynthesis.cancel();
@@ -31,7 +32,7 @@ export default function Mentrix() {
   // Realtime voice (persistent dock, mounted globally in Layout.tsx) owns the speaker
   // whenever it's connected — this page's browser speechSynthesis must yield to it,
   // otherwise both speak at once ("multiple voices").
-  const { voiceConnected } = useMentrixSession();
+  const { voiceConnected, voiceConnecting } = useMentrixSession();
   const { activeRepoId, activeLocalPath, activeProjectKey } = useActiveProject();
   const location = useLocation();
   const {
@@ -132,7 +133,7 @@ export default function Mentrix() {
       unsubs.push(
         desktop.onWake(() => {
           goalInputRef.current?.focus();
-          speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected);
+          speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected && !voiceConnecting);
           setWakeHint("Wake heard — Mentrix ready");
         }),
       );
@@ -182,7 +183,7 @@ export default function Mentrix() {
         if (/\b(mentrix|matrix|mentrics)\b/.test(t) || t.includes("hey mentrix")) {
           goalInputRef.current?.focus();
           setWakeHint("Wake heard — Mentrix ready");
-          speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected);
+          speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected && !voiceConnecting);
         } else if (transcript.trim().length > 8) {
           setGoal((g) => (g ? g : transcript.trim()));
         }
@@ -205,7 +206,7 @@ export default function Mentrix() {
     }
     const onDomWake = () => {
       goalInputRef.current?.focus();
-      speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected);
+      speakStatus("Mentrix ready. State your goal.", ttsEnabled && !voiceConnected && !voiceConnecting);
     };
     window.addEventListener("mentrix-wake", onDomWake);
     return () => {
@@ -221,11 +222,11 @@ export default function Mentrix() {
       }
       setSttListening(false);
     };
-  }, [ttsEnabled, voiceConnected]);
+  }, [ttsEnabled, voiceConnected, voiceConnecting]);
 
   // TTS on status transitions
   useEffect(() => {
-    if (!active?.status || !ttsEnabled || voiceConnected) return;
+    if (!active?.status || !ttsEnabled || voiceConnected || voiceConnecting) return;
     const key = `${active.id}:${active.status}:${active.next_step || ""}`;
     if (key === lastSpokenStatus.current) return;
     lastSpokenStatus.current = key;
@@ -246,7 +247,7 @@ export default function Mentrix() {
     } else if (active.pr_url) {
       speakStatus("Pull request ready.", true);
     }
-  }, [active?.id, active?.status, active?.next_step, active?.pr_url, ttsEnabled, voiceConnected]);
+  }, [active?.id, active?.status, active?.next_step, active?.pr_url, ttsEnabled, voiceConnected, voiceConnecting]);
 
   const start = async () => {
     try {

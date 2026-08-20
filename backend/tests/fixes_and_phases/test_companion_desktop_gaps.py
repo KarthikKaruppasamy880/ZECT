@@ -65,3 +65,29 @@ def test_coding_agent_start_requires_workspace(monkeypatch):
     assert "/workspace" in (out.get("navigate") or "")
     spoken = (out.get("spoken_summary") or "").lower()
     assert "does not edit" in spoken or "developer workspace" in spoken
+
+
+def test_sort_desktop_routes_to_file_organize_not_click():
+    tools = c._parse_intents("sort my Desktop and Documents folders")
+    names = [t["name"] for t in tools]
+    assert "file_organize_plan" in names
+    assert "computer_click" not in names
+    plan = next(t for t in tools if t["name"] == "file_organize_plan")
+    src = str(plan["args"].get("source_dir") or "").lower()
+    assert "document" in src or "desktop" in src
+
+
+def test_merge_intents_drops_click_when_organize_present():
+    out = c._merge_intents("organize my downloads")
+    names = [t["name"] for t in out]
+    assert "file_organize_plan" in names
+    assert "computer_click" not in names
+
+
+def test_architecture_and_graphify_navigate_to_lattice():
+    tools = c._parse_intents("open graphify")
+    assert any(t["name"] == "navigate" and t["args"].get("path") == "/lattice" for t in tools)
+    arch = c._parse_intents("show connector architecture")
+    assert any(t["name"] == "connector_architecture" for t in arch)
+    assert any(t["name"] == "navigate" and t["args"].get("path") == "/lattice" for t in arch)
+    assert any(t["name"] == "navigate" and t["args"].get("path") == "/tool-comparison" for t in arch)

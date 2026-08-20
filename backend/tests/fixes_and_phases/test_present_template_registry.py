@@ -249,3 +249,23 @@ def test_invalid_canonical_replacement_preserves_master(tmp_path, monkeypatch):
     assert bad["ok"] is False
     assert master.read_bytes() == before
     assert native_ready("zinnia-executive-v1") is True
+
+
+def test_delete_uploaded_template_and_reject_builtin(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+
+    async def _run():
+        upload = UploadFile(filename="master.pptx", file=BytesIO(make_master_pptx_bytes()))
+        reg = await tmpl.register_user_pptx("u1", upload, name="My Master")
+        tid = reg["template"]["id"]
+        gone = tmpl.delete_uploaded_template("u1", tid)
+        assert gone["ok"] is True
+        listed = tmpl.list_templates("u1")
+        assert all(t["id"] != tid for t in listed["my_templates"])
+        builtin = tmpl.delete_uploaded_template("u1", "zinnia-executive-v1")
+        assert builtin["ok"] is False
+        assert builtin["error"] == "cannot_delete_builtin"
+
+    import asyncio
+
+    asyncio.run(_run())

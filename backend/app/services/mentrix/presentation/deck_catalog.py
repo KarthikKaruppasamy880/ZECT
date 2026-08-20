@@ -12,6 +12,25 @@ from app.services.mentrix.presentation.native_provider import _unique_pptx_path
 from app.services.pptx_paths import default_pptx_save_dir, notes_sidecar_for_pptx, resolve_allowlisted_pptx
 
 
+def delete_deck(path_str: str) -> dict[str, Any]:
+    pptx = resolve_allowlisted_pptx(path_str)
+    sidecar = notes_sidecar_for_pptx(pptx)
+    pptx.unlink()
+    if sidecar.is_file():
+        sidecar.unlink()
+    return {"ok": True, "path": str(pptx), "deleted": True}
+
+
+def duplicate_deck(path_str: str) -> Path:
+    pptx = resolve_allowlisted_pptx(path_str)
+    dest = _unique_pptx_path(default_pptx_save_dir(), pptx.name)
+    dest.write_bytes(pptx.read_bytes())
+    sidecar = notes_sidecar_for_pptx(pptx)
+    if sidecar.is_file():
+        notes_sidecar_for_pptx(dest).write_bytes(sidecar.read_bytes())
+    return dest
+
+
 def list_recent_decks(*, limit: int = 24) -> list[dict[str, Any]]:
     root = default_pptx_save_dir()
     files = sorted(root.glob("*.pptx"), key=lambda p: p.stat().st_mtime, reverse=True)

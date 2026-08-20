@@ -432,6 +432,25 @@ async def register_user_pptx(
     return {"ok": True, "template": _public_row(entry, default_scope=entry["scope"], default_kind=entry["kind"])}
 
 
+def delete_uploaded_template(user_id: str | int, template_id: str) -> dict[str, Any]:
+    """Remove a user/org uploaded PPTX from the registry. Built-in Zinnia ids are not deletable."""
+    tid = (template_id or "").strip()
+    if not tid or tid.startswith("zinnia-") or tid in {str(r["id"]) for r in _CANONICAL_ZINNIA}:
+        return {"ok": False, "error": "cannot_delete_builtin"}
+    for path in (_meta_path(user_id), _org_meta_path()):
+        rows = _load_list(path)
+        hit = next((t for t in rows if str(t.get("id") or "") == tid), None)
+        if not hit:
+            continue
+        pptx = Path(str(hit.get("path") or ""))
+        root = str(_root())
+        if pptx.is_file() and (str(pptx).startswith(root) or path_under_allowed_roots(str(pptx))):
+            pptx.unlink(missing_ok=True)
+        _save_list(path, [t for t in rows if str(t.get("id") or "") != tid])
+        return {"ok": True, "id": tid, "deleted": True}
+    return {"ok": False, "error": "not_found"}
+
+
 def import_canonical_master(
     zect_id: str,
     data: bytes,

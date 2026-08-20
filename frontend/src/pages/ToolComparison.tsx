@@ -4,6 +4,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Workflow, ArrowRight, Map } from "lucide-react";
+import { explainIdFromMermaidLabel } from "@/lib/archExplain";
 
 const SYSTEM_FLOW = `flowchart TB
   subgraph You["You"]
@@ -120,7 +121,15 @@ const ARCH_EXPLAIN = [
   },
 ];
 
-function MermaidDiagram({ body, title }: { body: string; title: string }) {
+function MermaidDiagram({
+  body,
+  title,
+  onNodeExplain,
+}: {
+  body: string;
+  title: string;
+  onNodeExplain?: (id: string) => void;
+}) {
   const id = useId().replace(/:/g, "");
   const ref = useRef<HTMLDivElement>(null);
 
@@ -148,10 +157,27 @@ function MermaidDiagram({ body, title }: { body: string; title: string }) {
     };
   }, [body, id]);
 
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !onNodeExplain) return;
+    const onClick = (ev: MouseEvent) => {
+      const node = (ev.target as Element | null)?.closest?.(".node");
+      if (!node || !el.contains(node)) return;
+      const mapped = explainIdFromMermaidLabel(node.textContent || "");
+      if (mapped) onNodeExplain(mapped);
+    };
+    el.addEventListener("click", onClick);
+    return () => el.removeEventListener("click", onClick);
+  }, [body, onNodeExplain]);
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <div className="border-b border-slate-100 px-4 py-2 text-sm font-semibold text-slate-800">{title}</div>
-      <div ref={ref} className="overflow-x-auto p-4 bg-slate-50 min-h-[160px]" />
+      <div
+        ref={ref}
+        className="overflow-x-auto p-4 bg-slate-50 min-h-[160px] cursor-pointer"
+        data-testid="architecture-mermaid"
+      />
     </div>
   );
 }
@@ -184,7 +210,23 @@ export default function ToolComparison() {
         </ol>
       </section>
 
-      <MermaidDiagram title="System architecture — where your clicks go" body={SYSTEM_FLOW} />
+      <MermaidDiagram
+        title="System architecture — where your clicks go"
+        body={SYSTEM_FLOW}
+        onNodeExplain={setExplainId}
+      />
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm" data-testid="architecture-legend">
+        <h2 className="text-sm font-semibold text-slate-900 mb-2">Implemented vs blocked</h2>
+        <ul className="space-y-1 text-slate-700">
+          <li>
+            <span className="font-medium text-emerald-800">Implemented:</span> Present generate (Presenton must be READY), clone TTS (Voicebox), Lattice ingest / Graphify.
+          </li>
+          <li>
+            <span className="font-medium text-amber-800">Blocked:</span> Presenton down = BLOCKED_EXTERNAL. Voicebox offline = clone narrate disabled. Lattice STALE = re-index.
+          </li>
+        </ul>
+      </section>
 
       <section className="space-y-3" data-testid="architecture-explain">
         <h2 className="text-lg font-semibold text-slate-900">Click a layer to explain</h2>
@@ -229,9 +271,9 @@ export default function ToolComparison() {
         </div>
       </section>
 
-      <MermaidDiagram title="Mentrix run — step order" body={MENTRIX_FLOW} />
-      <MermaidDiagram title="Labs productivity loop" body={LABS_FLOW} />
-      <MermaidDiagram title="Security incident response" body={IR_FLOW} />
+      <MermaidDiagram title="Mentrix run — step order" body={MENTRIX_FLOW} onNodeExplain={setExplainId} />
+      <MermaidDiagram title="Labs productivity loop" body={LABS_FLOW} onNodeExplain={setExplainId} />
+      <MermaidDiagram title="Security incident response" body={IR_FLOW} onNodeExplain={setExplainId} />
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold text-slate-900">Follow these paths in the product</h2>

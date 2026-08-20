@@ -886,7 +886,7 @@ def _parse_intents(message: str) -> list[dict[str, Any]]:
             "build this in the workspace",
             "mentrix coding agent:",
         )
-    ) or re.search(r"\b(code|fix|implement|refactor)\b.{0,40}\b(repo|workspace|project)\b", m):
+    ) or re.search(r"\b(code|implement|refactor)\b.{0,40}\b(repo|workspace|project)\b", m):
         # Prefer dedicated coding agent over Delivery for workspace edits
         if "delivery" not in m and "pr" not in m:
             tools.append({"name": "coding_agent_start", "args": {"goal": message[:800]}})
@@ -2314,14 +2314,21 @@ def _exec_tool(
     if name == "computer_type":
         text = str(args.get("text") or "")
         if len(text) > _TYPE_MAX_CHARS:
-            return {
-                "ok": False,
-                "error": "text_too_long_for_type",
-                "chars": len(text),
-                "max": _TYPE_MAX_CHARS,
-                "hint": "Use desktop_write_note for long content — computer_type is for short keystrokes only",
-                "spoken_summary": "That text is too long to type. Ask me to write a Desktop note file instead.",
-            }
+            # Paragraphs belong in a Desktop note — SendKeys is short keystrokes only.
+            return _exec_tool(
+                db,
+                "desktop_write_note",
+                {
+                    "content": text[:50_000],
+                    "folder": str(args.get("folder") or "Desktop"),
+                    "filename": str(args.get("filename") or "mentrix-note.md"),
+                },
+                project_key=project_key,
+                created_by=created_by,
+                user_id=user_id,
+                project_id=project_id,
+                correlation_id=correlation_id,
+            )
         return {"ok": True, "desktop": name, "args": {"text": text, "app": args.get("app")}}
     if name in ("computer_scroll", "computer_ui_inspect"):
         return {"ok": True, "desktop": name, "args": args}

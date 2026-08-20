@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 NOTES_DIR = Path(__file__).resolve().parents[3] / "data" / "mentrix_notes"
+_NOTE_MAX_CHARS = 50_000
 
 
 def _ensure_dir() -> Path:
@@ -31,7 +32,7 @@ def add_note(text: str, tags: list[str] | None = None) -> dict[str, Any]:
     root = _ensure_dir()
     note = {
         "id": str(uuid.uuid4()),
-        "text": (text or "").strip()[:4000],
+        "text": (text or "").strip()[:_NOTE_MAX_CHARS],
         "tags": tags or ["mentrix"],
         "createdAt": datetime.now(timezone.utc).isoformat(),
     }

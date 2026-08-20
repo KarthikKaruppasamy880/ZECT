@@ -1490,6 +1490,8 @@ class PresentonGenerateRequest(BaseModel):
     instructions: str = ""
     filename: str = ""
     asset_ids: list[str] = []
+    language: str = ""
+    documents: list[str] = []
     fast_basic: bool = False
     require_llm: bool = False
     run_id: str = ""
@@ -1521,9 +1523,16 @@ def presenton_generate(
     from app.services.mentrix.presentation.service import PresentationService
 
     uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
+    content = req.content
+    lang = (req.language or "").strip()
+    if lang and lang.lower() not in {"en", "english", "auto", ""}:
+        content = f"Write the entire presentation in {lang}.\n\n{content}"
+    docs = [d.strip() for d in (req.documents or []) if str(d).strip()]
+    if docs:
+        content = content + "\n\nAttached source material:\n" + "\n\n".join(docs[:8])
     out = PresentationService().generate(
         PresentationGenerateRequest(
-            content=req.content,
+            content=content,
             n_slides=req.n_slides,
             template=req.template,
             ui_template_choice=req.ui_template_choice,
@@ -1662,6 +1671,31 @@ def present_list_decks(_user: CurrentUser = Depends(get_current_user), limit: in
     from app.services.mentrix.presentation.deck_catalog import list_recent_decks
 
     return {"ok": True, "items": list_recent_decks(limit=limit)}
+
+
+@router.post("/present/decks/delete")
+def present_delete_deck(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import delete_deck
+
+    try:
+        return delete_deck(body.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+
+
+@router.post("/present/decks/duplicate")
+def present_duplicate_deck(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import duplicate_deck
+
+    try:
+        dest = duplicate_deck(body.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+    return {"ok": True, "path": str(dest), "filename": dest.name}
 
 
 @router.post("/present/blank")

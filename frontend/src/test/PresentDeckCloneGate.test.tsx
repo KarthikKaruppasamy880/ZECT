@@ -47,6 +47,7 @@ vi.mock("@/lib/api", () => ({
     },
   ]),
   mentrixVoiceEngineStatus: vi.fn(),
+  mentrixPresentationAssetUpload: vi.fn(async () => ({ ok: true, asset_id: "a1" })),
 }));
 
 vi.mock("@/mentrix/speak", () => ({
@@ -159,9 +160,9 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
     (mentrixPresentationTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
-      zinnia: [{ id: "zinnia-executive-v1", name: "Zinnia — Executive brief" }],
-      organization: [{ id: "org-brand", name: "Org brand" }],
-      my_templates: [{ id: "user-my-deck", name: "My deck" }],
+      zinnia: [{ id: "zinnia-executive-v1", name: "Zinnia — Executive brief", native_ready: true }],
+      organization: [{ id: "org-brand", name: "Org brand", native_ready: true }],
+      my_templates: [{ id: "user-my-deck", name: "My deck", native_ready: true }],
     });
 
     render(
@@ -172,6 +173,9 @@ describe("PresentDeckPanel clone narrate gate", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("present-lifecycle-state").textContent).toMatch(/BLOCKED_EXTERNAL/);
+      const select = screen.getByTestId("present-deck-template") as HTMLSelectElement;
+      const labels = [...select.options].map((o) => o.textContent || "");
+      expect(labels.some((t) => /Zinnia/i.test(t))).toBe(true);
     });
     expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
     const select = screen.getByTestId("present-deck-template") as HTMLSelectElement;
@@ -228,8 +232,49 @@ describe("PresentDeckPanel clone narrate gate", () => {
           content: "Q2 ZOAS delivery brief",
           template: "modern",
           n_slides: 8,
+          language: "English",
         }),
       );
     });
+  });
+
+  it("hides NOT_READY registry templates from generate dropdown", async () => {
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://localhost:17493",
+      default_voice: null,
+      hint: "online",
+    });
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: true });
+    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: true,
+      reachable: true,
+      base_url: "http://127.0.0.1:5000",
+      lifecycle: "READY",
+    });
+    (mentrixPresentationTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      zinnia: [
+        { id: "zinnia-executive-v1", name: "Zinnia — Executive brief", native_ready: true },
+        { id: "zinnia-delivery-v1", name: "Zinnia — Delivery status", native_ready: false },
+      ],
+      organization: [],
+      my_templates: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel mode="create" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("present-deck-language")).toBeTruthy();
+      expect(screen.getByTestId("present-deck-attach")).toBeTruthy();
+    });
+    const select = screen.getByTestId("present-deck-template") as HTMLSelectElement;
+    const labels = [...select.options].map((o) => o.textContent || "");
+    expect(labels.some((t) => /Executive/i.test(t))).toBe(true);
+    expect(labels.some((t) => /Delivery/i.test(t))).toBe(false);
   });
 });

@@ -11,6 +11,7 @@ import {
   nextSpeakableSentence,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
+  clonedRemainderToSpeak,
 } from "@/lib/mentrixRealtimeFinalize";
 import { registerSpeechCancelListener } from "@/mentrix/speak";
 
@@ -51,6 +52,8 @@ export type RealtimeSessionHandle = {
   stop: () => void;
   mode: "realtime" | "fallback";
   resumeAfterTool: (output: string) => void;
+  /** Speak a short cue on the Realtime audio path (not companion chat TTS). */
+  speakCue: (text: string) => void;
   ready: Promise<boolean>;
   /** Mentrix-facing provider label (never third-party product names in UI) */
   providerLabel: "realtime" | "fallback";
@@ -270,6 +273,7 @@ export async function startMentrixRealtime(
       providerLabel: "fallback",
       stop: () => undefined,
       resumeAfterTool: () => undefined,
+      speakCue: () => undefined,
       ready: noopReady,
     };
   }
@@ -299,6 +303,7 @@ export async function startMentrixRealtime(
         providerLabel: "fallback",
         stop: () => undefined,
         resumeAfterTool: () => undefined,
+        speakCue: () => undefined,
         ready: noopReady,
       };
     }
@@ -337,6 +342,10 @@ export async function startMentrixRealtime(
   const playQueue: Int16Array[] = [];
   let playing = false;
   const handledCallIds = new Set<string>();
+  /** Assigned after enqueueSpeak exists — cues must not use companion chat TTS. */
+  let speakCue: (text: string) => void = () => undefined;
+  let lastToolSpoken = "";
+  let loggedPcmWhileClone = false;
   // The Realtime API allows only one response in flight per conversation at a
   // time. A single turn can include several function calls (e.g. slack_digest
   // for two channels + delivery_status) whose completions race each other —
@@ -413,6 +422,18 @@ export async function startMentrixRealtime(
       args = {};
     }
     const output = await executeTool(name, args, false, handlers);
+    lastToolSpoken = "";
+    try {
+      const parsed = JSON.parse(output) as { spoken_summary?: unknown; pending?: unknown };
+      if (typeof parsed.spoken_summary === "string" && parsed.spoken_summary.trim()) {
+        lastToolSpoken = parsed.spoken_summary.trim();
+      }
+    } catch {
+      /* output may be a plain string */
+    }
+    if (output.includes('"pending":true')) {
+      speakCue("I need your permission to continue.");
+    }
     if (ws.readyState === WebSocket.OPEN && !output.includes('"pending":true')) {
       ws.send(
         JSON.stringify({
@@ -857,6 +878,7 @@ export async function startMentrixRealtime(
     startLookahead();
     void runSpeakQueue();
   };
+  speakCue = (text: string) => enqueueSpeak(text);
 
   ws.onerror = () => {
     handlers.onFallback?.("ws_error");
@@ -936,6 +958,10 @@ export async function startMentrixRealtime(
       (t === "response.output_audio.delta" || t === "response.audio.delta")
     ) {
       playQueue.length = 0;
+      if (!loggedPcmWhileClone) {
+        loggedPcmWhileClone = true;
+        handlers.onLog?.("Clone TTS active — discarded Realtime PCM (prevents double voice)");
+      }
     }
     const userTranscript = msg.transcript || msg.item?.content?.[0]?.transcript || "";
     if (
@@ -983,15 +1009,16 @@ export async function startMentrixRealtime(
             .trim() || clonedTextAcc.trim();
         if (text) {
           handlers.onTranscript?.("assistant", text);
-          // Personal-assistant behavior: log every completed exchange, not
-          // just when the user says "remember"/"note that". Fire-and-forget.
           if (lastUserTranscript) void logMentrixExchange(lastUserTranscript, text);
-          // Full sentences already got queued for speech as they streamed in
-          // (see the output_text.delta handler above) — only the trailing
-          // partial sentence (no terminal punctuation, or the non-cloned/
-          // fallback path where clonedSpokenUpTo never advanced) is left.
-          const remaining = clonedSpokenUpTo < text.length ? text.slice(clonedSpokenUpTo).trim() : "";
+        }
+        if (clonedTextAcc.trim()) {
+          const remaining = clonedRemainderToSpeak(clonedTextAcc, clonedSpokenUpTo);
           if (remaining) enqueueSpeak(remaining);
+        } else if (lastToolSpoken) {
+          enqueueSpeak(lastToolSpoken);
+          lastToolSpoken = "";
+        } else if (text) {
+          enqueueSpeak(text);
         }
         clonedTextAcc = "";
         lastUserTranscript = "";
@@ -1010,7 +1037,7 @@ export async function startMentrixRealtime(
     }
   };
 
-  return { mode: "realtime", providerLabel: "realtime", stop, resumeAfterTool, ready };
+  return { mode: "realtime", providerLabel: "realtime", stop, resumeAfterTool, speakCue, ready };
 }
 
 /** Confirm pending tools from Realtime Allow overlay. */

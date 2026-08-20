@@ -112,3 +112,12 @@ export function nextSpeakableSentence(unspoken: string): { sentence: string; con
   if (!sentence) return null;
   return { sentence, consumedLength: match[0].length };
 }
+
+/**
+ * Trailing clone TTS after response.done must use streamed clonedTextAcc, not
+ * rejoined response.output text (that string can differ and re-speak the whole reply).
+ */
+export function clonedRemainderToSpeak(clonedTextAcc: string, clonedSpokenUpTo: number): string {
+  if (clonedSpokenUpTo >= clonedTextAcc.length) return "";
+  return clonedTextAcc.slice(Math.max(0, clonedSpokenUpTo)).trim();
+}

@@ -6,6 +6,7 @@ import PresentTemplateCardView from "@/pages/present/PresentTemplateCardView";
 import {
   encodeDeckId,
   mentrixPresentonStatus,
+  mentrixPresentationTemplateDelete,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplates,
   mentrixPresentationTemplateUpload,
@@ -37,6 +38,7 @@ export default function PresentCreate() {
   const [orgScope, setOrgScope] = useState(false);
   const [lifecycle, setLifecycle] = useState("STARTING");
   const [panelKey, setPanelKey] = useState(0);
+  const [hideNotReady, setHideNotReady] = useState(true);
   const evidencePrompt = params.get("prompt") || params.get("goal") || "";
   const evidenceAudience = params.get("audience") || "";
   const evidenceProject = params.get("project_id") || "";
@@ -92,6 +94,22 @@ export default function PresentCreate() {
     }
   };
 
+  const visible = (rows: PresentTemplateCard[]) =>
+    hideNotReady ? rows.filter((t) => Boolean(t.visual?.ready ?? t.native_ready)) : rows;
+
+  const onDeleteTemplate = async (id: string) => {
+    if (!window.confirm("Remove this uploaded template?")) return;
+    const out = await mentrixPresentationTemplateDelete(id).catch(() => ({ ok: false as const, error: "delete_failed" }));
+    if (!out.ok) {
+      setStatus(out.error || "Could not delete template");
+      return;
+    }
+    const r = await mentrixPresentationTemplates();
+    setZinnia(r.zinnia || []);
+    setOrg(r.organization || []);
+    setMine(r.my_templates || []);
+  };
+
   return (
     <div className="space-y-4" data-testid="zect-present-workspace">
       <div className="flex items-center justify-between">
@@ -127,6 +145,16 @@ export default function PresentCreate() {
               />
               Organization scope
             </label>
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+              <input
+                data-testid="zect-present-hide-not-ready"
+                type="checkbox"
+                checked={hideNotReady}
+                onChange={(e) => setHideNotReady(e.target.checked)}
+                className="rounded border-slate-400"
+              />
+              Ready templates only
+            </label>
             <label className="inline-flex items-center gap-1.5 text-xs text-teal-800 cursor-pointer">
               <Upload className="h-3.5 w-3.5" />
               Upload PPTX template
@@ -143,7 +171,7 @@ export default function PresentCreate() {
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Zinnia</p>
           <div className="grid sm:grid-cols-3 gap-3">
-            {zinnia.map((t) => (
+            {visible(zinnia).map((t) => (
               <PresentTemplateCardView
                 key={t.id}
                 tmpl={t}
@@ -157,13 +185,14 @@ export default function PresentCreate() {
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Organization</p>
           <div className="grid sm:grid-cols-3 gap-3">
-            {org.map((t) => (
+            {visible(org).map((t) => (
               <PresentTemplateCardView
                 key={`org-${t.id}`}
                 tmpl={t}
                 selected={selected === t.id}
                 testId={`zect-present-template-${t.id}`}
                 onSelect={() => void selectTemplate(t.id)}
+                onDelete={t.id.startsWith("zinnia-") ? undefined : () => void onDeleteTemplate(t.id)}
               />
             ))}
           </div>
@@ -174,13 +203,14 @@ export default function PresentCreate() {
             <p className="text-xs text-slate-500">No uploaded PPTX templates yet.</p>
           ) : (
             <div className="grid sm:grid-cols-3 gap-3">
-              {mine.map((t) => (
+              {visible(mine).map((t) => (
                 <PresentTemplateCardView
                   key={t.id}
                   tmpl={t}
                   selected={selected === t.id}
                   testId={`zect-present-my-${t.id}`}
                   onSelect={() => void selectTemplate(t.id)}
+                  onDelete={() => void onDeleteTemplate(t.id)}
                 />
               ))}
             </div>

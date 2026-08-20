@@ -5,7 +5,7 @@
  */
 import { Link } from "react-router-dom";
 import PresentEditor from "@/components/PresentEditor";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
 import {
   mentrixCompanionIntegrations,
@@ -14,18 +14,18 @@ import {
   mentrixPresentonTemplates,
   mentrixParsePptx,
   mentrixPresentationAudiences,
+  mentrixPresentationAssetUpload,
   mentrixPresentationTemplates,
   mentrixAnalyzeDeck,
   mentrixPreparePromptDeck,
   listMyClonedVoices,
   mentrixVoiceEngineStatus,
   type ClonedVoiceInfo,
-  type PresentonTemplate,
   type VoiceEngineStatus,
 } from "@/lib/api";
 import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
 import { pickLocalFile } from "@/lib/pickLocalFile";
-import { mergePresentTemplateLists } from "@/lib/presentTemplates";
+import { isGenerateTemplateReady, mergePresentTemplateLists, type PresentTemplateCard } from "@/lib/presentTemplates";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -36,11 +36,25 @@ const TEMPLATE_KEY = "mentrix_present_template";
 const N_SLIDES_KEY = "mentrix_present_n_slides";
 const CUSTOM_TEMPLATE_KEY = "mentrix_present_custom_template";
 const CUSTOM_TEMPLATE_OPTION = "__custom__";
+const LANGUAGE_KEY = "mentrix_present_language";
+
+const DECK_LANGUAGES = [
+  { id: "English", label: "English" },
+  { id: "Spanish", label: "Spanish" },
+  { id: "French", label: "French" },
+  { id: "German", label: "German" },
+  { id: "Portuguese", label: "Portuguese" },
+  { id: "Japanese", label: "Japanese" },
+  { id: "Chinese", label: "Chinese" },
+  { id: "Korean", label: "Korean" },
+  { id: "Hindi", label: "Hindi" },
+  { id: "Arabic", label: "Arabic" },
+];
 
 const AUDIENCE_KEY = "zect_mentrix_present_audience";
 const SENS_KEY = "zect_mentrix_present_sensitivity";
 
-const BUILTIN_TEMPLATES: PresentonTemplate[] = [
+const BUILTIN_TEMPLATES: PresentTemplateCard[] = [
   { id: "general", name: "General" },
   { id: "modern", name: "Modern" },
   { id: "standard", name: "Standard" },
@@ -143,7 +157,18 @@ export default function PresentDeckPanel({
   const [busy, setBusy] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [presentonReady, setPresentonReady] = useState(false);
-  const [templates, setTemplates] = useState<PresentonTemplate[]>(BUILTIN_TEMPLATES);
+  const [templates, setTemplates] = useState<PresentTemplateCard[]>(BUILTIN_TEMPLATES);
+  const [language, setLanguage] = useState(() => {
+    try {
+      return localStorage.getItem(LANGUAGE_KEY) || "English";
+    } catch {
+      return "English";
+    }
+  });
+  const [attachDocs, setAttachDocs] = useState<string[]>([]);
+  const [attachAssetIds, setAttachAssetIds] = useState<string[]>([]);
+  const [attachLabels, setAttachLabels] = useState<string[]>([]);
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const [templateChoice, setTemplateChoice] = useState(
     () => migrateTemplateId(initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general"),
   );
@@ -285,15 +310,33 @@ export default function PresentDeckPanel({
   }, []);
 
   useEffect(() => {
-    if (presentonReady) return;
-    if (templateChoice !== CUSTOM_TEMPLATE_OPTION) return;
-    setTemplateChoice("zinnia-executive-v1");
+    const ready = templates.filter((t) => isGenerateTemplateReady(t, { presentonReady }));
+    if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
+      if (presentonReady) return;
+      const fallback = ready[0]?.id || "zinnia-executive-v1";
+      setTemplateChoice(fallback);
+      try {
+        localStorage.setItem(TEMPLATE_KEY, fallback);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    if (ready.some((t) => t.id === templateChoice)) return;
+    const fallback = ready[0]?.id;
+    if (!fallback) return;
+    setTemplateChoice(fallback);
     try {
-      localStorage.setItem(TEMPLATE_KEY, "zinnia-executive-v1");
+      localStorage.setItem(TEMPLATE_KEY, fallback);
     } catch {
       /* ignore */
     }
-  }, [presentonReady, templateChoice]);
+  }, [templates, presentonReady, templateChoice]);
+
+  const readyTemplates = useMemo(
+    () => templates.filter((t) => isGenerateTemplateReady(t, { presentonReady })),
+    [templates, presentonReady],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -502,6 +545,7 @@ export default function PresentDeckPanel({
         prompt: content,
         audience_id: audienceId,
         sensitivity_hint: sensitivityHint || undefined,
+        documents: attachDocs.length ? attachDocs : undefined,
       });
       setClaimsPreview(prep.claims || []);
       setAnalysisNote(
@@ -554,6 +598,9 @@ export default function PresentDeckPanel({
           custom_id: customTemplateId.trim() || undefined,
           filename: "mentrix-deck.pptx",
           fast_basic: Boolean(opts?.fastBasic),
+          language,
+          documents: attachDocs.length ? attachDocs : undefined,
+          asset_ids: attachAssetIds.length ? attachAssetIds : undefined,
         });
       } finally {
         window.clearInterval(stageTimer);
@@ -1030,7 +1077,7 @@ export default function PresentDeckPanel({
                 : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
             }
           >
-            {templates.map((t) => (
+            {readyTemplates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -1053,6 +1100,85 @@ export default function PresentDeckPanel({
                 : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
             }
           />
+        </label>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Language
+          <select
+            data-testid="present-deck-language"
+            value={language}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLanguage(v);
+              try {
+                localStorage.setItem(LANGUAGE_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {DECK_LANGUAGES.map((lang) => (
+              <option key={lang.id} value={lang.id}>
+                {lang.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Attach source files
+          <input
+            ref={attachInputRef}
+            data-testid="present-deck-attach"
+            type="file"
+            multiple
+            accept=".txt,.md,.csv,.json,image/png,image/jpeg,image/gif,image/webp"
+            className="mt-1 block w-full text-[11px]"
+            onChange={async (e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = "";
+              for (const file of files) {
+                const lower = file.name.toLowerCase();
+                const isImage = /\.(png|jpe?g|gif|webp)$/.test(lower);
+                if (isImage) {
+                  try {
+                    const out = await mentrixPresentationAssetUpload(file);
+                    if (out.asset_id) {
+                      const assetId = out.asset_id;
+                      setAttachAssetIds((prev) => [...prev, assetId]);
+                      setAttachLabels((prev) => [...prev, file.name]);
+                    } else {
+                      setStatus(out.error || "Image rejected");
+                    }
+                  } catch (err) {
+                    setStatus(err instanceof Error ? err.message : "Image upload failed");
+                  }
+                  continue;
+                }
+                try {
+                  const text = (await file.text()).slice(0, 20_000);
+                  setAttachDocs((prev) => [...prev, `# ${file.name}\n${text}`]);
+                  setAttachLabels((prev) => [...prev, file.name]);
+                } catch {
+                  setStatus(`Could not read ${file.name}`);
+                }
+              }
+            }}
+          />
+          {attachLabels.length ? (
+            <p className={`mt-1 text-[10px] ${dark ? "text-slate-400" : "text-slate-500"}`} data-testid="present-deck-attach-names">
+              {attachLabels.join(" · ")}
+            </p>
+          ) : (
+            <p className={`mt-1 text-[10px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
+              Text files become source material. Images upload as assets. No Presenton Community gallery.
+            </p>
+          )}
         </label>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

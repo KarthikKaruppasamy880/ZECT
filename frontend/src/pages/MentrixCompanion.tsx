@@ -107,7 +107,7 @@ export default function MentrixCompanion() {
 
   return (
     <div
-      className={`-m-4 md:-m-6 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-100 ${s.displayMode ? "fixed inset-0 z-40 m-0 p-4" : ""}`}
+      className={`bg-slate-950 text-slate-100 overflow-hidden ${s.displayMode ? "fixed inset-0 z-40 m-0 p-4" : "h-full"}`}
       data-testid="mentrix-companion-page"
     >
       <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 p-4">
@@ -656,7 +656,7 @@ export default function MentrixCompanion() {
           </section>
 
           {mode === "chat" && s.showArtifacts && !s.displayMode && (
-            <aside className="flex max-h-[calc(100vh-8rem)] min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
+            <aside className="flex h-full min-h-0 flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold text-teal-200">
                   <Sparkles className="h-4 w-4" />

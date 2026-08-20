@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FilePlus2, Sparkles, Upload } from "lucide-react";
+import { Copy, FilePlus2, MoreVertical, Sparkles, Trash2, Upload } from "lucide-react";
 import {
   encodeDeckId,
+  mentrixPresentDeckDelete,
+  mentrixPresentDeckDuplicate,
   mentrixPresentDecks,
   mentrixPresentSlidePreview,
   mentrixPresentationTemplates,
@@ -16,12 +18,19 @@ export default function PresentDashboard() {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [zinnia, setZinnia] = useState<PresentTemplateCard[]>([]);
   const [decksLoading, setDecksLoading] = useState(true);
+  const [menuPath, setMenuPath] = useState<string | null>(null);
+  const [busyPath, setBusyPath] = useState("");
 
-  useEffect(() => {
+  const refreshDecks = () => {
+    setDecksLoading(true);
     mentrixPresentDecks()
       .then((r) => setDecks(r.items || []))
       .catch(() => setDecks([]))
       .finally(() => setDecksLoading(false));
+  };
+
+  useEffect(() => {
+    refreshDecks();
     mentrixPresentationTemplates()
       .then((r) => setZinnia(r.zinnia || []))
       .catch(() => undefined);
@@ -47,6 +56,33 @@ export default function PresentDashboard() {
       created.forEach((u) => URL.revokeObjectURL(u));
     };
   }, [decks]);
+
+  const onDelete = async (path: string) => {
+    if (!window.confirm("Delete this presentation from Documents? This cannot be undone.")) return;
+    setBusyPath(path);
+    try {
+      await mentrixPresentDeckDelete(path);
+      setMenuPath(null);
+      refreshDecks();
+    } catch {
+      /* keep card */
+    } finally {
+      setBusyPath("");
+    }
+  };
+
+  const onDuplicate = async (path: string) => {
+    setBusyPath(path);
+    try {
+      await mentrixPresentDeckDuplicate(path);
+      setMenuPath(null);
+      refreshDecks();
+    } catch {
+      /* keep card */
+    } finally {
+      setBusyPath("");
+    }
+  };
 
   return (
     <div className="space-y-6" data-testid="present-dashboard">
@@ -93,23 +129,51 @@ export default function PresentDashboard() {
         ) : (
           <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3" data-testid="present-recent-decks">
             {decks.map((d) => (
-              <Link
-                key={d.path}
-                to={`/present/d/${encodeDeckId(d.path)}`}
-                className="rounded-xl border border-slate-200 bg-white p-3 hover:border-teal-500"
-              >
-                {thumbs[d.path] ? (
-                  <img
-                    src={thumbs[d.path]}
-                    alt=""
-                    className="mb-2 h-24 w-full rounded-lg border border-slate-200 object-cover"
-                  />
-                ) : (
-                  <div className="mb-2 h-16 rounded-lg bg-slate-100" />
-                )}
-                <p className="text-sm font-medium text-slate-900 truncate">{d.name}</p>
-                <p className="text-[11px] text-slate-500">{d.slide_count} slides</p>
-              </Link>
+              <div key={d.path} className="relative rounded-xl border border-slate-200 bg-white p-3 hover:border-teal-500">
+                <Link to={`/present/d/${encodeDeckId(d.path)}`} className="block">
+                  {thumbs[d.path] ? (
+                    <img
+                      src={thumbs[d.path]}
+                      alt=""
+                      className="mb-2 h-24 w-full rounded-lg border border-slate-200 object-cover"
+                    />
+                  ) : (
+                    <div className="mb-2 h-16 rounded-lg bg-slate-100" />
+                  )}
+                  <p className="text-sm font-medium text-slate-900 truncate">{d.name}</p>
+                  <p className="text-[11px] text-slate-500">{d.slide_count} slides</p>
+                </Link>
+                <button
+                  type="button"
+                  data-testid={`present-deck-menu-${d.name}`}
+                  className="absolute top-2 right-2 rounded border border-slate-200 bg-white p-1 text-slate-600"
+                  disabled={busyPath === d.path}
+                  onClick={() => setMenuPath((p) => (p === d.path ? null : d.path))}
+                  aria-label="Deck actions"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+                {menuPath === d.path ? (
+                  <div className="absolute top-10 right-2 z-10 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    <button
+                      type="button"
+                      data-testid={`present-deck-duplicate-${d.name}`}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50"
+                      onClick={() => void onDuplicate(d.path)}
+                    >
+                      <Copy className="h-3.5 w-3.5" /> Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`present-deck-delete-${d.name}`}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-rose-700 hover:bg-rose-50"
+                      onClick={() => void onDelete(d.path)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ))}
           </div>
         )}

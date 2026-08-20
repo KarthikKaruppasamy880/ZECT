@@ -52,7 +52,7 @@ export default function Layout({ onLogout }: LayoutProps) {
 
   return (
     <MentrixSessionProvider>
-      <div className={`min-h-screen overflow-x-hidden ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
+      <div className={`min-h-screen ${mentrixHud ? "h-screen overflow-hidden" : "overflow-x-hidden"} ${mentrixHud ? "bg-slate-950" : "bg-slate-50"}`}>
         <a
           href="#zect-main"
           className="zect-skip-link"
@@ -105,7 +105,7 @@ export default function Layout({ onLogout }: LayoutProps) {
             id="zect-main"
             tabIndex={-1}
             data-testid="zect-main"
-            className={mentrixHud ? "p-0 min-w-0" : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"}
+            className={mentrixHud ? "p-0 min-w-0 min-h-0 h-[calc(100vh-2.5rem)] overflow-hidden" : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"}
           >
             <Outlet />
           </main>

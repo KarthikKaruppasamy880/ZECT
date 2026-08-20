@@ -3,6 +3,7 @@ import {
   chunkSpeakText,
   createPerfTracker,
   nextSpeakableSentence,
+  clonedRemainderToSpeak,
   shouldAppendAssistantTranscript,
   shouldFinalizeClonedResponse,
 } from "./mentrixRealtimeFinalize";
@@ -94,6 +95,22 @@ describe("mentrixRealtimeFinalize", () => {
     }
     expect(sentences).toEqual(["First one.", "Second one!", "Third one?"]);
     expect(full.slice(spokenUpTo)).toBe("Trailing partial");
+  });
+
+  it("remainder uses streamed accumulator, not a reformatted full reply", () => {
+    const streamed = "First sentence is ready. Second still open";
+    let spokenUpTo = 0;
+    const first = nextSpeakableSentence(streamed.slice(spokenUpTo));
+    expect(first).not.toBeNull();
+    spokenUpTo += first!.consumedLength;
+    const rejoined = "First sentence is ready. Second still open — extra trailer from output JSON.";
+    expect(clonedRemainderToSpeak(rejoined, spokenUpTo).startsWith("First")).toBe(false);
+    expect(clonedRemainderToSpeak(streamed, spokenUpTo)).toBe("Second still open");
+  });
+
+  it("remainder is empty when every streamed char was already queued", () => {
+    expect(clonedRemainderToSpeak("Done.", 5)).toBe("");
+    expect(clonedRemainderToSpeak("", 0)).toBe("");
   });
 
   describe("createPerfTracker", () => {

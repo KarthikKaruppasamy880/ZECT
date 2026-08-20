@@ -31,11 +31,24 @@ def test_coding_engine_status_intent():
     assert any(t["name"] == "coding_engine_status" for t in tools)
 
 
-def test_computer_type_rejects_long_text():
+def test_computer_type_rewrites_long_text_to_desktop_note():
     long = "x" * 600
     out = c._exec_tool(db=None, name="computer_type", args={"text": long})  # type: ignore[arg-type]
-    assert out.get("ok") is False
-    assert out.get("error") == "text_too_long_for_type"
+    assert out.get("ok") is True
+    assert out.get("desktop") == "desktop_write_note"
+    assert "spoken_summary" in out
+    assert out.get("error") != "text_too_long_for_type"
+
+
+def test_computer_type_keeps_short_keystrokes():
+    out = c._exec_tool(db=None, name="computer_type", args={"text": "hello"})  # type: ignore[arg-type]
+    assert out.get("ok") is True
+    assert out.get("desktop") == "computer_type"
+
+
+def test_bare_fix_does_not_start_coding_agent():
+    tools = c._parse_intents("can you fix this")
+    assert not any(t["name"] == "coding_agent_start" for t in tools)
 
 
 def test_capability_refuse_zoom_exec():

@@ -102,23 +102,27 @@ def redact(text: str) -> str:
 
 
 def find_powerpoint() -> str | None:
-    """Office often installs POWERPNT.EXE without putting it on PATH."""
+    """Office often installs POWERPNT.EXE without putting it on PATH.
+
+    Use string paths + os.path.isfile so Linux CI can exercise the Windows
+    branch without pathlib trying to construct WindowsPath on POSIX.
+    """
     found = shutil.which("powerpnt") or shutil.which("POWERPNT.EXE")
     if found:
         return found
     if os.name != "nt":
         return None
-    home = Path.home()
+    home = os.path.expanduser("~")
     candidates = [
-        Path(r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE"),
-        Path(r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE"),
-        Path(r"C:\Program Files\Microsoft Office\Office16\POWERPNT.EXE"),
-        Path(r"C:\Program Files\Microsoft Office\Office15\POWERPNT.EXE"),
-        home / r"AppData\Local\Microsoft\WindowsApps\powerpnt.exe",
+        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\POWERPNT.EXE",
+        r"C:\Program Files\Microsoft Office\Office16\POWERPNT.EXE",
+        r"C:\Program Files\Microsoft Office\Office15\POWERPNT.EXE",
+        os.path.join(home, r"AppData\Local\Microsoft\WindowsApps\powerpnt.exe"),
     ]
     for path in candidates:
-        if path.is_file():
-            return str(path)
+        if os.path.isfile(path):
+            return path
     return None
 
 

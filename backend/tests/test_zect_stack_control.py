@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -144,12 +145,12 @@ def test_find_powerpoint_uses_which(monkeypatch):
 
 def test_find_powerpoint_office16_path_when_not_on_path(monkeypatch):
     monkeypatch.setattr(zect_stack.shutil, "which", lambda name: None)
-    monkeypatch.setattr(zect_stack.os, "name", "nt")
     target = r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE"
 
-    def fake_is_file(self):
-        return str(self) == target
+    def fake_isfile(path):
+        return os.path.normcase(str(path)) == os.path.normcase(target)
 
-    monkeypatch.setattr(zect_stack.Path, "is_file", fake_is_file)
+    monkeypatch.setattr(zect_stack.os.path, "isfile", fake_isfile)
+    monkeypatch.setattr(zect_stack.os, "name", "nt")
     found = zect_stack.find_powerpoint()
     assert found == target

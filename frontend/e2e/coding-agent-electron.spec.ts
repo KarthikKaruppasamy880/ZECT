@@ -8,6 +8,7 @@ import path from "path";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
+import { openCodingAgentMission } from "./helpers/releaseJourney";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(REPO, "test-results", "coding-agent-electron");
@@ -96,8 +97,7 @@ test.describe("coding agent electron", () => {
       );
       await page.goto(`${BASE}/workspace`, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await expect(page.getByTestId("developer-workspace")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId("mentrix-coding-agent-mission-tab")).toBeVisible();
+      await openCodingAgentMission(page);
       await expect(page.getByTestId("mentrix-coding-agent-start-mission")).toBeVisible();
       await expect(page.getByTestId("workspace-maximize-agent")).toBeVisible();
       await page.screenshot({ path: path.join(ART, "01-electron-agent.png") });

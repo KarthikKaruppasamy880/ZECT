@@ -15,6 +15,7 @@ import {
   apiRetry,
   hideImportPanel,
   makeGitRepo,
+  openCodingAgentMission,
   openWorkspace,
   sidebarOpen,
 } from "./helpers/releaseJourney";
@@ -114,7 +115,7 @@ test.describe("full release E2E production", () => {
 
     await sidebarOpen(page, "Developer", "developer-workspace");
     await hideImportPanel(page);
-    await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible({ timeout: 20_000 });
+    await openCodingAgentMission(page);
     await page.getByTestId("mentrix-coding-agent-mission-goal").fill("Fix add() so 2+3 is 5");
     await page.getByTestId("mentrix-coding-agent-patches-toggle").click();
     await page.getByTestId("mentrix-coding-agent-patches").fill(

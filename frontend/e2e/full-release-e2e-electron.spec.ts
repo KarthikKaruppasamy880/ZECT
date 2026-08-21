@@ -9,7 +9,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
-import { API, makeGitRepo, openWorkspace } from "./helpers/releaseJourney";
+import { API, makeGitRepo, openCodingAgentMission, openWorkspace } from "./helpers/releaseJourney";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(REPO, "test-results", "full-release-e2e-electron");
@@ -129,7 +129,7 @@ test.describe("full release E2E electron", () => {
         if (pressed === "false") await showTools.click();
       }
       await expect(page.getByTestId("workspace-terminal")).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible({ timeout: 20_000 });
+      await openCodingAgentMission(page);
       await page.getByTestId("mentrix-coding-agent-mission-goal").fill("Fix add() so 2+3 is 5");
       await page.getByTestId("mentrix-coding-agent-patches-toggle").click();
       await page.getByTestId("mentrix-coding-agent-patches").fill(

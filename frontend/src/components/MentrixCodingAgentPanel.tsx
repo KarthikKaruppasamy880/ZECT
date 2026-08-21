@@ -73,7 +73,7 @@ export default function MentrixCodingAgentPanel({
   workItemId = null,
   roots = [],
 }: Props) {
-  const [tab, setTab] = useState<Tab>(initialSessionId ? "agent" : "ask");
+  const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
 
   useEffect(() => {

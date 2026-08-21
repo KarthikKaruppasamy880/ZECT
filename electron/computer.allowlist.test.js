@@ -27,8 +27,10 @@ describe("allowlisted", () => {
     assert.equal(computer.allowlisted("snippingtool"), true);
     assert.equal(computer.allowlisted("ScreenClippingHost.exe"), true);
   });
-  it("rejects unknown apps", () => {
+  it("rejects unknown apps and never allowlists Electron (Mentrix itself)", () => {
     assert.equal(computer.allowlisted("malware.exe"), false);
+    assert.equal(computer.allowlisted("electron.exe"), false);
+    assert.equal(computer.allowlisted("electron"), false);
   });
 });
 

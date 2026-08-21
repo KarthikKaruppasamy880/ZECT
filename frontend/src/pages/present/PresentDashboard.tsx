@@ -71,6 +71,26 @@ export default function PresentDashboard() {
     }
   };
 
+  const onDeleteAll = async () => {
+    if (!decks.length) return;
+    const ok = window.confirm(
+      `Delete all ${decks.length} recent presentations from Documents? This cannot be undone.`,
+    );
+    if (!ok) return;
+    setBusyPath("*");
+    try {
+      for (const d of decks) {
+        await mentrixPresentDeckDelete(d.path);
+      }
+      setMenuPath(null);
+      refreshDecks();
+    } catch {
+      refreshDecks();
+    } finally {
+      setBusyPath("");
+    }
+  };
+
   const onDuplicate = async (path: string) => {
     setBusyPath(path);
     try {
@@ -117,7 +137,20 @@ export default function PresentDashboard() {
       </div>
 
       <section>
-        <h2 className="text-sm font-semibold text-slate-800 mb-2">Recent presentations</h2>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-slate-800">Recent presentations</h2>
+          {decks.length > 0 ? (
+            <button
+              type="button"
+              data-testid="present-delete-all-recent"
+              className="inline-flex items-center gap-1 rounded border border-rose-200 px-2 py-1 text-[11px] text-rose-800 hover:bg-rose-50 disabled:opacity-40"
+              disabled={Boolean(busyPath)}
+              onClick={() => void onDeleteAll()}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete all recent
+            </button>
+          ) : null}
+        </div>
         {decksLoading ? (
           <p className="text-xs text-slate-500" role="status" data-testid="present-decks-loading">
             Loading presentations…

@@ -25,6 +25,18 @@ def _extract_at_text(xml: str) -> str:
     return " ".join(parts).replace("  ", " ").strip()
 
 
+def _visual_markers(xml: str) -> list[str]:
+    markers: list[str] = []
+    low = xml.lower()
+    if "c:chart" in low or "c:plotarea" in low:
+        markers.append("chart")
+    if "<a:tbl" in low or "a:tbl>" in low:
+        markers.append("table")
+    if "dsp:sp" in low or "wps:wsp" in low or "p:cxnsp" in low:
+        markers.append("diagram")
+    return markers
+
+
 def parse_pptx_bytes(data: bytes) -> list[dict]:
     """Return [{index, notes, text}, ...] from a .pptx archive."""
     if not data:
@@ -54,5 +66,5 @@ def parse_pptx_bytes(data: bytes) -> list[dict]:
                 notes = _extract_at_text(notes_path.read_text(encoding="utf-8", errors="ignore"))[:2000]
                 if re.search(r"click to edit master", notes, re.I) and len(notes) < 80:
                     notes = ""
-            slides.append({"index": i, "notes": notes, "text": text})
+            slides.append({"index": i, "notes": notes, "text": text, "visuals": _visual_markers(slide_xml)})
     return slides

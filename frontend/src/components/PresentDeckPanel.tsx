@@ -20,12 +20,14 @@ import {
   mentrixPreparePromptDeck,
   listMyClonedVoices,
   mentrixVoiceEngineStatus,
+  mentrixPresentationNarrateSlides,
   type ClonedVoiceInfo,
   type VoiceEngineStatus,
 } from "@/lib/api";
-import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
+import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
 import { pickLocalFile } from "@/lib/pickLocalFile";
 import { isGenerateTemplateReady, mergePresentTemplateLists, type PresentTemplateCard } from "@/lib/presentTemplates";
+import { preferredPresentVoiceChoice } from "@/lib/presentVoiceChoice";
 
 const STORAGE_KEY = "zect_mentrix_present_deck_path";
 const NOTES_KEY = "zect_mentrix_present_deck_notes";
@@ -114,7 +116,7 @@ type Props = {
   onGenerated?: (path: string) => void;
 };
 
-type SlideParsed = { index: number; notes?: string; text?: string };
+type SlideParsed = { index: number; notes?: string; text?: string; visuals?: string[] };
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -189,6 +191,7 @@ export default function PresentDeckPanel({
   const [flowBApproved, setFlowBApproved] = useState(false);
   const abortRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const userLockedVoiceRef = useRef(false);
   const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
   const dark = variant === "dark";
   const isCreate = mode === "create";
@@ -237,6 +240,9 @@ export default function PresentDeckPanel({
           if (statusCancelled) return;
           setPresentonReady(!!s.configured && !!s.reachable);
           const life = String(s.lifecycle || "") as ProviderLifecycle;
+          if (s.provider === "zect_native" && (life === "READY" || life === "TEMPLATE_NOT_READY")) {
+            setPresentonReady(true);
+          }
           if (
             life === "READY" ||
             life === "TEMPLATE_NOT_READY" ||
@@ -364,7 +370,10 @@ export default function PresentDeckPanel({
     };
   }, []);
 
-  const persistVoiceChoice = (value: string) => {
+  const persistVoiceChoice = (value: string, opts?: { userChoice?: boolean }) => {
+    if (opts?.userChoice && (value.startsWith("stock:") || value === "none")) {
+      userLockedVoiceRef.current = true;
+    }
     setVoiceChoice(value);
     try {
       localStorage.setItem(VOICE_CHOICE_KEY, value);
@@ -372,6 +381,12 @@ export default function PresentDeckPanel({
       /* ignore */
     }
   };
+
+  useEffect(() => {
+    const cloneId = myVoices.find((v) => v.is_default)?.voice_id || myVoices[0]?.voice_id;
+    const next = preferredPresentVoiceChoice(voiceChoice, cloneId, userLockedVoiceRef.current);
+    if (next !== voiceChoice) persistVoiceChoice(next);
+  }, [myVoices, voiceChoice]);
 
   const voiceOptsFromChoice = (choice: string): SpeakVoiceOptions => {
     if (choice.startsWith("clone:")) {
@@ -790,11 +805,26 @@ export default function PresentDeckPanel({
 
   const narrateSlideList = async (slides: SlideParsed[], modeLabel: string) => {
     const n = slides.length;
-    const scriptFor = (idx: number) => {
-      const slide = slides[idx];
+    const scripts: string[] = slides.map((slide, idx) => {
       const raw = (slide.notes || slide.text || "").trim() || `Slide ${idx + 1} of ${n}.`;
-      return capPresentSlideScript(raw);
-    };
+      return raw;
+    });
+    try {
+      const intel = await mentrixPresentationNarrateSlides(
+        slides as unknown as Array<Record<string, unknown>>,
+        notes.trim().slice(0, 180),
+      );
+      if (intel.ok && intel.slides?.length) {
+        for (const row of intel.slides) {
+          if (typeof row.script === "string" && row.script.trim()) {
+            scripts[row.index] = row.script.trim();
+          }
+        }
+      }
+    } catch {
+      /* grounded fallback already in scripts from notes/text */
+    }
+    const scriptFor = (idx: number) => scripts[idx] || `Slide ${idx + 1} of ${n}.`;
     const opts = voiceOptsFromChoice(voiceChoice);
     // Warm Voicebox + prefetch slide 0 before first play (cuts cold-start lag).
     setStatus(`${modeLabel}: warming voice engine…`);
@@ -812,10 +842,7 @@ export default function PresentDeckPanel({
         return;
       }
       const script = scriptFor(i);
-      setStatus(
-        `${modeLabel}: slide ${i + 1} / ${n}` +
-          (script.endsWith("…") ? " (script capped ~500 chars for clone speed)" : ""),
-      );
+      setStatus(`${modeLabel}: slide ${i + 1} / ${n}`);
 
       // Kick off slide N+1 synthesis while current slide audio plays
       const upcoming =
@@ -862,14 +889,14 @@ export default function PresentDeckPanel({
     );
   };
 
-  const presentAllSlides = async () => {
+  const presentAllSlides = async (opts?: { requireZoomShare?: boolean }) => {
     abortRef.current = false;
     setPresenting(true);
     setBusy(true);
     setStatus("");
 
     try {
-      if (isDesktop && !shareApproved) {
+      if (opts?.requireZoomShare && isDesktop && !shareApproved) {
         setStatus(
           "Approve screen-share first — Mentrix will narrate only after you confirm you will share PowerPoint in Zoom yourself.",
         );
@@ -964,7 +991,7 @@ export default function PresentDeckPanel({
     if (engineStatus.online) {
       return `ZECT Voicebox online (${engineStatus.base_url}). Present can narrate with your clone.`;
     }
-    return `ZECT Voicebox offline (${engineStatus.base_url}). Start local engine to narrate in your voice — sample in ZECT ≠ engine online.`;
+    return `ZECT Voicebox offline (${engineStatus.base_url || "http://127.0.0.1:17493"}). Start Voicebox: services/zect-voicebox/scripts/up.ps1 — sample in ZECT ≠ engine online.`;
   })();
 
   return (
@@ -1002,7 +1029,7 @@ export default function PresentDeckPanel({
         {isCreate
           ? "Prompt + template, then Generate presentation. Voice and Zoom live on Rehearse after a draft exists."
           : isDesktop
-            ? "Electron: open PowerPoint + Zoom, then Present & narrate advances slides (F5 / Right). You share the window in Zoom."
+            ? "Electron: Present locally uses PowerPoint F5 + narrate. Present in Zoom still needs the share checkbox. Clone needs Voicebox; stock Echo works without it."
             : "Browser: upload a .pptx to narrate every slide with your clone. For PowerPoint auto-advance, use the Electron desktop app."}
       </p>
       {!isCreate ? (
@@ -1046,6 +1073,18 @@ export default function PresentDeckPanel({
         >
           Create with AI in Present
         </Link>
+      ) : null}
+      {isCreate && lifecycle === "PROVIDER_UNAVAILABLE" ? (
+        <p
+          className={`text-[11px] rounded border px-2 py-1.5 ${
+            dark ? "border-amber-800 text-amber-200 bg-amber-950/40" : "border-amber-200 text-amber-900 bg-amber-50"
+          }`}
+          data-testid="present-create-blocked-external"
+        >
+          BLOCKED_EXTERNAL — Presenton is not reachable. Start local Docker (Rancher dockerd):{" "}
+          <code className="break-all">docker run -d --name presenton -p 5000:80 ghcr.io/presenton/presenton:latest</code>
+          {" "}— see docs/PRESENTON_LOCAL.md. Generate stays disabled until READY.
+        </p>
       ) : null}
       {isCreate ? (
       <>
@@ -1306,7 +1345,7 @@ export default function PresentDeckPanel({
         title={
           presentonReady
             ? "Generate a reviewable draft (Quality). Inspector and critic always run."
-            : "Presentation provider unreachable"
+            : "BLOCKED_EXTERNAL — start Presenton locally (docs/PRESENTON_LOCAL.md). Generate stays disabled until READY."
         }
       >
         <Sparkles className="h-3.5 w-3.5" />
@@ -1475,7 +1514,7 @@ export default function PresentDeckPanel({
         <select
           data-testid="present-deck-voice-select"
           value={voiceChoice}
-          onChange={(e) => persistVoiceChoice(e.target.value)}
+          onChange={(e) => persistVoiceChoice(e.target.value, { userChoice: true })}
           className={
             dark
               ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
@@ -1562,21 +1601,35 @@ export default function PresentDeckPanel({
         <button
           type="button"
           data-testid="present-deck-present-all"
-          disabled={busy || cloneNarrateBlocked || (isDesktop && !shareApproved)}
-          onClick={() => void presentAllSlides()}
+          disabled={busy || cloneNarrateBlocked}
+          onClick={() => void presentAllSlides({ requireZoomShare: false })}
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-900/40 px-2.5 py-1.5 text-xs text-amber-50 hover:bg-amber-900 disabled:opacity-40"
           title={
-            isDesktop && !shareApproved
-              ? "Approve screen-share first"
-              : cloneNarrateBlocked
-                ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice)"
-                : isDesktop
-                  ? "Reads slide text + speaker notes, opens PowerPoint, F5, narrates, advances with Right Arrow"
-                  : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
+            cloneNarrateBlocked
+              ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice). Stock Echo works without Voicebox."
+              : isDesktop
+                ? "Present locally: opens PowerPoint, F5, narrates, advances with Right Arrow. Zoom share is not required."
+                : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
           }
         >
           <Presentation className="h-3.5 w-3.5" />
-          Present &amp; narrate my PPTX (all slides)
+          Present locally
+        </button>
+        <button
+          type="button"
+          data-testid="present-deck-present-zoom"
+          disabled={busy || cloneNarrateBlocked || (isDesktop && !shareApproved)}
+          onClick={() => void presentAllSlides({ requireZoomShare: true })}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-500 px-2.5 py-1.5 text-xs text-slate-100 hover:bg-slate-800 disabled:opacity-40"
+          title={
+            isDesktop && !shareApproved
+              ? "Check “I will share PowerPoint in Zoom” first"
+              : cloneNarrateBlocked
+                ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice). Stock Echo works without Voicebox."
+                : "Present in Zoom after you share PowerPoint yourself (Mentrix does not auto-share)"
+          }
+        >
+          Present in Zoom
         </button>
         {!pptxFile && !isDesktop && (
           <button
@@ -1600,7 +1653,14 @@ export default function PresentDeckPanel({
           </button>
         )}
       </div>
-      {path && /\.pptx$/i.test(path) ? <PresentEditor pptxPath={path} /> : null}
+      {path && /\.pptx$/i.test(path) ? (
+        <>
+          <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`} data-testid="present-editor-role-hint">
+            Review slides here; Generate lives on Create with AI; Voicebox narrates Rehearse.
+          </p>
+          <PresentEditor pptxPath={path} />
+        </>
+      ) : null}
       </>
       ) : null}
       {status && (

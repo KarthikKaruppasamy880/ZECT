@@ -27,6 +27,7 @@ import IncidentRunbookPanel from "@/components/IncidentRunbookPanel";
 import CloneVoicePanel from "@/components/CloneVoicePanel";
 import ModelSelector from "@/components/ModelSelector";
 import CompanionScopeStrip from "@/components/CompanionScopeStrip";
+import { computerTargetHint } from "@/lib/computerTarget";
 import { setStoredMicDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
@@ -58,7 +59,7 @@ function ComputerTargetChip() {
           res.summary?.frontmost ||
           res.summary?.foreground_title ||
           "unknown";
-        setLabel(`${name}${res.allowlisted ? " · allowlisted" : " · not allowlisted"}`);
+        setLabel(computerTargetHint(name, Boolean(res.allowlisted)));
       } catch {
         if (!cancelled) setLabel("Inspect failed");
       }
@@ -72,7 +73,7 @@ function ComputerTargetChip() {
   }, []);
   return (
     <p
-      className="text-[10px] text-teal-300/90 max-w-[240px] truncate"
+      className="text-[10px] text-teal-300/90 max-w-[360px] break-words"
       data-testid="computer-active-target"
       title={label}
     >
@@ -501,9 +502,10 @@ export default function MentrixCompanion() {
                     {s.computerMode ? (
                       <ComputerTargetChip />
                     ) : null}
-                    <p className="hidden max-w-[220px] text-[10px] text-slate-500 2xl:block" data-testid="computer-mode-hint">
+                    <p className="max-w-[280px] text-[10px] text-slate-500" data-testid="computer-mode-hint">
                       Desktop actions require Electron + Computer Mode on (allowlisted apps / notes /
-                      Present Deck only — never delete).
+                      Present Deck only — never delete). Folder create works while Mentrix is focused;
+                      click/type needs Explorer or Notepad in front.
                     </p>
                     <button
                       type="button"
@@ -518,19 +520,19 @@ export default function MentrixCompanion() {
                 </div>
 
                 <div
-                  className="max-h-24 shrink-0 space-y-1 overflow-auto border-t border-slate-800 pt-2 text-[11px] text-slate-400"
+                  className="min-h-[8rem] max-h-[30%] shrink-0 space-y-1 overflow-y-auto overscroll-contain border-t border-slate-800 pt-2 text-[11px] text-slate-400"
                   data-testid="mentrix-live-log"
                 >
                   {s.log.length === 0 && <p>Live log — tool events stream here</p>}
                   {s.log.map((l, i) => (
-                    <div key={i}>
+                    <div key={i} className="break-words whitespace-pre-wrap">
                       <span className="text-teal-700">{l.ts}</span> {l.text}
                     </div>
                   ))}
                 </div>
 
                 <div
-                  className="mt-2 min-h-0 flex-1 space-y-2 overflow-auto border-t border-slate-800 pt-2"
+                  className="mt-2 min-h-0 flex-[2] space-y-2 overflow-y-auto overscroll-contain border-t border-slate-800 pt-2"
                   data-testid="mentrix-companion-chat"
                 >
                   {s.messages.map((m, i) => (
@@ -538,15 +540,15 @@ export default function MentrixCompanion() {
                       key={i}
                       className={
                         m.role === "user"
-                          ? "ml-6 rounded-lg border border-teal-800 bg-teal-950/40 px-3 py-2 text-sm"
-                          : "mr-6 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm"
+                          ? "ml-6 rounded-lg border border-teal-800 bg-teal-950/40 px-3 py-2 text-sm break-words whitespace-pre-wrap"
+                          : "mr-6 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2 text-sm break-words whitespace-pre-wrap"
                       }
                     >
                       {m.text}
                     </div>
                   ))}
                   {s.streamReply ? (
-                    <div className="mr-6 rounded-lg border border-emerald-900 bg-slate-900/80 px-3 py-2 text-sm text-emerald-100">
+                    <div className="mr-6 rounded-lg border border-emerald-900 bg-slate-900/80 px-3 py-2 text-sm text-emerald-100 break-words whitespace-pre-wrap">
                       {s.streamReply}
                     </div>
                   ) : null}
@@ -624,7 +626,7 @@ export default function MentrixCompanion() {
                     checked={s.tts}
                     onChange={(e) => s.setTts(e.target.checked)}
                   />
-                  Speak replies (TTS) — uses your cloned voice when set
+                  Speak replies (TTS) — uses your cloned voice when set. Uncheck if you hear two voices.
                 </label>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -741,7 +743,7 @@ export default function MentrixCompanion() {
       <MentrixConfirmModal
         open={s.pending.length > 0}
         items={s.pending}
-        speakPrompt={s.browserTtsEnabled}
+        speakPrompt={false}
         onAllow={s.onAllow}
         onDeny={() => {
           s.setPending([]);

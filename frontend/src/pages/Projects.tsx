@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getProjectFixtureAudit, getProjects } from "@/lib/api";
+import { getProjectFixtureAudit, getProjects, deleteProject } from "@/lib/api";
 import type { Project } from "@/types";
 import { STAGES } from "@/types";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { isZoasKeepProject, projectsToDeleteKeepingZoas } from "@/lib/keepZoasProjects";
 import {
   Plus,
   Layers,
   GitBranch,
+  Trash2,
 } from "lucide-react";
 
 function stageBadge(stage: string) {
@@ -40,16 +43,23 @@ function statusBadge(status: string) {
 }
 
 export default function Projects() {
+  const { activeProjectId } = useActiveProject();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("");
   const [query, setQuery] = useState("");
   const [candidateCount, setCandidateCount] = useState(0);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const refresh = () => {
+    setLoading(true);
     getProjects()
       .then(setProjects)
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    refresh();
     getProjectFixtureAudit()
       .then((a) => setCandidateCount((a.name_candidates || []).length))
       .catch(() => setCandidateCount(0));
@@ -64,6 +74,44 @@ export default function Projects() {
     }
     return true;
   });
+
+  const onDeleteOne = async (p: Project, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isZoasKeepProject(p) && activeProjectId === p.id) {
+      window.alert("The active zoas project cannot be deleted.");
+      return;
+    }
+    if (!window.confirm(`Delete project “${p.name}”? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteProject(p.id);
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKeepZoas = async () => {
+    const doomed = projectsToDeleteKeepingZoas(projects, activeProjectId);
+    if (!doomed.length) {
+      window.alert("Nothing to delete — only zoas keep-list projects remain.");
+      return;
+    }
+    const typed = window.prompt(
+      `Delete ${doomed.length} non-zoas project(s)? Type DELETE to confirm. Never deletes zoas / zinnia/zoas / ZOAS Eval.`,
+    );
+    if (typed !== "DELETE") return;
+    setBusy(true);
+    try {
+      for (const p of doomed) {
+        await deleteProject(p.id);
+      }
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -82,12 +130,23 @@ export default function Projects() {
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
           <p className="text-slate-500 text-sm">Authorized projects you can access. Test fixtures are hidden by provenance.</p>
         </div>
-        <Link
-          to="/projects/new"
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-        >
-          <Plus className="h-4 w-4" /> New Project
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="projects-keep-zoas"
+            disabled={busy}
+            onClick={() => void onKeepZoas()}
+            className="flex items-center gap-2 border border-rose-200 text-rose-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" /> Keep zoas (delete others)
+          </button>
+          <Link
+            to="/projects/new"
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" /> New Project
+          </Link>
+        </div>
       </div>
 
       {candidateCount > 0 && (
@@ -143,6 +202,15 @@ export default function Projects() {
               <div className="flex gap-1.5 shrink-0 ml-2">
                 {statusBadge(p.status)}
                 {stageBadge(p.current_stage)}
+                <button
+                  type="button"
+                  data-testid={`project-delete-${p.id}`}
+                  className="rounded border border-rose-200 px-1.5 py-0.5 text-[10px] text-rose-800 hover:bg-rose-50"
+                  disabled={busy}
+                  onClick={(e) => void onDeleteOne(p, e)}
+                >
+                  Delete
+                </button>
               </div>
             </div>
             <p className="text-xs text-slate-500 mb-4 line-clamp-2">{p.description}</p>

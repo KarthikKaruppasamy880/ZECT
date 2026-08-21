@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { deployChecklist, deployRunbook, deployTriggerWorkflow, approvePermissionAudit } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
 import { Rocket, Play, Loader2, CheckSquare, FileText, AlertCircle, Zap, ShieldAlert } from "lucide-react";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { deployPrefillFromActive } from "@/lib/deployPrefill";
 
 export default function DeployPhase() {
+  const { activeRepo, activeBranch } = useActiveProject();
+  const prefill = deployPrefillFromActive(activeRepo, activeBranch);
   const [projectName, setProjectName] = useState("");
   const [techStack, setTechStack] = useState("");
   const [environment, setEnvironment] = useState("production");
@@ -17,15 +21,21 @@ export default function DeployPhase() {
   const [error, setError] = useState("");
 
   // Trigger Deployment — actually fires a GitHub Actions run, gated by the
-  // deploy_.* permission rule (require_approval by default).
-  const [triggerOwner, setTriggerOwner] = useState("");
-  const [triggerRepo, setTriggerRepo] = useState("");
+  // deploy_.* permission rule (require_approval by default). Does not write ECS JSON.
+  const [triggerOwner, setTriggerOwner] = useState(prefill.owner);
+  const [triggerRepo, setTriggerRepo] = useState(prefill.repo);
   const [triggerWorkflowFile, setTriggerWorkflowFile] = useState("deploy.yml");
-  const [triggerRef, setTriggerRef] = useState("main");
+  const [triggerRef, setTriggerRef] = useState(prefill.ref);
   const [triggerConfirmArmed, setTriggerConfirmArmed] = useState(false);
   const [triggerLoading, setTriggerLoading] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<{ status: string; audit_id: number | null; message: string } | null>(null);
   const [triggerError, setTriggerError] = useState("");
+
+  useEffect(() => {
+    if (prefill.owner) setTriggerOwner((prev) => prev || prefill.owner);
+    if (prefill.repo) setTriggerRepo((prev) => prev || prefill.repo);
+    if (prefill.ref) setTriggerRef((prev) => prev || prefill.ref);
+  }, [prefill.owner, prefill.repo, prefill.ref]);
 
   const runTrigger = async (auditId?: number) => {
     setTriggerLoading(true);
@@ -180,7 +190,9 @@ export default function DeployPhase() {
         <div className="flex items-center gap-2">
           <Zap className="h-5 w-5 text-amber-600" />
           <h3 className="font-semibold text-slate-900">Trigger Deployment</h3>
-          <span className="text-xs text-slate-500">Fires a real GitHub Actions run — not a suggestion</span>
+          <span className="text-xs text-slate-500">
+            Two-click workflow_dispatch on existing deploy.yml — does not write ECS task defs
+          </span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input
@@ -188,6 +200,7 @@ export default function DeployPhase() {
             value={triggerOwner}
             onChange={(e) => { setTriggerOwner(e.target.value); setTriggerConfirmArmed(false); }}
             placeholder="GitHub owner/org"
+            data-testid="deploy-trigger-owner"
             className="p-2 border border-slate-300 rounded-lg text-sm"
           />
           <input
@@ -195,6 +208,7 @@ export default function DeployPhase() {
             value={triggerRepo}
             onChange={(e) => { setTriggerRepo(e.target.value); setTriggerConfirmArmed(false); }}
             placeholder="Repo name"
+            data-testid="deploy-trigger-repo"
             className="p-2 border border-slate-300 rounded-lg text-sm"
           />
           <input
@@ -209,6 +223,7 @@ export default function DeployPhase() {
             value={triggerRef}
             onChange={(e) => { setTriggerRef(e.target.value); setTriggerConfirmArmed(false); }}
             placeholder="Branch/ref"
+            data-testid="deploy-trigger-ref"
             className="p-2 border border-slate-300 rounded-lg text-sm"
           />
         </div>

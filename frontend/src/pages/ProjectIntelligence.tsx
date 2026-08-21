@@ -96,6 +96,11 @@ export default function ProjectIntelligencePage() {
         <Link to="/lattice" className="zect-btn zect-btn-primary text-xs">
           View Intelligence
         </Link>
+        {state === "STALE" || state === "NOT_APPLICABLE" ? (
+          <p className="w-full text-xs text-amber-800" data-testid="pi-reindex-hint">
+            Lattice is {state}. Re-index the cloned zinnia/zoas root on this page or open Lattice — this view is empty until ingest runs. Raw JSON below is not a substitute for an index.
+          </p>
+        ) : null}
         {indexNote ? <p className="w-full text-xs text-slate-500">{indexNote}</p> : null}
       </div>
       <div className="mt-4 flex gap-2">

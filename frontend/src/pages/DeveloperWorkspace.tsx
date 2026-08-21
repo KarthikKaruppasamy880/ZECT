@@ -16,6 +16,7 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
+  X,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
@@ -40,6 +41,8 @@ import {
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import DeveloperMultiRepoStatus from "@/components/DeveloperMultiRepoStatus";
 import WorkspaceRootsRail from "@/components/WorkspaceRootsRail";
+import WorkspaceEditorTabs from "@/components/WorkspaceEditorTabs";
+import WorkspaceIdeMenu from "@/components/WorkspaceIdeMenu";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { useWorkspaceRepoContext } from "@/hooks/useWorkspaceRepoContext";
 import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
@@ -50,9 +53,12 @@ import {
   visibleProjectRepos,
 } from "@/lib/workspaceRoots";
 import {
+  closeEditorTab,
+  closeTerminalSession,
   loadWorkspaceSession,
   newTerminalSession,
   saveWorkspaceSession,
+  upsertEditorTab,
 } from "@/lib/workspaceSession";
 import {
   fileList,
@@ -186,6 +192,15 @@ export default function DeveloperWorkspace() {
 
   const [showImport, setShowImport] = useState(false);
   const userToggledImport = useRef(false);
+  const userClosedAllTerminals = useRef(false);
+  const [runAppTick, setRunAppTick] = useState(0);
+  const [lastTestLog, setLastTestLog] = useState(() => {
+    try {
+      return localStorage.getItem("zect_ws_last_test_log") || "";
+    } catch {
+      return "";
+    }
+  });
   useEffect(() => {
     if (userToggledImport.current) return;
     if (!rootPath && visibleRoots.length === 0) {
@@ -277,6 +292,11 @@ export default function DeveloperWorkspace() {
   const [worktrees, setWorktrees] = useState<{ path?: string; branch?: string; is_current?: boolean }[]>([]);
   const [agentModel, setAgentModel] = useState("gpt-4o-mini");
   const [wsSession, setWsSession] = useState(() => loadWorkspaceSession());
+  const buffersRef = useRef<Record<string, { content: string; baseline: string }>>({});
+  const contentRef = useRef("");
+  const baselineRef = useRef("");
+  const selectedPathRef = useRef("");
+  const [bufferTick, setBufferTick] = useState(0);
   const workItemId = urlWorkItem || wsSession.workItemId;
   useEffect(() => {
     saveWorkspaceSession(wsSession);
@@ -301,6 +321,9 @@ export default function DeveloperWorkspace() {
   }, [activeProjectId, wsSession.projectId, wsSession.activeRepoId, setActiveProject, setActiveRepo]);
 
   const dirty = content !== baseline && Boolean(selectedPath);
+  contentRef.current = content;
+  baselineRef.current = baseline;
+  selectedPathRef.current = selectedPath;
   const sideOpen = showDiff || showInline;
   const currentWorktree = worktrees.find((w) => w.is_current) || worktrees[0];
   const isLinkedWorktree = worktrees.length > 1;
@@ -404,6 +427,7 @@ export default function DeveloperWorkspace() {
     if (!visibleRoots.length) return;
     setWsSession((prev) => {
       if (prev.terminals.length) return prev;
+      if (userClosedAllTerminals.current) return prev;
       const repo =
         visibleRoots.find((r) => r.repo_id === activeRepoId && r.local_path) ||
         visibleRoots.find((r) => r.local_path);
@@ -412,6 +436,22 @@ export default function DeveloperWorkspace() {
       return { ...prev, terminals: [term], activeTerminalId: term.id };
     });
   }, [rootCatalog, visibleRoots, activeRepoId]);
+
+  const stashActiveBuffer = () => {
+    const path = selectedPathRef.current;
+    if (!path) return;
+    buffersRef.current[path] = { content: contentRef.current, baseline: baselineRef.current };
+    setBufferTick((n) => n + 1);
+  };
+
+  const dirtyPaths = useMemo(() => {
+    const next = new Set<string>();
+    for (const [path, buf] of Object.entries(buffersRef.current)) {
+      if (buf.content !== buf.baseline) next.add(path);
+    }
+    if (selectedPath && content !== baseline) next.add(selectedPath);
+    return next;
+  }, [selectedPath, content, baseline, bufferTick]);
 
   const handleSelectRoot = (repoId: number) => {
     const nextId = Number(repoId);
@@ -440,6 +480,24 @@ export default function DeveloperWorkspace() {
     userToggledImport.current = true;
     setShowImport(true);
   };
+
+  useEffect(() => {
+    const run = (action: string) => {
+      if (action === "add-folder") handleAddRoot();
+      if (action === "remove-folder" && activeRepoId) handleRemoveRoot(activeRepoId);
+    };
+    const onCmd = (e: Event) => {
+      const action = String((e as CustomEvent<{ action?: string }>).detail?.action || "");
+      run(action);
+    };
+    window.addEventListener("zect-workspace-command", onCmd);
+    const pending = (window as unknown as { __zectWsCommand?: string }).__zectWsCommand;
+    if (pending) {
+      (window as unknown as { __zectWsCommand?: string }).__zectWsCommand = undefined;
+      run(pending);
+    }
+    return () => window.removeEventListener("zect-workspace-command", onCmd);
+  }, [activeRepoId]);
 
   const handleRepairRoot = (repoId: number) => {
     userToggledImport.current = true;
@@ -490,8 +548,22 @@ export default function DeveloperWorkspace() {
       setError("File is outside authorized workspace roots");
       return;
     }
+    stashActiveBuffer();
     if (Number(owner.repo_id) !== Number(activeRepoId)) setActiveRepo(owner.repo_id);
     setBrowsingDir("");
+    const cached = buffersRef.current[norm];
+    if (cached && norm !== selectedPathRef.current) {
+      setSelectedPath(norm);
+      setContent(cached.content);
+      setBaseline(cached.baseline);
+      setSelection(null);
+      setRevealLine(line && line > 0 ? line : null);
+      setWsSession((prev) => ({
+        ...prev,
+        openEditors: upsertEditorTab(prev.openEditors, { repoId: owner.repo_id, path: norm }),
+      }));
+      return;
+    }
     setLoadingFile(true);
     setError("");
     try {
@@ -500,14 +572,12 @@ export default function DeveloperWorkspace() {
       setSelectedPath(norm);
       setContent(text);
       setBaseline(text);
+      buffersRef.current[norm] = { content: text, baseline: text };
       setSelection(null);
       setRevealLine(line && line > 0 ? line : null);
       setWsSession((prev) => ({
         ...prev,
-        openEditors: [{ repoId: owner.repo_id, path: norm }, ...prev.openEditors.filter((e) => e.path !== norm)].slice(
-          0,
-          12,
-        ),
+        openEditors: upsertEditorTab(prev.openEditors, { repoId: owner.repo_id, path: norm }),
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read file");
@@ -516,18 +586,48 @@ export default function DeveloperWorkspace() {
     }
   };
 
+  const selectEditorTab = async (tab: { repoId: number; path: string }) => {
+    if (normalizePath(tab.path) === selectedPathRef.current) return;
+    await openFile(tab.path, undefined, tab.repoId);
+  };
+
+  const closeEditor = async (tab: { repoId: number; path: string }) => {
+    const path = normalizePath(tab.path);
+    if (path === selectedPathRef.current) stashActiveBuffer();
+    const buf = buffersRef.current[path];
+    if (buf && buf.content !== buf.baseline && !window.confirm("Close and discard unsaved changes in this file?")) {
+      return;
+    }
+    delete buffersRef.current[path];
+    const remaining = closeEditorTab(wsSession.openEditors, path);
+    setWsSession((prev) => ({ ...prev, openEditors: closeEditorTab(prev.openEditors, path) }));
+    setBufferTick((n) => n + 1);
+    if (path !== selectedPathRef.current) return;
+    const fallback = remaining[remaining.length - 1];
+    if (fallback) {
+      selectedPathRef.current = "";
+      await openFile(fallback.path, undefined, fallback.repoId);
+      return;
+    }
+    setSelectedPath("");
+    setContent("");
+    setBaseline("");
+    setBrowsingDir("");
+  };
+
   const restoredEditors = useRef(false);
   useEffect(() => {
     if (restoredEditors.current || !visibleRoots.length) return;
-    const first = wsSession.openEditors[0];
-    if (!first?.path) {
+    const tabs = wsSession.openEditors;
+    const active = tabs[tabs.length - 1];
+    if (!active?.path) {
       restoredEditors.current = true;
       return;
     }
-    const owner = visibleRoots.find((r) => r.repo_id === first.repoId && r.local_path);
+    const owner = visibleRoots.find((r) => r.repo_id === active.repoId && r.local_path);
     if (!owner) return;
     restoredEditors.current = true;
-    void openFile(first.path, undefined, first.repoId);
+    void openFile(active.path, undefined, active.repoId);
   }, [visibleRoots, wsSession.openEditors]);
 
   const openAgentPath = (relOrAbs: string) => {
@@ -627,17 +727,14 @@ export default function DeveloperWorkspace() {
 
   const toggleDir = (path: string) => {
     const norm = normalizePath(path);
+    const isOpen = expanded.has(norm);
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(norm)) {
-        next.delete(norm);
-        return next;
-      }
-      next.add(norm);
+      if (isOpen) next.delete(norm);
+      else next.add(norm);
       return next;
     });
-    // Always refresh children when expanding — depth-limited tree often has empty children.
-    void loadDirChildren(path);
+    if (!isOpen) void loadDirChildren(path);
   };
 
   const onDirClick = (path: string) => {
@@ -723,9 +820,30 @@ export default function DeveloperWorkspace() {
     });
 
   return (
-    <div className="zect-page flex flex-col gap-3 h-[calc(100vh-7rem)] min-w-0" data-testid="developer-workspace">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="zect-page flex h-full min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden" data-testid="developer-workspace">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div>
+          <WorkspaceIdeMenu
+            canRemoveFolder={Boolean(activeRepoId)}
+            canSave={dirty && Boolean(selectedPath)}
+            terminalOpen={showBottom}
+            canRunApp={Boolean(rootPath || termRoots[0]?.rootPath)}
+            onAddFolder={handleAddRoot}
+            onRemoveFolder={() => {
+              if (activeRepoId) handleRemoveRoot(activeRepoId);
+            }}
+            onSave={() => void saveFile()}
+            onCloseTerminal={() => setShowBottom(false)}
+            onShowTerminal={() => {
+              setShowBottom(true);
+              setBottomTab("terminal");
+            }}
+            onRunAppLocally={() => {
+              setShowBottom(true);
+              setBottomTab("terminal");
+              setRunAppTick((n) => n + 1);
+            }}
+          />
           <h1 className="text-xl font-bold text-slate-900">Developer Workspace</h1>
           <p className="text-xs text-slate-500" data-testid="workspace-spine-hint">
             Mentrix Coding Agent edits here — Delivery owns ship (plan → batches → Approve → PR).
@@ -807,7 +925,7 @@ export default function DeveloperWorkspace() {
       </div>
 
       {(showImport || !rootPath) && (
-        <div data-testid="workspace-import-panel">
+        <div className="shrink-0 overflow-y-auto max-h-40" data-testid="workspace-import-panel">
           <RepoOnboardingPanel
             projectId={activeProjectId}
             compact
@@ -819,7 +937,7 @@ export default function DeveloperWorkspace() {
       )}
 
       <div
-        className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+        className="flex shrink-0 flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
         data-testid="workspace-git-strip"
       >
         <span className="inline-flex items-center gap-1 font-medium">
@@ -886,8 +1004,8 @@ export default function DeveloperWorkspace() {
 
       <PhaseErrorBanner error={error} testId="workspace-error" density="compact" />
 
-      <div className="flex flex-1 min-h-0 gap-3">
-        <div className="flex flex-1 min-h-0 flex-col min-w-0">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {!rootPath && visibleRoots.length === 0 ? (
         <div className="flex flex-1 min-h-0 flex-col gap-3">
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
@@ -919,8 +1037,8 @@ export default function DeveloperWorkspace() {
       ) : (
         (() => {
           const explorerPane = (
-            <aside className="h-full flex flex-col gap-2 min-h-0 min-w-0 relative z-10">
-              <div className="flex-1 overflow-auto rounded-lg border border-slate-200 bg-white flex flex-col min-h-0">
+            <aside className="relative z-10 flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
                 <WorkspaceRootsRail
                   projectId={activeProjectId}
                   repos={visibleRoots}
@@ -932,7 +1050,7 @@ export default function DeveloperWorkspace() {
                   fileTree={(repoId) => renderTree(treesByRepo[repoId] || [], 1, repoId)}
                 />
                 <div
-                  className="flex items-center justify-between border-t border-slate-100 px-2 py-1"
+                  className="flex shrink-0 items-center justify-between border-t border-slate-100 px-2 py-1"
                   data-testid="workspace-file-tree"
                 >
                   <span className="text-[10px] uppercase tracking-wide text-slate-400">Merged explorer</span>
@@ -961,8 +1079,15 @@ export default function DeveloperWorkspace() {
           );
 
           const editorPane = (
-            <section className="h-full min-w-0 flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
+            <section className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+              <WorkspaceEditorTabs
+                tabs={wsSession.openEditors}
+                activePath={selectedPath}
+                dirtyPaths={dirtyPaths}
+                onSelect={(tab) => void selectEditorTab(tab)}
+                onClose={(tab) => void closeEditor(tab)}
+              />
+              <div className="flex shrink-0 items-center justify-between gap-2">
                 <div className="truncate font-mono text-xs text-slate-600" data-testid="workspace-open-path">
                   {selectedPath || "Select a file"}
                   {revealLine ? `:${revealLine}` : ""}
@@ -1138,6 +1263,7 @@ export default function DeveloperWorkspace() {
                   void loadTree();
                   void refreshGit(rootPath);
                 }}
+                onTestOutput={(text) => setLastTestLog(text)}
                 initialGoal={deepGoal}
                 initialSessionId={deepSession || null}
                 projectId={activeProjectId}
@@ -1169,7 +1295,10 @@ export default function DeveloperWorkspace() {
 
           const bottomPane = (
             <div className="flex h-full min-h-0 flex-col" data-testid="workspace-stage-b-panels">
-              <div className="flex items-center gap-1 border-b border-slate-100 px-2 py-1">
+                <div
+                  className="flex shrink-0 items-center gap-1 border-b border-slate-100 px-2 py-1"
+                  data-testid="workspace-bottom-tabs"
+                >
                 {(
                   [
                     ["terminal", "Terminal"],
@@ -1201,18 +1330,33 @@ export default function DeveloperWorkspace() {
                 >
                   {maximized === "bottom" ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
                 </button>
+                <button
+                  type="button"
+                  className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600"
+                  data-testid="workspace-close-bottom"
+                  title="Close tools panel"
+                  aria-label="Close tools panel"
+                  onClick={() => setShowBottom(false)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
               </div>
-              <div className={`min-h-0 flex-1 p-2 ${bottomTab === "terminal" ? "overflow-hidden flex flex-col" : "overflow-auto"}`}>
+              <div className={`min-h-0 flex-1 p-2 ${bottomTab === "terminal" ? "flex min-h-0 flex-col overflow-hidden" : "overflow-auto"}`}>
                 {bottomTab === "terminal" ? (
                   <WorkspaceTerminal
                     workspaceRoot={
-                      wsSession.terminals.find((t) => t.id === wsSession.activeTerminalId)?.rootPath || rootPath
+                      wsSession.terminals.find((t) => t.id === wsSession.activeTerminalId)?.rootPath ||
+                      rootPath ||
+                      termRoots[0]?.rootPath ||
+                      ""
                     }
                     sessions={wsSession.terminals}
                     activeSessionId={wsSession.activeTerminalId}
                     roots={termRoots}
+                    runAppTick={runAppTick}
                     onSelectSession={(id) => setWsSession((prev) => ({ ...prev, activeTerminalId: id }))}
                     onCreateSession={(root) => {
+                      userClosedAllTerminals.current = false;
                       const term = newTerminalSession(root.repoId, root.rootPath, root.label);
                       setWsSession((prev) => ({
                         ...prev,
@@ -1220,6 +1364,16 @@ export default function DeveloperWorkspace() {
                         activeTerminalId: term.id,
                       }));
                     }}
+                    onCloseSession={(id) => {
+                      setWsSession((prev) => {
+                        const terminals = closeTerminalSession(prev.terminals, id);
+                        if (!terminals.length) userClosedAllTerminals.current = true;
+                        const activeTerminalId =
+                          prev.activeTerminalId === id ? terminals[0]?.id || null : prev.activeTerminalId;
+                        return { ...prev, terminals, activeTerminalId };
+                      });
+                    }}
+                    onClosePanel={() => setShowBottom(false)}
                   />
                 ) : null}
                 {bottomTab === "timeline" ? <WorkspaceMentrixTimeline workspaceRoot={rootPath} /> : null}
@@ -1246,6 +1400,14 @@ export default function DeveloperWorkspace() {
                 ) : null}
                 {bottomTab === "tests" || bottomTab === "evidence" ? (
                   <div data-testid={bottomTab === "tests" ? "workspace-tests-panel" : "workspace-evidence-panel"}>
+                    {bottomTab === "tests" && lastTestLog ? (
+                      <pre
+                        className="mb-2 max-h-40 overflow-auto rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-100"
+                        data-testid="workspace-tests-live-output"
+                      >
+                        {lastTestLog}
+                      </pre>
+                    ) : null}
                     <DeveloperMultiRepoStatus workItemId={workItemId} projectId={activeProjectId} />
                   </div>
                 ) : null}

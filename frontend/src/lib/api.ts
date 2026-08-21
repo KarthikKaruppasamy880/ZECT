@@ -794,6 +794,7 @@ export const mentrixPresentonStatus = () =>
     canonical_template_id?: string;
     blocked_external?: boolean;
     block_code?: string;
+    provider?: string;
   }>("/api/mentrix/presenton/status");
 export type PresentonTemplate = { id: string; name: string; native_ready?: boolean; visual?: { ready?: boolean } };
 export const mentrixPresentonTemplates = () =>
@@ -1107,9 +1108,30 @@ export async function mentrixPresentationTemplateUpload(
 }
 
 export const mentrixPresentationTemplateDelete = (template_id: string) =>
-  request<{ ok: boolean; id?: string; error?: string }>("/api/mentrix/presentation/templates/delete", {
+  request<{ ok: boolean; id?: string; error?: string; message?: string }>(
+    "/api/mentrix/presentation/templates/delete",
+    {
+      method: "POST",
+      body: JSON.stringify({ template_id }),
+    },
+  );
+
+export const mentrixPresentationDeleteUnmapped = () =>
+  request<{ ok: boolean; deleted?: string[]; count?: number; error?: string; message?: string }>(
+    "/api/mentrix/presentation/templates/delete-unmapped",
+    { method: "POST" },
+  );
+
+export const mentrixPresentationNarrateSlides = (slides: Array<Record<string, unknown>>, deck_context = "") =>
+  request<{
+    ok: boolean;
+    count?: number;
+    max_words?: number;
+    slides?: Array<{ index: number; script: string; word_count?: number; visuals?: string[] }>;
+    error?: string;
+  }>("/api/mentrix/presentation/narrate-slides", {
     method: "POST",
-    body: JSON.stringify({ template_id }),
+    body: JSON.stringify({ slides, deck_context }),
   });
 
 export async function mentrixPresentationAssetUpload(file: File) {
@@ -1424,7 +1446,13 @@ export const mentrixStartRun = (
   mode = "upgrade",
   project_key = "",
   workspace = "",
-  opts?: { source_lang?: string; target_lang?: string; repo_id?: number }
+  opts?: {
+    source_lang?: string;
+    target_lang?: string;
+    repo_id?: number;
+    work_item_id?: number | null;
+    coding_mission_id?: string;
+  }
 ) =>
   request<any>("/api/mentrix/runs", {
     method: "POST",
@@ -1436,6 +1464,8 @@ export const mentrixStartRun = (
       source_lang: opts?.source_lang || "",
       target_lang: opts?.target_lang || "",
       repo_id: opts?.repo_id ?? null,
+      work_item_id: opts?.work_item_id ?? null,
+      coding_mission_id: opts?.coding_mission_id || "",
     }),
   });
 export const mentrixGetRun = (runId: number) => request<any>(`/api/mentrix/runs/${runId}`);
@@ -1920,6 +1950,38 @@ export const codingAgentRetryMission = (missionId: string) =>
   request<CodingAgentMission>(`/api/coding-agent/missions/${encodeURIComponent(missionId)}/retry`, {
     method: "POST",
   });
+
+export const codingAgentListPlans = () =>
+  request<{ ok: boolean; plans: Array<{ id: string; markdown?: string; title?: string; work_item_or_run?: string }> }>(
+    "/api/coding-agent/plans",
+  );
+
+export const codingAgentSavePlan = (body: {
+  work_item_or_run: string;
+  title?: string;
+  markdown: string;
+  meta?: Record<string, unknown>;
+}) =>
+  request<{ ok: boolean; id: string; path?: string; markdown: string }>("/api/coding-agent/plans", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export type RuntimeRecipe = {
+  id: string;
+  kind: string;
+  label?: string;
+  command: string;
+  cwdRel: string;
+  port?: number;
+  confirmRequired?: boolean;
+  evidence?: string;
+};
+
+export const codingAgentRuntimeRecipes = (root: string) =>
+  request<{ ok: boolean; default_id?: string; recipes: RuntimeRecipe[]; postgres_note?: string; error?: string }>(
+    `/api/coding-agent/runtime-recipes?root=${encodeURIComponent(root)}`,
+  );
 
 // Git Operations
 export const gitStatus = (repoPath: string) =>

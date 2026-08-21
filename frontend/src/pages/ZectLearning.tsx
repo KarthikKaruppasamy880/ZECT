@@ -427,6 +427,12 @@ export default function ZectLearning() {
           </p>
         </div>
       </div>
+      <p
+        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+        data-testid="learning-not-university"
+      >
+        Guided catalog only — not a general university. Empty PBL lists need Sync catalog.
+      </p>
 
       {firstRunOpen ? (
         <div
@@ -585,7 +591,9 @@ export default function ZectLearning() {
           <BookOpen className="h-4 w-4" /> Explore (external catalog)
         </h2>
         {resources.length === 0 ? (
-          <p className="text-sm text-slate-500">Sync catalog to load external link-only resources.</p>
+          <p className="text-sm text-slate-500" data-testid="learning-pbl-empty">
+            Empty PBL catalog — click Sync PBL catalog. This is not a general university.
+          </p>
         ) : (
           <ul className="space-y-2">
             {resources.slice(0, 20).map((r) => (

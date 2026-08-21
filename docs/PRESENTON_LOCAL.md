@@ -1,6 +1,20 @@
-# Presenton (self-host) for Mentrix Present Deck
+# Present generate (ZECT native vs Presenton sidecar)
 
-Mentrix **Generate deck** calls your local Presenton instance, downloads the PPTX into Documents/Desktop, and fills Present Deck path. No Presenton Cloud key required when you self-host with your own LLM keys / Ollama.
+Local **Generate deck** uses **ZECT native** (`ZECT_PRESENTATION_PROVIDER=zect_native` in `backend/.env`). You do not need Presenton Docker for Create / Review / editor / Voice / Zoom.
+
+Presenton remains an optional sidecar when you set `ZECT_PRESENTATION_PROVIDER=presenton`. Do not vendor Presenton community templates.
+
+```env
+ZECT_PRESENTATION_PROVIDER=zect_native
+```
+
+Restart after changing the provider: `./zect.ps1 restart`.
+
+---
+
+# Presenton sidecar (optional)
+
+When the provider is `presenton`, Mentrix **Generate deck** calls your local Presenton instance, downloads the PPTX into Documents/Desktop, and fills Present Deck path. No Presenton Cloud key required when you self-host with your own LLM keys / Ollama.
 
 ## Run Presenton (Docker)
 
@@ -70,4 +84,4 @@ Canonical ZECT id: **`zinnia-executive-v1`** (aliases `zinnia-exec`, `zinnia-exe
 4. **You** join the meeting and share the PowerPoint window.
 5. **Narrate talking points** with your Chatterbox clone (or an OpenAI stock voice).
 
-Generate stays disabled until `PRESENTON_BASE_URL` is set. Open presentation / Open Zoom require the Electron app. Clone narrate requires Chatterbox online — see [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md).
+With `zect_native`, Generate is enabled when the native engine reports READY (or TEMPLATE_NOT_READY for unmapped Zinnia cards). With `presenton`, Generate stays disabled until Presenton is configured and reachable. Open presentation / Open Zoom require the Electron app. Clone narrate requires Chatterbox online — see [`CHATTERBOX_LOCAL.md`](CHATTERBOX_LOCAL.md).

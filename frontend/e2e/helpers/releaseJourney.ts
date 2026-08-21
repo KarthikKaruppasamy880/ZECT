@@ -55,6 +55,17 @@ export async function apiRetry(page: Page, method: string, pathName: string, bod
   return last;
 }
 
+/** AGENT tab owns mission goal / Start — ASK is a separate pane. */
+export async function openCodingAgentMission(page: Page) {
+  const showAgent = page.getByTestId("workspace-toggle-agent");
+  if ((await showAgent.count()) && (await showAgent.getAttribute("aria-pressed")) === "false") {
+    await showAgent.click();
+  }
+  await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible({ timeout: 20_000 });
+  await page.getByTestId("mentrix-coding-agent-mission-tab").click();
+  await expect(page.getByTestId("mentrix-coding-agent-mission-goal")).toBeVisible({ timeout: 15_000 });
+}
+
 export async function hideImportPanel(page: Page) {
   const panel = page.getByTestId("workspace-import-panel");
   if (!(await panel.isVisible().catch(() => false))) return;

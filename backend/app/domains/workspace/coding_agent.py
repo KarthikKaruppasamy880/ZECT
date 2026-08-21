@@ -304,3 +304,54 @@ def mission_repair(
         raise HTTPException(status_code=404, detail="mission_not_found") from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+class PlanSaveIn(BaseModel):
+    work_item_or_run: str = Field(..., min_length=1)
+    title: str = "coding"
+    markdown: str = Field(..., min_length=1)
+    meta: dict = Field(default_factory=dict)
+
+
+@router.get("/plans")
+def coding_plans(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.plan_store import list_plans
+
+    return {"ok": True, "plans": list_plans()}
+
+
+@router.get("/plans/{plan_id}")
+def coding_plan_get(plan_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.plan_store import load_plan
+
+    try:
+        return load_plan(plan_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="plan_not_found") from None
+
+
+@router.post("/plans")
+def coding_plan_save(req: PlanSaveIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.coding_engine.plan_store import save_plan
+
+    try:
+        return save_plan(
+            work_item_or_run=req.work_item_or_run,
+            title=req.title,
+            markdown=req.markdown,
+            meta=req.meta,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/runtime-recipes")
+def coding_runtime_recipes(root: str = Query(..., min_length=1), _user: CurrentUser = Depends(get_current_user)):
+    from app.infrastructure.allowed_paths import path_under_allowed_roots
+    from app.services.workspace.runtime_discovery import discover_runtime_recipes
+
+    try:
+        path_under_allowed_roots(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return discover_runtime_recipes(root)

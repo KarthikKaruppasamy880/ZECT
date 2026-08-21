@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderPlus, GitBranch, RefreshCw, X } from "lucide-react";
 import { getRepoIdentity, latticeIngest, latticeStatus, type RepoIdentity } from "@/lib/api";
 import { canonicalLatticeState, latticeHeaderLabel, type LatticeState } from "@/lib/contextUsed";
 import { deriveProjectKey } from "@/lib/workspaceContext";
@@ -84,6 +84,7 @@ export default function WorkspaceRootsRail({
   );
 
   const [indexingId, setIndexingId] = useState<number | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const loadGen = useRef(0);
   const loadRows = useCallback(async () => {
     const current = reposRef.current;
@@ -139,10 +140,10 @@ export default function WorkspaceRootsRail({
 
   return (
     <section
-      className="shrink-0 flex flex-col h-full min-h-0 border-b border-slate-100 bg-slate-50/80"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden border-b border-slate-100 bg-slate-50/80"
       data-testid="workspace-roots-rail"
     >
-      <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2 py-1.5">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">WORKSPACE</p>
         <div className="flex items-center gap-1">
           <button
@@ -173,15 +174,21 @@ export default function WorkspaceRootsRail({
           No authorized roots. Add registers a Project local folder — not a Cursor untitled workspace.
         </p>
       ) : (
-        <ul className="flex-1 overflow-auto pb-1 min-h-0">
+        <div
+          className="h-0 min-h-0 flex-1 overflow-y-scroll overscroll-contain pb-1"
+          data-testid="workspace-explorer-scroll"
+        >
+        <ul className="m-0 list-none p-0">
           {rows.map((row) => {
             const active = Number(row.repoId) === Number(activeRepoId);
             const unavailable = row.rootState === "ROOT_UNAVAILABLE";
+            const isCollapsed = collapsed.has(row.repoId);
             return (
               <li
                 key={row.repoId}
                 data-testid={`workspace-root-${row.repoId}`}
                 data-active={active ? "true" : "false"}
+                data-collapsed={isCollapsed ? "true" : "false"}
                 aria-current={active ? "true" : undefined}
               >
                 <div
@@ -189,6 +196,23 @@ export default function WorkspaceRootsRail({
                     active ? "bg-teal-50" : "hover:bg-white"
                   }`}
                 >
+                  <button
+                    type="button"
+                    className="mt-0.5 shrink-0 rounded p-0.5 text-slate-500 hover:bg-white"
+                    data-testid={`workspace-root-collapse-${row.repoId}`}
+                    aria-expanded={!isCollapsed}
+                    title={isCollapsed ? "Expand folder" : "Collapse folder"}
+                    onClick={() => {
+                      setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(row.repoId)) next.delete(row.repoId);
+                        else next.add(row.repoId);
+                        return next;
+                      });
+                    }}
+                  >
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                  </button>
                   <button
                     type="button"
                     className="min-w-0 flex-1 text-left"
@@ -289,13 +313,14 @@ export default function WorkspaceRootsRail({
                     <X className="h-3 w-3" />
                   </button>
                 </div>
-                {!unavailable && fileTree ? (
+                {!unavailable && !isCollapsed && fileTree ? (
                   <div data-testid={`workspace-root-tree-${row.repoId}`}>{fileTree(row.repoId)}</div>
                 ) : null}
               </li>
             );
           })}
         </ul>
+        </div>
       )}
     </section>
   );

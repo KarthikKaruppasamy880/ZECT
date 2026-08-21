@@ -8,6 +8,7 @@ import os from "os";
 import path from "path";
 import { execSync } from "child_process";
 import { loadEnvCreds } from "./helpers/env";
+import { openCodingAgentMission } from "./helpers/releaseJourney";
 
 const ART = path.join(process.cwd(), "test-results", "coding-agent-production");
 const API = process.env.VITE_API_URL || process.env.ZECT_API_URL || "http://127.0.0.1:8000";
@@ -112,8 +113,7 @@ test.describe("coding agent production", () => {
     }
     await expect(page.getByTestId("workspace-agent-pane")).toBeVisible({ timeout: 20_000 });
     await page.getByTestId("workspace-maximize-agent").click();
-    await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible();
-    await expect(page.getByTestId("mentrix-coding-agent-mission-tab")).toBeVisible();
+    await openCodingAgentMission(page);
     await expect(page.getByTestId("mentrix-coding-agent-phase")).toContainText("idle");
 
     await page.getByTestId("mentrix-coding-agent-mission-goal").fill("Fix add() so 2+3 is 5");
@@ -214,7 +214,7 @@ test.describe("coding agent production", () => {
     }
     await expect(page.getByTestId(`workspace-root-${idA}`)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId(`workspace-root-${idB}`)).toBeVisible();
-    await expect(page.getByTestId("mentrix-coding-agent-panel")).toBeVisible({ timeout: 20_000 });
+    await openCodingAgentMission(page);
     await page.getByTestId("mentrix-coding-agent-mission-goal").fill("Bump protocol to 2 in both roots");
     await page.getByTestId("mentrix-coding-agent-patches-toggle").click();
     await page.getByTestId("mentrix-coding-agent-patches").fill(

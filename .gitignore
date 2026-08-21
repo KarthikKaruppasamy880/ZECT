@@ -59,6 +59,7 @@ frontend/blob-report/
 
 # Local Present assets / template worktrees (never commit user images or org masters)
 .zect/stack/
+.zect/plans/
 .zect/present-assets/
 .zect/present-templates/
 .zect/live-endurance/

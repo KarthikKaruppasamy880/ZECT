@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   getProject,
   getGitHubPulls,
@@ -7,7 +7,9 @@ import {
   getGitHubWorkflowRuns,
   getClonedRepos,
   openPrWorktree,
+  deleteProject,
 } from "@/lib/api";
+import { isZoasKeepProject } from "@/lib/keepZoasProjects";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
 import { deriveProjectKey, writeMentrixWorkspace } from "@/lib/workspaceContext";
@@ -48,7 +50,8 @@ function relativeTime(dateStr: string) {
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
-  const { activeBranch, activeRepo, setActiveRepo, setActiveProject, refresh } = useActiveProject();
+  const nav = useNavigate();
+  const { activeBranch, activeRepo, setActiveRepo, setActiveProject, refresh, activeProjectId } = useActiveProject();
   const [project, setProject] = useState<Project | null>(null);
   const [pulls, setPulls] = useState<GitHubPR[]>([]);
   const [commits, setCommits] = useState<GitHubCommit[]>([]);
@@ -149,6 +152,17 @@ export default function ProjectDetail() {
 
   const stageIdx = STAGES.findIndex((s) => s.key === project.current_stage);
 
+  const onDeleteProject = async () => {
+    if (!project) return;
+    if (isZoasKeepProject(project) && activeProjectId === project.id) {
+      window.alert("The active zoas project cannot be deleted.");
+      return;
+    }
+    if (!window.confirm(`Delete project “${project.name}”? This cannot be undone.`)) return;
+    await deleteProject(project.id);
+    nav("/projects");
+  };
+
   return (
     <div>
       <Link to="/projects" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-4">
@@ -163,6 +177,15 @@ export default function ProjectDetail() {
             </h1>
             <p className="text-sm text-slate-500 mt-1">{project.description}</p>
           </div>
+          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="project-detail-delete"
+            className="rounded border border-rose-200 px-2.5 py-1 text-xs text-rose-800 hover:bg-rose-50"
+            onClick={() => void onDeleteProject()}
+          >
+            Delete project
+          </button>
           <span
             className={`text-xs font-medium px-2.5 py-1 rounded capitalize ${
               project.status === "active"
@@ -174,6 +197,7 @@ export default function ProjectDetail() {
           >
             {project.status}
           </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-6 mb-6 flex-wrap">

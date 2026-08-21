@@ -136,6 +136,28 @@ def presentation_template_delete(body: PreviewIn, current_user: CurrentUser = De
     return tmpl.delete_uploaded_template(uid, body.template_id)
 
 
+@router.post("/templates/delete-unmapped")
+@require_authentication
+def presentation_template_delete_unmapped(current_user: CurrentUser = Depends(get_current_user)):
+    uid = getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon")
+    return tmpl.delete_unmapped_uploads(uid)
+
+
+class NarrateSlidesIn(BaseModel):
+    slides: list[dict[str, Any]] = Field(default_factory=list)
+    deck_context: str = ""
+
+
+@router.post("/narrate-slides")
+@require_authentication
+def presentation_narrate_slides(body: NarrateSlidesIn, current_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.presenter_intelligence import narrate_slides
+
+    if not body.slides:
+        return {"ok": False, "error": "no_slides", "message": "No slides to narrate."}
+    return narrate_slides(body.slides, deck_context=body.deck_context)
+
+
 @router.post("/templates/mapping")
 @require_authentication
 def presentation_template_mapping(body: MappingIn, current_user: CurrentUser = Depends(get_current_user)):

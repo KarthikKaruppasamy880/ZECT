@@ -55,6 +55,7 @@ describe("WorkspaceRootsRail", () => {
       />,
     );
     expect(screen.getByTestId("workspace-roots-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-explorer-scroll")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-root-1")).toHaveAttribute("data-active", "true");
     await waitFor(() => expect(screen.getByTestId("workspace-root-unavailable-2")).toHaveTextContent("ROOT_UNAVAILABLE"));
     await waitFor(() => expect(screen.getByTestId("workspace-root-sha-1")).toHaveTextContent(/head bbbbbbb/i));
@@ -65,6 +66,8 @@ describe("WorkspaceRootsRail", () => {
     expect(onRemoveRoot).toHaveBeenCalledWith(1);
     fireEvent.click(screen.getByTestId("workspace-add-root"));
     expect(onAddRoot).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("workspace-root-collapse-1"));
+    expect(screen.getByTestId("workspace-root-1")).toHaveAttribute("data-collapsed", "true");
   });
 
   it("nests files under ready roots and hides them for ROOT_UNAVAILABLE", async () => {
@@ -82,5 +85,7 @@ describe("WorkspaceRootsRail", () => {
     expect(screen.getByTestId("nested-1")).toHaveTextContent("file-1");
     await waitFor(() => expect(screen.getByTestId("workspace-root-unavailable-2")).toBeInTheDocument());
     expect(screen.queryByTestId("nested-2")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("workspace-root-collapse-1"));
+    expect(screen.queryByTestId("nested-1")).not.toBeInTheDocument();
   });
 });

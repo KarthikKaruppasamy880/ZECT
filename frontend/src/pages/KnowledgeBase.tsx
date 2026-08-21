@@ -246,8 +246,8 @@ export default function KnowledgeBase() {
       ) : entries.length === 0 ? (
         <div className="zect-empty text-center py-12" data-testid="knowledge-empty">
           <BookOpen className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-          <p className="text-lg font-medium">No knowledge entries yet</p>
-          <p className="text-sm mt-1">Create your first entry to start building your knowledge base</p>
+          <p className="text-lg font-medium">Create first entry — not auto-filled from git</p>
+          <p className="text-sm mt-1">Knowledge stays empty until you write it. Lattice ingest does not populate this list.</p>
         </div>
       ) : (
         <div className="space-y-3">

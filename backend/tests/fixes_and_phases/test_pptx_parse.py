@@ -36,3 +36,4 @@ def test_parse_pptx_bytes_extracts_slide_text():
     slides = parse_pptx_bytes(data)
     assert len(slides) == 1
     assert "Hello Mentrix Present" in (slides[0].get("text") or "")
+    assert "visuals" in slides[0]

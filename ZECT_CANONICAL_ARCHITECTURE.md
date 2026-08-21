@@ -27,6 +27,8 @@ User
 
 Companion does **not** silently edit code. Coding Agent owns worktrees/tests/review/git. Presenton remains the product default until an explicit S8C decision (out of scope).
 
+**Canonical split:** Developer = engineering cockpit; Coding Agent = executor; Delivery = ship pipeline; Graphify/Lattice = intelligence; WorkItem = durable work; Processes = external intake. ASK/PLAN/AGENT live in Developer; Prepare PR hands the same WorkItem to Mentrix Delivery. No auto-merge.
+
 ## Orchestration
 
 ```text

@@ -75,6 +75,11 @@ function waitForAudioEnded(audio: HTMLAudioElement, gen: number): Promise<void> 
     const done = () => {
       cleanup();
       if (lastAudio === audio) lastAudio = null;
+      const dur = Number(audio.duration);
+      if (Number.isNaN(dur) || dur === 0 || (Number.isFinite(dur) && dur < 0.05)) {
+        reject(new Error("audio ended before playback (empty or failed)"));
+        return;
+      }
       resolve();
     };
     const fail = () => {
@@ -86,7 +91,7 @@ function waitForAudioEnded(audio: HTMLAudioElement, gen: number): Promise<void> 
       if (gen !== awaitGeneration) {
         cleanup();
         if (lastAudio === audio) lastAudio = null;
-        resolve(); // cancelled — resolve so callers can exit cleanly
+        reject(new Error("cancelled"));
       }
     };
     const cleanup = () => {
@@ -527,8 +532,8 @@ export async function playMentrixPrefetch(
   };
 }
 
-/** Present Deck: keep slide scripts short so clone /generate stays usable. */
-export const PRESENT_SLIDE_SCRIPT_CAP = 500;
+/** Present Deck: word-budget scripts from Presenter Intelligence; keep a high ceiling only. */
+export const PRESENT_SLIDE_SCRIPT_CAP = 8000;
 
 export function capPresentSlideScript(text: string, cap = PRESENT_SLIDE_SCRIPT_CAP): string {
   const t = String(text || "").trim();

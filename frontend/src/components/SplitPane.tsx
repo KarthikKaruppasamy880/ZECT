@@ -28,16 +28,25 @@ export default function SplitPane({
       return initial;
     }
   });
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(`${storageKey}:collapsed`) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const lastPct = useRef(pct);
   const dragging = useRef(false);
   const wrap = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, String(pct));
+      localStorage.setItem(`${storageKey}:collapsed`, collapsed ? "1" : "0");
     } catch {
       /* ignore */
     }
-  }, [pct, storageKey]);
+  }, [pct, storageKey, collapsed]);
 
   const onMove = useCallback(
     (clientX: number, clientY: number) => {
@@ -48,7 +57,10 @@ export default function SplitPane({
         axis === "horizontal"
           ? ((clientX - box.left) / Math.max(1, box.width)) * 100
           : ((clientY - box.top) / Math.max(1, box.height)) * 100;
-      setPct(Math.min(max, Math.max(min, next)));
+      const clamped = Math.min(max, Math.max(min, next));
+      lastPct.current = clamped;
+      setCollapsed(false);
+      setPct(clamped);
     },
     [axis, max, min],
   );
@@ -70,26 +82,44 @@ export default function SplitPane({
 
   const horizontal = axis === "horizontal";
   const nudge = (delta: number) => {
-    setPct((prev) => Math.min(max, Math.max(min, prev + delta)));
+    setCollapsed(false);
+    setPct((prev) => {
+      const next = Math.min(max, Math.max(min, prev + delta));
+      lastPct.current = next;
+      return next;
+    });
   };
+  const toggleCollapse = () => {
+    setCollapsed((was) => {
+      if (was) {
+        setPct(Math.min(max, Math.max(min, lastPct.current || initial)));
+        return false;
+      }
+      lastPct.current = pct;
+      setPct(min);
+      return true;
+    });
+  };
+  const shown = collapsed ? min : pct;
 
   return (
     <div
       ref={wrap}
       data-testid={testId}
-      className={`flex min-h-0 min-w-0 flex-1 ${horizontal ? "flex-row" : "flex-col"}`}
+      data-collapsed={collapsed ? "true" : "false"}
+      className={`flex h-full min-h-0 min-w-0 flex-1 ${horizontal ? "flex-row" : "flex-col"}`}
     >
-      <div className="min-h-0 min-w-0 overflow-hidden" style={horizontal ? { width: `${pct}%` } : { height: `${pct}%` }}>
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" style={horizontal ? { width: `${shown}%` } : { height: `${shown}%` }}>
         {children[0]}
       </div>
       <button
         type="button"
         role="separator"
         aria-orientation={horizontal ? "vertical" : "horizontal"}
-        aria-valuenow={Math.round(pct)}
+        aria-valuenow={Math.round(shown)}
         aria-valuemin={min}
         aria-valuemax={max}
-        aria-valuetext={`${Math.round(pct)} percent`}
+        aria-valuetext={`${Math.round(shown)} percent`}
         aria-label="Resize panels"
         data-testid={`${testId || "split"}-handle`}
         className={
@@ -103,6 +133,10 @@ export default function SplitPane({
           dragging.current = true;
           e.currentTarget.setPointerCapture(e.pointerId);
         }}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          toggleCollapse();
+        }}
         onKeyDown={(e) => {
           const step = e.shiftKey ? 5 : 2;
           if (e.key === "Escape") {
@@ -110,13 +144,20 @@ export default function SplitPane({
             dragging.current = false;
             return;
           }
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            toggleCollapse();
+            return;
+          }
           if (e.key === "Home") {
             e.preventDefault();
+            setCollapsed(false);
             setPct(min);
             return;
           }
           if (e.key === "End") {
             e.preventDefault();
+            setCollapsed(false);
             setPct(max);
             return;
           }
@@ -135,7 +176,7 @@ export default function SplitPane({
           }
         }}
       />
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children[1]}</div>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children[1]}</div>
     </div>
   );
 }

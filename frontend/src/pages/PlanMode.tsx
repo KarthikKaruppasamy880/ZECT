@@ -160,6 +160,12 @@ export default function PlanMode() {
         <p className="text-gray-500 mt-1">
           Generate a detailed, phased engineering plan for any project or feature.
         </p>
+        <p className="mt-2 text-xs text-slate-600" data-testid="plan-open-in-developer">
+          PLAN in Developer saves .zect/plans scratch.{" "}
+          <a className="text-teal-700 underline" href="/workspace">
+            Open in Developer
+          </a>
+        </p>
         {projectKey && (
           <p className="text-xs text-teal-600 mt-1 font-mono" data-testid="plan-workspace-key">
             {projectKey}

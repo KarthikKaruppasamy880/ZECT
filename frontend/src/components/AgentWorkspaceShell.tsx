@@ -10,6 +10,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { isAgentModeEnabled } from "@/lib/featureFlags";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { ultraReviewHref } from "@/lib/deployPrefill";
 
 type Step = {
   to: string;
@@ -44,6 +46,8 @@ const AGENT_MODE_STEP: Step = {
 export default function AgentWorkspaceShell() {
   const location = useLocation();
   const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
+  const { activeRepo } = useActiveProject();
+  const qualityHref = ultraReviewHref(activeRepo);
 
   useEffect(() => {
     const sync = () => setAgentModeOn(isAgentModeEnabled());
@@ -69,7 +73,9 @@ export default function AgentWorkspaceShell() {
           </h2>
           <p className="text-[11px] leading-snug text-slate-500" data-testid="agent-workspace-spine-hint">
             <strong className="font-semibold text-slate-700">Ship here:</strong> Mentrix Delivery.{" "}
-            <strong className="font-semibold text-slate-700">Prep:</strong> Ask / Plan / Build forms.{" "}
+            <strong className="font-semibold text-slate-700">Ask</strong> = questions.{" "}
+            <strong className="font-semibold text-slate-700">Mentrix Delivery</strong> = plan/fix/PR.{" "}
+            <strong className="font-semibold text-slate-700">Quality</strong> = Ultra Review.{" "}
             <strong className="font-semibold text-slate-700">Edit:</strong>{" "}
             <Link to="/workspace" className="text-teal-700 underline">
               Developer Workspace
@@ -122,6 +128,15 @@ export default function AgentWorkspaceShell() {
             );
           })}
         </nav>
+        {(location.pathname === "/review" || location.pathname.startsWith("/review")) && (
+          <Link
+            to={qualityHref}
+            className="mt-2 block rounded-md border border-teal-200 bg-teal-50 px-2.5 py-2 text-xs font-medium text-teal-900 hover:bg-teal-100"
+            data-testid="agent-ultra-review-pr"
+          >
+            Ultra Review this PR
+          </Link>
+        )}
         {!agentModeOn && (
           <p className="mt-3 hidden text-[11px] text-slate-500 lg:block">
             Need the legacy orchestrator? Enable{" "}

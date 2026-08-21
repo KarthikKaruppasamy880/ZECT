@@ -25,6 +25,10 @@ vi.mock("@/lib/api", () => ({
     sensitivity: { sensitivity: "PUBLIC" },
   })),
   mentrixAnalyzeDeck: vi.fn(),
+  mentrixPresentationNarrateSlides: vi.fn(async (slides: Array<{ notes?: string; text?: string }>) => ({
+    ok: true,
+    slides: slides.map((s, i) => ({ index: i, script: (s.notes || s.text || `Slide ${i + 1}`).repeat(1), word_count: 12 })),
+  })),
   mentrixPresentonTemplates: vi.fn(async () => ({
     ok: true,
     source: "builtin",
@@ -69,6 +73,7 @@ import { MemoryRouter } from "react-router-dom";
 
 describe("PresentDeckPanel clone narrate gate", () => {
   beforeEach(() => {
+    localStorage.clear();
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockReset();
     (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockReset();
     (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
@@ -126,6 +131,27 @@ describe("PresentDeckPanel clone narrate gate", () => {
     expect(screen.getByTestId("present-deck-present-all")).not.toBeDisabled();
   });
 
+  it("auto-selects a clone over leftover stock Echo", async () => {
+    localStorage.setItem("zect_mentrix_present_deck_voice", "stock:echo");
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://127.0.0.1:17493",
+      default_voice: { voice_id: "v1", name: "Me", has_sample: true },
+      hint: "online",
+    });
+
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      const sel = screen.getByTestId("present-deck-voice-select") as HTMLSelectElement;
+      expect(sel.value).toBe("clone:v1");
+    });
+  });
+
   it("disables Generate deck when Presenton is not configured", async () => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       online: true,
@@ -143,6 +169,33 @@ describe("PresentDeckPanel clone narrate gate", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("present-deck-generate")).toBeDisabled();
+    });
+  });
+
+  it("enables Generate when ZECT native provider is ready (no Presenton Docker)", async () => {
+    (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      online: true,
+      base_url: "http://127.0.0.1:17493",
+      default_voice: null,
+      hint: "online",
+    });
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
+    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      configured: true,
+      reachable: true,
+      base_url: "",
+      lifecycle: "READY",
+      provider: "zect_native",
+    });
+
+    render(
+      <MemoryRouter>
+        <PresentDeckPanel mode="create" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("present-deck-generate")).not.toBeDisabled();
     });
   });
 

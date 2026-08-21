@@ -1520,7 +1520,7 @@ def _exec_tool(
                     "blocked_external": True,
                     "error": "BLOCKED_EXTERNAL",
                     "spoken_summary": "Jira is not configured — BLOCKED_EXTERNAL, not a fake ticket.",
-                    "detail": result.get("message") or "set MCP_JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN",
+                    "detail": result.get("message") or "set MCP_JIRA_URL, JIRA_EMAIL (or JIRA_USERNAME), JIRA_API_TOKEN",
                     "result": result,
                 }
             fields = result.get("fields") or {}
@@ -2895,13 +2895,18 @@ def _exec_tool(
             "ok": True,
             "desktop": "mkdir",
             "args": {"path": folder},
-            "spoken_summary": f"Create folder queued: {folder}",
+            "spoken_summary": f"Created folder on Desktop: {folder}",
         }
     if name == "desktop_list_dir":
         folder = str(args.get("path") or args.get("dir") or "").strip()
         if not folder:
             return {"ok": False, "error": "path_required"}
-        return {"ok": True, "desktop": "list_dir", "args": {"path": folder}}
+        return {
+            "ok": True,
+            "desktop": "list_dir",
+            "args": {"path": folder},
+            "spoken_summary": f"Listing folder: {folder}",
+        }
     if name == "desktop_move_path":
         src = str(args.get("src") or args.get("from") or "").strip()
         dest = str(args.get("dest") or args.get("to") or "").strip()
@@ -2911,7 +2916,7 @@ def _exec_tool(
             "ok": True,
             "desktop": "move_path",
             "args": {"src": src, "dest": dest},
-            "spoken_summary": f"Move queued: {src} → {dest}",
+            "spoken_summary": f"Moved on Desktop: {src} to {dest}",
         }
     if name == "daily_brief":
         from app.domains.personal_agent.personal_actions import assemble_daily_brief

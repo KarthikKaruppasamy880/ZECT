@@ -36,6 +36,14 @@ export function isGalleryTemplateVisible(
   return Boolean(t.visual?.ready ?? t.native_ready);
 }
 
+/** Builtin gallery shells are not in the upload registry — hide Delete. */
+export function canDeleteGalleryTemplate(id: string): boolean {
+  if (!id) return false;
+  if (id.startsWith("zinnia-")) return false;
+  if (id === "org-standard" || id === "org-delivery") return false;
+  return id.startsWith("user-") || id.startsWith("org-");
+}
+
 export function mergePresentTemplateLists(
   builtin: PresentTemplateCard[],
   remotePresenton: PresentTemplateCard[],

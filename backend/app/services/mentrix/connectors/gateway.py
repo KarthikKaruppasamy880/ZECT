@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from app.adapters.jira_env import jira_api_token, jira_base_url, jira_email
 from app.services.mentrix.connectors.base import ConnectorCapability, ConnectorHealth, MentrixConnector
 
 
@@ -160,15 +161,13 @@ class JiraConnector(_BaseConnector):
     permission_requirement = "jira:read"
 
     def health(self) -> ConnectorHealth:
-        ok = bool((os.getenv("JIRA_BASE_URL") or os.getenv("MCP_JIRA_URL") or "").strip()) and bool(
-            (os.getenv("JIRA_API_TOKEN") or "").strip()
-        )
+        ok = bool(jira_base_url() and jira_api_token() and jira_email())
         return ConnectorHealth(
             id=self.id,
             name=self.name,
             status="configured" if ok else "missing_creds",
             transport="mcp",
-            detail="JIRA_* configured" if ok else "set JIRA_BASE_URL + JIRA_EMAIL + JIRA_API_TOKEN",
+            detail="JIRA_* configured" if ok else "set JIRA_BASE_URL + JIRA_EMAIL (or JIRA_USERNAME) + JIRA_API_TOKEN",
             permission_requirement=self.permission_requirement,
             capabilities=[
                 ConnectorCapability("assigned", "Issues assigned to me", "jira:read", kind="read", permission_policy="ALLOW"),

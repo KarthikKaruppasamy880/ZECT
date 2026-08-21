@@ -1,4 +1,4 @@
-"""Editable PPTX charts via python-pptx. Only column/bar/line/pie/donut."""
+"""Editable PPTX charts via python-pptx (column/bar/line/pie/donut/radar/area/stacked)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,9 @@ _XL = {
     "line": XL_CHART_TYPE.LINE,
     "pie": XL_CHART_TYPE.PIE,
     "donut": XL_CHART_TYPE.DOUGHNUT,
+    "radar": XL_CHART_TYPE.RADAR,
+    "area": XL_CHART_TYPE.AREA,
+    "stacked": XL_CHART_TYPE.COLUMN_STACKED,
 }
 
 

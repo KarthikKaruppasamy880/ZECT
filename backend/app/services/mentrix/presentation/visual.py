@@ -218,6 +218,84 @@ def paint_diagram(slide, block: dict[str, Any], geometry: dict[str, int]) -> boo
     return True
 
 
+_ELEMENT_SHAPES = {
+    "rect": MSO_SHAPE.RECTANGLE,
+    "ellipse": MSO_SHAPE.OVAL,
+    "oval": MSO_SHAPE.OVAL,
+    "arrow": MSO_SHAPE.RIGHT_ARROW,
+}
+
+
+def paint_shape(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
+    content = block.get("content") if isinstance(block.get("content"), dict) else {}
+    key = str(content.get("shape") or "rect").lower()
+    mso = _ELEMENT_SHAPES.get(key, MSO_SHAPE.RECTANGLE)
+    shape = slide.shapes.add_shape(
+        mso,
+        Emu(int(geometry["x"])),
+        Emu(int(geometry["y"])),
+        Emu(int(geometry["cx"])),
+        Emu(int(geometry["cy"])),
+    )
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = RGBColor(0x00, 0x62, 0x8B)
+    shape.line.fill.background()
+    label = str(content.get("text") or content.get("label") or key)[:80]
+    if shape.has_text_frame and label:
+        _text(shape, label, size=12, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+    return True
+
+
+def paint_chart_svg_png(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
+    """Fallback raster for radar/area/stacked when python-pptx chart types fail."""
+    import hashlib
+    import struct
+    import zlib
+    from pathlib import Path
+    from tempfile import gettempdir
+
+    content = block.get("content") if isinstance(block.get("content"), dict) else {}
+    categories = [str(c) for c in list(content.get("categories") or [])][:8]
+    series = [s for s in list(content.get("series") or []) if isinstance(s, dict)]
+    values = [float(v) for v in list((series[0] or {}).get("values") or [])][: len(categories)] if series else []
+    if len(categories) < 2 or len(values) < 2:
+        return False
+    w, h = 320, 200
+    mx = max(values) or 1.0
+    pts = []
+    for i, val in enumerate(values):
+        x = int(20 + i * ((w - 40) / max(len(values) - 1, 1)))
+        y = int(h - 20 - (val / mx) * (h - 40))
+        pts.append((x, y))
+    # Minimal RGB PNG (dark teal background + orange polyline approximation as filled bars).
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        for x in range(w):
+            on = any(abs(x - px) < 3 and y >= py for px, py in pts)
+            if on:
+                raw.extend(b"\xff\x75\x00")
+            else:
+                raw.extend(b"\x00\x62\x8b")
+    def _chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    png = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+    png += _chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    png += _chunk(b"IEND", b"")
+    digest = hashlib.sha1(png[:32]).hexdigest()[:12]
+    path = Path(gettempdir()) / f"zect-chart-{digest}.png"
+    path.write_bytes(png)
+    slide.shapes.add_picture(
+        str(path),
+        Emu(int(geometry["x"])),
+        Emu(int(geometry["y"])),
+        width=Emu(int(geometry["cx"])),
+        height=Emu(int(geometry["cy"])),
+    )
+    return True
+
+
 def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_id: str) -> bool:
     if not (block.get("validation") or {}).get("ok", True):
         errors = list((block.get("validation") or {}).get("errors") or [])
@@ -233,7 +311,14 @@ def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_
     if kind == "image":
         return paint_image(slide, block, geometry, user_id=user_id)
     if kind == "chart":
-        return add_chart(slide, block, geometry)
+        try:
+            if add_chart(slide, block, geometry):
+                return True
+        except Exception:
+            pass
+        return paint_chart_svg_png(slide, block, geometry)
+    if kind == "shape":
+        return paint_shape(slide, block, geometry)
     if kind == "table":
         return paint_table(slide, block, geometry)
     if kind == "metric":
@@ -241,5 +326,8 @@ def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_
     if kind == "quote":
         return paint_quote(slide, block, geometry)
     if kind == "diagram":
+        content = block.get("content") if isinstance(block.get("content"), dict) else {}
+        if str(content.get("shape") or "") in _ELEMENT_SHAPES:
+            return paint_shape(slide, block, geometry)
         return paint_diagram(slide, block, geometry)
     return False

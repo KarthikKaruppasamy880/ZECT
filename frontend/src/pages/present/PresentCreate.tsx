@@ -91,6 +91,10 @@ export default function PresentCreate() {
       setZinnia(r.zinnia || []);
       setOrg(r.organization || []);
       setMine(r.my_templates || []);
+      const uploadedId = out.template?.id;
+      if (out.ok && uploadedId) {
+        await selectTemplate(uploadedId);
+      }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Upload failed");
     }

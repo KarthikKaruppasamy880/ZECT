@@ -616,6 +616,7 @@ def start_mission(
     work_item_id: int | None = None,
     project_id: int | None = None,
     workspace_parent: str = "",
+    propose_if_empty: bool = False,
 ) -> dict[str, Any]:
     if not (goal or "").strip():
         raise ValueError("goal_required")
@@ -646,6 +647,7 @@ def start_mission(
         "project_id": project_id,
         "work_item_id": work_item_id,
         "patches_by_repo": _stringify_patch_map(patches_by_repo),
+        "propose_if_empty": bool(propose_if_empty),
         "workspace_parent": str(parent),
         "repos": [
             {
@@ -677,6 +679,24 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
     mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
+    existing = _stringify_patch_map(mission.get("patches_by_repo"))
+    has_patches = any(existing.get(str(k)) for k in existing)
+    if mission.get("propose_if_empty") and not has_patches:
+        from app.services.coding_engine.propose_patches import propose_from_plan
+
+        try:
+            proposed = propose_from_plan(mission)
+        except ValueError as exc:
+            if str(exc) == "llm_offline":
+                raise ValueError("llm_offline") from exc
+            proposed = {}
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"propose_patches_failed:{exc}") from exc
+        mission["patches_by_repo"] = _stringify_patch_map(proposed)
+        n = sum(len(v) for v in (proposed or {}).values())
+        _emit(mission, "patches_proposed", f"Proposed {n} patch(es) from PLAN + ContextPack.")
+        if n == 0:
+            raise ValueError("no_patches_from_plan")
     mission["plan_approved"] = True
     mission["phase"] = "isolating"
     mission["status"] = "running"

@@ -176,6 +176,7 @@ class MissionCreate(BaseModel):
     patches_by_repo: dict[str, list] | None = None
     plan: str = ""
     workspace_parent: str = ""
+    propose_if_empty: bool = False
 
 
 class MissionRepair(BaseModel):
@@ -217,6 +218,7 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
             work_item_id=req.work_item_id,
             project_id=req.project_id,
             workspace_parent=req.workspace_parent,
+            propose_if_empty=bool(req.propose_if_empty),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

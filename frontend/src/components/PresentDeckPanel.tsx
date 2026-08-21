@@ -202,6 +202,9 @@ export default function PresentDeckPanel({
   const [plannerDegraded, setPlannerDegraded] = useState(false);
   const [qualitySummary, setQualitySummary] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [outlineReady, setOutlineReady] = useState(false);
+  const [outline, setOutline] = useState("");
+  const [draftWithoutModel, setDraftWithoutModel] = useState(false);
   const usingStock = voiceChoice.startsWith("stock:");
   const usingNone = voiceChoice === "none";
   const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
@@ -437,6 +440,7 @@ export default function PresentDeckPanel({
 
   const persistPrompt = (value: string) => {
     setPrompt(value);
+    setOutlineReady(false);
     try {
       localStorage.setItem(PROMPT_KEY, value);
     } catch {
@@ -543,6 +547,11 @@ export default function PresentDeckPanel({
         setStatus("Presentation provider unavailable — BLOCKED_EXTERNAL until Presenton is configured and reachable.");
         return;
       }
+      if (opts?.fastBasic && !draftWithoutModel) {
+        setAdvancedOpen(true);
+        setStatus("Check Draft without model to skip the planner (Fast-Basic is never silent).");
+        return;
+      }
       const content = [prompt.trim(), toneHint?.trim() ? `Tone: ${toneHint.trim()}` : ""]
         .filter(Boolean)
         .join("\n\n");
@@ -585,6 +594,13 @@ export default function PresentDeckPanel({
       }
       const slidesHint = prep.n_slides_hint || nSlides;
       if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
+      if (!outlineReady) {
+        setOutline(adapted);
+        setOutlineReady(true);
+        setStatus("Confirm adapted prompt and slide count, then Generate.");
+        return;
+      }
+      adapted = outline.trim() || adapted;
       const stages = [
         "Understanding request",
         "Building story",
@@ -1332,6 +1348,23 @@ export default function PresentDeckPanel({
           />
         </label>
       )}
+      {outlineReady ? (
+        <div className="rounded-lg border border-teal-200 bg-teal-50/50 p-2 space-y-1" data-testid="present-deck-confirm">
+          <p className="text-[11px] font-medium text-teal-900">Confirm outline</p>
+          <textarea
+            data-testid="present-deck-adapted-prompt"
+            value={outline}
+            onChange={(e) => setOutline(e.target.value)}
+            rows={4}
+            className={
+              dark
+                ? "w-full rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                : "w-full rounded border border-slate-300 px-2 py-1 text-xs"
+            }
+          />
+          <p className="text-[10px] text-slate-500">{nSlides} slides · selected template {templateChoice}</p>
+        </div>
+      ) : null}
       <button
         type="button"
         data-testid="present-deck-generate"
@@ -1360,6 +1393,15 @@ export default function PresentDeckPanel({
         <summary className={`cursor-pointer text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
           Advanced
         </summary>
+      <label className={`mt-1 flex items-center gap-1.5 text-[11px] ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        <input
+          type="checkbox"
+          data-testid="present-draft-without-model"
+          checked={draftWithoutModel}
+          onChange={(e) => setDraftWithoutModel(e.target.checked)}
+        />
+        Draft without model
+      </label>
       <button
         type="button"
         data-testid="present-deck-generate-fast-basic"

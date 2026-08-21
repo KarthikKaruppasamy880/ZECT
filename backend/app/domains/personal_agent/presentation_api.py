@@ -114,6 +114,15 @@ def presentation_template_preview(body: PreviewIn, current_user: CurrentUser = D
     return tmpl.preview_template(uid, body.template_id)
 
 
+@router.get("/templates/{template_id}/slides")
+@require_authentication
+def presentation_template_slides(template_id: str, current_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation import template_definition as tdef
+
+    slides = tdef.template_slide_previews(template_id)
+    return {"ok": bool(slides), "template_id": template_id, "slides": slides, "count": len(slides)}
+
+
 @router.post("/templates/upload")
 @require_authentication
 async def presentation_template_upload(

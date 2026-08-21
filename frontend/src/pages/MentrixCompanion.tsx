@@ -28,7 +28,7 @@ import CloneVoicePanel from "@/components/CloneVoicePanel";
 import ModelSelector from "@/components/ModelSelector";
 import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 import { computerTargetHint } from "@/lib/computerTarget";
-import { setStoredMicDeviceId } from "@/lib/micDevices";
+import { setStoredMicDeviceId, setStoredSpeakerDeviceId } from "@/lib/micDevices";
 import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
 type CompanionMode = "chat" | "incident" | "voice";
@@ -85,6 +85,7 @@ function ComputerTargetChip() {
 export default function MentrixCompanion() {
   const s = useMentrixSession();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [eventsOpen, setEventsOpen] = useState(false);
   const mode: CompanionMode =
     searchParams.get("voice") === "1"
       ? "voice"
@@ -224,8 +225,8 @@ export default function MentrixCompanion() {
 
         <div
           className={`grid min-h-0 flex-1 gap-3 ${
-            mode === "chat" && s.showArtifacts && !s.displayMode
-              ? "grid-rows-[minmax(0,1fr)_auto] lg:grid-rows-1 lg:grid-cols-[1fr_minmax(16rem,22rem)]"
+            mode === "chat" && (s.showArtifacts || s.displayMode)
+              ? "grid-rows-[minmax(0,1fr)_auto] lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]"
               : "grid-cols-1"
           }`}
         >
@@ -301,21 +302,26 @@ export default function MentrixCompanion() {
                 </div>
               </div>
             )}
-            {!s.displayMode && mode === "chat" && (
+            {mode === "chat" && (
               <>
                 <div
                   className="flex min-h-0 flex-1 flex-col overflow-hidden"
                   data-testid="mentrix-companion-scroll"
                 >
-                <div className="flex shrink-0 flex-col items-center gap-1 py-1 sm:gap-2 sm:py-2">
+                <div className={`flex shrink-0 flex-col items-center gap-1 py-1 ${s.displayMode ? "sm:py-1" : "sm:gap-2 sm:py-2"}`}>
                   <div
                     data-testid="mentrix-avatar"
                     data-state={s.avatar}
-                    className={`flex h-16 w-16 items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl sm:h-24 sm:w-24 ${ORB[s.avatar]}`}
+                    className={`flex items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl ${
+                      s.displayMode ? "h-10 w-10 sm:h-12 sm:w-12" : "h-16 w-16 sm:h-24 sm:w-24"
+                    } ${ORB[s.avatar]}`}
                   >
-                    <Bot className="h-8 w-8 text-teal-300 sm:h-12 sm:w-12" />
+                    <Bot className={s.displayMode ? "h-5 w-5 text-teal-300" : "h-8 w-8 text-teal-300 sm:h-12 sm:w-12"} />
                   </div>
-                  <p className="text-sm font-medium uppercase tracking-widest text-teal-200/90">
+                  <p
+                    className="text-sm font-medium uppercase tracking-widest text-teal-200/90"
+                    data-testid="mentrix-greeting"
+                  >
                     Good to see you
                   </p>
                   <p className="text-xs text-slate-400" data-testid="mentrix-companion-status">
@@ -397,6 +403,29 @@ export default function MentrixCompanion() {
                             </option>
                           ))
                         )}
+                      </select>
+                    </label>
+                    <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2 py-1.5 text-xs">
+                      <span className="text-slate-400">Speakers</span>
+                      <select
+                        data-testid="mentrix-speaker-select"
+                        className="max-w-[180px] rounded bg-slate-900 text-slate-100"
+                        value={s.speakerDeviceId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          s.setSpeakerDeviceId(id);
+                          setStoredSpeakerDeviceId(id);
+                          s.pushLog(
+                            `Speakers selected: ${s.speakerDevices.find((d) => d.deviceId === id)?.label || id || "default"}`,
+                          );
+                        }}
+                      >
+                        <option value="">Default speakers</option>
+                        {s.speakerDevices.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2 py-1.5 text-xs">
@@ -519,20 +548,32 @@ export default function MentrixCompanion() {
                   </div>
                 </div>
 
-                <div
-                  className="min-h-[8rem] max-h-[30%] shrink-0 space-y-1 overflow-y-auto overscroll-contain border-t border-slate-800 pt-2 text-[11px] text-slate-400"
-                  data-testid="mentrix-live-log"
-                >
-                  {s.log.length === 0 && <p>Live log — tool events stream here</p>}
-                  {s.log.map((l, i) => (
-                    <div key={i} className="break-words whitespace-pre-wrap">
-                      <span className="text-teal-700">{l.ts}</span> {l.text}
+                <div className="shrink-0 border-t border-slate-800 pt-1">
+                  <button
+                    type="button"
+                    data-testid="mentrix-events-toggle"
+                    onClick={() => setEventsOpen((o) => !o)}
+                    className="rounded px-1 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 hover:text-teal-300"
+                  >
+                    {eventsOpen ? "Hide events" : "Events"}
+                  </button>
+                  {eventsOpen ? (
+                    <div
+                      className="mt-1 max-h-24 space-y-1 overflow-y-auto overscroll-contain text-[11px] text-slate-400"
+                      data-testid="mentrix-live-log"
+                    >
+                      {s.log.length === 0 && <p>Live log — tool events stream here</p>}
+                      {s.log.map((l, i) => (
+                        <div key={i} className="break-words whitespace-pre-wrap">
+                          <span className="text-teal-700">{l.ts}</span> {l.text}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
                 </div>
 
                 <div
-                  className="mt-2 min-h-0 flex-[2] space-y-2 overflow-y-auto overscroll-contain border-t border-slate-800 pt-2"
+                  className="mt-2 min-h-[12rem] flex-1 space-y-2 overflow-y-auto overscroll-contain border-t border-slate-800 pt-2"
                   data-testid="mentrix-companion-chat"
                 >
                   {s.messages.map((m, i) => (
@@ -627,6 +668,12 @@ export default function MentrixCompanion() {
                     onChange={(e) => s.setTts(e.target.checked)}
                   />
                   Speak replies (TTS) — uses your cloned voice when set. Uncheck if you hear two voices.
+                  <span
+                    className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase text-teal-300"
+                    data-testid="mentrix-tts-playback"
+                  >
+                    {s.tts ? s.ttsPlayback : "muted"}
+                  </span>
                 </label>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -648,32 +695,12 @@ export default function MentrixCompanion() {
                 </div>
               </>
             )}
-            {mode === "chat" && s.displayMode && (
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-xs uppercase tracking-widest text-teal-500">
-                  Artifacts · Present
-                </span>
-                <button
-                  type="button"
-                  data-testid="mentrix-present-narrate-display"
-                  className="rounded border border-teal-600 px-2 py-1 text-xs text-teal-200"
-                  onClick={() => void s.presentNarrate?.()}
-                >
-                  Narrate
-                </button>
-                <button
-                  type="button"
-                  className="rounded border border-slate-600 px-2 py-1 text-xs"
-                  onClick={() => s.setDisplayMode(false)}
-                >
-                  Hide
-                </button>
-              </div>
-            )}
-            {mode === "chat" && s.displayMode && <MentrixArtifacts items={s.board} displayMode />}
+            {mode === "chat" && s.displayMode ? (
+              <p className="shrink-0 text-[10px] text-teal-500/80">Display keeps Chat visible — artifacts are the side pane.</p>
+            ) : null}
           </section>
 
-          {mode === "chat" && s.showArtifacts && !s.displayMode && (
+          {mode === "chat" && (s.showArtifacts || s.displayMode) && (
             <aside
               className="flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-40 lg:h-full lg:min-h-0"
               data-testid="mentrix-companion-artifacts"
@@ -701,9 +728,28 @@ export default function MentrixCompanion() {
                 >
                   <Maximize2 className="h-4 w-4" />
                 </button>
+                {s.displayMode ? (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="mentrix-present-narrate-display"
+                      className="rounded border border-teal-600 px-2 py-1 text-[10px] text-teal-200"
+                      onClick={() => void s.presentNarrate?.()}
+                    >
+                      Narrate
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-600 px-2 py-1 text-[10px]"
+                      onClick={() => s.setDisplayMode(false)}
+                    >
+                      Hide
+                    </button>
+                  </>
+                ) : null}
                 </div>
               </div>
-              <MentrixArtifacts items={s.board} />
+              <MentrixArtifacts items={s.board} displayMode={s.displayMode} />
               <div className="space-y-1 border-t border-slate-800 pt-3 text-xs text-slate-400">
                 <p className="font-semibold text-slate-200">Quick asks</p>
                 {[

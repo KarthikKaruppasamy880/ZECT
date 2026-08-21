@@ -47,14 +47,23 @@ describe("PresentEditor v1", () => {
       expect(screen.getByTestId("present-editor-status").textContent).toMatch(/Saved into PPTX/i);
     });
     expect(screen.getByTestId("present-editor-rail")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-palette")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-ai")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-blocks")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-texts")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-tables")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-images")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-tab-elements")).toBeTruthy();
     expect(screen.getByTestId("present-editor-canvas")).toBeTruthy();
   });
 
   it("toasts that Save is required after adding a chart", async () => {
     render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
     await waitFor(() => {
-      expect(screen.getByTestId("present-editor-add-chart")).toBeTruthy();
+      expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
     });
+    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
     expect(screen.getByTestId("present-editor-status").textContent).toMatch(/Save to persist/i);
   });

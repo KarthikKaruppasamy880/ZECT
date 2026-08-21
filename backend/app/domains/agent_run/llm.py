@@ -1,8 +1,9 @@
 """LLM-powered endpoints for Ask Mode, Plan Mode, and enhanced Blueprint."""
 
 import os
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -55,6 +56,7 @@ class AskRequest(BaseModel):
     repo_context: str | None = None  # optional repo analysis context
     repo_id: int | None = None  # auto-inject context from cloned repo
     project_id: int | None = None  # Knowledge Base / Memory inject
+    project_key: str | None = None
     model: str | None = None  # Mentrix Local or cloud model id
 
 
@@ -62,6 +64,7 @@ class AskResponse(BaseModel):
     answer: str
     model: str
     tokens_used: int
+    context_used: dict[str, Any] | None = None
 
 
 class PlanRequest(BaseModel):
@@ -70,6 +73,7 @@ class PlanRequest(BaseModel):
     repo_id: int | None = None  # auto-inject context from cloned repo
     constraints: str | None = None
     project_id: int | None = None
+    project_key: str | None = None
     model: str | None = None
 
 
@@ -78,6 +82,7 @@ class PlanResponse(BaseModel):
     phases: list[str]
     model: str
     tokens_used: int
+    context_used: dict[str, Any] | None = None
 
 
 class EnhanceBlueprintRequest(BaseModel):
@@ -170,6 +175,28 @@ def _build_repo_context(db: Session, repo_id: int, max_chars: int = 8000) -> str
     return full[:max_chars]
 
 
+_PATH_ONLY = re.compile(r"^[A-Za-z]:[\\/].+|/.+")
+
+
+def _looks_like_path_only(value: str | None) -> bool:
+    text = (value or "").strip()
+    if not text or "\n" in text:
+        return False
+    return bool(_PATH_ONLY.fullmatch(text))
+
+
+def _inject_context_pack(query: str, project_id: int | None, project_key: str | None, db: Session) -> dict[str, Any]:
+    from app.services.coding_engine.agent_context import compose_context_pack
+
+    return compose_context_pack(
+        goal=query or "",
+        project_id=project_id,
+        project_key=project_key,
+        db=db,
+        max_chars=1800,
+    )
+
+
 @router.post("/ask", response_model=AskResponse)
 def ask_question(
     req: AskRequest,
@@ -188,6 +215,14 @@ def ask_question(
 
     messages = [{"role": "system", "content": system_prompt}]
 
+    pack: dict[str, Any] = {}
+    try:
+        pack = _inject_context_pack(req.question, req.project_id, req.project_key, db)
+        if pack.get("text"):
+            messages.append({"role": "user", "content": str(pack["text"])})
+    except Exception:
+        pack = {}
+
     # Prefer token-capped Knowledge snippets when available
     try:
         from app.domains.repository.knowledge_base import retrieve_knowledge_for_context
@@ -201,11 +236,14 @@ def ask_question(
         )
         if kb_block:
             messages.append({"role": "user", "content": kb_block})
+            pack["knowledge"] = True
     except Exception:
         pass
 
     # Auto-inject repo context if repo_id provided (trimmed when knowledge present)
     context = req.repo_context or ""
+    if _looks_like_path_only(context):
+        context = ""
     if req.repo_id and not context:
         context = _build_repo_context(db, req.repo_id)
 
@@ -239,7 +277,19 @@ def ask_question(
             total_tokens=tokens,
             user_id=current_user.user_id,
         )
-        return AskResponse(answer=answer, model=model, tokens_used=tokens)
+        return AskResponse(
+            answer=answer,
+            model=model,
+            tokens_used=tokens,
+            context_used={
+                "knowledge": bool(pack.get("knowledge")),
+                "lattice_hits": int(pack.get("lattice_hits") or 0),
+                "lattice_indexed": bool(pack.get("lattice_indexed")),
+                "blueprint": bool(pack.get("blueprint")),
+                "repo_id": req.repo_id,
+                "project_id": req.project_id,
+            },
+        )
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"LLM API error: {e.message}")
 
@@ -266,8 +316,16 @@ def generate_plan(
 
     # Auto-inject repo context if repo_id provided
     context = req.repo_context or ""
+    if _looks_like_path_only(context):
+        context = ""
     if req.repo_id and not context:
         context = _build_repo_context(db, req.repo_id)
+
+    pack: dict[str, Any] = {}
+    try:
+        pack = _inject_context_pack(req.project_description, req.project_id, req.project_key, db)
+    except Exception:
+        pack = {}
 
     kb_block = ""
     try:
@@ -284,8 +342,11 @@ def generate_plan(
         pass
 
     user_content = f"Project Description:\n{req.project_description}"
+    if pack.get("text"):
+        user_content += f"\n\n{pack['text']}"
     if kb_block:
         user_content += f"\n\n{kb_block}"
+        pack["knowledge"] = True
     repo_cap = 3500 if kb_block else 6000
     if context:
         user_content += f"\n\nExisting Repository Context:\n{context[:repo_cap]}"
@@ -328,7 +389,20 @@ def generate_plan(
             total_tokens=tokens,
             user_id=current_user.user_id,
         )
-        return PlanResponse(plan=plan_text, phases=phases, model=model, tokens_used=tokens)
+        return PlanResponse(
+            plan=plan_text,
+            phases=phases,
+            model=model,
+            tokens_used=tokens,
+            context_used={
+                "knowledge": bool(pack.get("knowledge")),
+                "lattice_hits": int(pack.get("lattice_hits") or 0),
+                "lattice_indexed": bool(pack.get("lattice_indexed")),
+                "blueprint": bool(pack.get("blueprint")),
+                "repo_id": req.repo_id,
+                "project_id": req.project_id,
+            },
+        )
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"LLM API error: {e.message}")
 

@@ -445,7 +445,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
         {current ? (
           <div className="flex h-full min-w-0">
           <div className="flex h-full min-w-0 flex-1 flex-col gap-2 overflow-auto p-3">
-            <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+            <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
             {previewUrl ? (
               <img
                 src={previewUrl}
@@ -458,9 +458,15 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                 data-testid="present-editor-canvas"
                 className="px-3 py-8 text-center text-xs text-slate-500"
               >
-                Slide canvas preview unavailable — showing extracted text.
+                Preview unavailable
               </div>
             )}
+            {(current.blocks || []).some((b) => ["chart", "table", "image"].includes(String(b.kind))) ? (
+              <div
+                data-testid="present-editor-block-overlay"
+                className="pointer-events-none absolute inset-[10%] rounded border-2 border-teal-500/80"
+              />
+            ) : null}
             </div>
             <label className="text-[11px] font-medium text-slate-600">
               Slide text
@@ -493,10 +499,11 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
             chat={chat}
             onChatChange={setChat}
             onRewrite={() => void rewrite()}
-            onAddChart={() =>
+            onAddChart={(chartType) =>
               addBlock(
                 newEditorBlock("chart", current.index, {
                   title: "New chart",
+                  chart_type: chartType || "column",
                   categories: ["A", "B"],
                   series: [{ name: "Series", values: [1, 2] }],
                 }),
@@ -521,6 +528,21 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
               )
             }
             onAddImage={(file) => void addImageFile(file)}
+            onAddText={(role) =>
+              addBlock(
+                newEditorBlock("quote", current.index, {
+                  text: role === "title" ? "Title" : role === "subtitle" ? "Subtitle" : role === "bullets" ? "• Point" : "Body",
+                }),
+                role,
+              )
+            }
+            onAddShape={(shape) =>
+              addBlock(
+                newEditorBlock("shape", current.index, { shape, text: shape }),
+                shape,
+              )
+            }
+            onApplyLayout={(layout) => setStatus(`Layout ${layout} — mapped to imported master placeholders`)}
           />
           </div>
         ) : (

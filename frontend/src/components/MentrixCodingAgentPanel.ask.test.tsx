@@ -38,4 +38,21 @@ describe("Developer ASK mode", () => {
     expect(codingAgentCreateSession).not.toHaveBeenCalled();
     expect(await screen.findByTestId("mentrix-coding-agent-ask-answer")).toHaveTextContent("No edits.");
   });
+
+  it("sends repo_id and project_id instead of a folder path", async () => {
+    render(
+      <MentrixCodingAgentPanel
+        workspaceRoot="C:/tmp/zect"
+        projectId={9}
+        roots={[{ id: 44, label: "zoas", path: "C:/tmp/zect" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));
+    fireEvent.change(screen.getByTestId("mentrix-coding-agent-ask-input"), {
+      target: { value: "Explain Lattice ingest" },
+    });
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-send"));
+    await waitFor(() => expect(askQuestion).toHaveBeenCalled());
+    expect(askQuestion).toHaveBeenCalledWith("Explain Lattice ingest", undefined, 44, expect.anything(), 9);
+  });
 });

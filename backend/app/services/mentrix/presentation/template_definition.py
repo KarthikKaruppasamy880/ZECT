@@ -93,7 +93,7 @@ def gallery_visual(zect_id: str) -> dict[str, Any]:
             if isinstance(lay, dict) and lay.get("name"):
                 layout_names.append(str(lay["name"]))
     ready = bool(row and row.get("ready") is True)
-    cover = ensure_template_cover(tid) if ready else None
+    cover = ensure_template_cover(tid)
     cover_data_url = ""
     if cover and cover.is_file():
         import base64
@@ -141,6 +141,36 @@ def ensure_template_cover(zect_id: str) -> Path | None:
         return dest
     except Exception:
         return dest if dest.is_file() else None
+
+
+def template_slide_previews(zect_id: str, max_slides: int = 12) -> list[str]:
+    """PNG data URLs for master slides 0..n (empty list if the master cannot render)."""
+    tid = tmpl.canonical_id(zect_id) or zect_id
+    master = tmpl.source_pptx_path(tid)
+    if not master or not master.is_file():
+        return []
+    try:
+        from pptx import Presentation
+
+        from app.services.mentrix.presentation.slide_preview import render_slide_png_bytes
+
+        n = min(max(1, int(max_slides)), len(Presentation(str(master)).slides))
+        out: list[str] = []
+        raw = master.read_bytes()
+        import base64
+
+        for i in range(n):
+            png = render_slide_png_bytes(raw, i)
+            if png:
+                out.append("data:image/png;base64," + base64.b64encode(png).decode("ascii"))
+        return out
+    except Exception:
+        cover = ensure_template_cover(tid)
+        if cover and cover.is_file():
+            import base64
+
+            return ["data:image/png;base64," + base64.b64encode(cover.read_bytes()).decode("ascii")]
+        return []
 
 
 def list_ready_ids() -> list[str]:

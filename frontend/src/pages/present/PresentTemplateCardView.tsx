@@ -54,6 +54,11 @@ export default function PresentTemplateCardView({ tmpl, selected, testId, onSele
         >
           {tmpl.visual?.readiness || (ready ? "READY" : "TEMPLATE_NOT_READY")}
         </span>
+        {!ready ? (
+          <p className="mt-1 text-[10px] text-amber-800" data-testid={`${testId}-not-ready-hint`}>
+            Not mapped to a Presenton master — pick a READY Zinnia card or upload PPTX. Community packs are not imported.
+          </p>
+        ) : null}
       </button>
       {onDelete ? (
         <button

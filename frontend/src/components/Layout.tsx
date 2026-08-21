@@ -14,6 +14,8 @@ interface LayoutProps {
 export default function Layout({ onLogout }: LayoutProps) {
   const location = useLocation();
   const mentrixHud = location.pathname === "/mentrix-home";
+  const workspaceHud = location.pathname === "/workspace";
+  const lockViewport = mentrixHud || workspaceHud;
   // User owns desktop collapse/expand; Companion HUD must not force-collapse.
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem("sidebar-collapsed") === "true";
@@ -54,8 +56,8 @@ export default function Layout({ onLogout }: LayoutProps) {
     <MentrixSessionProvider>
       <div
         className={`flex flex-col ${
-          mentrixHud ? "h-dvh overflow-hidden bg-slate-950" : "min-h-screen overflow-x-hidden bg-slate-50"
-        }`}
+          lockViewport ? "h-dvh overflow-hidden bg-slate-50" : "min-h-screen overflow-x-hidden bg-slate-50"
+        } ${mentrixHud ? "bg-slate-950" : ""}`}
       >
         <a
           href="#zect-main"
@@ -79,12 +81,12 @@ export default function Layout({ onLogout }: LayoutProps) {
           onMobileClose={handleMobileClose}
         />
         <div
-          className={`min-w-0 flex flex-col ${mentrixHud ? "min-h-0 flex-1" : ""} transition-all duration-200 ease-in-out ${
+          className={`min-w-0 flex flex-col ${lockViewport ? "min-h-0 flex-1" : ""} transition-all duration-200 ease-in-out ${
             collapsed ? "md:ml-16" : "md:ml-56"
           }`}
         >
           {!mentrixHud && (
-            <div className="hidden md:flex min-w-0 flex-wrap items-center justify-between gap-3 overflow-visible px-4 py-2 border-b border-slate-200 bg-white lg:px-6">
+            <div className="hidden md:flex shrink-0 min-w-0 flex-wrap items-center justify-between gap-3 overflow-visible px-4 py-2 border-b border-slate-200 bg-white lg:px-6">
               <ProjectRepoSelector />
               <div className="flex items-center gap-3">
                 <MentrixWakeBridge />
@@ -112,7 +114,9 @@ export default function Layout({ onLogout }: LayoutProps) {
             className={
               mentrixHud
                 ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0 pt-14 md:pt-0"
-                : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"
+                : workspaceHud
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-3 pt-16 md:p-4 md:pt-4"
+                  : "p-4 md:p-6 pt-16 md:pt-4 min-w-0 overflow-x-auto"
             }
           >
             <Outlet />

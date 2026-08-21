@@ -182,7 +182,7 @@ export default function Integrations() {
           <ul className="text-sm text-indigo-800 space-y-1 list-disc list-inside">
             <li><strong>Browser automation</strong> — Mentrix uses Playwright via BrowserRuntime. Install: <code>pip install playwright && playwright install chromium</code>. See docs/BROWSER_RUNTIME.md.</li>
             <li><strong>GitHub</strong> — Set <code>GITHUB_TOKEN</code> in <code>backend/.env</code> (repo read + PR create). Status card below shows readiness (never shows the token).</li>
-            <li><strong>Jira</strong> — UI form below <em>or</em> env: <code>JIRA_BASE_URL</code> / <code>MCP_JIRA_URL</code>, <code>JIRA_EMAIL</code>, <code>JIRA_API_TOKEN</code>. Same credentials power Mentrix Incident + MCP.</li>
+            <li><strong>Jira</strong> — UI form below <em>or</em> env names from runner: <code>JIRA_BASE_URL</code> / <code>MCP_JIRA_URL</code>, <code>JIRA_EMAIL</code> or <code>JIRA_USERNAME</code>, <code>JIRA_API_TOKEN</code>. Paste the token into local <code>backend/.env</code> — never commit it.</li>
             <li><strong>Slack</strong> — Get notifications when reviews complete, deployments happen, or budget alerts trigger. Create a Slack bot at api.slack.com/apps.</li>
             <li><strong>Presenton</strong> — Self-host Docker; set <code>PRESENTON_BASE_URL</code>. Mentrix Companion → Present Deck → Generate deck → PPTX path.</li>
             <li><strong>Zoom (Present Deck)</strong> — Optional <code>ZOOM_DESKTOP_PATH</code> / <code>ZOOM_DEFAULT_JOIN_URL</code>. Mentrix opens Zoom only; you join and share PowerPoint (no Meeting SDK).</li>
@@ -405,8 +405,8 @@ export default function Integrations() {
 
           {showJiraForm && (
             <div className="space-y-3 pt-3 border-t border-slate-200">
-              <input value={jiraForm.base_url} onChange={(e) => setJiraForm({ ...jiraForm, base_url: e.target.value })} placeholder="https://yourcompany.atlassian.net" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
-              <input value={jiraForm.email} onChange={(e) => setJiraForm({ ...jiraForm, email: e.target.value })} placeholder="email@company.com" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
+              <input value={jiraForm.base_url} onChange={(e) => setJiraForm({ ...jiraForm, base_url: e.target.value })} placeholder="https://zinnia.atlassian.net" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
+              <input value={jiraForm.email} onChange={(e) => setJiraForm({ ...jiraForm, email: e.target.value })} placeholder="JIRA_EMAIL or JIRA_USERNAME (email)" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
               <input type="password" value={jiraForm.api_token} onChange={(e) => setJiraForm({ ...jiraForm, api_token: e.target.value })} placeholder="Jira API Token" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
               <input value={jiraForm.default_project_key} onChange={(e) => setJiraForm({ ...jiraForm, default_project_key: e.target.value })} placeholder="Project Key (e.g. PROJ)" className="w-full border border-slate-300 text-slate-900 rounded-lg px-3 py-2 text-sm" />
               <button onClick={configureJira} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">Save</button>

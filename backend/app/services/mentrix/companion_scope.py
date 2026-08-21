@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 
 from sqlalchemy.orm import Session
 
+from app.adapters.jira_env import jira_configured
+
 # Honest product limitation (Developer multi-root IDE / PR #156).
 SEMANTIC_CROSS_REPO_REFERENCES = False
 
@@ -63,11 +65,7 @@ def _git_head(path: str) -> str:
 
 def external_connectors() -> dict[str, dict[str, Any]]:
     """Honest connector readiness — never fake PASS when unset."""
-    jira = bool(
-        (os.getenv("JIRA_BASE_URL") or os.getenv("MCP_JIRA_URL") or "").strip()
-        and (os.getenv("JIRA_EMAIL") or "").strip()
-        and (os.getenv("JIRA_API_TOKEN") or "").strip()
-    )
+    jira = jira_configured()
     camunda = bool((os.getenv("ZECT_CAMUNDA_BASE_URL") or "").strip())
     voicebox = bool((os.getenv("ZECT_VOICEBOX_URL") or os.getenv("VOICEBOX_URL") or "").strip())
     presenton = (os.getenv("ZECT_PRESENTATION_PROVIDER") or "presenton").strip().lower() != "none"
@@ -75,7 +73,7 @@ def external_connectors() -> dict[str, dict[str, Any]]:
         "jira": {
             "ready": jira,
             "status": "ready" if jira else "BLOCKED_EXTERNAL",
-            "detail": "JIRA_BASE_URL + JIRA_EMAIL + JIRA_API_TOKEN" if not jira else "",
+            "detail": "JIRA_BASE_URL + JIRA_EMAIL (or JIRA_USERNAME) + JIRA_API_TOKEN" if not jira else "",
         },
         "camunda": {
             "ready": camunda,

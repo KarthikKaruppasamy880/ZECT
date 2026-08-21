@@ -49,4 +49,13 @@ describe("PresentEditor v1", () => {
     expect(screen.getByTestId("present-editor-rail")).toBeTruthy();
     expect(screen.getByTestId("present-editor-canvas")).toBeTruthy();
   });
+
+  it("toasts that Save is required after adding a chart", async () => {
+    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    await waitFor(() => {
+      expect(screen.getByTestId("present-editor-add-chart")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("present-editor-add-chart"));
+    expect(screen.getByTestId("present-editor-status").textContent).toMatch(/Save to persist/i);
+  });
 });

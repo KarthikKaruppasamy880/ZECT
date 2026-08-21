@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   reviewPR,
   reviewSnippet,
@@ -183,9 +184,14 @@ function FindingCard({ finding, index }: { finding: ReviewFinding; index: number
 /* ------------------------------------------------------------------ */
 export default function CodeReview() {
   const { activeProject, activeRepo, activeLocalPath, activeProjectKey } = useActiveProject();
+  const [searchParams] = useSearchParams();
   const [mode, setMode] = useState<"pr" | "snippet" | "repo" | "autofix" | "webhook">("pr");
-  const [owner, setOwner] = useState("KarthikKaruppasamy880");
-  const [repo, setRepo] = useState("ZECT");
+  const [owner, setOwner] = useState(
+    () => searchParams.get("owner") || activeRepo?.owner || "zinnia",
+  );
+  const [repo, setRepo] = useState(
+    () => searchParams.get("repo") || activeRepo?.repo_name || "zoas",
+  );
   const [prNumber, setPrNumber] = useState("");
   const [snippetCode, setSnippetCode] = useState("");
   const [snippetLang, setSnippetLang] = useState("typescript");
@@ -232,6 +238,15 @@ export default function CodeReview() {
   const [sastLoading, setSastLoading] = useState(false);
   const [sastResult, setSastResult] = useState<any>(null);
   const [sastError, setSastError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const qOwner = searchParams.get("owner");
+    const qRepo = searchParams.get("repo");
+    if (qOwner) setOwner(qOwner);
+    else if (activeRepo?.owner) setOwner(activeRepo.owner);
+    if (qRepo) setRepo(qRepo);
+    else if (activeRepo?.repo_name) setRepo(activeRepo.repo_name);
+  }, [searchParams, activeRepo?.owner, activeRepo?.repo_name]);
 
   const loadSastStatus = async () => {
     if (!owner || !repo || !sastRef.trim()) {

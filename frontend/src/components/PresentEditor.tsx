@@ -107,7 +107,9 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
       setSelected(0);
       setStatus(`${next.length} slides · ${parsed.filename || "deck"}`);
     } catch (e) {
-      setStatus(e instanceof Error ? e.message : "Could not open deck in editor");
+      const msg = e instanceof Error ? e.message : "Could not open deck in editor";
+      setSlides([]);
+      setStatus(`Parse error: ${msg}`);
     } finally {
       setBusy(false);
     }
@@ -251,9 +253,13 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
     }
   };
 
-  const addBlock = (block: PresentBlock) => {
-    if (!current) return;
+  const addBlock = (block: PresentBlock, kindLabel: string) => {
+    if (!current) {
+      setStatus("No slide to edit — Generate on Create with AI, or wait for the deck to parse.");
+      return;
+    }
     patchSlide(current.index, { blocks: [...(current.blocks || []), block] });
+    setStatus(`${kindLabel} added on this slide — click Save to persist into the PPTX.`);
   };
 
   const addImageFile = async (file: File) => {
@@ -267,7 +273,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
       const nextBlock = newEditorBlock("image", current.index, { asset_id: out.asset_id, alt: file.name });
       const without = (current.blocks || []).filter((b) => b.kind !== "image");
       patchSlide(current.index, { blocks: [...without, nextBlock] });
-      setStatus("Image attached to this slide.");
+      setStatus("Image attached to this slide — click Save to persist into the PPTX.");
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Image upload failed");
     }
@@ -342,6 +348,9 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Deck editor</h3>
+          <p className="text-[11px] text-slate-500">
+            Review slides here; Generate lives on Create with AI; Voicebox narrates Rehearse.
+          </p>
           <p className="text-[11px] text-slate-500" data-testid="present-editor-status">
             {busy ? "Working…" : status || "Select a slide"}
           </p>
@@ -491,6 +500,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                   categories: ["A", "B"],
                   series: [{ name: "Series", values: [1, 2] }],
                 }),
+                "Chart",
               )
             }
             onAddTable={() =>
@@ -499,6 +509,7 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                   headers: ["Item", "Value"],
                   rows: [["Row 1", "—"]],
                 }),
+                "Table",
               )
             }
             onAddElement={(kind) =>
@@ -506,13 +517,18 @@ export default function PresentEditor({ pptxPath }: PresentEditorProps) {
                 kind === "quote"
                   ? newEditorBlock("quote", current.index, { text: "Quote" })
                   : newEditorBlock("metric", current.index, { label: "Metric", value: "—" }),
+                kind === "quote" ? "Quote" : "Metric",
               )
             }
             onAddImage={(file) => void addImageFile(file)}
           />
           </div>
         ) : (
-          <p className="p-4 text-sm text-slate-500">Generate a deck to edit slides.</p>
+          <p className="p-4 text-sm text-slate-500" data-testid="present-editor-empty">
+            {status.startsWith("Parse error")
+              ? status
+              : "No slides to edit — Generate on Create with AI, or wait for parse. Chart/Table/Image need a saved slide."}
+          </p>
         )}
       </SplitPane>
       </div>

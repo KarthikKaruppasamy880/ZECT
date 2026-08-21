@@ -8,6 +8,11 @@ export type DesktopApplyResult = {
   verified?: boolean;
   verification?: unknown;
   hint?: string;
+  desktopAction?: string;
+  path?: string;
+  src?: string;
+  dest?: string;
+  entries?: Array<{ name: string; type?: string }>;
 };
 
 function parseToolPayload(output: string | Record<string, unknown>): Record<string, unknown> | null {
@@ -107,6 +112,10 @@ export async function applyDesktopToolOutput(
       verified?: boolean;
       verification?: unknown;
       hint?: string;
+      path?: string;
+      src?: string;
+      dest?: string;
+      entries?: Array<{ name: string; type?: string }>;
     };
     void reportDesktopAudit({
       action,
@@ -123,12 +132,18 @@ export async function applyDesktopToolOutput(
         verified: Boolean(res.verified),
         verification: res.verification,
         hint: res.hint ? String(res.hint) : undefined,
+        desktopAction: action,
       };
     }
     return {
       ok: true,
       verified: res?.verified,
       verification: res?.verification,
+      desktopAction: action,
+      path: res?.path ? String(res.path) : args.path ? String(args.path) : undefined,
+      src: res?.src ? String(res.src) : args.src ? String(args.src) : undefined,
+      dest: res?.dest ? String(res.dest) : args.dest ? String(args.dest) : undefined,
+      entries: Array.isArray(res?.entries) ? res.entries : undefined,
     };
   } catch (e) {
     const err = e instanceof Error ? e.message : "desktop_failed";

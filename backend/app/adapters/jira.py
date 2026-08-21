@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
 from typing import Any
+
+from app.adapters.jira_env import jira_api_token, jira_base_url, jira_email
 
 import httpx
 
@@ -25,18 +26,13 @@ def _adf_doc(text: str) -> dict[str, Any]:
 def execute(tool_name: str, arguments: dict, *, config: dict, enabled: bool) -> dict[str, Any]:
     if not enabled:
         return {"status": "disabled"}
-    base = (
-        config.get("base_url")
-        or os.getenv("MCP_JIRA_URL")
-        or os.getenv("JIRA_BASE_URL")
-        or ""
-    ).rstrip("/")
-    email = config.get("email") or os.getenv("JIRA_EMAIL", "")
-    token = config.get("token") or os.getenv("JIRA_API_TOKEN", "")
+    base = (config.get("base_url") or jira_base_url()).rstrip("/")
+    email = config.get("email") or jira_email()
+    token = config.get("token") or jira_api_token()
     if not base or not email or not token:
         return {
             "status": "not_configured",
-            "message": "Configure MCP_JIRA_URL + JIRA_EMAIL + JIRA_API_TOKEN (or server config)",
+            "message": "Configure MCP_JIRA_URL + JIRA_EMAIL (or JIRA_USERNAME) + JIRA_API_TOKEN (or server config)",
             "dry_run": {"tool": tool_name, "arguments": arguments},
         }
     auth = (email, token)

@@ -116,12 +116,24 @@ export default function PresentCreate() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-900">Create with AI</h2>
         <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium" data-testid="present-lifecycle-state">
-          {lifecycle}
+          {lifecycle === "PROVIDER_UNAVAILABLE" ? "BLOCKED_EXTERNAL" : lifecycle}
         </span>
       </div>
       <p className="text-xs text-slate-500">
         Selected template: <strong data-testid="zect-present-selected">{selected}</strong>
       </p>
+      {lifecycle === "PROVIDER_UNAVAILABLE" ? (
+        <p
+          className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          data-testid="present-create-page-blocked"
+        >
+          BLOCKED_EXTERNAL — Presenton is not reachable. Start local Docker (Rancher = dockerd, port 5000):{" "}
+          <code className="break-all">
+            docker run -d --name presenton -p 5000:80 ghcr.io/presenton/presenton:latest
+          </code>
+          . Full steps: docs/PRESENTON_LOCAL.md. Generate stays disabled until READY.
+        </p>
+      ) : null}
       {evidenceProject || evidenceWorkItem || evidencePrompt ? (
         <p className="text-xs text-slate-600" data-testid="present-create-evidence">
           Evidence
@@ -131,6 +143,16 @@ export default function PresentCreate() {
           {evidencePrompt ? ` · ${evidencePrompt.slice(0, 160)}` : ""}
         </p>
       ) : null}
+
+      <PresentDeckPanel
+        key={panelKey}
+        variant="light"
+        mode="create"
+        initialTemplateId={selected}
+        initialPrompt={evidencePrompt || params.get("prompt") || undefined}
+        toneHint={rewrite}
+        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}`)}
+      />
 
       <section className="space-y-4" data-testid="zect-present-gallery">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -242,16 +264,6 @@ export default function PresentCreate() {
           Use this template
         </button>
       </section>
-
-      <PresentDeckPanel
-        key={panelKey}
-        variant="light"
-        mode="create"
-        initialTemplateId={selected}
-        initialPrompt={evidencePrompt || params.get("prompt") || undefined}
-        toneHint={rewrite}
-        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}`)}
-      />
       {status ? (
         <p data-testid="zect-present-status" className="text-xs text-slate-600">
           {status}

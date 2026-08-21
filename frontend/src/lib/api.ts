@@ -794,6 +794,7 @@ export const mentrixPresentonStatus = () =>
     canonical_template_id?: string;
     blocked_external?: boolean;
     block_code?: string;
+    provider?: string;
   }>("/api/mentrix/presenton/status");
 export type PresentonTemplate = { id: string; name: string; native_ready?: boolean; visual?: { ready?: boolean } };
 export const mentrixPresentonTemplates = () =>

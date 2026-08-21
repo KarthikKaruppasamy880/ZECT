@@ -92,6 +92,36 @@ export function saveWorkspaceSession(session: WorkspaceSession): void {
   }
 }
 
+export function editorTabLabel(path: string): string {
+  const norm = (path || "").replace(/\\/g, "/");
+  return norm.split("/").filter(Boolean).pop() || path || "untitled";
+}
+
+export function upsertEditorTab(
+  tabs: WorkspaceEditorTab[],
+  tab: WorkspaceEditorTab,
+  limit = 12,
+): WorkspaceEditorTab[] {
+  if (!tab?.path || !Number.isFinite(tab.repoId) || tab.repoId <= 0) return tabs;
+  const exists = tabs.some((t) => t.path === tab.path);
+  if (exists) {
+    return tabs.map((t) => (t.path === tab.path ? tab : t));
+  }
+  const next = [...tabs, tab];
+  return next.length > limit ? next.slice(next.length - limit) : next;
+}
+
+export function closeEditorTab(tabs: WorkspaceEditorTab[], path: string): WorkspaceEditorTab[] {
+  return tabs.filter((t) => t.path !== path);
+}
+
+export function closeTerminalSession(
+  terminals: WorkspaceTerminalSession[],
+  id: string,
+): WorkspaceTerminalSession[] {
+  return terminals.filter((t) => t.id !== id);
+}
+
 export function newTerminalSession(repoId: number, rootPath: string, label: string): WorkspaceTerminalSession {
   const id =
     typeof crypto !== "undefined" && crypto.randomUUID

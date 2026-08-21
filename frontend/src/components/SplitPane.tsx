@@ -77,9 +77,9 @@ export default function SplitPane({
     <div
       ref={wrap}
       data-testid={testId}
-      className={`flex min-h-0 min-w-0 flex-1 ${horizontal ? "flex-row" : "flex-col"}`}
+      className={`flex h-full min-h-0 min-w-0 flex-1 ${horizontal ? "flex-row" : "flex-col"}`}
     >
-      <div className="min-h-0 min-w-0 overflow-hidden" style={horizontal ? { width: `${pct}%` } : { height: `${pct}%` }}>
+      <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" style={horizontal ? { width: `${pct}%` } : { height: `${pct}%` }}>
         {children[0]}
       </div>
       <button
@@ -135,7 +135,7 @@ export default function SplitPane({
           }
         }}
       />
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{children[1]}</div>
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children[1]}</div>
     </div>
   );
 }

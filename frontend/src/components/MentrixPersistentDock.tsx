@@ -11,6 +11,7 @@ import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 export default function MentrixPersistentDock() {
   const location = useLocation();
   const hideChrome = location.pathname === "/mentrix-home";
+  const onWorkspace = location.pathname === "/workspace";
   const s = useMentrixSession();
 
   useEffect(() => {
@@ -31,9 +32,9 @@ export default function MentrixPersistentDock() {
   return (
     <>
       <div
-        className={`fixed bottom-4 right-4 z-40 flex max-h-[70vh] flex-col gap-2 ${
-          s.dockExpanded ? "w-[min(100vw-2rem,22rem)]" : "w-auto items-end"
-        }`}
+        className={`fixed z-40 flex max-h-[70vh] flex-col gap-2 ${
+          onWorkspace ? "right-4 top-20 bottom-auto" : "bottom-4 right-4"
+        } ${s.dockExpanded ? "w-[min(100vw-2rem,22rem)]" : "w-auto items-end"}`}
         data-testid="mentrix-persistent-dock"
       >
         {s.dockExpanded ? (
@@ -232,7 +233,7 @@ export default function MentrixPersistentDock() {
       <MentrixConfirmModal
         open={s.pending.length > 0}
         items={s.pending}
-        speakPrompt={s.browserTtsEnabled}
+        speakPrompt={false}
         onAllow={s.onAllow}
         onDeny={() => {
           s.setPending([]);

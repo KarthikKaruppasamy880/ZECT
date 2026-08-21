@@ -771,6 +771,41 @@ const menuTemplate = [
     ],
   },
   {
+    label: "File",
+    submenu: [
+      {
+        label: "Add Folder to Workspace…",
+        click: () => {
+          mainWindow?.webContents.executeJavaScript(`
+            (function () {
+              window.__zectWsCommand = "add-folder";
+              if (!String(location.pathname || "").includes("/workspace")) {
+                location.assign("/workspace");
+                return;
+              }
+              window.dispatchEvent(new CustomEvent("zect-workspace-command", { detail: { action: "add-folder" } }));
+            })();
+          `);
+        },
+      },
+      {
+        label: "Remove Folder from Workspace",
+        click: () => {
+          mainWindow?.webContents.executeJavaScript(`
+            (function () {
+              window.__zectWsCommand = "remove-folder";
+              if (!String(location.pathname || "").includes("/workspace")) {
+                location.assign("/workspace");
+                return;
+              }
+              window.dispatchEvent(new CustomEvent("zect-workspace-command", { detail: { action: "remove-folder" } }));
+            })();
+          `);
+        },
+      },
+    ],
+  },
+  {
     label: "Mentrix",
     submenu: [
       {

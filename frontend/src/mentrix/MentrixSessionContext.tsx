@@ -44,6 +44,7 @@ import {
   type MicDevice,
 } from "@/lib/micDevices";
 import { fetchMentrixAgentContext } from "@/mentrix/agentContext";
+import { sessionCapsForTools } from "@/lib/companionSessionGrants";
 import {
   applyDesktopToolOutput,
   COMPUTER_MODE_HINT,
@@ -304,7 +305,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   voiceConnectedRef.current = voiceConnected;
   // When Connect Voice / Realtime owns the speaker, companion chat TTS must stay
   // silent — otherwise users hear two overlapping voices (Realtime + speakMentrix).
-  const browserTtsEnabled = tts && !voiceConnected;
+  const browserTtsEnabled = tts && !voiceConnected && !voiceConnecting;
 
   const speakAllowed = useCallback(() => ttsRef.current && !voiceConnectedRef.current && !realtimeRef.current, []);
 
@@ -345,10 +346,33 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       } else if (res.verified === false) {
         pushLog("Desktop action ran but verification did not confirm target window");
       } else {
-        pushLog("Desktop action OK");
+        const action = res.desktopAction || "";
+        if (action === "list_dir") {
+          const names = (res.entries || [])
+            .slice(0, 40)
+            .map((e) => `${e.type === "dir" ? "[dir]" : "[file]"} ${e.name}`)
+            .join("\n");
+          const listing = names
+            ? `Desktop listing (${res.path || "folder"}):\n${names}`
+            : `Desktop listing empty: ${res.path || "folder"}`;
+          setMessages((m) => [...m, { role: "system", text: listing }]);
+          pushLog(listing.slice(0, 200));
+        } else if (action === "mkdir") {
+          const note = `Created folder: ${res.path || "Desktop"}`;
+          setMessages((m) => [...m, { role: "system", text: note }]);
+          speakChat(note);
+          pushLog(note);
+        } else if (action === "move_path") {
+          const note = `Moved ${res.src || "path"} → ${res.dest || "destination"}`;
+          setMessages((m) => [...m, { role: "system", text: note }]);
+          speakChat(note);
+          pushLog(note);
+        } else {
+          pushLog("Desktop action OK");
+        }
       }
     },
-    [pushLog],
+    [pushLog, speakChat],
   );
 
   const handleQuotaError = useCallback(
@@ -388,6 +412,10 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     persistMessages(messages);
   }, [messages]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [messages, streamReply]);
 
   useEffect(() => {
     mentrixListRuns(3)
@@ -899,29 +927,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       // Session Allow → CapabilityGrant TTL so multi-step actions skip per-step Allow.
       try {
         const { createCapabilityGrant } = await import("@/lib/api");
-        const caps = new Set<string>();
-        for (const t of tools) {
-          if (t.startsWith("browser_")) {
-            caps.add("browser:control");
-            caps.add("desktop:control");
-          } else if (
-            t.startsWith("computer_") ||
-            t.startsWith("desktop_") ||
-            t === "file_organize_approve"
-          ) {
-            caps.add("desktop:control");
-          }
-          if (t === "file_organize_approve" || t === "desktop_move_path" || t === "desktop_mkdir") {
-            caps.add("filesystem:move");
-          }
-          if (t === "email_send" || t === "email_digest") {
-            caps.add(t === "email_send" ? "email:draft" : "email:read");
-          }
-          if (t === "slack_digest") caps.add("slack:read");
-          if (t === "jira_get_issue" || t === "jira_search_incidents") caps.add("jira:read");
-        }
         const minted: string[] = [];
-        for (const capability of caps) {
+        for (const capability of sessionCapsForTools(tools)) {
           await createCapabilityGrant({
             capability,
             duration_minutes: 30,

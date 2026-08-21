@@ -3,6 +3,18 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import WorkspaceTerminal from "./WorkspaceTerminal";
 
+vi.mock("@/lib/api", () => ({
+  runnerExecute: vi.fn(),
+  runnerOutput: vi.fn(),
+  runnerStart: vi.fn(),
+  runnerStop: vi.fn(),
+  codingAgentRuntimeRecipes: vi.fn(async () => ({
+    ok: true,
+    default_id: "pkg-dev",
+    recipes: [{ id: "pkg-dev", kind: "frontend", label: "npm run dev", command: "npm run dev", cwdRel: ".", confirmRequired: false }],
+  })),
+}));
+
 describe("WorkspaceTerminal", () => {
   it("shows attach-root CTA and disables input when cwd is empty", () => {
     render(

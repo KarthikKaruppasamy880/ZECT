@@ -25,6 +25,11 @@ import {
   codingAgentResumeMission,
   codingAgentRetryMission,
   codingAgentStream,
+  codingAgentListPlans,
+  codingAgentSavePlan,
+  askQuestion,
+  generatePlan,
+  mentrixStartRun,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
   type MentrixCodingAgentEvent,
@@ -36,6 +41,7 @@ type Props = {
   onModelChange?: (id: string) => void;
   onOpenPath?: (relativeOrAbsolutePath: string) => void;
   onFilesChanged?: (paths: string[]) => void;
+  onTestOutput?: (text: string) => void;
   initialGoal?: string;
   initialSessionId?: string | null;
   projectId?: number | null;
@@ -52,7 +58,7 @@ type Line = {
   actionId?: string;
 };
 
-type Tab = "mission" | "chat";
+type Tab = "ask" | "plan" | "agent" | "history";
 
 export default function MentrixCodingAgentPanel({
   workspaceRoot,
@@ -60,13 +66,14 @@ export default function MentrixCodingAgentPanel({
   onModelChange,
   onOpenPath,
   onFilesChanged,
+  onTestOutput,
   initialGoal = "",
   initialSessionId = null,
   projectId = null,
   workItemId = null,
   roots = [],
 }: Props) {
-  const [tab, setTab] = useState<Tab>(initialSessionId ? "chat" : "mission");
+  const [tab, setTab] = useState<Tab>(initialSessionId ? "agent" : "ask");
   const [chatModel, setChatModel] = useState(model);
 
   useEffect(() => {
@@ -86,19 +93,35 @@ export default function MentrixCodingAgentPanel({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className={`rounded px-2 py-0.5 text-[10px] ${tab === "mission" ? "bg-teal-700 text-white" : "text-slate-600"}`}
-            data-testid="mentrix-coding-agent-mission-tab"
-            onClick={() => setTab("mission")}
+            className={`rounded px-2 py-0.5 text-[10px] ${tab === "ask" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+            data-testid="mentrix-coding-agent-ask-tab"
+            onClick={() => setTab("ask")}
           >
-            Mission
+            ASK
           </button>
           <button
             type="button"
-            className={`rounded px-2 py-0.5 text-[10px] ${tab === "chat" ? "bg-teal-700 text-white" : "text-slate-600"}`}
-            data-testid="mentrix-coding-agent-chat-tab"
-            onClick={() => setTab("chat")}
+            className={`rounded px-2 py-0.5 text-[10px] ${tab === "plan" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+            data-testid="mentrix-coding-agent-plan-tab"
+            onClick={() => setTab("plan")}
           >
-            Chat
+            PLAN
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2 py-0.5 text-[10px] ${tab === "agent" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+            data-testid="mentrix-coding-agent-mission-tab"
+            onClick={() => setTab("agent")}
+          >
+            AGENT
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2 py-0.5 text-[10px] ${tab === "history" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+            data-testid="mentrix-coding-agent-history-tab"
+            onClick={() => setTab("history")}
+          >
+            HISTORY
           </button>
           <div className="origin-right scale-90">
             <ModelSelector
@@ -112,23 +135,37 @@ export default function MentrixCodingAgentPanel({
           </div>
         </div>
       </div>
-      {tab === "mission" ? (
-        <MissionPane
+      {tab === "ask" ? (
+        <AskPane workspaceRoot={workspaceRoot} model={chatModel} workItemId={workItemId} onCreatePlan={() => setTab("plan")} />
+      ) : tab === "plan" ? (
+        <PlanPane
           goalSeed={initialGoal}
-          projectId={projectId}
           workItemId={workItemId}
+          projectId={projectId}
           roots={roots}
-          onOpenPath={onOpenPath}
-          onFilesChanged={onFilesChanged}
+          workspaceRoot={workspaceRoot}
+          model={chatModel}
+          onApproved={() => setTab("agent")}
         />
-      ) : (
-        <ChatPane
+      ) : tab === "history" ? (
+        <HistoryPane
           workspaceRoot={workspaceRoot}
           chatModel={chatModel}
           onOpenPath={onOpenPath}
           onFilesChanged={onFilesChanged}
           initialGoal={initialGoal}
           initialSessionId={initialSessionId}
+        />
+      ) : (
+        <MissionPane
+          goalSeed={initialGoal}
+          projectId={projectId}
+          workItemId={workItemId}
+          roots={roots}
+          workspaceRoot={workspaceRoot}
+          onOpenPath={onOpenPath}
+          onFilesChanged={onFilesChanged}
+          onTestOutput={onTestOutput}
         />
       )}
     </div>
@@ -140,15 +177,19 @@ function MissionPane({
   projectId,
   workItemId,
   roots,
+  workspaceRoot,
   onOpenPath,
   onFilesChanged,
+  onTestOutput,
 }: {
   goalSeed: string;
   projectId?: number | null;
   workItemId?: number | null;
   roots: CodingAgentMissionRoot[];
+  workspaceRoot: string;
   onOpenPath?: (path: string) => void;
   onFilesChanged?: (paths: string[]) => void;
+  onTestOutput?: (text: string) => void;
 }) {
   const [goal, setGoal] = useState(goalSeed);
   const [patchesJson, setPatchesJson] = useState("");
@@ -156,6 +197,18 @@ function MissionPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
+  const [shipNote, setShipNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!mission?.tests) return;
+    const blob = JSON.stringify(mission.tests, null, 2);
+    try {
+      localStorage.setItem("zect_ws_last_test_log", blob);
+    } catch {
+      /* ignore */
+    }
+    onTestOutput?.(blob);
+  }, [mission, onTestOutput]);
 
   const run = async (fn: () => Promise<CodingAgentMission>) => {
     setBusy(true);
@@ -384,7 +437,7 @@ function MissionPane({
           className="rounded border border-slate-300 px-2 py-1.5 text-xs disabled:opacity-40"
           data-testid="mentrix-coding-agent-approve-plan"
         >
-          Approve PLAN
+          Approve & Build
         </button>
         <button
           type="button"
@@ -435,6 +488,297 @@ function MissionPane({
         >
           <GitCompare className="h-3 w-3" /> Open diff
         </button>
+        <a
+          href="/review"
+          className="rounded border border-slate-300 px-2 py-1.5 text-xs text-slate-700"
+          data-testid="mentrix-coding-agent-review"
+        >
+          Review
+        </a>
+        <button
+          type="button"
+          disabled={busy || !mission || !mission.review || mission.review.passed !== false}
+          onClick={() => mission && void run(() => codingAgentRetryMission(mission.id))}
+          className="rounded border border-slate-300 px-2 py-1.5 text-xs disabled:opacity-40"
+          data-testid="mentrix-coding-agent-fix-findings"
+        >
+          Fix findings
+        </button>
+        <button
+          type="button"
+          disabled={busy || !mission}
+          onClick={async () => {
+            if (!mission) return;
+            setBusy(true);
+            setShipNote(null);
+            try {
+              const run = await mentrixStartRun(
+                mission.goal || goal,
+                "upgrade",
+                "",
+                workspaceRoot,
+                {
+                  work_item_id: workItemId,
+                  coding_mission_id: mission.id,
+                },
+              );
+              const id = run?.id;
+              setShipNote(`Delivery run ${id} — no auto-merge. Open Mentrix Runs.`);
+              window.location.assign(`/mentrix?run=${encodeURIComponent(String(id || ""))}`);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : "Prepare PR failed";
+              if (/duplicate_delivery_run/i.test(msg)) {
+                setError("A Delivery run already exists for this WorkItem and mission. Open Mentrix Runs — do not start a second pipeline.");
+              } else {
+                setError(msg);
+              }
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="rounded bg-indigo-700 px-2 py-1.5 text-xs text-white disabled:opacity-40"
+          data-testid="mentrix-coding-agent-prepare-pr"
+        >
+          Prepare PR
+        </button>
+      </div>
+      {shipNote ? <p className="px-3 pb-2 text-[10px] text-indigo-700">{shipNote}</p> : null}
+    </div>
+  );
+}
+
+function AskPane({
+  workspaceRoot,
+  model,
+  workItemId,
+  onCreatePlan,
+}: {
+  workspaceRoot: string;
+  model: string;
+  workItemId?: number | null;
+  onCreatePlan: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ask = async () => {
+    const question = q.trim();
+    if (!question) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await askQuestion(question, workspaceRoot || undefined, undefined, model);
+      setAnswer(res.answer || "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ask failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-ask">
+      <p className="text-[10px] text-slate-500">ASK is read-only — this path never edits files.</p>
+      <textarea
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        className="mt-1 min-h-[4rem] rounded border border-slate-200 px-2 py-1"
+        placeholder="Search or explain this workspace…"
+        data-testid="mentrix-coding-agent-ask-input"
+      />
+      <div className="mt-2 flex gap-1">
+        <button
+          type="button"
+          disabled={busy || !q.trim()}
+          onClick={() => void ask()}
+          className="rounded bg-teal-700 px-2 py-1 text-white disabled:opacity-40"
+          data-testid="mentrix-coding-agent-ask-send"
+        >
+          {busy ? "Asking…" : "Ask"}
+        </button>
+        <button
+          type="button"
+          onClick={onCreatePlan}
+          className="rounded border border-slate-300 px-2 py-1"
+          data-testid="mentrix-coding-agent-ask-create-plan"
+        >
+          Create Plan
+        </button>
+      </div>
+      {error ? <p className="mt-1 text-rose-600">{error}</p> : null}
+      {answer ? (
+        <pre className="mt-2 flex-1 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px]" data-testid="mentrix-coding-agent-ask-answer">
+          {answer}
+        </pre>
+      ) : null}
+      <p className="mt-1 text-[10px] text-slate-400">WorkItem {workItemId ?? "—"} · zero edits</p>
+    </div>
+  );
+}
+
+function PlanPane({
+  goalSeed,
+  workItemId,
+  projectId,
+  roots,
+  workspaceRoot,
+  model,
+  onApproved,
+}: {
+  goalSeed: string;
+  workItemId?: number | null;
+  projectId?: number | null;
+  roots: CodingAgentMissionRoot[];
+  workspaceRoot: string;
+  model: string;
+  onApproved: () => void;
+}) {
+  const [goal, setGoal] = useState(goalSeed);
+  const [markdown, setMarkdown] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const key = String(workItemId || "local");
+
+  const save = async () => {
+    if (!markdown.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await codingAgentSavePlan({
+        work_item_or_run: key,
+        title: "coding",
+        markdown,
+        meta: { workspace: workspaceRoot },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revise = async () => {
+    const g = goal.trim();
+    if (!g) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await generatePlan(g, workspaceRoot || undefined, undefined, undefined, model);
+      setMarkdown(res.plan || "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Revise failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approveAndBuild = async () => {
+    if (!markdown.trim()) {
+      setError("Save a PLAN.md before Approve & Build");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown });
+      const mission = await codingAgentCreateMission({
+        goal: goal.trim() || "Approved PLAN",
+        project_id: projectId,
+        work_item_id: workItemId,
+        roots,
+        plan: markdown,
+        workspace_parent: workspaceRoot,
+      });
+      if (mission.phase === "awaiting_plan_approval") {
+        await codingAgentApprovePlan(mission.id);
+      }
+      onApproved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Approve & Build failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-plan-mode">
+      <p className="text-[10px] text-slate-500">PLAN.md is scratch in .zect/plans (gitignored). Zero edits until Approve &amp; Build.</p>
+      <input
+        value={goal}
+        onChange={(e) => setGoal(e.target.value)}
+        className="mt-1 rounded border border-slate-200 px-2 py-1"
+        placeholder="Goal"
+        data-testid="mentrix-coding-agent-plan-goal"
+      />
+      <textarea
+        value={markdown}
+        onChange={(e) => setMarkdown(e.target.value)}
+        className="mt-1 min-h-[8rem] flex-1 rounded border border-slate-200 px-2 py-1 font-mono text-[11px]"
+        placeholder="## Plan"
+        data-testid="mentrix-coding-agent-plan-md"
+      />
+      {error ? <p className="text-rose-600">{error}</p> : null}
+      <div className="mt-2 flex flex-wrap gap-1">
+        <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-slate-300 px-2 py-1" data-testid="mentrix-coding-agent-save-plan">
+          Save Plan
+        </button>
+        <button type="button" disabled={busy} onClick={() => void revise()} className="rounded border border-slate-300 px-2 py-1" data-testid="mentrix-coding-agent-revise-plan">
+          Revise
+        </button>
+        <button type="button" disabled={busy} onClick={() => void approveAndBuild()} className="rounded bg-teal-700 px-2 py-1 text-white" data-testid="mentrix-coding-agent-approve-build">
+          Approve &amp; Build
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HistoryPane({
+  workspaceRoot,
+  chatModel,
+  onOpenPath,
+  onFilesChanged,
+  initialGoal,
+  initialSessionId,
+}: {
+  workspaceRoot: string;
+  chatModel: string;
+  onOpenPath?: (path: string) => void;
+  onFilesChanged?: (paths: string[]) => void;
+  initialGoal: string;
+  initialSessionId: string | null;
+}) {
+  const [rows, setRows] = useState<Array<{ id: string; markdown?: string; title?: string }>>([]);
+  useEffect(() => {
+    void codingAgentListPlans()
+      .then((r) => setRows(r.plans || []))
+      .catch(() => setRows([]));
+  }, []);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="mentrix-coding-agent-history">
+      <div className="max-h-[40%] overflow-auto p-2 text-xs">
+        <p className="text-[10px] text-slate-500">Saved PLAN.md versions. Chat below is interactive (not ASK).</p>
+        {rows.length === 0 ? <p className="mt-2 text-slate-400">No saved plans yet.</p> : null}
+        <ul className="mt-2 space-y-2">
+          {rows.map((p) => (
+            <li key={p.id} className="rounded border border-slate-100 p-2">
+              <p className="font-semibold">{p.title || p.id}</p>
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap text-[10px] text-slate-600">{p.markdown}</pre>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden border-t border-slate-100">
+        <ChatPane
+          workspaceRoot={workspaceRoot}
+          chatModel={chatModel}
+          onOpenPath={onOpenPath}
+          onFilesChanged={onFilesChanged}
+          initialGoal={initialGoal}
+          initialSessionId={initialSessionId}
+        />
       </div>
     </div>
   );

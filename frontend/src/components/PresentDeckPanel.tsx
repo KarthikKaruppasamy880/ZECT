@@ -20,10 +20,11 @@ import {
   mentrixPreparePromptDeck,
   listMyClonedVoices,
   mentrixVoiceEngineStatus,
+  mentrixPresentationNarrateSlides,
   type ClonedVoiceInfo,
   type VoiceEngineStatus,
 } from "@/lib/api";
-import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, capPresentSlideScript, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
+import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
 import { pickLocalFile } from "@/lib/pickLocalFile";
 import { isGenerateTemplateReady, mergePresentTemplateLists, type PresentTemplateCard } from "@/lib/presentTemplates";
 import { preferredPresentVoiceChoice } from "@/lib/presentVoiceChoice";
@@ -115,7 +116,7 @@ type Props = {
   onGenerated?: (path: string) => void;
 };
 
-type SlideParsed = { index: number; notes?: string; text?: string };
+type SlideParsed = { index: number; notes?: string; text?: string; visuals?: string[] };
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -804,11 +805,26 @@ export default function PresentDeckPanel({
 
   const narrateSlideList = async (slides: SlideParsed[], modeLabel: string) => {
     const n = slides.length;
-    const scriptFor = (idx: number) => {
-      const slide = slides[idx];
+    const scripts: string[] = slides.map((slide, idx) => {
       const raw = (slide.notes || slide.text || "").trim() || `Slide ${idx + 1} of ${n}.`;
-      return capPresentSlideScript(raw);
-    };
+      return raw;
+    });
+    try {
+      const intel = await mentrixPresentationNarrateSlides(
+        slides as unknown as Array<Record<string, unknown>>,
+        notes.trim().slice(0, 180),
+      );
+      if (intel.ok && intel.slides?.length) {
+        for (const row of intel.slides) {
+          if (typeof row.script === "string" && row.script.trim()) {
+            scripts[row.index] = row.script.trim();
+          }
+        }
+      }
+    } catch {
+      /* grounded fallback already in scripts from notes/text */
+    }
+    const scriptFor = (idx: number) => scripts[idx] || `Slide ${idx + 1} of ${n}.`;
     const opts = voiceOptsFromChoice(voiceChoice);
     // Warm Voicebox + prefetch slide 0 before first play (cuts cold-start lag).
     setStatus(`${modeLabel}: warming voice engine…`);
@@ -826,10 +842,7 @@ export default function PresentDeckPanel({
         return;
       }
       const script = scriptFor(i);
-      setStatus(
-        `${modeLabel}: slide ${i + 1} / ${n}` +
-          (script.endsWith("…") ? " (script capped ~500 chars for clone speed)" : ""),
-      );
+      setStatus(`${modeLabel}: slide ${i + 1} / ${n}`);
 
       // Kick off slide N+1 synthesis while current slide audio plays
       const upcoming =

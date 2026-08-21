@@ -147,6 +147,12 @@ export default function AskMode() {
           <p className="text-gray-500 mt-1">
             Ask any engineering question — architecture, debugging, code review, best practices.
           </p>
+          <p className="mt-2 text-xs text-slate-600" data-testid="ask-open-in-developer">
+            ASK in Developer is the cockpit (zero file edits).{" "}
+            <a className="text-teal-700 underline" href="/workspace">
+              Open in Developer
+            </a>
+          </p>
         </div>
         <ModelSelector value={selectedModel} onChange={setSelectedModel} compact />
       </div>

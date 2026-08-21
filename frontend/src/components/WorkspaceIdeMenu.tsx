@@ -115,7 +115,7 @@ export default function WorkspaceIdeMenu({
             <div className="my-1 border-t border-slate-100" />
             {item(
               "workspace-menu-run-app",
-              "Run App Locally (npm run dev)…",
+              "Run App Locally (discovered recipe)…",
               onRunAppLocally,
               !canRunApp,
             )}

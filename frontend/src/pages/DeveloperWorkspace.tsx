@@ -194,6 +194,13 @@ export default function DeveloperWorkspace() {
   const userToggledImport = useRef(false);
   const userClosedAllTerminals = useRef(false);
   const [runAppTick, setRunAppTick] = useState(0);
+  const [lastTestLog, setLastTestLog] = useState(() => {
+    try {
+      return localStorage.getItem("zect_ws_last_test_log") || "";
+    } catch {
+      return "";
+    }
+  });
   useEffect(() => {
     if (userToggledImport.current) return;
     if (!rootPath && visibleRoots.length === 0) {
@@ -1256,6 +1263,7 @@ export default function DeveloperWorkspace() {
                   void loadTree();
                   void refreshGit(rootPath);
                 }}
+                onTestOutput={(text) => setLastTestLog(text)}
                 initialGoal={deepGoal}
                 initialSessionId={deepSession || null}
                 projectId={activeProjectId}
@@ -1392,6 +1400,14 @@ export default function DeveloperWorkspace() {
                 ) : null}
                 {bottomTab === "tests" || bottomTab === "evidence" ? (
                   <div data-testid={bottomTab === "tests" ? "workspace-tests-panel" : "workspace-evidence-panel"}>
+                    {bottomTab === "tests" && lastTestLog ? (
+                      <pre
+                        className="mb-2 max-h-40 overflow-auto rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-100"
+                        data-testid="workspace-tests-live-output"
+                      >
+                        {lastTestLog}
+                      </pre>
+                    ) : null}
                     <DeveloperMultiRepoStatus workItemId={workItemId} projectId={activeProjectId} />
                   </div>
                 ) : null}

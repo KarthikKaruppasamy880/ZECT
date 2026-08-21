@@ -64,6 +64,8 @@ class StartRunRequest(BaseModel):
     source_lang: str = ""
     target_lang: str = ""
     repo_id: int | None = None
+    work_item_id: int | None = None
+    coding_mission_id: str = ""
 
 
 class FineTuneSampleRequest(BaseModel):
@@ -243,6 +245,21 @@ def start_run(
     if pack_errors:
         raise HTTPException(status_code=400, detail="; ".join(pack_errors))
 
+    coding_mission_id = (req.coding_mission_id or "").strip()
+    if coding_mission_id:
+        from app.services.coding_engine.ship_handoff import find_open_handoff
+
+        existing = find_open_handoff(req.work_item_id, coding_mission_id)
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "duplicate_delivery_run",
+                    "delivery_run_id": existing.get("delivery_run_id"),
+                    "coding_mission_id": coding_mission_id,
+                },
+            )
+
     run = MentrixRun(
         project_id=req.project_id,
         mode=req.mode,
@@ -259,6 +276,8 @@ def start_run(
                     "source_lang": req.source_lang or "",
                     "target_lang": req.target_lang or "",
                     "repo_id": req.repo_id,
+                    "work_item_id": req.work_item_id,
+                    "coding_mission_id": coding_mission_id,
                 }
             }
         ),
@@ -268,6 +287,16 @@ def start_run(
     db.add(run)
     db.commit()
     db.refresh(run)
+
+    if coding_mission_id:
+        from app.services.coding_engine.ship_handoff import register_handoff
+
+        register_handoff(
+            work_item_id=req.work_item_id,
+            coding_mission_id=coding_mission_id,
+            delivery_run_id=int(run.id),
+            status="running",
+        )
 
     log_audit(
         db,

@@ -3,11 +3,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Upload } from "lucide-react";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import PresentTemplateCardView from "@/pages/present/PresentTemplateCardView";
-import { isGalleryTemplateVisible } from "@/lib/presentTemplates";
+import { isGalleryTemplateVisible, canDeleteGalleryTemplate } from "@/lib/presentTemplates";
 import {
   encodeDeckId,
   mentrixPresentonStatus,
   mentrixPresentationTemplateDelete,
+  mentrixPresentationDeleteUnmapped,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplates,
   mentrixPresentationTemplateUpload,
@@ -100,9 +101,20 @@ export default function PresentCreate() {
 
   const onDeleteTemplate = async (id: string) => {
     if (!window.confirm("Remove this uploaded template?")) return;
-    const out = await mentrixPresentationTemplateDelete(id).catch(() => ({ ok: false as const, error: "delete_failed" }));
+    const out = await mentrixPresentationTemplateDelete(id).catch(() => ({
+      ok: false as const,
+      error: "delete_failed",
+      message: "Could not delete that template.",
+    }));
     if (!out.ok) {
-      setStatus(out.error || "Could not delete template");
+      const human =
+        out.message ||
+        (out.error === "not_found"
+          ? "That template is not in your upload registry, so it cannot be deleted."
+          : out.error === "cannot_delete_builtin"
+            ? "Built-in Zinnia and org gallery shells cannot be deleted."
+            : out.error || "Could not delete template");
+      setStatus(human);
       return;
     }
     const r = await mentrixPresentationTemplates();
@@ -215,13 +227,33 @@ export default function PresentCreate() {
                 selected={selected === t.id}
                 testId={`zect-present-template-${t.id}`}
                 onSelect={() => void selectTemplate(t.id)}
-                onDelete={t.id.startsWith("zinnia-") ? undefined : () => void onDeleteTemplate(t.id)}
+                onDelete={canDeleteGalleryTemplate(t.id) ? () => void onDeleteTemplate(t.id) : undefined}
               />
             ))}
           </div>
         </div>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">My Templates</p>
+          {mine.some((t) => !t.native_ready && !t.visual?.ready) ? (
+            <button
+              type="button"
+              className="mb-2 rounded border border-rose-200 px-2 py-1 text-[11px] text-rose-800"
+              data-testid="zect-present-delete-unmapped"
+              onClick={async () => {
+                if (!window.confirm("Delete all unmapped uploaded templates? Built-in Zinnia cards are never deleted.")) return;
+                const out = await mentrixPresentationDeleteUnmapped().catch(() => ({ ok: false as const, error: "failed" }));
+                setStatus(out.ok ? `Removed ${out.count || 0} unmapped upload(s).` : out.error || "Delete failed");
+                const r = await mentrixPresentationTemplates().catch(() => null);
+                if (r) {
+                  setZinnia(r.zinnia || []);
+                  setOrg(r.organization || []);
+                  setMine(r.my_templates || []);
+                }
+              }}
+            >
+              Delete all unmapped uploads
+            </button>
+          ) : null}
           {mine.length === 0 ? (
             <p className="text-xs text-slate-500">No uploaded PPTX templates yet.</p>
           ) : (

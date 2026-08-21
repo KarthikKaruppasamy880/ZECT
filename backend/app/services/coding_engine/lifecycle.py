@@ -317,22 +317,33 @@ def isolate_worktree(source: str | Path, *, branch: str, dest: str | Path) -> di
     }
 
 
+def _locate_pytest(worktree: Path) -> tuple[Path, Path] | None:
+    """Prefer nested ZOAS tests over missing repo-root tests/."""
+    pairs = [
+        (worktree, worktree / "tests"),
+        (worktree / "zinnia-modern" / "backend", worktree / "zinnia-modern" / "backend" / "tests"),
+        (worktree / "backend", worktree / "backend" / "tests"),
+    ]
+    for cwd, tests_dir in pairs:
+        if tests_dir.is_dir() and any(tests_dir.glob("test_*.py")):
+            return cwd.resolve(), tests_dir.resolve()
+    return None
+
+
 def run_repo_tests(worktree: Path) -> dict[str, Any]:
-    tests_dir = worktree / "tests"
-    has_pytest = tests_dir.is_dir() and any(tests_dir.glob("test_*.py"))
-    if not has_pytest:
+    located = _locate_pytest(worktree)
+    if not located:
         return {"ok": True, "status": "skipped", "kind": "none", "detail": "no tests/"}
+    cwd, tests_dir = located
     import sys
 
-    root = resolve_workspace(str(worktree))
+    root = resolve_workspace(str(cwd))
     cfg_path = ""
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".ini", delete=False, encoding="utf-8") as cfg:
             cfg.write("[pytest]\naddopts =\npythonpath = .\n")
             cfg_path = cfg.name
         child_env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST")}
-        # Worktree only — parent CI PYTHONPATH / pytest 9 importlib must not
-        # import a sibling (or ZECT backend) module named like the fixture.
         child_env["PYTHONPATH"] = str(root)
         child_env["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
         child_env["PYTEST_ADDOPTS"] = ""
@@ -351,7 +362,7 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
             "--import-mode=prepend",
             "-p",
             "no:cacheprovider",
-            str((root / "tests").resolve()),
+            str(tests_dir),
         ]
         completed = subprocess.run(
             argv,

@@ -3,6 +3,7 @@ import {
   isGalleryTemplateVisible,
   isGenerateTemplateReady,
   mergePresentTemplateLists,
+  canDeleteGalleryTemplate,
 } from "./presentTemplates";
 
 const BUILTIN = [
@@ -67,5 +68,15 @@ describe("mergePresentTemplateLists", () => {
     expect(
       isGalleryTemplateVisible({ id: "org-brand", name: "Org", visual: { ready: true } }, true),
     ).toBe(true);
+  });
+});
+
+describe("canDeleteGalleryTemplate", () => {
+  it("hides Delete on builtin org and zinnia shells", () => {
+    expect(canDeleteGalleryTemplate("zinnia-executive-v1")).toBe(false);
+    expect(canDeleteGalleryTemplate("org-standard")).toBe(false);
+    expect(canDeleteGalleryTemplate("org-delivery")).toBe(false);
+    expect(canDeleteGalleryTemplate("user-abc")).toBe(true);
+    expect(canDeleteGalleryTemplate("org-brand-upload")).toBe(true);
   });
 });

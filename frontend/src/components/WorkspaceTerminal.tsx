@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, Play, Plus, Square, Terminal, X } from "lucide-react";
-import { runnerExecute, runnerOutput, runnerStart, runnerStop } from "@/lib/api";
+import { runnerExecute, runnerOutput, runnerStart, runnerStop, codingAgentRuntimeRecipes, type RuntimeRecipe } from "@/lib/api";
 import type { WorkspaceTerminalSession } from "@/lib/workspaceSession";
 
 type RootChoice = { repoId: number; rootPath: string; label: string };
@@ -17,9 +17,17 @@ type WorkspaceTerminalProps = {
   onCloseSession?: (id: string) => void;
   onClosePanel?: () => void;
   runAppTick?: number;
+  runAppRecipeId?: string | null;
 };
 
-const START_APP_CMD = "npm run dev";
+const FALLBACK_APP_CMD = "npm run dev";
+
+function joinCwd(root: string, cwdRel: string): string {
+  const rel = (cwdRel || ".").replace(/\\/g, "/");
+  if (!rel || rel === ".") return root;
+  if (rel.split("/").includes("..")) return root;
+  return `${root.replace(/[\\/]+$/, "")}/${rel}`;
+}
 
 /**
  * Per-root command forms: each session cwd is locked. This is App Runner, not a Cursor PTY.
@@ -35,6 +43,7 @@ export default function WorkspaceTerminal({
   onCloseSession,
   onClosePanel,
   runAppTick = 0,
+  runAppRecipeId = null,
 }: WorkspaceTerminalProps) {
   const active = sessions?.find((s) => s.id === activeSessionId) || sessions?.[0] || null;
   const root = (active?.rootPath || workspaceRoot || roots[0]?.rootPath || "").trim();
@@ -47,6 +56,10 @@ export default function WorkspaceTerminal({
   const inputRef = useRef<HTMLInputElement>(null);
   const key = active?.id || "default";
   const lines = linesById[key] || [];
+  const [recipes, setRecipes] = useState<RuntimeRecipe[]>([]);
+  const [defaultRecipeId, setDefaultRecipeId] = useState("");
+  const [selectedRecipeId, setSelectedRecipeId] = useState("");
+  const [recipesReady, setRecipesReady] = useState(false);
 
   const focusInput = () => {
     if (!root || busy) return;
@@ -120,13 +133,14 @@ export default function WorkspaceTerminal({
     }
   };
 
-  const startBg = async (cmdOverride?: string) => {
+  const startBg = async (cmdOverride?: string, cwdOverride?: string) => {
     const cmd = (cmdOverride ?? command).trim();
     if (!cmd || busy || !root) return;
+    const cwd = cwdOverride && !cwdOverride.split(/[\\/]/).includes("..") ? cwdOverride : root;
     setBusy(true);
-    append(["", `[starting] ${cmd}`]);
+    append(["", `[starting] ${cmd} (cwd ${cwd})`]);
     try {
-      const result = await runnerStart(cmd, root, "workspace-terminal", undefined, root);
+      const result = await runnerStart(cmd, cwd, "workspace-terminal", undefined, root);
       setBgId(result.id);
       append(`[started] ${result.id}${result.pid != null ? ` pid=${result.pid}` : ""} — output streams here. Stop to kill.`);
     } catch (e) {
@@ -135,6 +149,16 @@ export default function WorkspaceTerminal({
       setCommand("");
       setBusy(false);
     }
+  };
+
+  const startRecipe = async (recipe: RuntimeRecipe) => {
+    if (recipe.confirmRequired) {
+      const ok = window.confirm(
+        `Run ${recipe.label || recipe.command}?\n\nCommand: ${recipe.command}\nCwd: ${recipe.cwdRel}\n${recipe.evidence || ""}\n\nZECT does not start PostgreSQL. Use the project's local DATABASE_URL.`,
+      );
+      if (!ok) return;
+    }
+    await startBg(recipe.command, joinCwd(root, recipe.cwdRel));
   };
 
   const stopBg = async () => {
@@ -148,14 +172,52 @@ export default function WorkspaceTerminal({
     }
   };
 
-  const startBgRef = useRef(startBg);
-  startBgRef.current = startBg;
+  const startRecipeRef = useRef(startRecipe);
+  startRecipeRef.current = startRecipe;
+  const recipesRef = useRef(recipes);
+  recipesRef.current = recipes;
   const appliedRunTick = useRef(0);
+
+  useEffect(() => {
+    if (!root) {
+      setRecipes([]);
+      setRecipesReady(true);
+      return;
+    }
+    let cancelled = false;
+    setRecipesReady(false);
+    void codingAgentRuntimeRecipes(root)
+      .then((out) => {
+        if (cancelled) return;
+        if (out.ok) {
+          setRecipes(out.recipes || []);
+          setDefaultRecipeId(out.default_id || out.recipes?.[0]?.id || "");
+          setSelectedRecipeId((prev) => prev || out.default_id || out.recipes?.[0]?.id || "");
+        } else {
+          setRecipes([]);
+        }
+        setRecipesReady(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecipes([]);
+          setRecipesReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
+
   useEffect(() => {
     if (!runAppTick || appliedRunTick.current === runAppTick) return;
+    if (!recipesReady) return;
     appliedRunTick.current = runAppTick;
-    void startBgRef.current(START_APP_CMD);
-  }, [runAppTick]);
+    const id = runAppRecipeId || selectedRecipeId || defaultRecipeId;
+    const recipe = recipesRef.current.find((r) => r.id === id) || recipesRef.current[0];
+    if (recipe) void startRecipeRef.current(recipe);
+    else void startBg(FALLBACK_APP_CMD, root);
+  }, [runAppTick, runAppRecipeId, selectedRecipeId, defaultRecipeId, root, recipesReady]);
 
   const showSessionBar = Boolean((sessions && sessions.length > 0) || roots.length);
 
@@ -278,8 +340,8 @@ export default function WorkspaceTerminal({
             <p>Not a live Cursor shell. Commands run under this locked root via App Runner.</p>
             <p>
               <strong className="text-slate-300">Run</strong> = one-shot, 30 seconds (<code>git status</code>).{" "}
-              <strong className="text-slate-300">Start app / BG</strong> = long-running (<code>{START_APP_CMD}</code>).
-              Mentrix chat cannot spawn a PTY.
+              <strong className="text-slate-300">Start app / BG</strong> = long-running discovered recipe (not hardcoded <code>npm run dev</code> at clone root).
+              Mentrix chat cannot spawn a PTY. Postgres is never started by ZECT.
             </p>
             <p>
               Preview and process list:{" "}
@@ -322,13 +384,32 @@ export default function WorkspaceTerminal({
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
           Run
         </button>
+        {recipes.length ? (
+          <select
+            value={selectedRecipeId || defaultRecipeId}
+            onChange={(e) => setSelectedRecipeId(e.target.value)}
+            className="max-w-[10rem] rounded border border-slate-700 bg-slate-900 px-1 py-1 text-[10px] text-slate-200"
+            data-testid="workspace-terminal-recipe"
+            title="Discovered Run App recipes — confirm before execute"
+          >
+            {recipes.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label || r.command}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <button
           type="button"
           disabled={!root || busy}
-          onClick={() => void startBg(START_APP_CMD)}
+          onClick={() => {
+            const recipe = recipes.find((r) => r.id === (selectedRecipeId || defaultRecipeId)) || recipes[0];
+            if (recipe) void startRecipe(recipe);
+            else void startBg(FALLBACK_APP_CMD, root);
+          }}
           className="rounded px-2 py-1 text-[11px] border border-teal-700 text-teal-200 disabled:opacity-40"
           data-testid="workspace-terminal-start-app"
-          title={`Start ${START_APP_CMD} in the background (App Runner). Not a Cursor PTY.`}
+          title="Start the confirmed Run App recipe (App Runner). Not a Cursor PTY."
         >
           Start app
         </button>

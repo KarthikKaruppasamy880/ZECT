@@ -25,6 +25,10 @@ vi.mock("@/lib/api", () => ({
     sensitivity: { sensitivity: "PUBLIC" },
   })),
   mentrixAnalyzeDeck: vi.fn(),
+  mentrixPresentationNarrateSlides: vi.fn(async (slides: Array<{ notes?: string; text?: string }>) => ({
+    ok: true,
+    slides: slides.map((s, i) => ({ index: i, script: (s.notes || s.text || `Slide ${i + 1}`).repeat(1), word_count: 12 })),
+  })),
   mentrixPresentonTemplates: vi.fn(async () => ({
     ok: true,
     source: "builtin",

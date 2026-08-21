@@ -435,8 +435,8 @@ async def register_user_pptx(
 def delete_uploaded_template(user_id: str | int, template_id: str) -> dict[str, Any]:
     """Remove a user/org uploaded PPTX from the registry. Built-in Zinnia ids are not deletable."""
     tid = (template_id or "").strip()
-    if not tid or tid.startswith("zinnia-") or tid in {str(r["id"]) for r in _CANONICAL_ZINNIA}:
-        return {"ok": False, "error": "cannot_delete_builtin"}
+    if not tid or tid.startswith("zinnia-") or tid in {str(r["id"]) for r in _CANONICAL_ZINNIA} or tid in {"org-standard", "org-delivery"}:
+        return {"ok": False, "error": "cannot_delete_builtin", "message": "Built-in Zinnia and org gallery shells cannot be deleted."}
     for path in (_meta_path(user_id), _org_meta_path()):
         rows = _load_list(path)
         hit = next((t for t in rows if str(t.get("id") or "") == tid), None)
@@ -448,7 +448,33 @@ def delete_uploaded_template(user_id: str | int, template_id: str) -> dict[str, 
             pptx.unlink(missing_ok=True)
         _save_list(path, [t for t in rows if str(t.get("id") or "") != tid])
         return {"ok": True, "id": tid, "deleted": True}
-    return {"ok": False, "error": "not_found"}
+    return {"ok": False, "error": "not_found", "message": "That template is not in your upload registry, so it cannot be deleted."}
+
+
+def delete_unmapped_uploads(user_id: str | int) -> dict[str, Any]:
+    """Delete TEMPLATE_NOT_READY user/org uploads only — never canonical Zinnia/org shells."""
+    deleted: list[str] = []
+    for path in (_meta_path(user_id), _org_meta_path()):
+        rows = _load_list(path)
+        keep: list[dict[str, Any]] = []
+        for row in rows:
+            tid = str(row.get("id") or "")
+            if tid.startswith("zinnia-") or tid in {"org-standard", "org-delivery"}:
+                keep.append(row)
+                continue
+            from app.services.mentrix.presentation.template_definition import native_ready as _native_ready
+
+            ready = bool(row.get("native_ready")) or bool(row.get("mapped")) or _native_ready(tid)
+            if ready:
+                keep.append(row)
+                continue
+            pptx = Path(str(row.get("path") or ""))
+            root = str(_root())
+            if pptx.is_file() and (str(pptx).startswith(root) or path_under_allowed_roots(str(pptx))):
+                pptx.unlink(missing_ok=True)
+            deleted.append(tid)
+        _save_list(path, keep)
+    return {"ok": True, "deleted": deleted, "count": len(deleted)}
 
 
 def import_canonical_master(

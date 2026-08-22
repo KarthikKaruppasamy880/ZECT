@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { authHeaders, getApiBase, indexClonedRepo, latticeIngest } from "@/lib/api";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+
+type LatticeHit = {
+  id?: string;
+  text?: string;
+  summary?: string;
+  content?: string;
+};
 
 type LatticeSnap = {
   state?: string;
@@ -10,59 +18,74 @@ type LatticeSnap = {
   repository_id?: number | null;
   project_key?: string;
   local_path?: string;
+  hits?: LatticeHit[];
   detail?: { indexed_at?: string | null; files_indexed?: number; reason?: string; local_path?: string };
 };
 
 export default function ProjectIntelligencePage() {
+  const { activeProjectId, activeRepoId, activeProjectKey, activeLocalPath, activeRepo } = useActiveProject();
   const [snap, setSnap] = useState<Record<string, unknown> | null>(null);
   const [query, setQuery] = useState("project");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [indexNote, setIndexNote] = useState("");
 
-  const load = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const qs = new URLSearchParams({ query });
-      const res = await fetch(`${getApiBase()}/api/mentrix/developer/project-intelligence?${qs}`, {
-        headers: authHeaders(),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      setSnap(await res.json());
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load Project Intelligence");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const repoLabel = activeRepo
+    ? `${activeRepo.owner}/${activeRepo.repo_name}`
+    : "";
+
+  const load = useCallback(
+    async (q: string) => {
+      setLoading(true);
+      setError("");
+      try {
+        const qs = new URLSearchParams({ query: q });
+        if (activeProjectId) qs.set("project_id", String(activeProjectId));
+        if (activeProjectKey) qs.set("project_key", activeProjectKey);
+        if (activeRepoId) qs.set("repository_id", String(activeRepoId));
+        const res = await fetch(`${getApiBase()}/api/mentrix/developer/project-intelligence?${qs}`, {
+          headers: authHeaders(),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        setSnap(await res.json());
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Failed to load Project Intelligence");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeProjectId, activeProjectKey, activeRepoId],
+  );
 
   useEffect(() => {
-    void load();
+    void load(query);
+    // query is applied on Refresh / project change (current query value on bind)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeProjectId, activeProjectKey, activeRepoId, load]);
 
   const lattice = (snap?.lattice || {}) as LatticeSnap;
   const state = String(lattice.state || lattice.status || "NOT_APPLICABLE");
-  const repoId = Number(lattice.repository_id || 0);
+  const repoId = Number(lattice.repository_id || activeRepoId || 0);
+  const hits = Array.isArray(lattice.hits) ? lattice.hits : [];
 
   const handleIndex = async () => {
-    if (!repoId) {
-      setIndexNote("Select a cloned repository in Developer, then Index.");
+    const boundId = repoId || Number(activeRepoId || 0);
+    if (!boundId && !activeLocalPath) {
+      setIndexNote("Select a project and cloned repository in the header, then Index.");
       return;
     }
     setIndexNote("Indexing…");
     try {
-      const localPath = String(lattice.local_path || lattice.detail?.local_path || "").trim();
-      const projectKey = String(lattice.project_key || "").trim();
+      const localPath = String(activeLocalPath || lattice.local_path || lattice.detail?.local_path || "").trim();
+      const projectKey = String(activeProjectKey || lattice.project_key || "").trim();
       if (localPath) {
         await latticeIngest(localPath, projectKey || localPath, true, true);
         setIndexNote("Lattice ingest requested. Refresh to see READY or STALE.");
-      } else {
-        await indexClonedRepo(repoId);
+      } else if (boundId) {
+        await indexClonedRepo(boundId);
         setIndexNote("Symbol index requested (no local path). Bind a clone for Lattice ingest.");
       }
-      await load();
+      await load(query);
     } catch (e: unknown) {
       setIndexNote(e instanceof Error ? e.message : "Index failed");
     }
@@ -79,30 +102,49 @@ export default function ProjectIntelligencePage() {
         data-testid="pi-lattice-state"
       >
         <span className="zect-chip bg-slate-100 text-slate-800">{state}</span>
-        <span className="text-sm text-slate-600">
-          {lattice.action_label || lattice.detail?.reason || "No project key bound"}
+        <span className="text-sm text-slate-600" data-testid="pi-bound-repo">
+          {lattice.action_label ||
+            lattice.detail?.reason ||
+            (repoLabel ? `Bound to ${repoLabel}` : "Select a project or repository in the header")}
         </span>
         {lattice.detail?.indexed_at ? (
           <span className="text-xs text-slate-500">Indexed {lattice.detail.indexed_at}</span>
         ) : null}
         <button
           type="button"
-          className="zect-btn zect-btn-secondary text-xs"
+          className="zect-btn zect-btn-secondary text-xs min-h-11"
           data-testid="pi-index-repository"
           onClick={() => void handleIndex()}
         >
           {state === "READY" || state === "STALE" ? "Re-index" : "Index Repository"}
         </button>
-        <Link to="/lattice" className="zect-btn zect-btn-primary text-xs">
+        <Link to="/lattice" className="zect-btn zect-btn-primary text-xs min-h-11 inline-flex items-center">
           View Intelligence
         </Link>
         {state === "STALE" || state === "NOT_APPLICABLE" ? (
           <p className="w-full text-xs text-amber-800" data-testid="pi-reindex-hint">
-            Lattice is {state}. Re-index the cloned zinnia/zoas root on this page or open Lattice — this view is empty until ingest runs. Raw JSON below is not a substitute for an index.
+            Lattice is {state}
+            {repoLabel ? ` for ${repoLabel}` : ""}. Re-index the cloned root on this page or open Lattice — this
+            view is empty until ingest runs. Raw JSON below is not a substitute for an index.
           </p>
         ) : null}
         {indexNote ? <p className="w-full text-xs text-slate-500">{indexNote}</p> : null}
       </div>
+      {hits.length > 0 ? (
+        <ul className="mt-4 space-y-2" data-testid="pi-lattice-hits">
+          {hits.slice(0, 12).map((hit, i) => (
+            <li
+              key={hit.id || `${i}`}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+            >
+              <p className="font-medium">{hit.text || hit.id || "Hit"}</p>
+              {hit.summary || hit.content ? (
+                <p className="mt-0.5 text-xs text-slate-600 line-clamp-3">{hit.summary || hit.content}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <div className="mt-4 flex gap-2">
         <input
           className="zect-input flex-1"
@@ -114,8 +156,8 @@ export default function ProjectIntelligencePage() {
         />
         <button
           type="button"
-          className="zect-btn zect-btn-primary"
-          onClick={() => void load()}
+          className="zect-btn zect-btn-primary min-h-11"
+          onClick={() => void load(query)}
           data-testid="pi-refresh"
         >
           Refresh

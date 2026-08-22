@@ -71,7 +71,6 @@ import {
   gitStatus,
   gitPull,
   gitWorktrees,
-  latticeIngest,
   mentrixGetRun,
   mentrixListRuns,
 } from "@/lib/api";

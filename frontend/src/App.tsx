@@ -31,6 +31,7 @@ import PresentExport from "@/pages/present/PresentExport";
 import PresentBlank from "@/pages/present/PresentBlank";
 import PresentImport from "@/pages/present/PresentImport";
 import PresentStudio from "@/pages/present/PresentStudio";
+import PresentTemplatePreview from "@/pages/present/PresentTemplatePreview";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
 import AppRunner from "@/pages/AppRunner";

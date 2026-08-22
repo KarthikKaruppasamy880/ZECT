@@ -1,4 +1,5 @@
 import type { PresentTemplateCard } from "@/lib/api";
+import { Link } from "react-router-dom";
 
 type Props = {
   tmpl: PresentTemplateCard;
@@ -73,6 +74,13 @@ export default function PresentTemplateCardView({ tmpl, selected, testId, onSele
           Delete
         </button>
       ) : null}
+      <Link
+        to={`/present/templates/${encodeURIComponent(tmpl.id)}`}
+        className="mt-2 inline-block text-[10px] text-teal-800"
+        data-testid={`${testId}-preview`}
+      >
+        Preview slides
+      </Link>
     </div>
   );
 }

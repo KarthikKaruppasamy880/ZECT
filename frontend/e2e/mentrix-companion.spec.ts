@@ -10,6 +10,9 @@ test.describe("Mentrix Companion", () => {
       page.getByTestId("mentrix-companion-page").getByRole("heading", { name: /MENTRIX/i }),
     ).toBeVisible();
     await expect(page.getByTestId("mentrix-connect-voice")).toBeVisible();
+    await expect(page.getByTestId("mentrix-greeting")).toBeVisible();
+    await expect(page.getByTestId("mentrix-events-toggle")).toBeVisible();
+    await page.getByTestId("mentrix-events-toggle").click();
     await expect(page.getByTestId("mentrix-live-log")).toBeVisible();
   });
 
@@ -82,6 +85,7 @@ test.describe("Mentrix Companion", () => {
       return;
     }
     await btn.click();
+    await page.getByTestId("mentrix-events-toggle").click();
     await expect(page.getByTestId("mentrix-live-log")).toContainText(/Connect Voice|Realtime|fallback|listening/i, {
       timeout: 30_000,
     });

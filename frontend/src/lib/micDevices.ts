@@ -1,6 +1,7 @@
 /** Mentrix mic / headset device picker helpers. */
 
 export const MENTRIX_MIC_STORAGE_KEY = "mentrix_mic_device_id";
+export const MENTRIX_SPEAKER_STORAGE_KEY = "mentrix_speaker_device_id";
 
 export type MicDevice = {
   deviceId: string;
@@ -19,6 +20,23 @@ export function setStoredMicDeviceId(deviceId: string): void {
   try {
     if (deviceId) localStorage.setItem(MENTRIX_MIC_STORAGE_KEY, deviceId);
     else localStorage.removeItem(MENTRIX_MIC_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getStoredSpeakerDeviceId(): string {
+  try {
+    return localStorage.getItem(MENTRIX_SPEAKER_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredSpeakerDeviceId(deviceId: string): void {
+  try {
+    if (deviceId) localStorage.setItem(MENTRIX_SPEAKER_STORAGE_KEY, deviceId);
+    else localStorage.removeItem(MENTRIX_SPEAKER_STORAGE_KEY);
   } catch {
     /* ignore */
   }
@@ -44,6 +62,17 @@ export async function listMicDevices(): Promise<MicDevice[]> {
     .map((d, i) => ({
       deviceId: d.deviceId,
       label: d.label || `Microphone ${i + 1}`,
+    }));
+}
+
+export async function listSpeakerDevices(): Promise<MicDevice[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices
+    .filter((d) => d.kind === "audiooutput")
+    .map((d, i) => ({
+      deviceId: d.deviceId,
+      label: d.label || `Speakers ${i + 1}`,
     }));
 }
 

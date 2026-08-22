@@ -11,7 +11,7 @@ from typing import Any
 BLOCK_KINDS = frozenset({"text", "bullet", "body", "image", "chart", "table", "metric", "quote", "diagram"})
 TEXT_KINDS = frozenset({"text", "bullet", "body"})
 VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram"})
-CHART_TYPES = frozenset({"column", "bar", "line", "pie", "donut"})
+CHART_TYPES = frozenset({"column", "bar", "line", "pie", "donut", "radar", "area", "stacked"})
 FIT_MODES = frozenset({"contain", "cover", "stretch"})
 PROVENANCE_SOURCES = frozenset({"example", "generated", "evidence", "upload", "document", "project", "web"})
 MAX_BLOCKS_PER_SLIDE = 16

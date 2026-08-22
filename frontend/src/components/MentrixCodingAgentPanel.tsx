@@ -136,7 +136,14 @@ export default function MentrixCodingAgentPanel({
         </div>
       </div>
       {tab === "ask" ? (
-        <AskPane workspaceRoot={workspaceRoot} model={chatModel} workItemId={workItemId} onCreatePlan={() => setTab("plan")} />
+        <AskPane
+          workspaceRoot={workspaceRoot}
+          model={chatModel}
+          workItemId={workItemId}
+          projectId={projectId}
+          repoId={roots[0]?.id ?? null}
+          onCreatePlan={() => setTab("plan")}
+        />
       ) : tab === "plan" ? (
         <PlanPane
           goalSeed={initialGoal}
@@ -547,21 +554,43 @@ function MissionPane({
   );
 }
 
+function ContextUsedStrip({ used }: { used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null }) {
+  if (!used) return null;
+  const lattice = used.lattice_indexed
+    ? used.lattice_hits
+      ? `Lattice ${used.lattice_hits} hits`
+      : "Lattice indexed"
+    : "Lattice NOT INDEXED";
+  return (
+    <p className="mt-1 text-[10px] text-slate-500" data-testid="mentrix-coding-agent-context-used">
+      Context used · {lattice}
+      {used.knowledge ? " · Knowledge" : ""}
+      {used.blueprint ? " · Blueprint" : ""}
+    </p>
+  );
+}
+
 function AskPane({
   workspaceRoot,
   model,
   workItemId,
+  projectId,
+  repoId,
   onCreatePlan,
 }: {
   workspaceRoot: string;
   model: string;
   workItemId?: number | null;
+  projectId?: number | null;
+  repoId?: number | null;
   onCreatePlan: () => void;
 }) {
   const [q, setQ] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  void workspaceRoot;
 
   const ask = async () => {
     const question = q.trim();
@@ -569,8 +598,15 @@ function AskPane({
     setBusy(true);
     setError(null);
     try {
-      const res = await askQuestion(question, workspaceRoot || undefined, undefined, model);
+      const res = await askQuestion(
+        question,
+        undefined,
+        repoId ?? undefined,
+        model,
+        projectId ?? undefined,
+      );
       setAnswer(res.answer || "");
+      setContextUsed(res.context_used || null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ask failed");
     } finally {
@@ -608,6 +644,7 @@ function AskPane({
         </button>
       </div>
       {error ? <p className="mt-1 text-rose-600">{error}</p> : null}
+      <ContextUsedStrip used={contextUsed} />
       {answer ? (
         <pre className="mt-2 flex-1 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px]" data-testid="mentrix-coding-agent-ask-answer">
           {answer}
@@ -641,6 +678,8 @@ function PlanPane({
   const [error, setError] = useState<string | null>(null);
   const key = String(workItemId || "local");
 
+  const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+
   const save = async () => {
     if (!markdown.trim()) return;
     setBusy(true);
@@ -665,8 +704,16 @@ function PlanPane({
     setBusy(true);
     setError(null);
     try {
-      const res = await generatePlan(g, workspaceRoot || undefined, undefined, undefined, model);
+      const res = await generatePlan(
+        g,
+        undefined,
+        undefined,
+        roots[0]?.id,
+        model,
+        projectId ?? undefined,
+      );
       setMarkdown(res.plan || "");
+      setContextUsed(res.context_used || null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Revise failed");
     } finally {
@@ -690,6 +737,7 @@ function PlanPane({
         roots,
         plan: markdown,
         workspace_parent: workspaceRoot,
+        propose_if_empty: true,
       });
       if (mission.phase === "awaiting_plan_approval") {
         await codingAgentApprovePlan(mission.id);
@@ -720,6 +768,7 @@ function PlanPane({
         data-testid="mentrix-coding-agent-plan-md"
       />
       {error ? <p className="text-rose-600">{error}</p> : null}
+      <ContextUsedStrip used={contextUsed} />
       <div className="mt-2 flex flex-wrap gap-1">
         <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-slate-300 px-2 py-1" data-testid="mentrix-coding-agent-save-plan">
           Save Plan

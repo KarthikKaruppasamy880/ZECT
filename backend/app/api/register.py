@@ -67,6 +67,7 @@ from app.domains.personal_agent import (
     calendar_api,
     personal_actions,
     presentation_api,
+    sheets_api,
     learning,
     automation_loops_api,
     long_running_api,
@@ -133,6 +134,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(calendar_api.router)
     app.include_router(personal_actions.router)
     app.include_router(presentation_api.router)
+    app.include_router(sheets_api.router)
     app.include_router(learning.router)
     app.include_router(automation_loops_api.router)
     app.include_router(long_running_api.router)

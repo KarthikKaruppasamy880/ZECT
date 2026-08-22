@@ -129,7 +129,7 @@ class ZectNativePresentationProvider:
             }
         definition = load_definition(canon) if canon else None
         source = tmpl.source_pptx_path(canon, user_id=req.user_id) if canon else None
-        used_master = bool(source and Path(source).is_file() and definition and definition.get("ready"))
+        used_master = bool(source and Path(source).is_file())
         plan = planned["plan"]
         asset_ids = [str(a).strip() for a in list(req.asset_ids or []) if str(a).strip()]
         for slide in list(plan.get("slides") or []):

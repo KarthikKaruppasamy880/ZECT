@@ -170,10 +170,20 @@ export interface DocGenResult {
 }
 
 // LLM Types
+export interface LlmContextUsed {
+  knowledge?: boolean;
+  lattice_hits?: number;
+  lattice_indexed?: boolean;
+  blueprint?: boolean;
+  repo_id?: number | null;
+  project_id?: number | null;
+}
+
 export interface AskResponse {
   answer: string;
   model: string;
   tokens_used: number;
+  context_used?: LlmContextUsed | null;
 }
 
 export interface PlanResponse {
@@ -181,6 +191,7 @@ export interface PlanResponse {
   phases: string[];
   model: string;
   tokens_used: number;
+  context_used?: LlmContextUsed | null;
 }
 
 export interface EnhanceBlueprintResponse {

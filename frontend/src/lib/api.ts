@@ -272,6 +272,7 @@ export const askQuestion = (
   repo_context?: string,
   repo_id?: number,
   model?: string,
+  project_id?: number,
 ) =>
   request<AskResponse>("/api/llm/ask", {
     method: "POST",
@@ -280,6 +281,7 @@ export const askQuestion = (
       ...(repo_context ? { repo_context } : {}),
       ...(repo_id != null ? { repo_id } : {}),
       ...(model ? { model } : {}),
+      ...(project_id != null ? { project_id } : {}),
     }),
   });
 export const generatePlan = (
@@ -288,6 +290,7 @@ export const generatePlan = (
   constraints?: string,
   repo_id?: number,
   model?: string,
+  project_id?: number,
 ) =>
   request<PlanResponse>("/api/llm/plan", {
     method: "POST",
@@ -297,6 +300,7 @@ export const generatePlan = (
       ...(constraints ? { constraints } : {}),
       ...(repo_id != null ? { repo_id } : {}),
       ...(model ? { model } : {}),
+      ...(project_id != null ? { project_id } : {}),
     }),
   });
 export const enhanceBlueprint = (raw_blueprint: string, instructions?: string) =>
@@ -1066,6 +1070,11 @@ export const mentrixPresentationTemplates = () =>
     canonical_ids?: string[];
   }>("/api/mentrix/presentation/templates");
 
+export const mentrixPresentationTemplateSlides = (templateId: string) =>
+  request<{ ok: boolean; template_id?: string; slides?: string[]; count?: number }>(
+    `/api/mentrix/presentation/templates/${encodeURIComponent(templateId)}/slides`,
+  );
+
 export const mentrixPresentationTemplatePreview = (template_id: string) =>
   request<{
     ok: boolean;
@@ -1133,6 +1142,50 @@ export const mentrixPresentationNarrateSlides = (slides: Array<Record<string, un
     method: "POST",
     body: JSON.stringify({ slides, deck_context }),
   });
+
+export type MentrixWorkbook = {
+  sheets: Array<{ name: string; cells: Record<string, { v?: string; f?: string }> }>;
+};
+
+export const mentrixSheetsGenerate = (prompt: string, project_id?: number) =>
+  request<{ ok: boolean; workbook: MentrixWorkbook }>("/api/mentrix/sheets/generate", {
+    method: "POST",
+    body: JSON.stringify({ prompt, ...(project_id != null ? { project_id } : {}) }),
+  });
+
+export async function mentrixSheetsImport(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const res = await fetch(`${API}/api/mentrix/sheets/import`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const body = (await res.json()) as { ok?: boolean; workbook?: MentrixWorkbook; detail?: string };
+  if (!res.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Import failed");
+  return body;
+}
+
+export async function mentrixSheetsExport(workbook: MentrixWorkbook) {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const res = await fetch(`${API}/api/mentrix/sheets/export`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ workbook }),
+  });
+  if (!res.ok) throw new Error("Export failed");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mentrix-sheet.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export async function mentrixPresentationAssetUpload(file: File) {
   const form = new FormData();
@@ -1917,6 +1970,7 @@ export const codingAgentCreateMission = (body: {
   patches_by_repo?: Record<string, Array<Record<string, string>>>;
   plan?: string;
   workspace_parent?: string;
+  propose_if_empty?: boolean;
 }) =>
   request<CodingAgentMission>("/api/coding-agent/missions", {
     method: "POST",

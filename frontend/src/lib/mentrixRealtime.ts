@@ -57,6 +57,10 @@ export type RealtimeSessionHandle = {
   ready: Promise<boolean>;
   /** Mentrix-facing provider label (never third-party product names in UI) */
   providerLabel: "realtime" | "fallback";
+  /** Epoch ms of last audible Realtime/clone chunk (0 if none this session). */
+  lastAudioAt: () => number;
+  /** Route clone HTMLAudio (and AudioContext when supported) to an output device. */
+  setOutputDeviceId: (deviceId: string) => Promise<void>;
 };
 
 const TARGET_SAMPLE_RATE = 24000;
@@ -275,6 +279,8 @@ export async function startMentrixRealtime(
       resumeAfterTool: () => undefined,
       speakCue: () => undefined,
       ready: noopReady,
+      lastAudioAt: () => 0,
+      setOutputDeviceId: async () => undefined,
     };
   }
 
@@ -305,6 +311,8 @@ export async function startMentrixRealtime(
         resumeAfterTool: () => undefined,
         speakCue: () => undefined,
         ready: noopReady,
+        lastAudioAt: () => 0,
+        setOutputDeviceId: async () => undefined,
       };
     }
   }
@@ -341,6 +349,31 @@ export async function startMentrixRealtime(
   let stopped = false;
   const playQueue: Int16Array[] = [];
   let playing = false;
+  let lastAudioAtMs = 0;
+  let outputDeviceId = "";
+  const markAudioPlaying = () => {
+    lastAudioAtMs = Date.now();
+  };
+  const applySink = async (el: HTMLAudioElement) => {
+    const sink = (el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId;
+    if (outputDeviceId && typeof sink === "function") {
+      try {
+        await sink.call(el, outputDeviceId);
+      } catch {
+        /* device gone */
+      }
+    }
+  };
+  const applyCtxSink = async (ctx: AudioContext) => {
+    const sink = (ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> }).setSinkId;
+    if (outputDeviceId && typeof sink === "function") {
+      try {
+        await sink.call(ctx, outputDeviceId);
+      } catch {
+        /* device gone */
+      }
+    }
+  };
   const handledCallIds = new Set<string>();
   /** Assigned after enqueueSpeak exists — cues must not use companion chat TTS. */
   let speakCue: (text: string) => void = () => undefined;
@@ -542,6 +575,7 @@ export async function startMentrixRealtime(
   const playNext = () => {
     if (playing || !playQueue.length || !audioCtx || stopped) return;
     playing = true;
+    markAudioPlaying();
     handlers.onOrb?.("speaking");
     const chunk = playQueue.shift()!;
     const float = new Float32Array(chunk.length);
@@ -575,6 +609,7 @@ export async function startMentrixRealtime(
       }
       await unlockClonedOutput();
       audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+      void applyCtxSink(audioCtx);
       // Some browsers ignore sampleRate hint — always resample from actual rate.
       const attached = await attachMicCapture(audioCtx, mediaStream, (pcm) => {
         if (stopped || ws.readyState !== WebSocket.OPEN) return;
@@ -776,7 +811,11 @@ export async function startMentrixRealtime(
       mountClonedAudio(audio);
       clonedSpeakEl = audio;
       clonedSpeakUrl = url;
-      audio.onplaying = () => markPerf("playback_started");
+      void applySink(audio);
+      audio.onplaying = () => {
+        markAudioPlaying();
+        markPerf("playback_started");
+      };
       audio.onended = () => {
         markPerf("playback_finished");
         stopClonedSpeakEl();
@@ -1070,7 +1109,22 @@ export async function startMentrixRealtime(
     }
   };
 
-  return { mode: "realtime", providerLabel: "realtime", stop, resumeAfterTool, speakCue, ready };
+  const setOutputDeviceId = async (deviceId: string) => {
+    outputDeviceId = (deviceId || "").trim();
+    if (audioCtx) await applyCtxSink(audioCtx);
+    if (clonedSpeakEl) await applySink(clonedSpeakEl);
+  };
+
+  return {
+    mode: "realtime",
+    providerLabel: "realtime",
+    stop,
+    resumeAfterTool,
+    speakCue,
+    ready,
+    lastAudioAt: () => lastAudioAtMs,
+    setOutputDeviceId,
+  };
 }
 
 /** Confirm pending tools from Realtime Allow overlay. */

@@ -30,6 +30,7 @@ import PresentRehearse from "@/pages/present/PresentRehearse";
 import PresentExport from "@/pages/present/PresentExport";
 import PresentBlank from "@/pages/present/PresentBlank";
 import PresentImport from "@/pages/present/PresentImport";
+import PresentTemplatePreview from "@/pages/present/PresentTemplatePreview";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
 import AppRunner from "@/pages/AppRunner";
@@ -61,6 +62,7 @@ import AgentMode from "@/pages/AgentMode";
 import LatticeGraph from "@/pages/LatticeGraph";
 import Mentrix from "@/pages/Mentrix";
 import MentrixCompanion from "@/pages/MentrixCompanion";
+import MentrixSheets from "@/pages/MentrixSheets";
 import MobileCompanion from "@/pages/MobileCompanion";
 import SandboxGate from "@/pages/SandboxGate";
 import WorkItems from "@/pages/WorkItems";
@@ -226,6 +228,7 @@ export default function App() {
             <Route path="blank" element={<PresentBlank />} />
             <Route path="import" element={<PresentImport />} />
             <Route path="templates" element={<PresentCreate />} />
+            <Route path="templates/:templateId" element={<PresentTemplatePreview />} />
             <Route path="d/:deckId" element={<PresentReview />} />
             <Route path="d/:deckId/rehearse" element={<PresentRehearse />} />
             <Route path="d/:deckId/export" element={<PresentExport />} />
@@ -240,6 +243,7 @@ export default function App() {
           <Route path="/workspace" element={<DeveloperWorkspace />} />
           <Route path="/lattice" element={<LatticeGraph />} />
           <Route path="/mentrix-home" element={<MentrixCompanion />} />
+          <Route path="/sheets" element={<MentrixSheets />} />
           <Route path="/m/companion" element={<MobileCompanion />} />
           <Route path="/sandbox" element={<SandboxGate />} />
           <Route path="/work-items" element={<WorkItems />} />

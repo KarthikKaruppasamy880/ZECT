@@ -39,8 +39,11 @@ import {
 import {
   ensureMicPermission,
   getStoredMicDeviceId,
+  getStoredSpeakerDeviceId,
   listMicDevices,
+  listSpeakerDevices,
   setStoredMicDeviceId,
+  setStoredSpeakerDeviceId,
   type MicDevice,
 } from "@/lib/micDevices";
 import { fetchMentrixAgentContext } from "@/mentrix/agentContext";
@@ -53,6 +56,11 @@ import {
 } from "@/mentrix/desktopBridge";
 import { cancelBrowserSpeech, speakMentrix, speakMentrixAwait } from "@/mentrix/speak";
 import { createVoiceHoldOff } from "@/mentrix/voiceHoldOff";
+import {
+  planChatSpeak,
+  shouldSilentFallback,
+  type TtsPlaybackState,
+} from "@/mentrix/companionChatVoice";
 
 export type AvatarState =
   | "idle"
@@ -174,6 +182,7 @@ type MentrixSessionValue = {
   tts: boolean;
   setTts: (v: boolean) => void;
   browserTtsEnabled: boolean;
+  ttsPlayback: TtsPlaybackState;
   voiceConnected: boolean;
   voiceConnecting: boolean;
   /** Phase 6 — Mentrix voice provider + last latency checkpoint */
@@ -200,6 +209,9 @@ type MentrixSessionValue = {
   micDevices: MicDevice[];
   micDeviceId: string;
   setMicDeviceId: (id: string) => void;
+  speakerDevices: MicDevice[];
+  speakerDeviceId: string;
+  setSpeakerDeviceId: (id: string) => void;
   integrations: {
     slack: boolean;
     jira: boolean;
@@ -243,6 +255,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const [log, setLog] = useState<LogLine[]>([]);
   const [statusLine, setStatusLine] = useState("SYSTEMS OPERATIONAL");
   const [tts, setTts] = useState(true);
+  const [ttsPlayback, setTtsPlayback] = useState<TtsPlaybackState>("muted");
   const [voiceConnected, setVoiceConnected] = useState(false);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
   const [voiceTelemetry, setVoiceTelemetry] = useState<{
@@ -270,6 +283,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   const [realtimePreflight, setRealtimePreflight] = useState<RealtimePreflight | null>(null);
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
   const [micDeviceId, setMicDeviceIdState] = useState(() => getStoredMicDeviceId());
+  const [speakerDevices, setSpeakerDevices] = useState<MicDevice[]>([]);
+  const [speakerDeviceId, setSpeakerDeviceIdState] = useState(() => getStoredSpeakerDeviceId());
   const [integrations, setIntegrations] = useState<{
     slack: boolean;
     jira: boolean;
@@ -307,17 +322,52 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   // silent — otherwise users hear two overlapping voices (Realtime + speakMentrix).
   const browserTtsEnabled = tts && !voiceConnected && !voiceConnecting;
 
-  const speakAllowed = useCallback(() => ttsRef.current && !voiceConnectedRef.current && !realtimeRef.current, []);
-
-  const speakChat = useCallback((text: string, onFail?: (err: string) => void) => {
-    if (!speakAllowed()) return;
-    speak(text, true, onFail);
-  }, [speakAllowed]);
-
+  const speakGenRef = useRef(0);
   const pushLog = useCallback((text: string) => {
     const ts = new Date().toLocaleTimeString();
     setLog((l) => [{ ts, text }, ...l].slice(0, 80));
   }, []);
+
+  const speakChat = useCallback((text: string, onFail?: (err: string) => void) => {
+    const plan = planChatSpeak({
+      ttsEnabled: ttsRef.current,
+      voiceConnected: voiceConnectedRef.current,
+      hasRealtime: Boolean(realtimeRef.current),
+    });
+    if (plan.action === "muted") {
+      setTtsPlayback("muted");
+      return;
+    }
+    if (plan.action === "clone") {
+      setTtsPlayback("playing");
+      speak(text, true, onFail);
+      return;
+    }
+    const gen = ++speakGenRef.current;
+    const startedAt = Date.now();
+    setTtsPlayback("playing");
+    window.setTimeout(() => {
+      if (gen !== speakGenRef.current) return;
+      const last = realtimeRef.current?.lastAudioAt?.() || 0;
+      if (
+        shouldSilentFallback({
+          lastRealtimeAudioAt: last,
+          startedAt,
+          now: Date.now(),
+          silenceMs: plan.silenceMs,
+        })
+      ) {
+        if (!ttsRef.current) {
+          setTtsPlayback("muted");
+          return;
+        }
+        setTtsPlayback("silent-fallback");
+        setStatusLine("Voice silent — clone fallback");
+        pushLog("tts silent-fallback");
+        speak(text, true, onFail);
+      }
+    }, plan.silenceMs);
+  }, [pushLog]);
 
   const handleDesktopOutput = useCallback(
     async (output: string | Record<string, unknown>) => {
@@ -397,6 +447,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setStoredMicDeviceId(id);
   }, []);
 
+  const setSpeakerDeviceId = useCallback((id: string) => {
+    setSpeakerDeviceIdState(id);
+    setStoredSpeakerDeviceId(id);
+    void realtimeRef.current?.setOutputDeviceId?.(id);
+  }, []);
+
   const setActiveSkillId = useCallback((id: string) => {
     setActiveSkillIdState(id);
     if (id) localStorage.setItem(SKILL_KEY, id);
@@ -454,6 +510,12 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       } else if (!stored && devices[0]?.deviceId) {
         setMicDeviceIdState(devices[0].deviceId);
         setStoredMicDeviceId(devices[0].deviceId);
+      }
+      const speakers = await listSpeakerDevices();
+      setSpeakerDevices(speakers);
+      const storedSpeaker = getStoredSpeakerDeviceId();
+      if (storedSpeaker && speakers.some((d) => d.deviceId === storedSpeaker)) {
+        setSpeakerDeviceIdState(storedSpeaker);
       }
     })();
   }, []);
@@ -632,6 +694,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
         return;
       }
       setVoiceConnected(true);
+      const speaker = speakerDeviceId || getStoredSpeakerDeviceId();
+      if (speaker) void handle.setOutputDeviceId(speaker);
       const cloneOnline = Boolean(preflight.voicebox_online) && Boolean(preflight.cloned_voice);
       if (cloneOnline) {
         const name =
@@ -655,7 +719,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       setVoiceConnecting(false);
       if (!realtimeRef.current) setDesktopWakeEnabled(wakeBeforeVoiceRef.current);
     }
-  }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakChat, stopVoice]);
+  }, [activeSkillId, applyNavPath, handleDesktopOutput, handleQuotaError, pushLog, refreshRealtimePreflight, speakerDeviceId, speakChat, stopVoice]);
 
   const handleStreamEvent = useCallback(
     (ev: MentrixStreamEvent) => {
@@ -903,10 +967,17 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     }
     setAvatar("speaking");
     setStatusLine("Present / Narrate");
+    const startedAt = Date.now();
     if (voiceConnectedRef.current || realtimeRef.current) {
-      setStatusLine("Present text shown — Disconnect Voice to narrate with chat TTS");
-      setAvatar("idle");
-      return;
+      await new Promise((r) => window.setTimeout(r, 2500));
+      const last = realtimeRef.current?.lastAudioAt?.() || 0;
+      if (last >= startedAt) {
+        setAvatar("idle");
+        setStatusLine("Present / Narrate (Realtime)");
+        return;
+      }
+      setTtsPlayback("silent-fallback");
+      setStatusLine("Voice silent — clone fallback");
     }
     let lastErr = "";
     for (const chunk of chunks) {
@@ -1136,6 +1207,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       tts,
       setTts,
       browserTtsEnabled,
+      ttsPlayback,
       voiceConnected,
       voiceConnecting,
       voiceTelemetry,
@@ -1161,6 +1233,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       micDevices,
       micDeviceId,
       setMicDeviceId,
+      speakerDevices,
+      speakerDeviceId,
+      setSpeakerDeviceId,
       integrations,
       dockExpanded,
       setDockExpanded,
@@ -1191,6 +1266,7 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       statusLine,
       tts,
       browserTtsEnabled,
+      ttsPlayback,
       voiceConnected,
       voiceConnecting,
       voiceTelemetry,
@@ -1209,6 +1285,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
       micDevices,
       micDeviceId,
       setMicDeviceId,
+      speakerDevices,
+      speakerDeviceId,
+      setSpeakerDeviceId,
       integrations,
       dockExpanded,
       wakeQueued,

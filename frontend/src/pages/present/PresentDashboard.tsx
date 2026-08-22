@@ -41,13 +41,13 @@ export default function PresentDashboard() {
     const created: string[] = [];
     decks.slice(0, 8).forEach((d) => {
       mentrixPresentSlidePreview(d.path, 0)
-        .then((url) => {
+        .then((preview) => {
           if (cancelled) {
-            URL.revokeObjectURL(url);
+            URL.revokeObjectURL(preview.url);
             return;
           }
-          created.push(url);
-          setThumbs((prev) => ({ ...prev, [d.path]: url }));
+          created.push(preview.url);
+          setThumbs((prev) => ({ ...prev, [d.path]: preview.url }));
         })
         .catch(() => undefined);
     });

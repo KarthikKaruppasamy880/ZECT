@@ -949,13 +949,22 @@ export async function mentrixPresentImport(file: File) {
   return (await res.json()) as { ok: boolean; path: string; filename: string };
 }
 
-export async function mentrixPresentSlidePreview(path: string, index: number): Promise<string> {
+export async function mentrixPresentSlidePreview(
+  path: string,
+  index: number,
+  opts?: { force?: boolean },
+): Promise<{ url: string; kind: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
-  const url = `${getApiBase()}/api/mentrix/present/slide-preview?path=${encodeURIComponent(path)}&index=${index}`;
+  const qs = new URLSearchParams({ path, index: String(index) });
+  if (opts?.force) qs.set("force", "true");
+  const url = `${getApiBase()}/api/mentrix/present/slide-preview?${qs}`;
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) throw new Error("preview_failed");
   const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  return {
+    url: URL.createObjectURL(blob),
+    kind: res.headers.get("X-Zect-Preview-Kind") || "ooxml",
+  };
 }
 
 export const mentrixPresentQualityGate = (path: string) =>

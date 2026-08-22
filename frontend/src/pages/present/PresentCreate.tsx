@@ -41,6 +41,7 @@ export default function PresentCreate() {
   const [lifecycle, setLifecycle] = useState("STARTING");
   const [panelKey, setPanelKey] = useState(0);
   const [hideNotReady, setHideNotReady] = useState(false);
+  const [galleryTab, setGalleryTab] = useState<"builtin" | "custom">("builtin");
   const evidencePrompt = params.get("prompt") || params.get("goal") || "";
   const evidenceAudience = params.get("audience") || "";
   const evidenceProject = params.get("project_id") || "";
@@ -208,6 +209,38 @@ export default function PresentCreate() {
             </label>
           </div>
         </div>
+        <div
+          className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1"
+          data-testid="zect-present-gallery-tabs"
+          role="tablist"
+          aria-label="Template gallery"
+        >
+          <button
+            type="button"
+            role="tab"
+            data-testid="zect-present-tab-builtin"
+            aria-selected={galleryTab === "builtin"}
+            className={`min-h-11 rounded-md px-3 text-xs font-medium ${
+              galleryTab === "builtin" ? "bg-white text-teal-900 shadow-sm" : "text-slate-600"
+            }`}
+            onClick={() => setGalleryTab("builtin")}
+          >
+            Built-in
+          </button>
+          <button
+            type="button"
+            role="tab"
+            data-testid="zect-present-tab-custom"
+            aria-selected={galleryTab === "custom"}
+            className={`min-h-11 rounded-md px-3 text-xs font-medium ${
+              galleryTab === "custom" ? "bg-white text-teal-900 shadow-sm" : "text-slate-600"
+            }`}
+            onClick={() => setGalleryTab("custom")}
+          >
+            Custom
+          </button>
+        </div>
+        {galleryTab === "builtin" ? (
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Zinnia</p>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -222,6 +255,8 @@ export default function PresentCreate() {
             ))}
           </div>
         </div>
+        ) : (
+        <>
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Organization</p>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -276,6 +311,8 @@ export default function PresentCreate() {
             </div>
           )}
         </div>
+        </>
+        )}
         {preview ? (
           <div data-testid="zect-present-template-preview" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
             Preview: {preview}

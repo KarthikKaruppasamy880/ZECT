@@ -15,17 +15,29 @@ vi.mock("@/lib/api", () => ({
   mentrixPresentPptxDownload: vi.fn(),
   mentrixPresentQualityGate: vi.fn(),
   mentrixPresentSaveNotes: vi.fn(async () => ({ ok: true, ooxml_roundtrip: true })),
-  mentrixPresentSlidePreview: vi.fn(async () => "blob:preview"),
+  mentrixPresentSlidePreview: vi.fn(async () => ({ url: "blob:preview", kind: "ooxml" })),
   mentrixPresentationAssetUpload: vi.fn(),
   mentrixPresentationAssetBlob: vi.fn(),
 }));
 
 import PresentEditor from "@/components/PresentEditor";
-import { mentrixPresentSaveNotes } from "@/lib/api";
+import { mentrixParsePptxFromPath, mentrixPresentSaveNotes } from "@/lib/api";
+
+const defaultSlides = [
+  { index: 0, text: "One", notes: "n1" },
+  { index: 1, text: "Two", notes: "n2" },
+];
 
 describe("PresentEditor v1", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(mentrixParsePptxFromPath).mockResolvedValue({
+      ok: true,
+      count: 2,
+      filename: "deck.pptx",
+      slides: defaultSlides,
+    });
     if (typeof URL.revokeObjectURL !== "function") {
       URL.revokeObjectURL = () => undefined;
     }
@@ -124,5 +136,34 @@ describe("PresentEditor v1", () => {
     ]) {
       expect(screen.getByTestId(`present-editor-chart-${id}`)).toBeTruthy();
     }
+  });
+
+  it("positions overlay from EMU geometry and keeps data-block-id", async () => {
+    vi.mocked(mentrixParsePptxFromPath).mockResolvedValueOnce({
+      ok: true,
+      count: 1,
+      filename: "deck.pptx",
+      slides: [
+        {
+          index: 0,
+          text: "One",
+          notes: "n1",
+          blocks: [
+            {
+              id: "blk_0_chart_0",
+              kind: "chart",
+              geometry: { x: 914400, y: 514350, cx: 4000000, cy: 2500000 },
+              content: { chart_type: "bar", categories: ["A", "B"], series: [{ name: "S", values: [1, 2] }] },
+            },
+          ],
+        },
+      ],
+    });
+    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    const hit = await screen.findByTestId("present-editor-block-hit-chart");
+    expect(hit.getAttribute("data-block-id")).toBe("blk_0_chart_0");
+    expect(hit.style.left).toBe("10%");
+    expect(hit.style.position).toBe("absolute");
+    expect(hit.className).toMatch(/bg-transparent/);
   });
 });

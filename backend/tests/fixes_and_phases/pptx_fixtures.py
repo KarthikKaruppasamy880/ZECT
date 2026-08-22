@@ -28,6 +28,31 @@ def make_master_pptx_bytes() -> bytes:
     return buf.getvalue()
 
 
+def make_chart_pptx_bytes() -> bytes:
+    """Widescreen deck with a graphicFrame chart (not just p:sp)."""
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+
+    prs = Presentation()
+    prs.slide_width = Emu(9144000)
+    prs.slide_height = Emu(5143500)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    chart_data = CategoryChartData()
+    chart_data.categories = ["A", "B", "C"]
+    chart_data.add_series("Series", (1.0, 2.0, 3.0))
+    slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED,
+        Inches(1),
+        Inches(1.2),
+        Inches(8),
+        Inches(4),
+        chart_data,
+    )
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
 THEME = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="{_NS_A}" name="ZECT">
   <a:themeElements>

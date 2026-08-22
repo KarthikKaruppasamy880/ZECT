@@ -18,7 +18,7 @@ const { session } = vi.hoisted(() => ({
     tts: true,
     setTts: vi.fn(),
     browserTtsEnabled: true,
-    ttsPlayback: "playing" as const,
+    ttsPlayback: "playing" as "playing" | "silent-fallback" | "muted",
     voiceConnected: false,
     voiceConnecting: false,
     voiceTelemetry: { mode: "idle" as const, lastMark: "", lastMs: 0, ttsEngine: "" },
@@ -125,5 +125,32 @@ describe("Mentrix Companion chat layout", () => {
     expect(screen.getByTestId("mentrix-greeting")).toBeTruthy();
     expect(screen.getByTestId("mentrix-companion-chat")).toHaveTextContent("I'm Mentrix");
     session.displayMode = false;
+  });
+
+  it("shows Speak replies as ready when idle, not MUTED", () => {
+    session.tts = true;
+    session.ttsPlayback = "muted";
+    session.voiceConnected = false;
+    render(
+      <MemoryRouter>
+        <MentrixCompanion />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("mentrix-tts-playback")).toHaveTextContent("ready");
+    session.ttsPlayback = "playing";
+  });
+
+  it("reaches desktop launcher and artifacts without a desktop breakpoint", () => {
+    session.showArtifacts = true;
+    render(
+      <MemoryRouter>
+        <MentrixCompanion />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("mentrix-companion-artifacts")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mentrix-companion-more"));
+    expect(screen.getByTestId("mentrix-companion-more-sheet")).toBeTruthy();
+    expect(screen.getByTestId("mentrix-desktop-launcher-sheet")).toBeTruthy();
+    expect(screen.getAllByTestId("desktop-panel").length).toBeGreaterThan(0);
   });
 });

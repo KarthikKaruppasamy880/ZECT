@@ -1,6 +1,7 @@
 /** Thin mobile Companion client — chat + desktop command enqueue. */
 
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   mentrixCompanionTurn,
   mentrixDesktopBridgeEnqueue,
@@ -64,7 +65,12 @@ export default function MobileCompanion() {
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 max-w-lg mx-auto" data-testid="mobile-companion">
       <h1 className="text-xl font-semibold mb-1">Mentrix Mobile</h1>
       <p className="text-xs text-slate-400 mb-4">
-        Thin Companion client. Desktop work runs on your linked Electron agent — not on the phone.
+        Thin Companion client for phones. Desktop work runs on your linked Electron agent — not on the phone.
+        For the full HUD (voice, artifacts, Present/Narrate), open{" "}
+        <Link to="/companion" className="text-teal-400 underline" data-testid="mobile-companion-full-hud">
+          /companion
+        </Link>
+        .
       </p>
 
       <div

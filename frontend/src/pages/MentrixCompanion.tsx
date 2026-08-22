@@ -11,6 +11,7 @@ import {
   Mic,
   MicOff,
   Monitor,
+  MoreHorizontal,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -27,6 +28,7 @@ import CloneVoicePanel from "@/components/CloneVoicePanel";
 import ModelSelector from "@/components/ModelSelector";
 import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 import { computerTargetHint } from "@/lib/computerTarget";
+import { ttsPlaybackChip } from "@/mentrix/companionChatVoice";
 import { setStoredMicDeviceId, setStoredSpeakerDeviceId } from "@/lib/micDevices";
 import MentrixAvatarOrb from "@/components/MentrixAvatarOrb";
 import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
@@ -86,6 +88,7 @@ export default function MentrixCompanion() {
   const s = useMentrixSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const [eventsOpen, setEventsOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const mode: CompanionMode =
     searchParams.get("voice") === "1"
       ? "voice"
@@ -119,7 +122,7 @@ export default function MentrixCompanion() {
           <div className="min-w-0 flex-1">
             <p className="text-[10px] uppercase tracking-[0.25em] text-teal-500/80">Mentrix Operator</p>
             <h1 className="text-xl font-bold tracking-tight text-teal-100">MENTRIX</h1>
-            <p className="hidden text-sm text-slate-400 2xl:block">
+            <p className="text-sm text-slate-400">
               Company orchestrator — Project, WorkItem, Developer, Present, Voice, Process. Companion does not edit code or decks.
             </p>
             <div className="mt-2 max-w-3xl">
@@ -165,7 +168,7 @@ export default function MentrixCompanion() {
                   tabIndex={mode === id ? 0 : -1}
                   data-testid={`mentrix-mode-${id}`}
                   onClick={() => setMode(id)}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                     mode === id
                       ? "bg-teal-800/80 text-teal-50"
                       : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
@@ -177,10 +180,10 @@ export default function MentrixCompanion() {
               ))}
             </div>
           </div>
-          <div className="hidden flex-wrap gap-2 text-xs 2xl:flex">
+          <div className="flex flex-wrap gap-2 text-xs">
             <button
               type="button"
-              className="rounded-lg border border-slate-700 px-3 py-1.5"
+              className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-1.5"
               data-testid="mentrix-policy-export"
               onClick={async () => {
                 try {
@@ -196,7 +199,7 @@ export default function MentrixCompanion() {
             </button>
             <button
               type="button"
-              className="rounded-lg border border-slate-700 px-3 py-1.5"
+              className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-1.5"
               data-testid="mentrix-policy-import"
               onClick={async () => {
                 const raw = window.prompt("Paste Mentrix org policy JSON");
@@ -212,12 +215,24 @@ export default function MentrixCompanion() {
             >
               Import org policy
             </button>
-            <Link to="/mentrix" className="rounded-lg border border-slate-700 px-3 py-1.5">
+            <Link
+              to="/mentrix"
+              className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-1.5"
+            >
               Mentrix Delivery
             </Link>
+            <button
+              type="button"
+              data-testid="mentrix-companion-more"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 md:hidden"
+              onClick={() => setMoreOpen(true)}
+            >
+              <MoreHorizontal className="h-4 w-4" />
+              More
+            </button>
           </div>
           {mode === "chat" && (
-            <div className="hidden w-full md:block">
+            <div className="hidden w-full md:block" data-testid="mentrix-desktop-launcher">
               <MentrixDesktopPanel />
             </div>
           )}
@@ -340,7 +355,7 @@ export default function MentrixCompanion() {
                         : `Realtime unavailable — ${s.realtimePreflight.reason || "check OPENAI_API_KEY"} · use typed asks or Retry`}
                   </p>
                   {s.integrations ? (
-                    <p className="hidden max-w-full truncate px-2 text-[10px] text-slate-500 2xl:block" data-testid="mentrix-integrations-status">
+                    <p className="max-w-full truncate px-2 text-[10px] text-slate-500" data-testid="mentrix-integrations-status">
                       Mentrix Local{" "}
                       {(s.integrations as { mentrix_local?: boolean }).mentrix_local
                         ? "online"
@@ -456,7 +471,7 @@ export default function MentrixCompanion() {
                         s.voiceConnecting ||
                         (!s.voiceConnected && s.realtimePreflight?.ready === false)
                       }
-                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                      className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
                         s.voiceConnected || s.voiceConnecting
                           ? "bg-teal-600 text-white"
                           : "border border-slate-600 text-slate-200"
@@ -499,7 +514,7 @@ export default function MentrixCompanion() {
                       <Eye className="h-3.5 w-3.5" />
                       Display
                     </button>
-                    <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs">
+                    <label className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs">
                       <input
                         type="checkbox"
                         checked={s.computerMode}
@@ -536,7 +551,7 @@ export default function MentrixCompanion() {
                       type="button"
                       data-testid="mentrix-artifacts-toggle"
                       onClick={() => s.setShowArtifacts((x) => !x)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs"
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-600 px-3 py-1.5 text-xs"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
                       Artifacts
@@ -651,7 +666,7 @@ export default function MentrixCompanion() {
                     data-testid="mentrix-companion-send"
                     disabled={s.loading || !s.input.trim()}
                     onClick={() => void s.onSend()}
-                    className="rounded-lg bg-teal-600 p-2.5 disabled:opacity-40"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg bg-teal-600 p-2.5 disabled:opacity-40"
                   >
                     <Send className="h-5 w-5" />
                   </button>
@@ -668,14 +683,18 @@ export default function MentrixCompanion() {
                     className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase text-teal-300"
                     data-testid="mentrix-tts-playback"
                   >
-                    {s.tts ? s.ttsPlayback : "muted"}
+                    {ttsPlaybackChip({
+                      ttsEnabled: s.tts,
+                      ttsPlayback: s.ttsPlayback,
+                      voiceConnected: s.voiceConnected,
+                    })}
                   </span>
                 </label>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
                     type="button"
                     data-testid="mentrix-present-narrate"
-                    className="rounded-lg border border-teal-700 px-3 py-1.5 text-xs text-teal-200 hover:bg-teal-950"
+                    className="inline-flex min-h-11 items-center rounded-lg border border-teal-700 px-3 py-1.5 text-xs text-teal-200 hover:bg-teal-950"
                     onClick={() => void s.presentNarrate?.()}
                   >
                     Present / Narrate
@@ -683,10 +702,14 @@ export default function MentrixCompanion() {
                 </div>
                 <p
                   data-testid="mentrix-present-hint"
-                  className="mt-1.5 hidden text-[11px] text-slate-500 sm:block"
+                  className="mt-1.5 text-[11px] text-slate-500"
                 >
                   Uses Mentrix Board artifacts + your default ZECT Voicebox voice (not PowerPoint files).
-                  For a prepared deck, open the Voice tab → Present Deck.
+                  For decks, open{" "}
+                  <Link to="/present" className="text-teal-400 underline" data-testid="mentrix-present-decks-link">
+                    Present
+                  </Link>
+                  .
                 </p>
                 </div>
               </>
@@ -698,7 +721,7 @@ export default function MentrixCompanion() {
 
           {mode === "chat" && (s.showArtifacts || s.displayMode) && (
             <aside
-              className="flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-40 lg:h-full lg:min-h-0"
+              className="flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-30 max-lg:max-h-[70vh] max-lg:rounded-t-2xl lg:h-full lg:min-h-0"
               data-testid="mentrix-companion-artifacts"
             >
               <div className="flex items-center justify-between">
@@ -781,6 +804,40 @@ export default function MentrixCompanion() {
           )}
         </div>
       </div>
+
+      {moreOpen ? (
+        <div
+          className="fixed inset-0 z-50 md:hidden"
+          data-testid="mentrix-companion-more-sheet"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60"
+            aria-label="Close more"
+            onClick={() => setMoreOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] space-y-3 overflow-y-auto rounded-t-2xl border border-teal-900/40 bg-slate-900 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-teal-200">More</p>
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 text-xs"
+                data-testid="mentrix-companion-more-close"
+                onClick={() => setMoreOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div data-testid="mentrix-desktop-launcher-sheet">
+              <MentrixDesktopPanel />
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Phone-thin chat also lives at <Link to="/m/companion" className="text-teal-400 underline">/m/companion</Link>.
+              This HUD is the full Companion for mobile browsers.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <MentrixConfirmModal
         open={s.pending.length > 0}

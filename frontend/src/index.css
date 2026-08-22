@@ -147,3 +147,40 @@
     max-width: 100%;
   }
 }
+
+@keyframes mentrix-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mentrix-orb-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.08);
+  }
+}
+
+.mentrix-orb[data-state="listening"] .mentrix-orb-ring,
+.mentrix-orb[data-state="thinking"] .mentrix-orb-ring,
+.mentrix-orb[data-state="working"] .mentrix-orb-ring,
+.mentrix-orb[data-state="speaking"] .mentrix-orb-ring {
+  animation: mentrix-orb-pulse 1.4s ease-in-out infinite;
+}
+
+.mentrix-orb[data-state="speaking"] .mentrix-orb-core {
+  animation: mentrix-orb-pulse 0.6s ease-in-out infinite;
+}
+
+.mentrix-orb[data-state="thinking"] .mentrix-orb-ring[data-ring="outer"] {
+  animation: mentrix-orb-spin 8s linear infinite;
+}
+
+.lattice-ingest-gif {
+  animation: mentrix-orb-pulse 0.9s ease-in-out infinite;
+}

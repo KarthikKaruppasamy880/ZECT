@@ -119,6 +119,19 @@ def _apply_visual_blocks(slide, spec: dict[str, Any], *, user_id: str) -> None:
                 _drop_pictures(slide)
                 replaced_image = True
             paint_image(slide, block, geom, user_id=user_id)
+        elif kind in {"shape", "metric", "quote", "diagram"}:
+            from app.services.mentrix.presentation.visual import paint_block
+
+            already = False
+            for shape in slide.shapes:
+                try:
+                    if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
+                        already = True
+                        break
+                except (ValueError, AttributeError):
+                    continue
+            if not already:
+                paint_block(slide, block, geom, user_id=user_id)
 
 
 def _write_slide_text(slide, text: str) -> None:

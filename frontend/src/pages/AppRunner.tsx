@@ -23,8 +23,11 @@ import {
   runnerOutput,
   runnerRemoveProcess,
   runnerConfigure,
+  codingAgentRuntimeRecipes,
+  type RuntimeRecipe,
 } from "@/lib/api";
 import { readMentrixWorkspace } from "@/lib/workspaceContext";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
 interface ProcessEntry {
   id: string;
@@ -77,18 +80,67 @@ export default function AppRunner() {
   const [envVars, setEnvVars] = useState("");
   const [configuring, setConfiguring] = useState(false);
   const [configResult, setConfigResult] = useState<any>(null);
+  const [recipes, setRecipes] = useState<RuntimeRecipe[]>([]);
+  const [recipeId, setRecipeId] = useState("");
+  const [resolvedCwd, setResolvedCwd] = useState("");
 
-  // Prefill cwd/repo from Agent Mode handoff (?cwd=) or Mentrix workspace
+  const { activeLocalPath } = useActiveProject();
+
+  const joinCwd = (root: string, rel: string) => {
+    if (!rel || rel === ".") return root;
+    const sep = root.includes("\\") ? "\\" : "/";
+    return `${root.replace(/[\\/]+$/, "")}${sep}${rel.replace(/^[\\/]+/, "")}`;
+  };
+
+  const applyRecipe = (recipe: RuntimeRecipe, root: string) => {
+    const nextCwd = joinCwd(root, recipe.cwdRel || ".");
+    setCwd(nextCwd);
+    setRepoPath(root);
+    setResolvedCwd(nextCwd);
+    setStartupCmd(recipe.command);
+    if (recipe.port) setPreviewPort(String(recipe.port));
+    if (recipe.command.startsWith("npm run")) setInstallCmd("npm install");
+    setCommand(recipe.command);
+  };
+
+  // Prefill cwd/repo from Agent Mode handoff (?cwd=), Active Project, or Mentrix workspace
   useEffect(() => {
     const fromQuery = searchParams.get("cwd") || searchParams.get("repo_path") || "";
     const ws = readMentrixWorkspace();
-    const path = fromQuery || ws?.path || "";
+    const path = fromQuery || activeLocalPath || ws?.path || "";
     if (path) {
       setCwd(path);
       setRepoPath(path);
+      setResolvedCwd(path);
       if (fromQuery) setActiveTab("configure");
     }
-  }, [searchParams]);
+  }, [searchParams, activeLocalPath]);
+
+  useEffect(() => {
+    const root = repoPath.trim() || cwd.trim();
+    if (!root) {
+      setRecipes([]);
+      return;
+    }
+    let cancelled = false;
+    void codingAgentRuntimeRecipes(root)
+      .then((out) => {
+        if (cancelled) return;
+        const rows = out.ok ? out.recipes || [] : [];
+        setRecipes(rows);
+        const chosen = rows.find((r) => r.id === out.default_id) || rows[0];
+        if (chosen) {
+          setRecipeId(chosen.id);
+          applyRecipe(chosen, root);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRecipes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [repoPath]);
 
   // --- Effects ---
 
@@ -408,9 +460,15 @@ export default function AppRunner() {
                     placeholder="Working directory (leave empty for home)"
                     value={cwd}
                     onChange={(e) => setCwd(e.target.value)}
+                    data-testid="app-runner-cwd"
                     className="flex-1 bg-slate-800 text-slate-300 text-xs px-3 py-1.5 rounded-md border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
                   />
                 </div>
+                {resolvedCwd ? (
+                  <p className="text-[10px] text-slate-500 mb-2" data-testid="app-runner-cwd-hint">
+                    Recipe cwd: {resolvedCwd}
+                  </p>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <span className="text-emerald-400 font-mono text-sm">$</span>
                   <input
@@ -453,6 +511,37 @@ export default function AppRunner() {
               </h3>
 
               <div className="space-y-4">
+                {recipes.length ? (
+                  <div data-testid="app-runner-recipes">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Discovered recipe</label>
+                    <select
+                      data-testid="app-runner-recipe-select"
+                      value={recipeId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setRecipeId(id);
+                        const recipe = recipes.find((r) => r.id === id);
+                        if (recipe) applyRecipe(recipe, repoPath.trim() || cwd.trim());
+                      }}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    >
+                      {recipes.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.label || r.command} ({r.cwdRel || "."})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1" data-testid="app-runner-resolved-cwd">
+                      Resolved cwd: {resolvedCwd || cwd || repoPath || "—"}
+                    </p>
+                    {recipes.some((r) => r.id === "zect-restart") ? (
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Stack restart uses <code>zect.ps1 restart</code> in this checkout — not Companion shell.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Repo Path</label>
                   <input

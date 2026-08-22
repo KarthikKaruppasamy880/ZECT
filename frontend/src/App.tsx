@@ -30,6 +30,7 @@ import PresentRehearse from "@/pages/present/PresentRehearse";
 import PresentExport from "@/pages/present/PresentExport";
 import PresentBlank from "@/pages/present/PresentBlank";
 import PresentImport from "@/pages/present/PresentImport";
+import PresentStudio from "@/pages/present/PresentStudio";
 import PresentTemplatePreview from "@/pages/present/PresentTemplatePreview";
 import ExportShare from "@/pages/ExportShare";
 import OutputHistory from "@/pages/OutputHistory";
@@ -230,6 +231,7 @@ export default function App() {
             <Route path="templates" element={<PresentCreate />} />
             <Route path="templates/:templateId" element={<PresentTemplatePreview />} />
             <Route path="d/:deckId" element={<PresentReview />} />
+            <Route path="d/:deckId/edit" element={<PresentStudio />} />
             <Route path="d/:deckId/rehearse" element={<PresentRehearse />} />
             <Route path="d/:deckId/export" element={<PresentExport />} />
           </Route>

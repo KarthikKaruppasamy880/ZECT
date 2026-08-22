@@ -16,7 +16,7 @@ export default function PresentImport() {
     setStatus("Importing…");
     try {
       const out = await mentrixPresentImport(file);
-      nav(`/present/d/${encodeDeckId(out.path)}`);
+      nav(`/present/d/${encodeDeckId(out.path)}/edit`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Import failed");
     }
@@ -39,7 +39,7 @@ export default function PresentImport() {
   return (
     <div className="space-y-3" data-testid="present-import-page">
       <h2 className="text-lg font-semibold text-slate-900">Import PPTX</h2>
-      <p className="text-xs text-slate-600">Opens in Review / Edit. Not mixed into Create with AI.</p>
+      <p className="text-xs text-slate-600">Opens in Present Studio. Not mixed into Create with AI.</p>
       <div className="flex flex-wrap gap-2">
         <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm cursor-pointer hover:border-teal-500">
           <Upload className="h-4 w-4" />

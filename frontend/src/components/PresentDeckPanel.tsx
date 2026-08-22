@@ -205,6 +205,8 @@ export default function PresentDeckPanel({
   const [outlineReady, setOutlineReady] = useState(false);
   const [outline, setOutline] = useState("");
   const [draftWithoutModel, setDraftWithoutModel] = useState(false);
+  const [generationMode, setGenerationMode] = useState<"smart" | "standard">("standard");
+  const [autoSlides, setAutoSlides] = useState(false);
   const usingStock = voiceChoice.startsWith("stock:");
   const usingNone = voiceChoice === "none";
   const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
@@ -594,11 +596,15 @@ export default function PresentDeckPanel({
       }
       const slidesHint = prep.n_slides_hint || nSlides;
       if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
-      if (!outlineReady) {
+      if (!outlineReady && generationMode === "smart") {
         setOutline(adapted);
         setOutlineReady(true);
         setStatus("Confirm adapted prompt and slide count, then Generate.");
         return;
+      }
+      if (!outlineReady) {
+        setOutline(adapted);
+        setOutlineReady(true);
       }
       adapted = outline.trim() || adapted;
       const stages = [
@@ -1104,18 +1110,59 @@ export default function PresentDeckPanel({
       ) : null}
       {isCreate ? (
       <>
+      <p className={`text-sm font-semibold ${dark ? "text-slate-100" : "text-slate-900"}`} data-testid="present-generate-heading">
+        Generate presentation
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="radio"
+            name="present-gen-mode"
+            data-testid="present-generate-mode-standard"
+            checked={generationMode === "standard"}
+            onChange={() => setGenerationMode("standard")}
+          />
+          Standard
+        </label>
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="radio"
+            name="present-gen-mode"
+            data-testid="present-generate-mode-smart"
+            checked={generationMode === "smart"}
+            onChange={() => {
+              setGenerationMode("smart");
+              setOutlineReady(false);
+            }}
+          />
+          Smart (confirm outline)
+        </label>
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="checkbox"
+            data-testid="present-generate-auto-slides"
+            checked={autoSlides}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setAutoSlides(on);
+              if (on) persistNSlides(8);
+            }}
+          />
+          Auto slides
+        </label>
+      </div>
       <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
         What should this presentation cover?
         <textarea
           data-testid="present-deck-prompt"
           value={prompt}
           onChange={(e) => persistPrompt(e.target.value)}
-          rows={2}
+          rows={6}
           placeholder="Q2 ZOAS delivery brief: status, risks, next actions…"
           className={
             dark
-              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
-              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
           }
         />
       </label>

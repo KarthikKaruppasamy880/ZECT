@@ -153,7 +153,7 @@ export async function applyDesktopToolOutput(
 }
 
 export const COMPUTER_MODE_HINT =
-  "Enable Computer Mode on the HUD, then Allow again.";
+  "Turn on Computer Mode in Electron first. Desktop folders (mkdir) are blocked until Computer Mode is ON and confirmed. Organize uses File Organize — never delete.";
 
 export function isOpenAiQuotaError(message: string): boolean {
   const m = (message || "").toLowerCase();

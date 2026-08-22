@@ -130,13 +130,14 @@ export default function PresentCreate() {
   return (
     <div className="space-y-4" data-testid="zect-present-workspace">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-900">Create with AI</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Generate presentation</h2>
         <span className="rounded-full border px-2 py-0.5 text-[10px] font-medium" data-testid="present-lifecycle-state">
           {lifecycle === "PROVIDER_UNAVAILABLE" ? "BLOCKED_EXTERNAL" : lifecycle}
         </span>
       </div>
       <p className="text-xs text-slate-500">
         Selected template: <strong data-testid="zect-present-selected">{selected}</strong>
+        {" · "}Generate opens Present Studio. Zinnia / org / uploaded PNG covers only — no Community packs.
       </p>
       {lifecycle === "PROVIDER_UNAVAILABLE" ? (
         <p
@@ -167,7 +168,7 @@ export default function PresentCreate() {
         initialTemplateId={selected}
         initialPrompt={evidencePrompt || params.get("prompt") || undefined}
         toneHint={rewrite}
-        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}`)}
+        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}/edit`)}
       />
 
       <section className="space-y-4" data-testid="zect-present-gallery">

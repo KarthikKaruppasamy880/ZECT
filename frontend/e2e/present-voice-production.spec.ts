@@ -94,9 +94,10 @@ test.describe("present + voice production", () => {
     await page.getByTestId("present-nav-dashboard").click();
     await expect(page.getByTestId("present-dashboard")).toBeVisible();
     await page.getByTestId("present-blank").click();
-    await expect(page.getByTestId("present-review")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
     await expect(page.getByTestId("present-editor")).toBeVisible();
     await expect(page.getByTestId("present-editor-thumbs")).toBeVisible();
+    await page.getByTestId("present-editor-notes-toggle").click();
     await page.getByTestId("present-editor-notes").fill("Executive note: owners needed this week.");
     await page.getByTestId("present-editor-save").click();
     await expect(page.getByTestId("present-editor-status")).toContainText(/Saved|local|ooxml/i, { timeout: 15_000 });
@@ -138,7 +139,7 @@ test.describe("present + voice production", () => {
       mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       buffer: importBytes,
     });
-    await expect(page.getByTestId("present-review")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
     await page.getByTestId("present-open-rehearse").click();
     await expect(page.getByTestId("present-rehearse")).toBeVisible();
     const voice = page.getByTestId("present-deck-voice-select");

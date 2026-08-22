@@ -154,7 +154,7 @@ test("S7.7 headed native quality generate when API is zect_native", async ({ pag
   expect(last.zinnia_verified).toBe(true);
   expect(last.final_quality_status).toBe("PASS");
   expect(presentonGenerateHits).toEqual([]);
-  await expect(page.getByTestId("present-review")).toBeVisible();
+  await expect(page.getByTestId("present-studio")).toBeVisible();
   await expect(page.getByTestId("present-editor")).toBeVisible();
   await page.screenshot({ path: path.join(ART, "native-generated.png"), fullPage: true });
 });

@@ -89,6 +89,35 @@ def discover_runtime_recipes(workspace_root: str) -> dict[str, Any]:
                 }
             )
 
+    fe_pkg = root / "frontend" / "package.json"
+    pom = root / "backend" / "pom.xml"
+    if fe_pkg.is_file() and pom.is_file() and not any(str(r.get("id") or "").startswith("zoas-") for r in recipes):
+        recipes.append(
+            {
+                "id": "zaf-frontend",
+                "kind": "frontend",
+                "label": "ZAF frontend",
+                "command": "npm run dev",
+                "cwdRel": "frontend",
+                "port": 5173,
+                "confirmRequired": True,
+                "evidence": "frontend/package.json + backend/pom.xml",
+            }
+        )
+
+    if (root / "zect.ps1").is_file() and (root / "frontend").is_dir() and (root / "backend").is_dir():
+        recipes.append(
+            {
+                "id": "zect-restart",
+                "kind": "full",
+                "label": "ZECT stack restart",
+                "command": "pwsh -File zect.ps1 restart",
+                "cwdRel": ".",
+                "confirmRequired": True,
+                "evidence": "zect.ps1 in this checkout — host stack control, not Companion arbitrary shell",
+            }
+        )
+
     pkg = root / "package.json"
     if pkg.is_file() and not any(r["id"] == "zoas-full" for r in recipes):
         try:

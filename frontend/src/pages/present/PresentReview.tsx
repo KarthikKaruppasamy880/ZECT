@@ -29,12 +29,15 @@ export default function PresentReview() {
   return (
     <div className="space-y-3" data-testid="present-review">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-slate-900">Review &amp; edit</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Quality review</h2>
         <div className="flex flex-wrap gap-1.5">
+          <Link to={`/present/d/${deckId}/edit`} className="zect-btn zect-btn-primary text-xs" data-testid="present-open-studio">
+            Open Studio
+          </Link>
           <Link to={`/present/d/${deckId}/rehearse`} className="zect-btn zect-btn-secondary text-xs" data-testid="present-open-rehearse">
             Rehearse
           </Link>
-          <Link to={`/present/d/${deckId}/export`} className="zect-btn zect-btn-primary text-xs" data-testid="present-open-export">
+          <Link to={`/present/d/${deckId}/export`} className="zect-btn zect-btn-secondary text-xs" data-testid="present-open-export">
             Export
           </Link>
         </div>
@@ -46,7 +49,7 @@ export default function PresentReview() {
           {gate.export_blocked ? " · export blocked until layout is repaired" : ""}
         </p>
       ) : null}
-      <PresentEditor pptxPath={path} />
+      <PresentEditor pptxPath={path} variant="review" />
     </div>
   );
 }

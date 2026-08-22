@@ -123,7 +123,7 @@ export default function PresentDashboard() {
         >
           <FilePlus2 className="h-5 w-5 text-slate-700" />
           <p className="mt-2 font-semibold text-slate-900">Blank presentation</p>
-          <p className="text-xs text-slate-600">Start from an empty deck and edit in Review.</p>
+          <p className="text-xs text-slate-600">Start from an empty deck and edit in Studio.</p>
         </Link>
         <Link
           to="/present/import"
@@ -132,7 +132,7 @@ export default function PresentDashboard() {
         >
           <Upload className="h-5 w-5 text-slate-700" />
           <p className="mt-2 font-semibold text-slate-900">Import PPTX</p>
-          <p className="text-xs text-slate-600">Open an existing deck in Review / Rehearse.</p>
+          <p className="text-xs text-slate-600">Open an existing deck in Studio / Rehearse.</p>
         </Link>
       </div>
 
@@ -163,7 +163,7 @@ export default function PresentDashboard() {
           <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-3" data-testid="present-recent-decks">
             {decks.map((d) => (
               <div key={d.path} className="relative rounded-xl border border-slate-200 bg-white p-3 hover:border-teal-500">
-                <Link to={`/present/d/${encodeDeckId(d.path)}`} className="block">
+                <Link to={`/present/d/${encodeDeckId(d.path)}/edit`} className="block" data-testid={`present-open-studio-${d.name}`}>
                   {thumbs[d.path] ? (
                     <img
                       src={thumbs[d.path]}

@@ -150,7 +150,8 @@ test.describe("full release E2E production", () => {
     if (!genEnabled) evidence.present_generate = "BLOCKED_EXTERNAL";
     await page.getByTestId("present-nav-dashboard").click();
     await page.getByTestId("present-blank").click();
-    await expect(page.getByTestId("present-review")).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
+    await page.getByTestId("present-editor-notes-toggle").click();
     await page.getByTestId("present-editor-notes").fill("Full-release E2E note.");
     await page.getByTestId("present-editor-save").click();
     await page.getByTestId("present-open-export").click();

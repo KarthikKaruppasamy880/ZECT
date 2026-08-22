@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PresentBlock } from "@/lib/api";
+import { PRESENT_CHART_TYPES } from "@/lib/presentChartTypes";
 
 export type EditorPaletteTab = "ai" | "blocks" | "texts" | "charts" | "tables" | "images" | "elements";
 
@@ -15,6 +16,11 @@ type PresentEditorRailProps = {
   onAddText?: (role: "title" | "subtitle" | "bullets" | "quote" | "body") => void;
   onAddShape?: (shape: "rect" | "ellipse" | "arrow") => void;
   onApplyLayout?: (layout: "title_body" | "split_image" | "two_col") => void;
+  slideLabel?: string;
+  selectedLabel?: string;
+  attachLabels?: string[];
+  onAttachFiles?: (files: File[]) => void;
+  onQuickPrompt?: (prompt: string) => void;
 };
 
 export function newEditorBlock(kind: string, slideIndex: number, content: Record<string, unknown>): PresentBlock {
@@ -38,6 +44,12 @@ const TABS: Array<{ id: EditorPaletteTab; label: string }> = [
   { id: "elements", label: "Elements" },
 ];
 
+const QUICK_PROMPTS = [
+  { id: "rewrite", label: "Rewrite this slide", prompt: "Rewrite speaker notes for an executive audience." },
+  { id: "layout", label: "Suggest a layout", prompt: "Apply title + body layout on this slide." },
+  { id: "notes", label: "Tighten notes", prompt: "Rewrite speaker notes shorter, keep facts from attached sources only." },
+];
+
 export default function PresentEditorRail({
   busy,
   chat,
@@ -50,11 +62,16 @@ export default function PresentEditorRail({
   onAddText,
   onAddShape,
   onApplyLayout,
+  slideLabel,
+  selectedLabel,
+  attachLabels,
+  onAttachFiles,
+  onQuickPrompt,
 }: PresentEditorRailProps) {
   const [tab, setTab] = useState<EditorPaletteTab>("ai");
   return (
     <aside
-      className="flex w-56 shrink-0 flex-col gap-2 overflow-auto border-l border-slate-100 p-2"
+      className="flex w-64 shrink-0 flex-col gap-2 overflow-auto border-l border-slate-100 p-2"
       data-testid="present-editor-rail"
     >
       <div className="flex flex-wrap gap-0.5" data-testid="present-editor-palette">
@@ -75,14 +92,69 @@ export default function PresentEditorRail({
       {tab === "ai" ? (
         <>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Slide AI</p>
+          <p className="text-xs font-medium text-slate-800" data-testid="present-editor-ai-intro">
+            What can I do for your deck today?
+          </p>
+          {slideLabel ? (
+            <span
+              className="inline-flex w-fit rounded-full bg-teal-50 px-2 py-0.5 text-[10px] text-teal-900"
+              data-testid="present-editor-ai-slide-chip"
+            >
+              {slideLabel}
+            </span>
+          ) : null}
+          {selectedLabel ? (
+            <span
+              className="inline-flex w-fit rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700"
+              data-testid="present-editor-ai-object-chip"
+            >
+              Selected: {selectedLabel}
+            </span>
+          ) : null}
           <textarea
             data-testid="present-editor-chat"
             value={chat}
             onChange={(e) => onChatChange(e.target.value)}
-            rows={3}
-            placeholder="Ask for an executive rewrite of this slide…"
+            rows={4}
+            placeholder="Rewrite this slide, change the chart to radar, or tighten speaker notes…"
             className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
           />
+          <label className="text-[10px] text-slate-600">
+            Attach source files
+            <input
+              type="file"
+              multiple
+              accept=".txt,.md,.csv,.json"
+              data-testid="present-editor-ai-attach"
+              className="mt-1 block w-full text-[10px]"
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                e.target.value = "";
+                if (files.length) onAttachFiles?.(files);
+              }}
+            />
+          </label>
+          {attachLabels?.length ? (
+            <p className="text-[10px] text-slate-500" data-testid="present-editor-ai-attach-names">
+              {attachLabels.join(" · ")}
+            </p>
+          ) : (
+            <p className="text-[10px] text-slate-400">Facts come from attached docs / ContextPack only — no invented KPIs.</p>
+          )}
+          <div className="flex flex-wrap gap-1">
+            {QUICK_PROMPTS.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                data-testid={`present-editor-ai-quick-${row.id}`}
+                disabled={busy}
+                onClick={() => onQuickPrompt?.(row.prompt)}
+                className="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                {row.label}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             data-testid="present-editor-chat-apply"
@@ -90,7 +162,7 @@ export default function PresentEditorRail({
             onClick={onRewrite}
             className="rounded-lg border border-teal-200 bg-teal-50 px-2 py-1.5 text-[11px] text-teal-900 hover:bg-teal-100 disabled:opacity-40"
           >
-            Apply rewrite
+            Apply to slide
           </button>
         </>
       ) : null}
@@ -135,16 +207,16 @@ export default function PresentEditorRail({
       ) : null}
       {tab === "charts" ? (
         <>
-          {["column", "bar", "line", "pie", "donut", "radar", "area", "stacked"].map((kind) => (
+          {PRESENT_CHART_TYPES.map((row) => (
             <button
-              key={kind}
+              key={row.id}
               type="button"
-              data-testid={kind === "column" ? "present-editor-add-chart" : `present-editor-chart-${kind}`}
+              data-testid={row.id === "column" ? "present-editor-add-chart" : `present-editor-chart-${row.id}`}
               disabled={busy}
-              onClick={() => onAddChart(kind)}
-              className="rounded border border-slate-200 px-2 py-1 text-[11px] capitalize text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              onClick={() => onAddChart(row.id)}
+              className="rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
             >
-              {kind}
+              {row.label}
             </button>
           ))}
         </>

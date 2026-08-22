@@ -992,6 +992,25 @@ export const mentrixPresentationAudiences = () =>
     "/api/mentrix/presentation/audiences",
   );
 
+export const mentrixPresentSlideAi = (data: {
+  prompt: string;
+  slide_text?: string;
+  notes?: string;
+  selected_kind?: string;
+  selected_chart_type?: string;
+  attach_excerpts?: string[];
+}) =>
+  request<{
+    ok: boolean;
+    error?: string;
+    message?: string;
+    action?: string;
+    chart_type?: string | null;
+    layout?: string | null;
+    notes?: string;
+    text?: string;
+  }>("/api/mentrix/presentation/slide-ai", { method: "POST", body: JSON.stringify(data) });
+
 export const mentrixAnalyzeDeck = (data: {
   slides?: Array<{ index?: number; notes?: string; text?: string }>;
   notes_blob?: string;

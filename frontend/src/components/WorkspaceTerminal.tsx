@@ -394,7 +394,7 @@ export default function WorkspaceTerminal({
           >
             {recipes.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.label || r.command}
+                {r.label || r.command} · {r.cwdRel || "."}
               </option>
             ))}
           </select>

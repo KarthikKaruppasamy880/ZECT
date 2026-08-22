@@ -6,7 +6,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
-  Bot,
   Eye,
   Maximize2,
   Mic,
@@ -29,7 +28,8 @@ import ModelSelector from "@/components/ModelSelector";
 import CompanionScopeStrip from "@/components/CompanionScopeStrip";
 import { computerTargetHint } from "@/lib/computerTarget";
 import { setStoredMicDeviceId, setStoredSpeakerDeviceId } from "@/lib/micDevices";
-import { ORB, useMentrixSession } from "@/mentrix/MentrixSessionContext";
+import MentrixAvatarOrb from "@/components/MentrixAvatarOrb";
+import { useMentrixSession } from "@/mentrix/MentrixSessionContext";
 
 type CompanionMode = "chat" | "incident" | "voice";
 
@@ -309,15 +309,7 @@ export default function MentrixCompanion() {
                   data-testid="mentrix-companion-scroll"
                 >
                 <div className={`flex shrink-0 flex-col items-center gap-1 py-1 ${s.displayMode ? "sm:py-1" : "sm:gap-2 sm:py-2"}`}>
-                  <div
-                    data-testid="mentrix-avatar"
-                    data-state={s.avatar}
-                    className={`flex items-center justify-center rounded-full border-4 bg-gradient-to-br shadow-2xl ${
-                      s.displayMode ? "h-10 w-10 sm:h-12 sm:w-12" : "h-16 w-16 sm:h-24 sm:w-24"
-                    } ${ORB[s.avatar]}`}
-                  >
-                    <Bot className={s.displayMode ? "h-5 w-5 text-teal-300" : "h-8 w-8 text-teal-300 sm:h-12 sm:w-12"} />
-                  </div>
+                  <MentrixAvatarOrb state={s.avatar} compact={s.displayMode} />
                   <p
                     className="text-sm font-medium uppercase tracking-widest text-teal-200/90"
                     data-testid="mentrix-greeting"
@@ -532,10 +524,14 @@ export default function MentrixCompanion() {
                       <ComputerTargetChip />
                     ) : null}
                     <p className="max-w-[280px] text-[10px] text-slate-500" data-testid="computer-mode-hint">
-                      Desktop actions require Electron + Computer Mode on (allowlisted apps / notes /
-                      Present Deck only — never delete). Folder create works while Mentrix is focused;
-                      click/type needs Explorer or Notepad in front.
+                      Desktop folders and clicks require Electron + Computer Mode ON (allowlisted apps /
+                      notes / Present Deck only — never delete). Organize files uses File Organize.
                     </p>
+                    {!s.computerMode ? (
+                      <p className="max-w-[280px] text-[10px] text-amber-400" data-testid="computer-mode-mkdir-blocked">
+                        Computer Mode is off — desktop_mkdir is blocked until you enable it and confirm.
+                      </p>
+                    ) : null}
                     <button
                       type="button"
                       data-testid="mentrix-artifacts-toggle"

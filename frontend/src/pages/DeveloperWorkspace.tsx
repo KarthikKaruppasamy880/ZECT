@@ -17,6 +17,7 @@ import {
   Maximize2,
   Minimize2,
   X,
+  Download,
 } from "lucide-react";
 import MonacoCodeEditor, { type EditorSelection } from "@/components/MonacoCodeEditor";
 import PhaseErrorBanner from "@/components/PhaseErrorBanner";
@@ -68,10 +69,13 @@ import {
   gitBranches,
   gitRestore,
   gitStatus,
+  gitPull,
   gitWorktrees,
+  latticeIngest,
   mentrixGetRun,
   mentrixListRuns,
 } from "@/lib/api";
+import { showToast } from "@/components/Toast";
 import { deriveProjectKey, readMentrixWorkspace, writeMentrixWorkspace } from "@/lib/workspaceContext";
 import { isPathInsideRoot, languageFromPath, normalizePath, pathMatchesMarker, relativeToRoot } from "@/lib/workspacePaths";
 
@@ -191,6 +195,8 @@ export default function DeveloperWorkspace() {
   const rootPath = (activeLocalPath || mentrix?.path || "").trim();
 
   const [showImport, setShowImport] = useState(false);
+  const [pullingRoot, setPullingRoot] = useState(false);
+  const [latticeStale, setLatticeStale] = useState(false);
   const userToggledImport = useRef(false);
   const userClosedAllTerminals = useRef(false);
   const [runAppTick, setRunAppTick] = useState(0);
@@ -349,6 +355,21 @@ export default function DeveloperWorkspace() {
       setWorktrees([]);
     }
   }, []);
+
+  const handlePullRoot = useCallback(async () => {
+    if (!rootPath) return;
+    setPullingRoot(true);
+    try {
+      await gitPull(rootPath);
+      setLatticeStale(true);
+      await refreshGit(rootPath);
+      showToast("success", "Pulled latest for this workspace root. Lattice is STALE until re-index.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Pull failed");
+    } finally {
+      setPullingRoot(false);
+    }
+  }, [rootPath, refreshGit]);
 
   const refreshAgentMarkers = useCallback(async () => {
     try {
@@ -983,14 +1004,24 @@ export default function DeveloperWorkspace() {
             {activeRepo.owner}/{activeRepo.repo_name}
           </span>
         )}
+        <button
+          type="button"
+          data-testid="workspace-git-pull"
+          disabled={!rootPath || pullingRoot}
+          onClick={() => void handlePullRoot()}
+          className="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-teal-50 disabled:opacity-40"
+        >
+          {pullingRoot ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+          Pull
+        </button>
         <Link
-          to="/lattice"
+          to={latticeStale ? "/lattice?stale=1" : "/lattice"}
           data-testid="workspace-git-lattice"
-          data-lattice-state={latticeLoading ? "" : canonicalLatticeState(latticeIdx?.state)}
+          data-lattice-state={latticeLoading ? "" : latticeStale ? "STALE" : canonicalLatticeState(latticeIdx?.state)}
           className="rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-teal-50"
           title="Graphify is Lattice ingest. STALE means re-index on /lattice."
         >
-          {latticeLoading ? "Lattice …" : latticeHeaderLabel(canonicalLatticeState(latticeIdx?.state))}
+          {latticeLoading ? "Lattice …" : latticeStale ? "Lattice STALE · Re-index" : latticeHeaderLabel(canonicalLatticeState(latticeIdx?.state))}
         </Link>
         <span className="ml-auto inline-flex items-center gap-2 text-[10px] text-slate-500">
           <span className="inline-flex items-center gap-1">

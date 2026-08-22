@@ -8,10 +8,26 @@ from __future__ import annotations
 
 from typing import Any
 
-BLOCK_KINDS = frozenset({"text", "bullet", "body", "image", "chart", "table", "metric", "quote", "diagram"})
+BLOCK_KINDS = frozenset({"text", "bullet", "body", "image", "chart", "table", "metric", "quote", "diagram", "shape"})
 TEXT_KINDS = frozenset({"text", "bullet", "body"})
-VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram"})
-CHART_TYPES = frozenset({"column", "bar", "line", "pie", "donut", "radar", "area", "stacked"})
+VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram", "shape"})
+CHART_TYPES = frozenset(
+    {
+        "column",
+        "bar",
+        "line",
+        "pie",
+        "donut",
+        "radar",
+        "area",
+        "stacked",
+        "stacked_horizontal",
+        "scatter",
+        "polar",
+        "progress",
+        "gauge",
+    }
+)
 FIT_MODES = frozenset({"contain", "cover", "stretch"})
 PROVENANCE_SOURCES = frozenset({"example", "generated", "evidence", "upload", "document", "project", "web"})
 MAX_BLOCKS_PER_SLIDE = 16
@@ -106,7 +122,7 @@ def _floats(values: Any, *, limit: int) -> list[float]:
 
 def _chart_content(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     nested = row.get("content") if isinstance(row.get("content"), dict) else row
-    chart_type = _str(nested.get("chart_type") or nested.get("type") or "column", limit=16).lower() or "column"
+    chart_type = _str(nested.get("chart_type") or nested.get("type") or "column", limit=32).lower() or "column"
     if chart_type not in CHART_TYPES:
         chart_type = "column"
     categories = [_str(c, limit=80) for c in list(nested.get("categories") or [])[:MAX_CHART_POINTS] if _str(c, limit=80)]
@@ -220,6 +236,12 @@ def normalize_block(raw: Any, *, slide_index: int, ordinal: int) -> dict[str, An
         content = _metric_content(raw)
     elif kind == "quote":
         content = _quote_content(raw)
+    elif kind == "shape":
+        nested = raw.get("content") if isinstance(raw.get("content"), dict) else raw
+        content = {
+            "shape": _str(nested.get("shape") or "rect", limit=24) or "rect",
+            "text": _str(nested.get("text"), limit=200),
+        }
     else:
         content = _diagram_content(raw)
     incoming_val = raw.get("validation") if isinstance(raw.get("validation"), dict) else {}

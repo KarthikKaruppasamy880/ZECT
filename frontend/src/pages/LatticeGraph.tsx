@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Network, Search, Upload } from "lucide-react";
+import { Network, Search, Upload, Loader2 } from "lucide-react";
 import {
   latticeBlueprint,
   latticeExplain,
@@ -254,6 +254,14 @@ export default function LatticeGraph() {
               )}
             </p>
           )}
+          {(idxStatus?.state === "STALE" || searchParams.get("stale") === "1") && (
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="lattice-stale-cta">
+              Lattice is STALE after a git pull.{" "}
+              <button type="button" className="font-semibold underline" onClick={() => void ingest()} data-testid="lattice-reindex">
+                Re-index repository
+              </button>
+            </p>
+          )}
         </div>
       </div>
 
@@ -298,13 +306,18 @@ export default function LatticeGraph() {
         ))}
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 items-center">
         <button
           onClick={ingest}
           disabled={!path || loading}
+          data-testid="lattice-ingest"
           className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-white disabled:opacity-50"
         >
-          <Upload className="h-4 w-4" />
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" data-testid="lattice-ingest-spinner" />
+          ) : (
+            <Upload className="h-4 w-4" />
+          )}
           Ingest + RAG
         </button>
         <button
@@ -314,6 +327,12 @@ export default function LatticeGraph() {
         >
           Load graph
         </button>
+        {loading ? (
+          <span className="inline-flex items-center gap-2 text-xs text-teal-800" data-testid="lattice-ingest-status" role="status">
+            <span className="lattice-ingest-gif h-4 w-4 rounded-full bg-teal-600" />
+            Indexing repository…
+          </span>
+        ) : null}
       </div>
 
       <div className="flex gap-2">

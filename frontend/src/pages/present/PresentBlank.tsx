@@ -8,7 +8,7 @@ export default function PresentBlank() {
 
   useEffect(() => {
     mentrixPresentBlank()
-      .then((out) => nav(`/present/d/${encodeDeckId(out.path)}`, { replace: true }))
+      .then((out) => nav(`/present/d/${encodeDeckId(out.path)}/edit`, { replace: true }))
       .catch((e) => setStatus(e instanceof Error ? e.message : "Blank deck failed"));
   }, [nav]);
 

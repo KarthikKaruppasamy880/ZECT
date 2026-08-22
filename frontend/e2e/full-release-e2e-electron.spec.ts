@@ -156,7 +156,7 @@ test.describe("full release E2E electron", () => {
       evidence.presenton_generate_enabled = await page.getByTestId("present-deck-generate").isEnabled();
       await page.getByTestId("present-nav-dashboard").click();
       await page.getByTestId("present-blank").click();
-      await expect(page.getByTestId("present-review")).toBeVisible({ timeout: 25_000 });
+      await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
       await page.getByTestId("present-open-export").click();
       await expect(page.getByTestId("present-export")).toBeVisible({ timeout: 15_000 });
       await page.screenshot({ path: path.join(ART, "03-present.png") });

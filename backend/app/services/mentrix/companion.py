@@ -2895,7 +2895,7 @@ def _exec_tool(
             "ok": True,
             "desktop": "mkdir",
             "args": {"path": folder},
-            "spoken_summary": f"Created folder on Desktop: {folder}",
+            "spoken_summary": f"Creating folder {folder} requires Electron + Computer Mode ON.",
         }
     if name == "desktop_list_dir":
         folder = str(args.get("path") or args.get("dir") or "").strip()

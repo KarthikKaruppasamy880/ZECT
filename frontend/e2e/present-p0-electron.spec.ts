@@ -106,7 +106,7 @@ async function generateAndExport(
   if (!genRes?.ok()) {
     throw new Error(`generate HTTP ${genRes?.status()} ${genRes ? (await genRes.text()).slice(0, 800) : "missing"}`);
   }
-  await expect(page.getByTestId("present-review")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId("present-editor")).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: path.join(ART, `${shotPrefix}-02-review.png`), timeout: 15_000 });
   await page.getByTestId("present-open-export").click({ force: true, timeout: 20_000 });

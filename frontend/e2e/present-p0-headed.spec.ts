@@ -85,8 +85,8 @@ async function generateAndExport(page: Page, opts: { fast: boolean; shotPrefix: 
     const body = await genRes!.text();
     throw new Error(`generate HTTP ${genRes!.status()} ${body.slice(0, 800)}`);
   }
-  await expect(page).toHaveURL(/\/present\/d\//, { timeout: 60_000 });
-  await expect(page.getByTestId("present-review")).toBeVisible();
+  await expect(page).toHaveURL(/\/present\/d\/.+\/edit/, { timeout: 60_000 });
+  await expect(page.getByTestId("present-studio")).toBeVisible();
   await expect(page.getByTestId("present-editor")).toBeVisible({ timeout: 30_000 });
   await page.screenshot({ path: path.join(ART, `${shotPrefix}-02-review.png`), timeout: 15_000 });
   await page.getByTestId("present-open-export").click();

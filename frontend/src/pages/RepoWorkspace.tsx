@@ -72,6 +72,7 @@ export default function RepoWorkspace() {
   const [cloneShallow, setCloneShallow] = useState(true);
   const [cloning, setCloning] = useState(false);
   const [pulling, setPulling] = useState<number | null>(null);
+  const [latticeStale, setLatticeStale] = useState<{ path: string; key: string } | null>(null);
   const [loadingCloned, setLoadingCloned] = useState(true);
 
   // --- Browse tab ---
@@ -213,6 +214,7 @@ export default function RepoWorkspace() {
         const owner = repo?.owner || "";
         const name = repo?.repo_name || "";
         const projectKey = repoProjectKey({ owner, repo_name: name });
+        setLatticeStale({ path: localPath, key: projectKey });
         try {
           await latticeIngest(localPath, projectKey, true);
           localStorage.setItem(
@@ -229,7 +231,7 @@ export default function RepoWorkspace() {
         } catch (ingestErr: any) {
           showToast(
             "error",
-            `Pull OK; Lattice re-ingest failed: ${ingestErr?.message || "unknown"}`,
+            `Pull OK; Lattice is STALE — re-index on Lattice. ${ingestErr?.message || "unknown"}`,
           );
         }
       }
@@ -504,6 +506,14 @@ export default function RepoWorkspace() {
                 <RefreshCw size={16} className={loadingCloned ? "animate-spin" : ""} />
               </button>
             </div>
+            {latticeStale ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="repo-lattice-stale">
+                Lattice is <strong>STALE</strong> after pull ({latticeStale.key}).{" "}
+                <Link to={`/lattice?stale=1`} className="font-semibold underline" data-testid="repo-lattice-reindex">
+                  Re-index repository
+                </Link>
+              </div>
+            ) : null}
             {clonedRepos.length === 0 ? (
               <div className="text-center py-8 text-slate-400">
                 <HardDrive size={32} className="mx-auto mb-2 opacity-50" />
@@ -570,6 +580,7 @@ export default function RepoWorkspace() {
                       <button
                         onClick={() => handlePull(r.repo_id)}
                         disabled={pulling === r.repo_id}
+                        data-testid={`repo-pull-${r.repo_id}`}
                         className="px-3 py-1.5 text-xs font-medium text-green-600 border border-green-200 rounded-lg hover:bg-green-50 disabled:opacity-50"
                       >
                         {pulling === r.repo_id ? <Loader2 size={12} className="inline animate-spin mr-1" /> : <RefreshCw size={12} className="inline mr-1" />}

@@ -39,7 +39,21 @@ def test_runtime_discovery_zoas_nested(tmp_path):
     assert Path(full["cwd"]).name == "zinnia-modern"
 
 
-def test_runtime_discovery_rejects_injection(tmp_path):
+def test_runtime_discovery_zaf_frontend(tmp_path):
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "frontend" / "package.json").write_text(
+        '{"scripts": {"dev": "vite"}}',
+        encoding="utf-8",
+    )
+    (tmp_path / "backend" / "pom.xml").write_text("<project></project>", encoding="utf-8")
+    out = discover_runtime_recipes(str(tmp_path))
+    ids = {r["id"] for r in out["recipes"]}
+    assert "zaf-frontend" in ids
+    resolved = resolve_recipe(str(tmp_path), "zaf-frontend")
+    assert resolved["ok"] is True
+    assert resolved["command"] == "npm run dev"
+    assert Path(resolved["cwd"]).name == "frontend"
     (tmp_path / "package.json").write_text(
         json.dumps({"scripts": {"dev": "npm run dev; rm -rf /"}}),
         encoding="utf-8",

@@ -65,6 +65,15 @@ class PresentationPlanIn(BaseModel):
     asset_ids: list[str] = Field(default_factory=list)
 
 
+class SlideAiIn(BaseModel):
+    prompt: str
+    slide_text: str = ""
+    notes: str = ""
+    selected_kind: str = ""
+    selected_chart_type: str = ""
+    attach_excerpts: list[str] = Field(default_factory=list)
+
+
 @router.get("/audiences")
 @require_authentication
 def audiences(current_user: CurrentUser = Depends(get_current_user)):
@@ -79,6 +88,21 @@ def analyze_deck(body: AnalyzeDeckIn, current_user: CurrentUser = Depends(get_cu
         notes_blob=body.notes_blob,
         audience_id=body.audience_id,
         sensitivity_hint=body.sensitivity_hint,
+    )
+
+
+@router.post("/slide-ai")
+@require_authentication
+def slide_ai(body: SlideAiIn, current_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.slide_ai import patch_slide_from_prompt
+
+    return patch_slide_from_prompt(
+        prompt=body.prompt,
+        slide_text=body.slide_text,
+        notes=body.notes,
+        selected_kind=body.selected_kind,
+        selected_chart_type=body.selected_chart_type,
+        attach_excerpts=body.attach_excerpts,
     )
 
 

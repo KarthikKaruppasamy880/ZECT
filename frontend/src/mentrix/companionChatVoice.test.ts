@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planChatSpeak, shouldSilentFallback, REALTIME_SILENCE_MS } from "./companionChatVoice";
+import { planChatSpeak, shouldSilentFallback, ttsPlaybackChip, REALTIME_SILENCE_MS } from "./companionChatVoice";
 
 describe("planChatSpeak", () => {
   it("is muted when Speak replies is off", () => {
@@ -19,6 +19,20 @@ describe("planChatSpeak", () => {
       action: "realtime_wait",
       silenceMs: REALTIME_SILENCE_MS,
     });
+  });
+});
+
+describe("ttsPlaybackChip", () => {
+  it("shows muted only when Speak replies is off", () => {
+    expect(ttsPlaybackChip({ ttsEnabled: false, ttsPlayback: "playing" })).toBe("muted");
+  });
+
+  it("shows ready when Speak replies is on and idle", () => {
+    expect(ttsPlaybackChip({ ttsEnabled: true, ttsPlayback: "muted" })).toBe("ready");
+  });
+
+  it("shows realtime while Connect Voice owns the speaker", () => {
+    expect(ttsPlaybackChip({ ttsEnabled: true, ttsPlayback: "muted", voiceConnected: true })).toBe("realtime");
   });
 });
 

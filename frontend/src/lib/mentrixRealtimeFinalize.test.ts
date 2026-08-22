@@ -78,6 +78,21 @@ describe("mentrixRealtimeFinalize", () => {
     expect(nextSpeakableSentence("Still typing the first sentence")).toBeNull();
   });
 
+  it("starts clone TTS on the first comma clause before a period arrives", () => {
+    const result = nextSpeakableSentence(
+      "Hello there, this is a longer clause without a period yet and still growing",
+    );
+    expect(result?.sentence).toBe("Hello there,");
+    expect(result?.consumedLength).toBeGreaterThan(10);
+  });
+
+  it("starts clone TTS after ~40 characters at a word boundary when there is no period", () => {
+    const stream = "This reply is already long enough to start speech without waiting ";
+    const result = nextSpeakableSentence(stream);
+    expect(result).not.toBeNull();
+    expect(result!.sentence.split(" ").length).toBeGreaterThan(4);
+  });
+
   it("returns null for empty or whitespace-only input", () => {
     expect(nextSpeakableSentence("")).toBeNull();
     expect(nextSpeakableSentence("   ")).toBeNull();

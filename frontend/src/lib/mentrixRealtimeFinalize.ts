@@ -105,12 +105,25 @@ export function createPerfTracker(now: () => number = () => performance.now()) {
   };
 }
 
+const FIRST_CLAUSE_MIN = 40;
+
 export function nextSpeakableSentence(unspoken: string): { sentence: string; consumedLength: number } | null {
-  const match = unspoken.match(/^[\s\S]*?[.!?](?:\s|$)/);
-  if (!match) return null;
-  const sentence = match[0].trim();
-  if (!sentence) return null;
-  return { sentence, consumedLength: match[0].length };
+  const period = unspoken.match(/^[\s\S]*?[.!?](?:\s|$)/);
+  if (period) {
+    const sentence = period[0].trim();
+    if (sentence) return { sentence, consumedLength: period[0].length };
+  }
+  const comma = unspoken.match(/^[\s\S]*?,\s/);
+  if (comma) {
+    const clause = comma[0].trim();
+    if (clause.length >= 12) return { sentence: clause, consumedLength: comma[0].length };
+  }
+  const wordBreak = unspoken.match(new RegExp(`^[\\s\\S]{${FIRST_CLAUSE_MIN},}?\\s`));
+  if (wordBreak) {
+    const clause = wordBreak[0].trim();
+    if (clause) return { sentence: clause, consumedLength: wordBreak[0].length };
+  }
+  return null;
 }
 
 /**

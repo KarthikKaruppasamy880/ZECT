@@ -265,7 +265,7 @@ export default function MentrixCompanion() {
               <div
                 id="mentrix-voice-cloning"
                 data-testid="mentrix-voice-section"
-                className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
+                className="min-h-[16rem] flex-1 space-y-3 overflow-y-auto rounded-xl border border-teal-700/60 bg-slate-950/90 p-3 shadow-lg shadow-teal-950/40"
               >
                 <div className="rounded-lg border border-teal-800/50 bg-slate-900/80 p-3 space-y-2">
                   <p className="text-[10px] uppercase tracking-[0.2em] text-teal-400">Voice</p>

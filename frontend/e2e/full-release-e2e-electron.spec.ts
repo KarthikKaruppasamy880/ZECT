@@ -9,7 +9,7 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
-import { API, makeGitRepo, openCodingAgentMission, openWorkspace } from "./helpers/releaseJourney";
+import { API, makeGitRepo, openCodingAgentMission, openCompanionVoice, openWorkspace } from "./helpers/releaseJourney";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(REPO, "test-results", "full-release-e2e-electron");
@@ -163,8 +163,7 @@ test.describe("full release E2E electron", () => {
 
       await nav.getByRole("link", { name: "Mentrix Companion" }).click();
       await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
-      await page.getByTestId("mentrix-mode-voice").click();
-      await expect(page.getByTestId("clone-voice-panel")).toBeVisible();
+      await openCompanionVoice(page);
       await page.screenshot({ path: path.join(ART, "04-voice.png") });
 
       await first.app.close();

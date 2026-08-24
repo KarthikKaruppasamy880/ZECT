@@ -148,6 +148,11 @@ describe("Mentrix Companion chat layout", () => {
       </MemoryRouter>,
     );
     expect(screen.getByTestId("mentrix-companion-artifacts")).toBeTruthy();
+    expect(screen.getByTestId("mentrix-companion-artifacts").className).not.toMatch(/\bfixed\b/);
+    expect(screen.getByTestId("mentrix-mode-voice")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mentrix-mode-voice"));
+    expect(screen.getByTestId("mentrix-voice-section")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("mentrix-mode-chat"));
     fireEvent.click(screen.getByTestId("mentrix-companion-more"));
     expect(screen.getByTestId("mentrix-companion-more-sheet")).toBeTruthy();
     expect(screen.getByTestId("mentrix-desktop-launcher-sheet")).toBeTruthy();

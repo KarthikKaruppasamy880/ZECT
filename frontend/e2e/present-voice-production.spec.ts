@@ -162,6 +162,8 @@ test.describe("present + voice production", () => {
 
     await page.getByRole("link", { name: "Mentrix Companion" }).first().click();
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
+    const closeArt = page.getByTestId("mentrix-artifacts-close");
+    if (await closeArt.isVisible().catch(() => false)) await closeArt.click();
     await page.getByTestId("mentrix-mode-voice").click();
     await expect(page.getByTestId("mentrix-voice-section")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible();

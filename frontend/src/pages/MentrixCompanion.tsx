@@ -129,7 +129,7 @@ export default function MentrixCompanion() {
               <CompanionScopeStrip provenance={s.lastProvenance} progress={s.lastProgress} />
             </div>
             <div
-              className="mt-3 flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/80 p-1"
+              className="relative z-40 mt-3 flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/80 p-1"
               data-testid="mentrix-companion-modes"
               role="tablist"
               aria-label="Companion modes"
@@ -167,6 +167,7 @@ export default function MentrixCompanion() {
                   aria-controls={`mentrix-panel-${id}`}
                   tabIndex={mode === id ? 0 : -1}
                   data-testid={`mentrix-mode-${id}`}
+                  data-mode-alias={id === "voice" ? "mentrix-mode-voice" : undefined}
                   onClick={() => setMode(id)}
                   className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                     mode === id
@@ -721,7 +722,7 @@ export default function MentrixCompanion() {
 
           {mode === "chat" && (s.showArtifacts || s.displayMode) && (
             <aside
-              className="flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-30 max-lg:max-h-[70vh] max-lg:rounded-t-2xl lg:h-full lg:min-h-0"
+              className="relative z-10 flex min-h-[9rem] flex-col space-y-3 overflow-y-auto rounded-2xl border border-teal-900/40 bg-slate-900/80 p-4 max-lg:max-h-[40vh] max-lg:rounded-t-2xl lg:h-full lg:min-h-0"
               data-testid="mentrix-companion-artifacts"
             >
               <div className="flex items-center justify-between">

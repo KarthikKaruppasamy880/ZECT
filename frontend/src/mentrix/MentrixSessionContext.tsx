@@ -24,6 +24,7 @@ import {
   mentrixCompanionStreamResume,
   mentrixCompanionTurn,
   mentrixListRuns,
+  mentrixVoiceEngineStatus,
   type CompanionProvenanceRow,
   type MentrixStreamEvent,
 } from "@/lib/api";
@@ -266,7 +267,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   }>({ mode: "idle", lastMark: "", lastMs: 0, ttsEngine: "" });
   const [computerMode, setComputerMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false);
-  const [showArtifacts, setShowArtifacts] = useState(true);
+  const [showArtifacts, setShowArtifacts] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+    try {
+      return window.matchMedia("(min-width: 1024px)").matches;
+    } catch {
+      return true;
+    }
+  });
   const [pending, setPending] = useState<PendingConfirm[]>([]);
   const [turnId, setTurnId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -570,6 +578,24 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     setDesktopWakeEnabled(false);
     cancelBrowserSpeech();
     try {
+      const AudioCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (AudioCtor) {
+        const warmCtx = new AudioCtor();
+        if (warmCtx.state === "suspended") await warmCtx.resume();
+        await warmCtx.close();
+      }
+    } catch {
+      /* Safari / Firefox user-gesture resume is best-effort */
+    }
+    try {
+      await mentrixVoiceEngineStatus({ forceRefresh: true });
+      pushLog("Voicebox warm requested before Connect Voice");
+    } catch {
+      pushLog("Voicebox warm skipped — engine-status unreachable");
+    }
+    try {
       const preflight = await refreshRealtimePreflight();
       if (!preflight?.ready || !preflight.client_secret) {
         setVoiceConnected(false);
@@ -599,6 +625,9 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
               lastMark: m.name,
               lastMs: m.elapsedMs,
             }));
+            if (m.name === "playback_started" && m.elapsedMs > 1500) {
+              pushLog(`first clone audio ${m.elapsedMs}ms (target <1500ms when Voicebox is warm)`);
+            }
           },
           onTranscript: (role, text) => {
             if (!text?.trim()) return;

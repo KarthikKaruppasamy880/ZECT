@@ -176,6 +176,8 @@ test.describe("full release E2E production", () => {
     await page.screenshot({ path: path.join(ART, "05-present-export.png") });
 
     await sidebarOpen(page, "Mentrix Companion", "mentrix-companion-page");
+    const closeArt = page.getByTestId("mentrix-artifacts-close");
+    if (await closeArt.isVisible().catch(() => false)) await closeArt.click();
     await page.getByTestId("mentrix-mode-voice").click();
     await expect(page.getByTestId("clone-voice-panel")).toBeVisible({ timeout: 20_000 });
     const engine = page.getByTestId("clone-voice-engine-status");

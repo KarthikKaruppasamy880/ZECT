@@ -4,6 +4,19 @@ export const REALTIME_SILENCE_MS = 2500;
 
 export type TtsPlaybackState = "playing" | "silent-fallback" | "muted";
 
+/** Chip next to Speak replies — idle+on is ready, not MUTED. */
+export function ttsPlaybackChip(opts: {
+  ttsEnabled: boolean;
+  ttsPlayback: TtsPlaybackState;
+  voiceConnected?: boolean;
+}): string {
+  if (!opts.ttsEnabled) return "muted";
+  if (opts.ttsPlayback === "playing") return "playing";
+  if (opts.ttsPlayback === "silent-fallback") return "silent-fallback";
+  if (opts.voiceConnected) return "realtime";
+  return "ready";
+}
+
 export type ChatSpeakPlan =
   | { action: "muted" }
   | { action: "clone" }

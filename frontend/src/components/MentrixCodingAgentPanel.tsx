@@ -718,6 +718,7 @@ function PlanPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = String(workItemId || "local");
+  void model;
 
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
 

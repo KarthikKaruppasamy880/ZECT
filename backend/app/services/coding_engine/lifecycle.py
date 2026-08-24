@@ -191,6 +191,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "correlation_id": mission.get("correlation_id") or "",
         "work_item_id": mission.get("work_item_id"),
         "project_id": mission.get("project_id"),
+        "propose_if_empty": bool(mission.get("propose_if_empty")),
         "sibling": sibling,
         "ready_to_merge": mission.get("phase") == "ready_to_merge",
         "companion_edits_code": False,

@@ -206,10 +206,13 @@ def run_ask(
             "telemetry": out.get("telemetry"),
         }
 
+    retrieved = f"\n\nRetrieved from authorized repo:\n{context[:2500]}" if context else ""
     return {
         "answer": (
-            f"Ask (offline): clarify target language, modules to port, and acceptance tests for: "
-            f"{question[:300]}"
+            (
+                f"Ask (offline): clarify target language, modules to port, and acceptance tests for: "
+                f"{question[:300]}{retrieved}"
+            )
             if out.get("blocked") or out.get("offline")
             else f"Ask failed: {out.get('error')}"
         ),

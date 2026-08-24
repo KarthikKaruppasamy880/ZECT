@@ -151,27 +151,52 @@ export const getWorkItemEvents = (id: number) =>
     events: Array<{ id: number; event_type: string; payload?: Record<string, unknown>; created_at?: string | null }>;
   }>(`/api/work-items/${id}/events`);
 
+export type DeveloperAskResponse = {
+  work_item_id: number;
+  answer?: string;
+  status?: string;
+  context_pack?: Record<string, unknown>;
+  project_intelligence?: {
+    lattice?: { status?: string; state?: string; hits?: unknown[] };
+    knowledge?: unknown[];
+    blueprint?: { snippet?: string };
+  };
+};
+
 export const developerAsk = (body: {
   question: string;
   work_item_id?: number;
   project_id?: number | null;
   repository_id?: number | null;
+  repository_ids?: number[];
 }) =>
-  request<{ work_item_id: number; answer?: string; status?: string }>("/api/mentrix/developer/ask", {
+  request<DeveloperAskResponse>("/api/mentrix/developer/ask", {
     method: "POST",
     body: JSON.stringify(body),
   });
+
+export type DeveloperPlanResponse = {
+  work_item_id: number;
+  plan?: string;
+  plan_hash?: string;
+  plan_version?: number;
+  status?: string;
+  context_pack?: Record<string, unknown>;
+  project_intelligence?: DeveloperAskResponse["project_intelligence"];
+};
 
 export const developerPlan = (body: {
   goal: string;
   work_item_id?: number;
   project_id?: number | null;
   repository_id?: number | null;
+  repository_ids?: number[];
+  constraints?: string;
 }) =>
-  request<{ work_item_id: number; plan_hash?: string; plan_version?: number; status?: string }>(
-    "/api/mentrix/developer/plan",
-    { method: "POST", body: JSON.stringify(body) },
-  );
+  request<DeveloperPlanResponse>("/api/mentrix/developer/plan", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 export const getProjects = (status?: string, opts?: { includeFixtures?: boolean }) => {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
@@ -2002,6 +2027,7 @@ export const codingAgentCreateMission = (body: {
   work_item_id?: number | null;
   roots?: CodingAgentMissionRoot[];
   patches_by_repo?: Record<string, Array<Record<string, string>>>;
+  /** Canonical start_mission field — PLAN.md body. */
   plan?: string;
   workspace_parent?: string;
   propose_if_empty?: boolean;

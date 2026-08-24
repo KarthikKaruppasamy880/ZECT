@@ -2,8 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
-  askQuestion: vi.fn(async () => ({ answer: "No edits.", model: "gpt-4o-mini", tokens_used: 1 })),
-  generatePlan: vi.fn(),
+  developerAsk: vi.fn(async () => ({
+    work_item_id: 1,
+    answer: "No edits.",
+    project_intelligence: { lattice: { status: "READY", hits: [{ id: "a" }] }, knowledge: [], blueprint: {} },
+  })),
+  developerPlan: vi.fn(),
   codingAgentSavePlan: vi.fn(),
   codingAgentListPlans: vi.fn(async () => ({ ok: true, plans: [] })),
   codingAgentCreateMission: vi.fn(),
@@ -24,7 +28,7 @@ vi.mock("@/components/ModelSelector", () => ({
 }));
 
 import MentrixCodingAgentPanel from "./MentrixCodingAgentPanel";
-import { askQuestion, codingAgentCreateSession } from "@/lib/api";
+import { codingAgentCreateSession, developerAsk } from "@/lib/api";
 
 describe("Developer ASK mode", () => {
   it("shows Implement vs Ship/PR labels without cloning an IDE menubar", () => {
@@ -41,17 +45,20 @@ describe("Developer ASK mode", () => {
       target: { value: "What does main.py do?" },
     });
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-send"));
-    await waitFor(() => expect(askQuestion).toHaveBeenCalled());
+    await waitFor(() => expect(developerAsk).toHaveBeenCalled());
     expect(codingAgentCreateSession).not.toHaveBeenCalled();
     expect(await screen.findByTestId("mentrix-coding-agent-ask-answer")).toHaveTextContent("No edits.");
   });
 
-  it("sends repo_id and project_id instead of a folder path", async () => {
+  it("sends repository_id, repository_ids and project_id instead of a folder path", async () => {
     render(
       <MentrixCodingAgentPanel
         workspaceRoot="C:/tmp/zect"
         projectId={9}
-        roots={[{ id: 44, label: "zoas", path: "C:/tmp/zect" }]}
+        roots={[
+          { id: 44, label: "zoas", path: "C:/tmp/zect" },
+          { id: 45, label: "zaf", path: "C:/tmp/zaf" },
+        ]}
       />,
     );
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));
@@ -59,7 +66,13 @@ describe("Developer ASK mode", () => {
       target: { value: "Explain Lattice ingest" },
     });
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-send"));
-    await waitFor(() => expect(askQuestion).toHaveBeenCalled());
-    expect(askQuestion).toHaveBeenCalledWith("Explain Lattice ingest", undefined, 44, expect.anything(), 9);
+    await waitFor(() => expect(developerAsk).toHaveBeenCalled());
+    expect(developerAsk).toHaveBeenCalledWith({
+      question: "Explain Lattice ingest",
+      project_id: 9,
+      work_item_id: undefined,
+      repository_id: 44,
+      repository_ids: [44, 45],
+    });
   });
 });

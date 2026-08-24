@@ -27,6 +27,13 @@ import MentrixCodingAgentPanel from "./MentrixCodingAgentPanel";
 import { askQuestion, codingAgentCreateSession } from "@/lib/api";
 
 describe("Developer ASK mode", () => {
+  it("shows Implement vs Ship/PR labels without cloning an IDE menubar", () => {
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
+    expect(screen.getByTestId("mentrix-coding-agent-mission-tab")).toHaveTextContent(/Ship\/PR/i);
+    expect(screen.getByTestId("mentrix-coding-agent-history-tab")).toHaveTextContent(/Implement/i);
+    expect(screen.queryByRole("menuitem", { name: /Go to File/i })).toBeNull();
+  });
+
   it("asks without creating a coding session (zero edits)", async () => {
     render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));

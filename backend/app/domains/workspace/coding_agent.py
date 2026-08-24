@@ -207,9 +207,12 @@ def _mission_roots(db: Session, req: MissionCreate) -> list[dict]:
 @router.post("/missions")
 def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: CurrentUser = Depends(get_current_user)):
     from app.services.coding_engine.lifecycle import start_mission
+    from app.services.coding_engine.sync_pull import is_pull_sync_intent, sync_authorized_roots
 
     try:
         roots = _mission_roots(db, req)
+        if is_pull_sync_intent(req.goal):
+            return sync_authorized_roots(roots)
         return start_mission(
             goal=req.goal.strip(),
             roots=roots,

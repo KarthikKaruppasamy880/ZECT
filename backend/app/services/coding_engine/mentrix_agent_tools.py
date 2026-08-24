@@ -149,6 +149,46 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {"branch": {"type": "string"}}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_pull",
+            "description": "Fast-forward only git pull in this workspace. Marks Lattice STALE. Never starts a coding mission.",
+            "parameters": {
+                "type": "object",
+                "properties": {"remote": {"type": "string", "description": "Remote name (default origin)"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_checkout",
+            "description": "Checkout a branch only inside an isolated git worktree. Refused on the live clone.",
+            "parameters": {
+                "type": "object",
+                "properties": {"branch": {"type": "string"}},
+                "required": ["branch"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_pr_worktree",
+            "description": "Create or reuse an isolated worktree for a later PR. Does not git checkout the live clone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo_id": {"type": "integer"},
+                    "pr_number": {"type": "integer"},
+                    "head_branch": {"type": "string"},
+                    "head_sha": {"type": "string"},
+                },
+                "required": ["repo_id", "pr_number"],
+            },
+        },
+    },
 ]
 
 
@@ -472,5 +512,71 @@ def _execute_tool_inner(
             "head_sha": "",
         }
         return _push_or_block(fake)
+
+    if name == "git_pull":
+        from app.services.coding_engine.sync_pull import ff_pull_root
+
+        return ff_pull_root(str(root), remote=str(args.get("remote") or "origin"))
+
+    if name == "git_checkout":
+        git_meta = root / ".git"
+        if git_meta.is_dir():
+            return {
+                "ok": False,
+                "error": "refused_live_clone_checkout",
+                "hint": "Use open_pr_worktree so the live ZOAS/ZAF clone stays on its current branch.",
+            }
+        branch = str(args.get("branch") or "").strip()
+        if not branch:
+            return {"ok": False, "error": "branch_required"}
+        try:
+            completed = subprocess.run(
+                ["git", "checkout", "--", branch] if False else ["git", "checkout", branch],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": completed.returncode == 0,
+            "branch": branch,
+            "stdout": (completed.stdout or "")[-1500:],
+            "stderr": (completed.stderr or "")[-800:],
+        }
+
+    if name == "open_pr_worktree":
+        try:
+            repo_id = int(args.get("repo_id") or 0)
+            pr_number = int(args.get("pr_number") or 0)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "repo_id_and_pr_number_required"}
+        if repo_id <= 0 or pr_number <= 0:
+            return {"ok": False, "error": "repo_id_and_pr_number_required"}
+        head = str(args.get("head_branch") or "").strip()
+        sha = str(args.get("head_sha") or "").strip()
+        try:
+            from app.infrastructure.database import SessionLocal
+            from app.services.repo_onboarding import ensure_pr_worktree
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"pr_worktree_unavailable:{exc}"}
+        db = SessionLocal()
+        try:
+            out = ensure_pr_worktree(
+                db,
+                repo_id=repo_id,
+                pr_number=pr_number,
+                head_branch=head,
+                head_sha=sha,
+            )
+            out = dict(out or {})
+            out.setdefault("ok", True)
+            out["main_unchanged"] = True
+            return out
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+        finally:
+            db.close()
 
     return {"ok": False, "error": f"unknown_tool:{name}"}

@@ -163,6 +163,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "diff": str(r.get("diff") or "")[:8000],
                 "push": r.get("push") or {},
                 "pr": r.get("pr") or {},
+                "native_build": r.get("native_build") or {},
             }
         )
     sibling = mission.get("sibling") or {}
@@ -193,6 +194,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "sibling": sibling,
         "ready_to_merge": mission.get("phase") == "ready_to_merge",
         "companion_edits_code": False,
+        "native_implement": mission.get("native_implement") or [],
         "no_auto_merge": True,
         "persistence": "durable_json",
         "updated_at": mission.get("updated_at"),
@@ -330,7 +332,7 @@ def _locate_pytest(worktree: Path) -> tuple[Path, Path] | None:
     return None
 
 
-def run_repo_tests(worktree: Path) -> dict[str, Any]:
+def _run_pytest_only(worktree: Path) -> dict[str, Any]:
     located = _locate_pytest(worktree)
     if not located:
         return {"ok": True, "status": "skipped", "kind": "none", "detail": "no tests/"}
@@ -398,6 +400,83 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
         "stdout": (completed.stdout or "")[-1200:],
         "stderr": (completed.stderr or "")[-600:],
         "command": " ".join(argv),
+    }
+
+
+def _run_js_suite(worktree: Path) -> dict[str, Any]:
+    """Run package.json test / Playwright when those files exist. Skip if neither exists."""
+    root = Path(worktree)
+    pkg = root / "package.json"
+    has_pw = any(
+        (root / name).is_file()
+        for name in ("playwright.config.ts", "playwright.config.js", "playwright.config.mts")
+    )
+    if not pkg.is_file() and not has_pw:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no package.json/playwright"}
+    cmd = ""
+    if pkg.is_file():
+        try:
+            data = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        scripts = data.get("scripts") if isinstance(data, dict) else {}
+        scripts = scripts if isinstance(scripts, dict) else {}
+        if "test" in scripts:
+            cmd = "npm test --silent"
+        elif "test:e2e" in scripts:
+            cmd = "npm run test:e2e --silent"
+    if not cmd and has_pw:
+        cmd = "npx --yes playwright test --reporter=line"
+    if not cmd:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no test script"}
+    try:
+        completed = subprocess.run(
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=180,
+            shell=True,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "js",
+            "detail": "timeout",
+            "command": cmd,
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "playwright" if "playwright" in cmd else "npm",
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": cmd,
+    }
+
+
+def run_repo_tests(worktree: Path) -> dict[str, Any]:
+    py = _run_pytest_only(worktree)
+    js = _run_js_suite(worktree)
+    if js.get("kind") == "none":
+        return py
+    if py.get("kind") == "none":
+        return js
+    ok = bool(py.get("ok")) and bool(js.get("ok"))
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": f"{py.get('kind')}+{js.get('kind')}",
+        "detail": f"{py.get('status')}; {js.get('status')}",
+        "stdout": ((py.get("stdout") or "") + "\n" + (js.get("stdout") or ""))[-2000:],
+        "stderr": ((py.get("stderr") or "") + "\n" + (js.get("stderr") or ""))[-1200:],
+        "command": f"{py.get('command') or ''} ; {js.get('command') or ''}",
+        "recipes": [py, js],
     }
 
 
@@ -696,7 +775,12 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
         n = sum(len(v) for v in (proposed or {}).values())
         _emit(mission, "patches_proposed", f"Proposed {n} patch(es) from PLAN + ContextPack.")
         if n == 0:
-            raise ValueError("no_patches_from_plan")
+            mission["native_implement_pending"] = True
+            _emit(
+                mission,
+                "native_implement",
+                "No JSON patches from PLAN — Mentrix native implementer will edit isolated worktrees.",
+            )
     mission["plan_approved"] = True
     mission["phase"] = "isolating"
     mission["status"] = "running"
@@ -722,7 +806,52 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
 
     mission["phase"] = "editing"
     _emit(mission, "isolating", "Worktrees ready.")
+    if mission.get("native_implement_pending"):
+        _run_native_implementer(mission)
     return _run_edit_test_review(mission)
+
+
+def _run_native_implementer(mission: dict[str, Any]) -> None:
+    """Run Mentrix native tool loop inside isolated worktrees (same engine as HISTORY chat)."""
+    from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+
+    goal = f"{mission.get('goal') or ''}\n\nPLAN:\n{mission.get('plan') or ''}"
+    results: list[dict[str, Any]] = []
+    for repo in mission["repos"]:
+        wt = str(repo.get("worktree_path") or "").strip()
+        if not wt:
+            continue
+        out = run_mentrix_native_build(
+            goal=goal,
+            workspace=wt,
+            expected_files=list(repo.get("expected_files") or []),
+            project_id=mission.get("project_id"),
+            timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
+            max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+        )
+        results.append(out)
+        repo["native_build"] = {
+            "ok": out.get("ok"),
+            "status": out.get("status"),
+            "files_written": list(out.get("files_written") or []),
+            "run_id": out.get("run_id"),
+        }
+        written = list(out.get("files_written") or [])
+        if written:
+            files = list(repo.get("files") or [])
+            for path in written:
+                if path not in files:
+                    files.append(path)
+            repo["files"] = files
+        _emit(
+            mission,
+            "native_implement",
+            f"{repo.get('label')}: native implementer {out.get('status') or 'done'} "
+            f"({len(written)} file(s))",
+            repository_id=repo.get("repository_id"),
+            ok=out.get("ok"),
+        )
+    mission["native_implement"] = results
 
 
 def _stringify_patch_map(patches: dict[str, Any] | None) -> dict[str, list[Any]]:

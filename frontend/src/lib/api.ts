@@ -1986,6 +1986,10 @@ export type CodingAgentMission = {
   sibling?: { blocked?: boolean; blocker?: string };
   ready_to_merge: boolean;
   no_auto_merge: boolean;
+  mission_created?: boolean;
+  lattice_stale?: boolean;
+  message?: string;
+  native_implement?: unknown;
   events?: Array<{ event?: string; message?: string; at?: string }>;
   evidence?: Array<{ event?: string; message?: string; at?: string }>;
 };

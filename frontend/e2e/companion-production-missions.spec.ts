@@ -182,6 +182,8 @@ test.describe("Companion production missions", () => {
     await expect(page.getByTestId("mentrix-tts-toggle")).toBeVisible();
     await page.getByTestId("mentrix-tts-toggle").uncheck();
     await expect(page.getByTestId("mentrix-connect-voice")).toBeVisible();
+    const closeArt = page.getByTestId("mentrix-artifacts-close");
+    if (await closeArt.isVisible().catch(() => false)) await closeArt.click();
     await page.getByTestId("mentrix-mode-voice").click();
     await expect(page.getByTestId("mentrix-voice-handoff-present")).toBeVisible();
     await expect(page.getByTestId("present-deck-handoff-create")).toBeVisible();

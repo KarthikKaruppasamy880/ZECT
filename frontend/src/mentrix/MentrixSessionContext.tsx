@@ -267,7 +267,14 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   }>({ mode: "idle", lastMark: "", lastMs: 0, ttsEngine: "" });
   const [computerMode, setComputerMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false);
-  const [showArtifacts, setShowArtifacts] = useState(true);
+  const [showArtifacts, setShowArtifacts] = useState(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+    try {
+      return window.matchMedia("(min-width: 1024px)").matches;
+    } catch {
+      return true;
+    }
+  });
   const [pending, setPending] = useState<PendingConfirm[]>([]);
   const [turnId, setTurnId] = useState("");
   const [loading, setLoading] = useState(false);

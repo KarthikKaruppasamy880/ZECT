@@ -93,6 +93,18 @@ export async function bindActiveProject(page: Page, projectId: number, repoId: n
   );
 }
 
+export async function openCompanionVoice(page: Page) {
+  const close = page.getByTestId("mentrix-artifacts-close");
+  if (await close.isVisible().catch(() => false)) {
+    await close.click();
+  }
+  const voice = page.getByTestId("mentrix-mode-voice").or(page.getByTestId("mentrix-mode-voice"));
+  await voice.click();
+  await expect(
+    page.getByTestId("mentrix-voice-section").or(page.getByTestId("clone-voice-panel")),
+  ).toBeVisible({ timeout: 20_000 });
+}
+
 export async function openWorkspace(page: Page, projectId: number, repoId: number) {
   await bindActiveProject(page, projectId, repoId);
   await page.evaluate(() => window.location.assign("/workspace"));

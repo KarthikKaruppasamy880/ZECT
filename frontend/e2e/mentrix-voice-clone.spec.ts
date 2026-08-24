@@ -5,6 +5,8 @@ test.describe("Mentrix ZECT Voicebox voice", () => {
     await page.goto("/mentrix-home");
     await expect(page.getByTestId("mentrix-companion-page")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("mentrix-companion-modes")).toBeVisible();
+    const closeArt = page.getByTestId("mentrix-artifacts-close");
+    if (await closeArt.isVisible().catch(() => false)) await closeArt.click();
     await page.getByTestId("mentrix-mode-voice").click();
     await expect(page).toHaveURL(/voice=1/);
     await expect(page.getByTestId("mentrix-voice-section")).toBeVisible();

@@ -1760,13 +1760,16 @@ async def present_import_deck(
 def present_slide_preview(
     path: str,
     index: int = 0,
+    force: bool = False,
     _user: CurrentUser = Depends(get_current_user),
 ):
     from app.services.mentrix.presentation.slide_preview import cache_slide_preview
 
     pptx = _pptx_from_request(path)
-    png = cache_slide_preview(pptx, max(0, index))
-    return FileResponse(path=str(png), media_type="image/png", filename=png.name)
+    png, kind = cache_slide_preview(pptx, max(0, index), force=force)
+    resp = FileResponse(path=str(png), media_type="image/png", filename=png.name)
+    resp.headers["X-Zect-Preview-Kind"] = kind
+    return resp
 
 
 @router.get("/present/quality-gate")

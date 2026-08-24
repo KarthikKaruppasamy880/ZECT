@@ -41,6 +41,12 @@ def apply_document_to_pptx(
         validate_generated_pptx(data, n_slides=len(prs.slides))
         os.replace(tmp, pptx)
         try:
+            from app.services.mentrix.presentation.slide_preview import invalidate_slide_previews
+
+            invalidate_slide_previews(pptx)
+        except Exception:
+            pass
+        try:
             from app.services.mentrix.presentation.final_pptx_inspector import inspect_and_repair_pptx
 
             repaired, _rep = inspect_and_repair_pptx(pptx.read_bytes())

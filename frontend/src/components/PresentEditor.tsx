@@ -45,7 +45,8 @@ function SlideThumbPreview({ path, index, nonce }: { path: string; index: number
     let active = true;
     let created = "";
     mentrixPresentSlidePreview(path, index)
-      .then((u) => {
+      .then((preview) => {
+        const u = preview.url;
         if (!active) {
           URL.revokeObjectURL(u);
           return;
@@ -75,6 +76,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [sourceFp, setSourceFp] = useState("");
   const [savedFp, setSavedFp] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
+  const [previewKind, setPreviewKind] = useState("");
   const [previewNonce, setPreviewNonce] = useState(0);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(!studio);
@@ -155,14 +157,15 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       setPreviewUrl("");
       return;
     }
-    mentrixPresentSlidePreview(pptxPath, selected)
-      .then((url) => {
+    mentrixPresentSlidePreview(pptxPath, selected, { force: previewNonce > 0 })
+      .then((preview) => {
         if (!active) {
-          URL.revokeObjectURL(url);
+          URL.revokeObjectURL(preview.url);
           return;
         }
-        created = url;
-        setPreviewUrl(url);
+        created = preview.url;
+        setPreviewUrl(preview.url);
+        setPreviewKind(preview.kind || "");
       })
       .catch(() => {
         if (active) setPreviewUrl("");
@@ -658,25 +661,58 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                 Preview unavailable
               </div>
             )}
+            {previewKind === "ooxml" ? (
+              <p
+                className="pointer-events-none absolute bottom-1 left-1 right-1 rounded bg-amber-50/90 px-2 py-0.5 text-[10px] text-amber-900"
+                data-testid="present-editor-preview-kind"
+              >
+                Layout preview — install PowerPoint for true slides
+              </p>
+            ) : null}
             {visualBlocks.length ? (
-              <div className="absolute inset-[8%] grid grid-cols-2 gap-1" data-testid="present-editor-block-overlay">
+              <div
+                className={
+                  visualBlocks.some((b) => b.geometry && (b.geometry.cx || 0) > 0)
+                    ? "absolute inset-0"
+                    : "absolute inset-[8%] grid grid-cols-2 gap-1"
+                }
+                data-testid="present-editor-block-overlay"
+              >
                 {visualBlocks.map((block, i) => {
                   const selectedHit = block.id === selectedBlockId;
+                  const geo = block.geometry;
+                  const hasGeo = Boolean(geo && (geo.cx || 0) > 0 && (geo.cy || 0) > 0);
+                  const style = hasGeo
+                    ? {
+                        position: "absolute" as const,
+                        left: `${(100 * (geo?.x || 0)) / 9144000}%`,
+                        top: `${(100 * (geo?.y || 0)) / 5143500}%`,
+                        width: `${(100 * (geo?.cx || 1)) / 9144000}%`,
+                        height: `${(100 * (geo?.cy || 1)) / 5143500}%`,
+                      }
+                    : undefined;
                   return (
                     <button
                       key={block.id || `${block.kind}-${i}`}
                       type="button"
                       data-testid={`present-editor-block-hit-${block.kind}`}
                       data-block-id={block.id || `${block.kind}-${i}`}
-                      className={`pointer-events-auto rounded border-2 bg-teal-500/5 text-left text-[10px] text-teal-900 ${
-                        selectedHit ? "border-teal-600" : "border-teal-400/70"
+                      style={style}
+                      className={`pointer-events-auto text-left text-[10px] text-teal-900 ${
+                        hasGeo
+                          ? `rounded border-2 bg-transparent ${selectedHit ? "border-teal-600" : "border-teal-400/40"}`
+                          : `rounded border-2 bg-teal-500/5 ${selectedHit ? "border-teal-600" : "border-teal-400/70"}`
                       }`}
                       onClick={() => setSelectedBlockId(block.id || null)}
                       onDoubleClick={() => {
                         if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
                       }}
                     >
-                      <span className="block truncate px-1 py-0.5 uppercase">{block.kind}</span>
+                      {hasGeo ? (
+                        <span className="sr-only">{block.kind}</span>
+                      ) : (
+                        <span className="block truncate px-1 py-0.5 uppercase">{block.kind}</span>
+                      )}
                     </button>
                   );
                 })}

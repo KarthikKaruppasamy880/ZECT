@@ -22,6 +22,10 @@ Dedicated full-viewport editor: `/present/d/:deckId/edit`
 - Right rail: **AI | Blocks | Texts | Charts | Tables | Images | Elements**
 - Charts (click selected chart to change type, else insert): Bar, Horizontal Bar, Stacked, Horizontal Stack Bar, Line, Pie, Area, Donut, Scatter, Radar, Polar, Progress, Gauge
 - Double-click chart/table → **Edit Data Table** → Save writes OOXML then refreshes slide PNG
+- Canvas prefers a real raster (Windows PowerPoint COM when `ZECT_LIVE_PPT_COM=1`, else LibreOffice if installed). Otherwise OOXML layout preview is labeled **Layout preview — install PowerPoint for true slides**. Response header `X-Zect-Preview-Kind`: `com` | `libreoffice` | `ooxml`
+- Overlay uses EMU geometry from `p:sp` / `p:pic` / `graphicFrame` (`data-block-id`). Fake 2-column CHART/SHAPE grid only when geometry is missing
+- After chart type-change + Save, cached PNG is busted so a bar/radar is visible when COM/LibreOffice can rasterize
 - AI chat is object-aware (current slide + selected block). No invented KPIs — attached docs / ContextPack only
 - Speaker notes sit behind a control in Studio; they are not the primary canvas UI
 - Export stays PPTX
+- Gallery tabs: **Built-in** = Zinnia ids with master cover PNGs; **Custom** = org/user uploaded PPTX. No Presenton Community packs and no `:5000` iframe

@@ -134,3 +134,55 @@ def make_theme_pptx_bytes() -> bytes:
         zf.writestr("ppt/slideMasters/slideMaster1.xml", MASTER)
         zf.writestr("ppt/slideLayouts/slideLayout1.xml", LAYOUT)
     return buf.getvalue()
+
+
+GROUP_SLIDE = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="{_NS_A}" xmlns:p="{_NS_P}">
+  <p:cSld><p:spTree>
+    <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+    <p:grpSpPr><a:xfrm>
+      <a:off x="0" y="0"/><a:ext cx="9144000" cy="5143500"/>
+      <a:chOff x="0" y="0"/><a:chExt cx="9144000" cy="5143500"/>
+    </a:xfrm></p:grpSpPr>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="9144000" cy="800000"/></a:xfrm></p:spPr>
+      <p:txBody><a:bodyPr/><a:p/></p:txBody>
+    </p:sp>
+    <p:grpSp>
+      <p:nvGrpSpPr><p:cNvPr id="3" name="Group 1"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr><a:xfrm>
+        <a:off x="1000000" y="500000"/><a:ext cx="4000000" cy="2000000"/>
+        <a:chOff x="0" y="0"/><a:chExt cx="4000000" cy="2000000"/>
+      </a:xfrm></p:grpSpPr>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="4" name="Child"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="200000" y="100000"/><a:ext cx="1000000" cy="400000"/></a:xfrm></p:spPr>
+        <p:txBody><a:bodyPr/><a:p><a:r><a:t>HelloGroup</a:t></a:r></a:p></p:txBody>
+      </p:sp>
+    </p:grpSp>
+  </p:spTree></p:cSld>
+</p:sld>
+"""
+
+GROUP_CT = CT.replace(
+    "</Types>",
+    '  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>\n</Types>',
+)
+
+WIDE_PRES = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:p="{_NS_P}">
+  <p:sldSz cx="9144000" cy="5143500" type="screen16x9"/>
+  <p:sldMasterIdLst><p:sldMasterId id="2147483648"/></p:sldMasterIdLst>
+</p:presentation>
+"""
+
+
+def make_group_pptx_bytes() -> bytes:
+    """Slide with an empty title placeholder plus a grouped child shape."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("[Content_Types].xml", GROUP_CT)
+        zf.writestr("ppt/presentation.xml", WIDE_PRES)
+        zf.writestr("ppt/slides/slide1.xml", GROUP_SLIDE)
+    return buf.getvalue()

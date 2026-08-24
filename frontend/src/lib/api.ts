@@ -883,6 +883,8 @@ export const mentrixParsePptxFromPath = (path: string) =>
     filename: string;
     path?: string;
     visuals?: { has_image?: boolean; has_chart?: boolean; has_table?: boolean };
+    slide_cx?: number;
+    slide_cy?: number;
   }>("/api/mentrix/present/parse-pptx-path", {
     method: "POST",
     body: JSON.stringify({ path }),
@@ -963,7 +965,7 @@ export async function mentrixPresentSlidePreview(
   const blob = await res.blob();
   return {
     url: URL.createObjectURL(blob),
-    kind: res.headers.get("X-Zect-Preview-Kind") || "ooxml",
+    kind: res.headers.get("X-Zect-Preview-Kind") || res.headers.get("X-Zect-Preview-Kind") || "ooxml",
   };
 }
 

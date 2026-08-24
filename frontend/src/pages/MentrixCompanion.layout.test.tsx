@@ -110,7 +110,9 @@ describe("Mentrix Companion chat layout", () => {
     );
     expect(screen.getByTestId("mentrix-greeting")).toHaveTextContent("Good to see you");
     expect(screen.getByTestId("mentrix-companion-chat")).toHaveTextContent("I'm Mentrix");
+    expect(screen.getByTestId("mentrix-avatar").className).toMatch(/h-28/);
     expect(screen.queryByTestId("mentrix-live-log")).toBeNull();
+    fireEvent.click(screen.getByTestId("mentrix-companion-more"));
     fireEvent.click(screen.getByTestId("mentrix-events-toggle"));
     expect(screen.getByTestId("mentrix-live-log")).toHaveTextContent("perf:");
   });
@@ -157,5 +159,19 @@ describe("Mentrix Companion chat layout", () => {
     expect(screen.getByTestId("mentrix-companion-more-sheet")).toBeTruthy();
     expect(screen.getByTestId("mentrix-desktop-launcher-sheet")).toBeTruthy();
     expect(screen.getAllByTestId("desktop-panel").length).toBeGreaterThan(0);
+  });
+
+  it("hides artifacts until opened and keeps More on desktop", () => {
+    session.showArtifacts = false;
+    render(
+      <MemoryRouter>
+        <MentrixCompanion />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId("mentrix-companion-artifacts")).toBeNull();
+    expect(screen.getByTestId("mentrix-companion-more").className).not.toMatch(/md:hidden/);
+    fireEvent.click(screen.getByTestId("mentrix-companion-more"));
+    expect(screen.getByTestId("mentrix-companion-more-sheet").className).not.toMatch(/md:hidden/);
+    session.showArtifacts = true;
   });
 });

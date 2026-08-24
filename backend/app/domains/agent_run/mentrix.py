@@ -1769,6 +1769,8 @@ def present_slide_preview(
     png, kind = cache_slide_preview(pptx, max(0, index), force=force)
     resp = FileResponse(path=str(png), media_type="image/png", filename=png.name)
     resp.headers["X-Zect-Preview-Kind"] = kind
+    resp.headers["X-Zect-Preview-Kind"] = kind
+    resp.headers["Access-Control-Expose-Headers"] = "X-Zect-Preview-Kind, X-Zect-Preview-Kind"
     return resp
 
 
@@ -1797,7 +1799,7 @@ def present_template_cover(template_id: str, _user: CurrentUser = Depends(get_cu
 @router.post("/present/parse-pptx-path")
 def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
     from app.services.mentrix.presentation.document import inspect_pptx_visuals, merge_sidecar_slides
-    from app.services.pptx_parse import parse_pptx_bytes
+    from app.services.pptx_parse import parse_pptx_bytes, slide_emu_size
     from app.services.pptx_paths import notes_sidecar_for_pptx
 
     pptx = _pptx_from_request(body.path)
@@ -1815,6 +1817,7 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
     except (PermissionError, OSError, ValueError, json.JSONDecodeError):
         sidecar_slides = None
     slides = merge_sidecar_slides(slides, sidecar_slides)
+    slide_cx, slide_cy = slide_emu_size(data)
     return {
         "ok": True,
         "count": len(slides),
@@ -1822,6 +1825,8 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
         "filename": pptx.name,
         "path": str(pptx),
         "visuals": inspect_pptx_visuals(data),
+        "slide_cx": slide_cx,
+        "slide_cy": slide_cy,
     }
 
 

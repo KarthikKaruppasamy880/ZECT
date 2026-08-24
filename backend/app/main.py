@@ -116,6 +116,7 @@ app.add_middleware(
         "X-Mentrix-TTS-Content-Type",
         "X-Correlation-Id",
         "X-Zect-Preview-Kind",
+        "X-Zect-Preview-Kind",
     ],
 )
 

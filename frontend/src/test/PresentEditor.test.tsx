@@ -166,4 +166,35 @@ describe("PresentEditor v1", () => {
     expect(hit.style.position).toBe("absolute");
     expect(hit.className).toMatch(/bg-transparent/);
   });
+
+  it("scales overlay percents from parsed slide EMU size", async () => {
+    vi.mocked(mentrixParsePptxFromPath).mockResolvedValueOnce({
+      ok: true,
+      count: 1,
+      filename: "deck.pptx",
+      slide_cx: 10000000,
+      slide_cy: 5000000,
+      slides: [
+        {
+          index: 0,
+          text: "One",
+          notes: "n1",
+          blocks: [
+            {
+              id: "blk_0_chart_0",
+              kind: "chart",
+              geometry: { x: 1000000, y: 500000, cx: 2000000, cy: 1000000 },
+              content: { chart_type: "bar", categories: ["A"], series: [{ name: "S", values: [1] }] },
+            },
+          ],
+        },
+      ],
+    });
+    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    const hit = await screen.findByTestId("present-editor-block-hit-chart");
+    expect(hit.style.left).toBe("10%");
+    expect(hit.style.top).toBe("10%");
+    expect(hit.style.width).toBe("20%");
+    expect(hit.style.height).toBe("20%");
+  });
 });

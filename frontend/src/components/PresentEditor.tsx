@@ -676,11 +676,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
             ) : null}
             {visualBlocks.length ? (
               <div
-                className={
-                  visualBlocks.some((b) => b.geometry && (b.geometry.cx || 0) > 0)
-                    ? "absolute inset-0"
-                    : "absolute inset-[8%] grid grid-cols-2 gap-1"
-                }
+                className="absolute inset-0"
                 data-testid="present-editor-block-overlay"
               >
                 {visualBlocks.map((block, i) => {

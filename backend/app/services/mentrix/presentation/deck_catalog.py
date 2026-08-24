@@ -71,6 +71,21 @@ def create_blank_pptx(*, filename: str = "untitled.pptx") -> Path:
     return dest
 
 
+def instantiate_from_template(template_id: str, user_id: str | int | None = None) -> Path:
+    """Copy a template master into the allowlisted deck dir so the editor can open it."""
+    from app.services.mentrix.presentation import template_registry as tmpl
+
+    zid = tmpl.canonical_id(template_id) or (template_id or "").strip()
+    src = tmpl.source_pptx_path(zid, user_id)
+    if src is None and zid in tmpl.zinnia_canonical_ids():
+        src = tmpl.repo_zinnia_master_pptx()
+    if src is None or not src.is_file():
+        raise FileNotFoundError("template_master_missing")
+    dest = _unique_pptx_path(default_pptx_save_dir(), f"{zid}.pptx")
+    dest.write_bytes(src.read_bytes())
+    return dest
+
+
 def import_pptx_bytes(data: bytes, *, filename: str) -> Path:
     """Copy an uploaded PPTX into the allowlisted deck dir after archive + OOXML checks."""
     from app.services.mentrix.presentation.template_importer import UnsafePptxError, inspect_pptx_archive

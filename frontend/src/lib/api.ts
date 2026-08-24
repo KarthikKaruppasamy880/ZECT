@@ -938,6 +938,12 @@ export const mentrixPresentDeckDuplicate = (path: string) =>
 export const mentrixPresentBlank = () =>
   request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/blank", { method: "POST" });
 
+export const mentrixPresentFromTemplate = (template_id: string) =>
+  request<{ ok: boolean; path: string; filename: string; template_id?: string }>(
+    "/api/mentrix/present/from-template",
+    { method: "POST", body: JSON.stringify({ template_id }) },
+  );
+
 export async function mentrixPresentImport(file: File) {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
   const fd = new FormData();

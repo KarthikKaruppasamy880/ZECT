@@ -165,6 +165,7 @@ describe("PresentEditor v1", () => {
     expect(hit.style.left).toBe("10%");
     expect(hit.style.position).toBe("absolute");
     expect(hit.className).toMatch(/bg-transparent/);
+    expect(screen.getByTestId("present-editor-block-overlay").className).not.toMatch(/grid-cols-2/);
   });
 
   it("scales overlay percents from parsed slide EMU size", async () => {

@@ -10,6 +10,16 @@ from app.services.mentrix.presentation.blocks import normalize_blocks
 from app.services.pptx_parse import parse_pptx_bytes
 
 
+def geometry_valid(geo: Any) -> bool:
+    """True when EMU cx/cy can drive overlay placement (never a slide-sized fallback)."""
+    if not isinstance(geo, dict):
+        return False
+    try:
+        return int(geo.get("cx") or 0) > 0 and int(geo.get("cy") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _copy_missing_geometry(sidecar: list[Any], parsed: list[Any]) -> list[dict[str, Any]]:
     unused = [p for p in parsed if isinstance(p, dict)]
     out: list[dict[str, Any]] = []
@@ -18,10 +28,7 @@ def _copy_missing_geometry(sidecar: list[Any], parsed: list[Any]) -> list[dict[s
             continue
         block = dict(raw)
         geo = block.get("geometry")
-        try:
-            has_geo = isinstance(geo, dict) and int(geo.get("cx") or 0) > 0 and int(geo.get("cy") or 0) > 0
-        except (TypeError, ValueError):
-            has_geo = False
+        has_geo = geometry_valid(geo)
         if not has_geo:
             kind = str(block.get("kind") or "")
             bid = str(block.get("id") or "")

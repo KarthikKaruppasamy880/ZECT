@@ -6,10 +6,12 @@ import PresentTemplateCardView from "@/pages/present/PresentTemplateCardView";
 import { isGalleryTemplateVisible, canDeleteGalleryTemplate } from "@/lib/presentTemplates";
 import {
   encodeDeckId,
+  mentrixPresentFromTemplate,
   mentrixPresentonStatus,
   mentrixPresentationTemplateDelete,
   mentrixPresentationDeleteUnmapped,
   mentrixPresentationTemplatePreview,
+  mentrixPresentationTemplateSlides,
   mentrixPresentationTemplates,
   mentrixPresentationTemplateUpload,
   type PresentTemplateCard,
@@ -35,6 +37,8 @@ export default function PresentCreate() {
     DEFAULT_TEMPLATE,
   );
   const [preview, setPreview] = useState("");
+  const [slidePreviews, setSlidePreviews] = useState<string[]>([]);
+  const [opening, setOpening] = useState(false);
   const [status, setStatus] = useState("");
   const [rewrite, setRewrite] = useState("");
   const [orgScope, setOrgScope] = useState(false);
@@ -80,7 +84,22 @@ export default function PresentCreate() {
     const layouts = p?.visual?.layout_names || [];
     if (layouts.length) bits.push(layouts.slice(0, 4).join(" · "));
     setPreview(bits.join(" — "));
+    const slides = await mentrixPresentationTemplateSlides(canonical).catch(() => null);
+    setSlidePreviews(slides?.slides || []);
     setPanelKey((k) => k + 1);
+  };
+
+  const openInEditor = async () => {
+    setOpening(true);
+    setStatus("");
+    try {
+      const out = await mentrixPresentFromTemplate(selected);
+      nav(`/present/d/${encodeDeckId(out.path)}/edit`);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Could not open template");
+    } finally {
+      setOpening(false);
+    }
   };
 
   const onUpload = async (file: File | null) => {
@@ -313,9 +332,22 @@ export default function PresentCreate() {
         </div>
         </>
         )}
-        {preview ? (
-          <div data-testid="zect-present-template-preview" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-            Preview: {preview}
+        {preview || slidePreviews.length ? (
+          <div data-testid="zect-present-template-preview" className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+            {preview ? <p>Preview: {preview}</p> : null}
+            {slidePreviews.length ? (
+              <div className="flex gap-2 overflow-x-auto" data-testid="zect-present-template-slides">
+                {slidePreviews.map((src, i) => (
+                  <img
+                    key={i}
+                    src={src}
+                    alt=""
+                    className="h-20 w-36 shrink-0 rounded border object-cover"
+                    data-testid={`zect-present-template-slide-${i}`}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
         <label className="block text-xs text-slate-700">
@@ -329,14 +361,25 @@ export default function PresentCreate() {
             className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
           />
         </label>
-        <button
-          type="button"
-          data-testid="zect-present-continue-generate"
-          className="zect-btn zect-btn-primary"
-          onClick={() => setPanelKey((k) => k + 1)}
-        >
-          Use this template
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="zect-present-continue-generate"
+            className="zect-btn zect-btn-primary"
+            onClick={() => setPanelKey((k) => k + 1)}
+          >
+            Use this template
+          </button>
+          <button
+            type="button"
+            data-testid="zect-present-open-editor"
+            className="zect-btn zect-btn-secondary"
+            disabled={opening}
+            onClick={() => void openInEditor()}
+          >
+            Open in editor
+          </button>
+        </div>
       </section>
       {status ? (
         <p data-testid="zect-present-status" className="text-xs text-slate-600">

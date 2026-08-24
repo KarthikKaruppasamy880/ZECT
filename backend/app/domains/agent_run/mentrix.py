@@ -1655,6 +1655,10 @@ class PresentPathIn(BaseModel):
     slides: list[dict[str, Any]] | None = None
 
 
+class PresentTemplateIdIn(BaseModel):
+    template_id: str
+
+
 def _pptx_from_request(path_str: str):
     from app.services.pptx_paths import resolve_allowlisted_pptx
 
@@ -1733,6 +1737,20 @@ def present_blank_deck(_user: CurrentUser = Depends(get_current_user)):
 
     dest = create_blank_pptx()
     return {"ok": True, "path": str(dest), "filename": dest.name}
+
+
+@router.post("/present/from-template")
+def present_from_template(body: PresentTemplateIdIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import instantiate_from_template
+
+    tid = (body.template_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="template_id_required")
+    try:
+        dest = instantiate_from_template(tid, _user.user_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="template_master_missing") from exc
+    return {"ok": True, "path": str(dest), "filename": dest.name, "template_id": tid}
 
 
 @router.post("/present/import")

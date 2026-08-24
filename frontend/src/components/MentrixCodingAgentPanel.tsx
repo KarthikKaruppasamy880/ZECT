@@ -27,8 +27,8 @@ import {
   codingAgentStream,
   codingAgentListPlans,
   codingAgentSavePlan,
-  askQuestion,
-  generatePlan,
+  developerAsk,
+  developerPlan,
   mentrixStartRun,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
@@ -75,6 +75,7 @@ export default function MentrixCodingAgentPanel({
 }: Props) {
   const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
+  const [handoffMission, setHandoffMission] = useState<CodingAgentMission | null>(null);
 
   useEffect(() => {
     setChatModel(model);
@@ -143,7 +144,7 @@ export default function MentrixCodingAgentPanel({
           model={chatModel}
           workItemId={workItemId}
           projectId={projectId}
-          repoId={roots[0]?.id ?? null}
+          roots={roots}
           onCreatePlan={() => setTab("plan")}
         />
       ) : tab === "plan" ? (
@@ -154,7 +155,10 @@ export default function MentrixCodingAgentPanel({
           roots={roots}
           workspaceRoot={workspaceRoot}
           model={chatModel}
-          onApproved={() => setTab("agent")}
+          onApproved={(mission) => {
+            setHandoffMission(mission);
+            setTab("agent");
+          }}
         />
       ) : tab === "history" ? (
         <HistoryPane
@@ -172,6 +176,7 @@ export default function MentrixCodingAgentPanel({
           workItemId={workItemId}
           roots={roots}
           workspaceRoot={workspaceRoot}
+          seedMission={handoffMission}
           onOpenPath={onOpenPath}
           onFilesChanged={onFilesChanged}
           onTestOutput={onTestOutput}
@@ -187,6 +192,7 @@ function MissionPane({
   workItemId,
   roots,
   workspaceRoot,
+  seedMission,
   onOpenPath,
   onFilesChanged,
   onTestOutput,
@@ -196,17 +202,22 @@ function MissionPane({
   workItemId?: number | null;
   roots: CodingAgentMissionRoot[];
   workspaceRoot: string;
+  seedMission?: CodingAgentMission | null;
   onOpenPath?: (path: string) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
 }) {
   const [goal, setGoal] = useState(goalSeed);
   const [patchesJson, setPatchesJson] = useState("");
-  const [mission, setMission] = useState<CodingAgentMission | null>(null);
+  const [mission, setMission] = useState<CodingAgentMission | null>(seedMission ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (seedMission) setMission(seedMission);
+  }, [seedMission]);
 
   useEffect(() => {
     if (!mission?.tests) return;
@@ -561,6 +572,25 @@ function MissionPane({
   );
 }
 
+function repoIdsFromRoots(roots: CodingAgentMissionRoot[]): number[] {
+  return roots.map((r) => r.id).filter((id) => Number.isFinite(id) && id > 0);
+}
+
+function contextFromDeveloperPi(pi?: {
+  lattice?: { status?: string; state?: string; hits?: unknown[] };
+  knowledge?: unknown[];
+  blueprint?: { snippet?: string };
+} | null): { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } {
+  const hits = Array.isArray(pi?.lattice?.hits) ? pi.lattice.hits.length : 0;
+  const status = String(pi?.lattice?.status || pi?.lattice?.state || "").toUpperCase();
+  return {
+    knowledge: Array.isArray(pi?.knowledge) && pi.knowledge.length > 0,
+    lattice_hits: hits,
+    lattice_indexed: ["READY", "INDEXED", "OK"].includes(status) || hits > 0,
+    blueprint: Boolean(pi?.blueprint?.snippet),
+  };
+}
+
 function ContextUsedStrip({ used }: { used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null }) {
   if (!used) return null;
   const lattice = used.lattice_indexed
@@ -579,17 +609,16 @@ function ContextUsedStrip({ used }: { used?: { knowledge?: boolean; lattice_hits
 
 function AskPane({
   workspaceRoot,
-  model,
   workItemId,
   projectId,
-  repoId,
+  roots,
   onCreatePlan,
 }: {
   workspaceRoot: string;
   model: string;
   workItemId?: number | null;
   projectId?: number | null;
-  repoId?: number | null;
+  roots: CodingAgentMissionRoot[];
   onCreatePlan: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -605,15 +634,16 @@ function AskPane({
     setBusy(true);
     setError(null);
     try {
-      const res = await askQuestion(
+      const ids = repoIdsFromRoots(roots);
+      const res = await developerAsk({
         question,
-        undefined,
-        repoId ?? undefined,
-        model,
-        projectId ?? undefined,
-      );
+        project_id: projectId ?? undefined,
+        work_item_id: workItemId ?? undefined,
+        repository_id: ids[0],
+        repository_ids: ids,
+      });
       setAnswer(res.answer || "");
-      setContextUsed(res.context_used || null);
+      setContextUsed(contextFromDeveloperPi(res.project_intelligence));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ask failed");
     } finally {
@@ -650,7 +680,11 @@ function AskPane({
           Create Plan
         </button>
       </div>
-      {error ? <p className="mt-1 text-rose-600">{error}</p> : null}
+      {error ? (
+        <p className="mt-1 text-rose-600" data-testid="mentrix-coding-agent-ask-error">
+          {error}
+        </p>
+      ) : null}
       <ContextUsedStrip used={contextUsed} />
       {answer ? (
         <pre className="mt-2 flex-1 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px]" data-testid="mentrix-coding-agent-ask-answer">
@@ -677,7 +711,7 @@ function PlanPane({
   roots: CodingAgentMissionRoot[];
   workspaceRoot: string;
   model: string;
-  onApproved: () => void;
+  onApproved: (mission: CodingAgentMission) => void;
 }) {
   const [goal, setGoal] = useState(goalSeed);
   const [markdown, setMarkdown] = useState("");
@@ -711,16 +745,16 @@ function PlanPane({
     setBusy(true);
     setError(null);
     try {
-      const res = await generatePlan(
-        g,
-        undefined,
-        undefined,
-        roots[0]?.id,
-        model,
-        projectId ?? undefined,
-      );
+      const ids = repoIdsFromRoots(roots);
+      const res = await developerPlan({
+        goal: g,
+        project_id: projectId ?? undefined,
+        work_item_id: workItemId ?? undefined,
+        repository_id: ids[0],
+        repository_ids: ids,
+      });
       setMarkdown(res.plan || "");
-      setContextUsed(res.context_used || null);
+      setContextUsed(contextFromDeveloperPi(res.project_intelligence));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Revise failed");
     } finally {
@@ -733,11 +767,15 @@ function PlanPane({
       setError("Save a PLAN.md before Approve & Build");
       return;
     }
+    if (!roots.length) {
+      setError("Authorize a local workspace root before Approve & Build");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown });
-      const mission = await codingAgentCreateMission({
+      const created = await codingAgentCreateMission({
         goal: goal.trim() || "Approved PLAN",
         project_id: projectId,
         work_item_id: workItemId,
@@ -746,10 +784,14 @@ function PlanPane({
         workspace_parent: workspaceRoot,
         propose_if_empty: true,
       });
-      if (mission.phase === "awaiting_plan_approval") {
-        await codingAgentApprovePlan(mission.id);
+      onApproved(created);
+      if (created.phase === "awaiting_plan_approval") {
+        void codingAgentApprovePlan(created.id)
+          .then(onApproved)
+          .catch(() => {
+            /* Agent tab polls / shows blockers; PLAN already handed off. */
+          });
       }
-      onApproved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Approve & Build failed");
     } finally {
@@ -774,7 +816,11 @@ function PlanPane({
         placeholder="## Plan"
         data-testid="mentrix-coding-agent-plan-md"
       />
-      {error ? <p className="text-rose-600">{error}</p> : null}
+      {error ? (
+        <p className="text-rose-600" data-testid="mentrix-coding-agent-plan-error">
+          {error}
+        </p>
+      ) : null}
       <ContextUsedStrip used={contextUsed} />
       <div className="mt-2 flex flex-wrap gap-1">
         <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-slate-300 px-2 py-1" data-testid="mentrix-coding-agent-save-plan">

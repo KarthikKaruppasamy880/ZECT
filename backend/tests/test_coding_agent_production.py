@@ -436,3 +436,26 @@ def test_mission_http_lifecycle(ws, authed_client):
     got = authed_client.get(f"/api/coding-agent/missions/{mid}")
     assert got.json()["phase"] == "ready_to_merge"
 
+
+def test_mission_http_plan_body_and_empty_roots(ws, authed_client):
+    empty = authed_client.post("/api/coding-agent/missions", json={"goal": "no roots"})
+    assert empty.status_code == 400, empty.text
+    assert "authorized_roots_required" in empty.text
+
+    repo = _init_repo(ws / "askplan", {"readme.txt": "marker_unique_zoas_lattice\n"})
+    created = authed_client.post(
+        "/api/coding-agent/missions",
+        json={
+            "goal": "Approved PLAN",
+            "roots": [{"id": 44, "label": "zoas", "path": str(repo)}],
+            "plan": "# PLAN\nTouch marker_unique_zoas_lattice\n",
+            "workspace_parent": str(ws / "wt-askplan"),
+            "propose_if_empty": True,
+        },
+    )
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert "marker_unique_zoas_lattice" in (body.get("plan") or "")
+    assert body.get("propose_if_empty") is True
+    assert "mission_start_contract" not in created.text
+

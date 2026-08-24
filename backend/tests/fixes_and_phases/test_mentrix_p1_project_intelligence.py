@@ -134,6 +134,44 @@ def test_developer_ask_uses_live_pi(db: Session, tmp_path, monkeypatch):
         assert isinstance(pack, dict)
 
 
+def test_developer_ask_cites_registered_local_file(db: Session, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("ZECT_MODEL_FALLBACK_POLICY", "never")
+    marker = "LATTICE_INGEST_TOKEN_ZXQ99"
+    repo_dir = tmp_path / "zoas-fixture"
+    repo_dir.mkdir()
+    (repo_dir / "lattice_ingest.py").write_text(
+        f'"""{marker} documents Lattice ingest."""\nINGEST_TOKEN = "{marker}"\n',
+        encoding="utf-8",
+    )
+    from app.models import Project, Repo
+
+    project = Project(name="ask-cite-local", description="fixture", status="active")
+    db.add(project)
+    db.flush()
+    repo = Repo(
+        project_id=project.id,
+        owner="local",
+        repo_name="zoas-fixture",
+        default_branch="main",
+        clone_status="cloned",
+        local_path=str(repo_dir),
+    )
+    db.add(repo)
+    db.commit()
+    db.refresh(repo)
+    svc = MentrixDeveloperService(db)
+    out = svc.ask(
+        question=f"What is {marker} and which file defines INGEST_TOKEN?",
+        project_id=project.id,
+        repository_id=repo.id,
+        repository_ids=[repo.id],
+    )
+    blob = (out.get("answer") or "") + json.dumps(out.get("context_pack") or {})
+    assert marker in blob
+    assert "lattice_ingest.py" in blob
+
+
 def test_fabric_handoff_requires_approved_plan(db: Session, tmp_path, monkeypatch):
     monkeypatch.setenv("ZECT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     monkeypatch.setenv("ZECT_MODEL_FALLBACK_POLICY", "never")

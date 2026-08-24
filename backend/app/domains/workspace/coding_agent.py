@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Iterator
+from typing import Any, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.adapters.coding_runtime import get_mentrix_native_runtime
@@ -178,6 +178,26 @@ class MissionCreate(BaseModel):
     workspace_parent: str = ""
     propose_if_empty: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def accept_ui_aliases(cls, data: Any) -> Any:
+        """Accept PLAN UI aliases (plan, workspace_parent, propose_if_empty)."""
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        if not str(out.get("plan") or "").strip():
+            alias_plan = out.get("plan")
+            if alias_plan:
+                out["plan"] = alias_plan
+        if not str(out.get("workspace_parent") or "").strip():
+            alias_ws = out.get("workspace_parent") or out.get("workspace_id")
+            if alias_ws:
+                out["workspace_parent"] = alias_ws
+        if "propose_if_empty" not in out:
+            if "propose_if_empty" in out:
+                out["propose_if_empty"] = out["propose_if_empty"]
+        return out
+
 
 class MissionRepair(BaseModel):
     patches_by_repo: dict[str, list] = Field(default_factory=dict)
@@ -225,6 +245,8 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TypeError as exc:
+        raise HTTPException(status_code=500, detail=f"mission_start_contract:{exc}") from exc
 
 
 @router.get("/missions/{mission_id}")

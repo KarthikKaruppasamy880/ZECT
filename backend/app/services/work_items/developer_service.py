@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -22,7 +25,7 @@ from app.domains.work_items.status import (
 from app.models import MentrixRun, WorkItem
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.work_items.checkpoints import load_execution_state, record_checkpoint
-from app.services.work_items.context_engine import MentrixContextEngine
+from app.services.work_items.context_engine import MentrixContextEngine, ProvenanceItem
 from app.services.work_items.evidence_verifier import EvidenceVerifier
 from app.services.work_items.fallback_policy import resolve_model_route
 from app.services.work_items.project_intelligence import ProjectIntelligenceService
@@ -144,6 +147,10 @@ class MentrixDeveloperService:
                     web_items = []
         except Exception:  # noqa: BLE001
             pass
+        file_items = self._workspace_file_items(
+            repository_ids=[int(rid)] if rid else [],
+            query=goal,
+        )
         pack = self.context_engine.build(
             work_item_id=wi.id,
             repository_id=rid,
@@ -154,9 +161,87 @@ class MentrixDeveloperService:
             memory_hits=snap.memory,
             lattice_hits=list((snap.lattice or {}).get("hits") or []),
             blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
-            extra_items=list(doc_items) + list(web_items),
+            extra_items=list(doc_items) + list(web_items) + file_items,
         )
         return {"pack": pack.to_dict(), "pi": snap.to_dict(), "pack_obj": pack}
+
+    _ASK_STOP = frozenset(
+        {
+            "what",
+            "which",
+            "where",
+            "when",
+            "this",
+            "that",
+            "with",
+            "from",
+            "file",
+            "files",
+            "does",
+            "define",
+            "defines",
+            "token",
+        }
+    )
+
+    def _workspace_file_items(self, *, repository_ids: list[int], query: str) -> list[ProvenanceItem]:
+        """Grep authorized local roots so ASK is file-grounded before Lattice is indexed."""
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+        from app.models import Repo
+
+        tokens = [
+            t
+            for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query or "")
+            if t.lower() not in self._ASK_STOP
+        ]
+        tokens = sorted(set(tokens), key=len, reverse=True)[:5]
+        if not tokens or not repository_ids:
+            return []
+        regexes = [re.compile(re.escape(t), re.IGNORECASE) for t in tokens]
+        skip_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+        items: list[ProvenanceItem] = []
+        for rid in repository_ids:
+            repo = self.db.query(Repo).filter(Repo.id == int(rid)).first()
+            local = str(getattr(repo, "local_path", "") or "") if repo else ""
+            if not local:
+                continue
+            try:
+                root = path_under_allowed_roots(local)
+            except ValueError:
+                continue
+            if not root.is_dir():
+                continue
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.startswith(".")]
+                for name in filenames:
+                    if name.startswith("."):
+                        continue
+                    fpath = Path(dirpath) / name
+                    try:
+                        if fpath.stat().st_size > 400_000:
+                            continue
+                        text = fpath.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    rel = str(fpath.relative_to(root)).replace("\\", "/")
+                    for i, line in enumerate(text.splitlines(), 1):
+                        if any(rx.search(line) for rx in regexes):
+                            items.append(
+                                ProvenanceItem(
+                                    source_type="workspace_file",
+                                    source_id=f"{rel}:{i}",
+                                    content=f"{rel}:{i}: {line.strip()[:240]}",
+                                    repository=str(rid),
+                                    freshness="current",
+                                    verification_state="file_search",
+                                    selection_reason="authorized_local_grep",
+                                    retrieval_score=1.0,
+                                )
+                            )
+                            if len(items) >= 12:
+                                return items
+                            break
+        return items
 
     def _build_multi_repo(
         self,
@@ -274,9 +359,18 @@ class MentrixDeveloperService:
             payload={"question": question[:500], "telemetry": tel},
             commit=True,
         )
+        answer = str(result.get("answer") or "")
+        pack_obj = built.get("pack_obj")
+        source_lines = [
+            str(getattr(it, "content", "") or "")
+            for it in (getattr(pack_obj, "items", None) or [])
+            if str(getattr(it, "source_type", "") or "") == "workspace_file"
+        ]
+        if source_lines and not any(line.split(":", 1)[0] in answer for line in source_lines if line):
+            answer = answer.rstrip() + "\n\nSources:\n" + "\n".join(source_lines[:8])
         return {
             "work_item_id": wi.id,
-            "answer": result.get("answer"),
+            "answer": answer,
             "context_pack": built["pack"],
             "context_by_repository": built.get("context_by_repository") or [],
             "affected_repos": built.get("affected_repos") or [],

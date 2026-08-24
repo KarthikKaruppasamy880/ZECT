@@ -393,7 +393,7 @@ def git_branches(repo_path: str):
 def git_pull(repo_path: str, remote: str = "origin"):
     """Pull latest changes from remote."""
     path = _validate_repo(repo_path)
-    result = _run_git(path, ["pull", remote], timeout=60)
+    result = _run_git(path, ["pull", "--ff-only", remote], timeout=60)
     if result["exit_code"] != 0:
         raise HTTPException(status_code=500, detail=f"git pull failed: {result['stderr']}")
     return {"status": "pulled", "output": result["stdout"] + result["stderr"]}

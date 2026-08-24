@@ -114,6 +114,7 @@ export default function MentrixCodingAgentPanel({
             onClick={() => setTab("agent")}
           >
             AGENT
+            <span className="ml-0.5 font-normal opacity-80">Ship/PR</span>
           </button>
           <button
             type="button"
@@ -122,6 +123,7 @@ export default function MentrixCodingAgentPanel({
             onClick={() => setTab("history")}
           >
             HISTORY
+            <span className="ml-0.5 font-normal opacity-80">Implement</span>
           </button>
           <div className="origin-right scale-90">
             <ModelSelector
@@ -222,6 +224,11 @@ function MissionPane({
     setError(null);
     try {
       const next = await fn();
+      if (next.mission_created === false || next.phase === "synced") {
+        setMission(null);
+        setError(next.message || "Pulled authorized roots. Lattice is STALE. No coding mission started.");
+        return;
+      }
       setMission(next);
       const files = next.files || [];
       if (files.length) onFilesChanged?.(files);
@@ -283,7 +290,7 @@ function MissionPane({
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           disabled={busy}
-          placeholder="Describe the change. PLAN must be approved before worktrees or edits."
+          placeholder="Describe the change. Approve &amp; Build implements it in a worktree, then this tab ships the PR. Pull-latest on clones does not start a mission."
           className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
           rows={2}
           data-testid="mentrix-coding-agent-mission-goal"
@@ -616,7 +623,7 @@ function AskPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-ask">
-      <p className="text-[10px] text-slate-500">ASK is read-only — this path never edits files.</p>
+      <p className="text-[10px] text-slate-500">ASK is Q&amp;A only — this path never edits files. Use PLAN → Approve &amp; Build or Implement chat to change code.</p>
       <textarea
         value={q}
         onChange={(e) => setQ(e.target.value)}
@@ -752,7 +759,7 @@ function PlanPane({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-plan-mode">
-      <p className="text-[10px] text-slate-500">PLAN.md is scratch in .zect/plans (gitignored). Zero edits until Approve &amp; Build.</p>
+      <p className="text-[10px] text-slate-500">PLAN.md is scratch in .zect/plans (gitignored). Approve &amp; Build starts the Mentrix implementer in an isolated worktree (same tool loop as Implement chat). Zero edits until then.</p>
       <input
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
@@ -808,7 +815,7 @@ function HistoryPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="mentrix-coding-agent-history">
       <div className="max-h-[40%] overflow-auto p-2 text-xs">
-        <p className="text-[10px] text-slate-500">Saved PLAN.md versions. Chat below is interactive (not ASK).</p>
+        <p className="text-[10px] text-slate-500">Saved PLAN.md versions. Chat below is Implement (live tool loop). Companion never edits code. Ship/PR is the AGENT tab.</p>
         {rows.length === 0 ? <p className="mt-2 text-slate-400">No saved plans yet.</p> : null}
         <ul className="mt-2 space-y-2">
           {rows.map((p) => (
@@ -971,8 +978,7 @@ function ChatPane({
       <div className="flex-1 space-y-2 overflow-auto px-3 py-2 text-xs" data-testid="mentrix-coding-agent-log">
         {lines.length === 0 ? (
           <p className="text-slate-500">
-            Chat uses the native tool loop in this workspace. Production missions (PLAN, worktrees, sibling
-            blocking, git approval) live on the Mission tab.
+            Chat is Implement: native tool loop in this workspace. AGENT is Ship/PR (worktrees, sibling gates, git approval). Companion does not write code.
           </p>
         ) : (
           lines.map((ln) => (

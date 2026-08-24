@@ -195,6 +195,7 @@ export default function DeveloperWorkspace() {
 
   const [showImport, setShowImport] = useState(false);
   const [pullingRoot, setPullingRoot] = useState(false);
+  const [pullingAllRoots, setPullingAllRoots] = useState(false);
   const [latticeStale, setLatticeStale] = useState(false);
   const userToggledImport = useRef(false);
   const userClosedAllTerminals = useRef(false);
@@ -369,6 +370,24 @@ export default function DeveloperWorkspace() {
       setPullingRoot(false);
     }
   }, [rootPath, refreshGit]);
+
+  const handlePullAllRoots = useCallback(async () => {
+    const paths = visibleRoots.map((r) => r.local_path).filter((p): p is string => Boolean(p));
+    if (!paths.length) return;
+    setPullingAllRoots(true);
+    try {
+      for (const p of paths) {
+        await gitPull(p);
+      }
+      setLatticeStale(true);
+      if (rootPath) await refreshGit(rootPath);
+      showToast("success", `Pulled ${paths.length} workspace root(s). Lattice is STALE until re-index.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Pull all failed");
+    } finally {
+      setPullingAllRoots(false);
+    }
+  }, [visibleRoots, rootPath, refreshGit]);
 
   const refreshAgentMarkers = useCallback(async () => {
     try {
@@ -1012,6 +1031,16 @@ export default function DeveloperWorkspace() {
         >
           {pullingRoot ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
           Pull
+        </button>
+        <button
+          type="button"
+          data-testid="workspace-git-pull-all"
+          disabled={!visibleRoots.some((r) => r.local_path) || pullingAllRoots}
+          onClick={() => void handlePullAllRoots()}
+          className="inline-flex items-center gap-1 rounded bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 hover:bg-teal-50 disabled:opacity-40"
+        >
+          {pullingAllRoots ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+          Pull all roots
         </button>
         <Link
           to={latticeStale ? "/lattice?stale=1" : "/lattice"}

@@ -21,6 +21,7 @@ def run_mentrix_native_build(
     project_id: int | None = None,
     skill_id: int | None = None,
     project_key: str | None = None,
+    max_steps: int | None = None,
 ) -> dict[str, Any]:
     """Execute Mentrix Coding Agent against workspace; return builder-shaped dict."""
     from app.adapters.coding_runtime import get_mentrix_native_runtime, selected_coding_engine
@@ -87,6 +88,12 @@ def run_mentrix_native_build(
         if timeout_s is not None
         else os.getenv("MENTRIX_CODING_AGENT_BUILD_TIMEOUT", "240")
     )
+    steps = int(
+        max_steps
+        if max_steps is not None
+        else os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS")
+        or os.getenv("MENTRIX_CODING_AGENT_MAX_STEPS", "48")
+    )
     enriched_goal = goal
     if project_id is not None or project_key:
         enriched_goal = (
@@ -109,7 +116,7 @@ def run_mentrix_native_build(
         auto_approve_edits=True,
         expected_files=list(expected_files or []),
         model=model,
-        max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MAX_STEPS", "24")),
+        max_steps=steps,
         project_id=project_id,
         skill_id=skill_id,
         project_key=project_key,

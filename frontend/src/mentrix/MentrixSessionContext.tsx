@@ -267,14 +267,8 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
   }>({ mode: "idle", lastMark: "", lastMs: 0, ttsEngine: "" });
   const [computerMode, setComputerMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false);
-  const [showArtifacts, setShowArtifacts] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
-    try {
-      return window.matchMedia("(min-width: 1024px)").matches;
-    } catch {
-      return true;
-    }
-  });
+  const [showArtifacts, setShowArtifacts] = useState(false);
+  const prevBoardLen = useRef(0);
   const [pending, setPending] = useState<PendingConfirm[]>([]);
   const [turnId, setTurnId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1020,6 +1014,13 @@ export function MentrixSessionProvider({ children }: { children: ReactNode }) {
     if (lastErr) setStatusLine(`Voice: ${lastErr}`);
     else setStatusLine("Present / Narrate complete");
   }, [board, messages]);
+
+  useEffect(() => {
+    if (board.length > prevBoardLen.current) {
+      setShowArtifacts(true);
+    }
+    prevBoardLen.current = board.length;
+  }, [board.length]);
 
   const onAllow = useCallback(
     async (tools: string[]) => {

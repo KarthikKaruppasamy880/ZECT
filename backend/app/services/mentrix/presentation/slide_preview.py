@@ -63,35 +63,15 @@ def invalidate_slide_previews(pptx: Path) -> None:
 
 
 def _shapes(xml: bytes) -> list[dict[str, Any]]:
-    """Legacy p:sp boxes plus graphicFrame/pic from extract_slide_blocks."""
+    """Boxes from extract_slide_blocks (group-absolute EMU; unused placeholders skipped)."""
     out: list[dict[str, Any]] = []
-    try:
-        root = ET.fromstring(xml)
-    except ET.ParseError:
-        root = None
-    if root is not None:
-        for sp in root.findall(f".//{{{_NS_P}}}sp"):
-            off = sp.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}off")
-            ext = sp.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}ext")
-            texts = [
-                t.text or ""
-                for t in sp.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/main}t")
-            ]
-            out.append(
-                {
-                    "kind": "shape",
-                    "x": int(off.get("x") or 0) if off is not None else 0,
-                    "y": int(off.get("y") or 0) if off is not None else 0,
-                    "cx": int(ext.get("cx") or 1) if ext is not None else 1,
-                    "cy": int(ext.get("cy") or 1) if ext is not None else 1,
-                    "text": " ".join(t.strip() for t in texts if t.strip())[:180],
-                }
-            )
     for block in extract_slide_blocks(xml):
         geo = block.get("geometry") or {}
         kind = str(block.get("kind") or "shape")
-        if kind in {"text", "shape"}:
-            continue
+        content = block.get("content") if isinstance(block.get("content"), dict) else {}
+        text = str(content.get("text") or content.get("title") or content.get("alt") or "")
+        if kind in {"chart", "table", "image"}:
+            text = kind.upper() + (f" {text}" if text and text.lower() != kind else "")
         out.append(
             {
                 "kind": kind,
@@ -99,7 +79,7 @@ def _shapes(xml: bytes) -> list[dict[str, Any]]:
                 "y": int(geo.get("y") or 0),
                 "cx": int(geo.get("cx") or 1),
                 "cy": int(geo.get("cy") or 1),
-                "text": str((block.get("content") or {}).get("title") or kind).upper()[:40],
+                "text": text[:80],
             }
         )
     return out
@@ -147,7 +127,7 @@ def render_slide_png_bytes(data: bytes, index: int = 0, *, width: int = 960) -> 
 
 
 def _try_com_png(pptx: Path, index: int, dest: Path) -> bool:
-    if os.environ.get("ZECT_LIVE_PPT_COM", "").strip() != "1":
+    if os.environ.get("ZECT_LIVE_PPT_COM", "").strip() == "0":
         return False
     if os.name != "nt":
         return False
@@ -240,3 +220,11 @@ def cache_slide_preview(pptx: Path, index: int = 0, *, force: bool = False) -> t
         kind = KIND_OOXML
     _write_kind(dest, kind)
     return dest, kind
+
+
+_read_kind = _read_kind
+_write_kind = _write_kind
+render_slide_png_bytes = render_slide_png_bytes
+cache_slide_preview = cache_slide_preview
+_try_com_png = _try_com_png
+_try_com_png = _try_com_png

@@ -88,6 +88,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [aiAttach, setAiAttach] = useState<string[]>([]);
   const [aiAttachLabels, setAiAttachLabels] = useState<string[]>([]);
   const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [slideEmu, setSlideEmu] = useState({ cx: 9144000, cy: 5143500 });
 
   const persist = useCallback((path: string, next: Slide[], fp: string) => {
     try {
@@ -128,6 +129,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       setSavedFp(fingerprint(next));
       setSlides(next);
       setFilename(parsed.filename || "");
+      setSlideEmu({
+        cx: parsed.slide_cx && parsed.slide_cx > 0 ? parsed.slide_cx : 9144000,
+        cy: parsed.slide_cy && parsed.slide_cy > 0 ? parsed.slide_cy : 5143500,
+      });
       setSelected(0);
       setSelectedBlockId(null);
       setUndoStack([]);
@@ -666,7 +671,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                 className="pointer-events-none absolute bottom-1 left-1 right-1 rounded bg-amber-50/90 px-2 py-0.5 text-[10px] text-amber-900"
                 data-testid="present-editor-preview-kind"
               >
-                Layout preview — install PowerPoint for true slides
+                Approximate layout — PowerPoint did not rasterize this slide
               </p>
             ) : null}
             {visualBlocks.length ? (
@@ -682,13 +687,16 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                   const selectedHit = block.id === selectedBlockId;
                   const geo = block.geometry;
                   const hasGeo = Boolean(geo && (geo.cx || 0) > 0 && (geo.cy || 0) > 0);
+                  const raster = previewKind === "com" || previewKind === "libreoffice";
+                  const emuCx = slideEmu.cx || 9144000;
+                  const emuCy = slideEmu.cy || 5143500;
                   const style = hasGeo
                     ? {
                         position: "absolute" as const,
-                        left: `${(100 * (geo?.x || 0)) / 9144000}%`,
-                        top: `${(100 * (geo?.y || 0)) / 5143500}%`,
-                        width: `${(100 * (geo?.cx || 1)) / 9144000}%`,
-                        height: `${(100 * (geo?.cy || 1)) / 5143500}%`,
+                        left: `${(100 * (geo?.x || 0)) / emuCx}%`,
+                        top: `${(100 * (geo?.y || 0)) / emuCy}%`,
+                        width: `${(100 * (geo?.cx || 1)) / emuCx}%`,
+                        height: `${(100 * (geo?.cy || 1)) / emuCy}%`,
                       }
                     : undefined;
                   return (
@@ -700,7 +708,13 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                       style={style}
                       className={`pointer-events-auto text-left text-[10px] text-teal-900 ${
                         hasGeo
-                          ? `rounded border-2 bg-transparent ${selectedHit ? "border-teal-600" : "border-teal-400/40"}`
+                          ? `rounded border-2 bg-transparent ${
+                              selectedHit
+                                ? "border-teal-600"
+                                : raster
+                                  ? "border-teal-400/20"
+                                  : "border-teal-400/40"
+                            }`
                           : `rounded border-2 bg-teal-500/5 ${selectedHit ? "border-teal-600" : "border-teal-400/70"}`
                       }`}
                       onClick={() => setSelectedBlockId(block.id || null)}
@@ -709,6 +723,8 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                       }}
                     >
                       {hasGeo ? (
+                        <span className="sr-only">{block.kind}</span>
+                      ) : raster ? (
                         <span className="sr-only">{block.kind}</span>
                       ) : (
                         <span className="block truncate px-1 py-0.5 uppercase">{block.kind}</span>

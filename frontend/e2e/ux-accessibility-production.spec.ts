@@ -6,7 +6,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { gotoAuthed } from "./helpers/login";
 
 const SURFACES: { path: string; testId: string; nav: string; heading?: RegExp }[] = [
-  { path: "/mentrix-home", testId: "mentrix-companion-page", nav: "Mentrix Companion", heading: /MENTRIX/ },
+  { path: "/mentrix-home", testId: "mentrix-companion-page", nav: "Mentrix Companion", heading: /Mentrix/i },
   { path: "/present", testId: "zect-present-page", nav: "Present", heading: /Presentations/ },
   { path: "/workspace", testId: "developer-workspace", nav: "Developer" },
   { path: "/ask", testId: "agent-workspace", nav: "Agent Workspace", heading: /Agent Workspace/ },

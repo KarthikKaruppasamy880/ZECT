@@ -8,7 +8,7 @@ test.describe("Mentrix Companion", () => {
     await expect(page.getByTestId("mentrix-companion-more")).toBeVisible();
     await expect(page.getByTestId("mentrix-companion-artifacts")).toHaveCount(0);
     await expect(
-      page.getByTestId("mentrix-companion-page").getByRole("heading", { name: /MENTRIX/i }),
+      page.getByTestId("mentrix-companion-page").getByRole("heading", { name: /Mentrix/i }),
     ).toBeVisible();
     await expect(page.getByTestId("mentrix-connect-voice")).toBeVisible();
     await expect(page.getByTestId("mentrix-greeting")).toBeVisible();

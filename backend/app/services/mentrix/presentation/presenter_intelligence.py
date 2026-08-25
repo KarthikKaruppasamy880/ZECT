@@ -15,11 +15,23 @@ def grounded_slide_script(slide: dict[str, Any], *, deck_context: str = "", slid
     notes = str(slide.get("notes") or "").strip()
     text = str(slide.get("text") or "").strip()
     visuals = [str(v) for v in (slide.get("visuals") or []) if str(v).strip()]
+    block_text: list[str] = []
+    for raw in slide.get("blocks") or []:
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind") or "")
+        content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+        if kind in {"chart", "table", "image", "diagram", "group"}:
+            visuals.append(kind)
+        if kind in {"text", "quote"}:
+            blob = str(content.get("text") or "").strip()
+            if blob:
+                block_text.append(blob)
     n = slide_index + 1
     parts: list[str] = [f"Slide {n} of {slide_count}."]
     if deck_context.strip():
         parts.append(f"This deck is about {deck_context.strip()[:180]}.")
-    body = notes or text
+    body = notes or text or "\n".join(block_text)
     if body:
         parts.append(body)
     else:

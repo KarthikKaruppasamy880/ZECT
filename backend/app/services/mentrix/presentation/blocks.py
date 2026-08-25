@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-BLOCK_KINDS = frozenset({"text", "bullet", "body", "image", "chart", "table", "metric", "quote", "diagram", "shape"})
-TEXT_KINDS = frozenset({"text", "bullet", "body"})
-VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram", "shape"})
+BLOCK_KINDS = frozenset(
+    {"text", "bullet", "body", "title", "subtitle", "image", "chart", "table", "metric", "quote", "diagram", "shape", "group"}
+)
+TEXT_KINDS = frozenset({"text", "bullet", "body", "title", "subtitle"})
+VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram", "shape", "group"})
 CHART_TYPES = frozenset(
     {
         "column",
@@ -30,7 +32,7 @@ CHART_TYPES = frozenset(
 )
 FIT_MODES = frozenset({"contain", "cover", "stretch"})
 PROVENANCE_SOURCES = frozenset({"example", "generated", "evidence", "upload", "document", "project", "web"})
-MAX_BLOCKS_PER_SLIDE = 16
+MAX_BLOCKS_PER_SLIDE = 80
 MAX_TABLE_ROWS = 24
 MAX_TABLE_COLS = 8
 RENDER_TABLE_ROWS = 12
@@ -87,10 +89,40 @@ def _text_content(row: dict[str, Any]) -> dict[str, Any]:
     return {"text": text, "role": _str(nested.get("role") or row.get("role") or "body", limit=24) or "body"}
 
 
+def _safe_data_url(raw: Any) -> str:
+    text = str(raw or "")
+    if not text.startswith("data:image/") or "," not in text:
+        return ""
+    header = text.split(",", 1)[0]
+    mime = header[11:].split(";")[0].lower()
+    if mime not in {"png", "jpeg", "jpg", "gif", "webp"}:
+        return ""
+    if len(text) > 400_000:
+        return ""
+    return text
+
+
+def _identity_fields(row: dict[str, Any]) -> dict[str, Any]:
+    nested = row.get("content") if isinstance(row.get("content"), dict) else {}
+    out: dict[str, Any] = {}
+    name = _str(nested.get("shape_name") or row.get("shape_name"), limit=120)
+    if name:
+        out["shape_name"] = name
+    fill = _str(nested.get("fill") or row.get("fill"), limit=16)
+    hex_ok = fill.startswith("#") and len(fill) == 7 and all(c in "0123456789abcdefABCDEF" for c in fill[1:])
+    if hex_ok:
+        out["fill"] = fill
+    if nested.get("locked") or row.get("locked"):
+        out["locked"] = True
+        out["layer"] = _str(nested.get("layer") or "master", limit=24) or "master"
+    return out
+
+
 def _image_content(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     nested = row.get("content") if isinstance(row.get("content"), dict) else {}
     asset_id = _str(row.get("asset_id") or nested.get("asset_id"), limit=80)
     url = _str(row.get("url") or nested.get("url"), limit=500)
+    data_url = _safe_data_url(nested.get("data_url") or row.get("data_url"))
     errors: list[str] = []
     if url:
         errors.append("image_url_rejected")
@@ -103,7 +135,9 @@ def _image_content(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "caption": _str(nested.get("caption") or row.get("caption"), limit=200),
         "fit": fit,
     }
-    if not asset_id:
+    if data_url:
+        content["data_url"] = data_url
+    if not asset_id and not data_url:
         errors.append("image_asset_required")
     return content, errors
 
@@ -223,6 +257,12 @@ def normalize_block(raw: Any, *, slide_index: int, ordinal: int) -> dict[str, An
     errors: list[str] = []
     if kind in TEXT_KINDS:
         content = _text_content(raw)
+        nested = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+        role = _str(raw.get("role") or nested.get("role"), limit=24)
+        if kind in {"title", "subtitle", "bullet", "body"}:
+            content["role"] = kind if kind != "bullet" else "bullets"
+        elif role:
+            content["role"] = role
         if not content["text"]:
             return None
         kind = "text"
@@ -244,6 +284,7 @@ def normalize_block(raw: Any, *, slide_index: int, ordinal: int) -> dict[str, An
         }
     else:
         content = _diagram_content(raw)
+    content = {**content, **_identity_fields(raw)}
     incoming_val = raw.get("validation") if isinstance(raw.get("validation"), dict) else {}
     extra = [_str(e, limit=80) for e in list(incoming_val.get("errors") or [])[:8]]
     block_id = _str(raw.get("id"), limit=64) or stable_id(slide_index, kind, ordinal)

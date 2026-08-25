@@ -5,7 +5,81 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.services.mentrix.presentation.blocks import CHART_TYPES
+from app.services.mentrix.presentation.blocks import CHART_TYPES, example_diagram_block, example_table_block
+from app.services.mentrix.presentation.geometry import boxes_overlap, normalize_geometry
+
+
+def _points_from_slide(slide_text: str, notes: str, blocks: list[dict[str, Any]]) -> list[str]:
+    points: list[str] = []
+    for raw in blocks:
+        content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+        kind = str(raw.get("kind") or "")
+        if kind in {"text", "quote", "bullet", "body"}:
+            blob = str(content.get("text") or "").strip()
+            for line in blob.splitlines():
+                cleaned = re.sub(r"^[\s•\-\*]+", "", line).strip()
+                if cleaned:
+                    points.append(cleaned[:80])
+    if not points:
+        for line in f"{slide_text}\n{notes}".splitlines():
+            cleaned = re.sub(r"^[\s•\-\*]+", "", line).strip()
+            if cleaned:
+                points.append(cleaned[:80])
+    return points[:8]
+
+
+def _document_tree_patch(
+    prompt: str,
+    *,
+    slide_text: str,
+    notes: str,
+    blocks: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Deterministic PresentationDocument patches. Never invent numeric values."""
+    points = _points_from_slide(slide_text, notes, blocks)
+    if re.search(r"bullets?\s+to\s+diagram|into a diagram|make (this )?slide visual", prompt, re.I):
+        if len(points) < 2:
+            return None
+        diagram = example_diagram_block(0, len(blocks), nodes=points[:5])
+        return {"action": "bullets_to_diagram", "blocks": [*blocks, diagram]}
+    if re.search(r"comparison table|add a table", prompt, re.I):
+        if not points:
+            return None
+        rows = [[p, "On slide"] for p in points[:4]]
+        table = example_table_block(0, len(blocks), headers=["Item", "Status"], rows=rows, title="Comparison")
+        return {"action": "add_table", "blocks": [*blocks, table]}
+    if re.search(r"reduce density|fewer bullets|first three", prompt, re.I):
+        kept = 0
+        next_blocks: list[dict[str, Any]] = []
+        for raw in blocks:
+            kind = str(raw.get("kind") or "")
+            content = raw.get("content") if isinstance(raw.get("content"), dict) else {}
+            if kind in {"text", "quote"} and kept < 3:
+                blob = str(content.get("text") or "")
+                lines = [ln for ln in blob.splitlines() if ln.strip()][:3]
+                next_blocks.append({**raw, "content": {**content, "text": "\n".join(lines) or blob}})
+                kept += 1
+            elif kind in {"text", "quote"} and kept >= 3:
+                continue
+            else:
+                next_blocks.append(raw)
+        text_out = "\n".join(points[:3]) if points else slide_text
+        return {"action": "reduce_density", "blocks": next_blocks, "text": text_out}
+    if re.search(r"fix layout", prompt, re.I):
+        laid = [dict(raw) for raw in blocks]
+        for i, raw in enumerate(laid):
+            gi = normalize_geometry(raw.get("geometry"))
+            if not gi:
+                continue
+            for j in range(i):
+                gj = normalize_geometry(laid[j].get("geometry"))
+                if not gj:
+                    continue
+                if boxes_overlap(gi, gj, pad=0):
+                    gi = {**gi, "y": gj["y"] + gj["cy"] + 80000}
+                    laid[i] = {**raw, "geometry": gi}
+        return {"action": "fix_layout", "blocks": laid}
+    return None
 
 _CHART_HITS: list[tuple[str, re.Pattern[str]]] = [
     ("radar", re.compile(r"\bradar\b", re.I)),
@@ -54,6 +128,7 @@ def patch_slide_from_prompt(
     selected_kind: str = "",
     selected_chart_type: str = "",
     attach_excerpts: list[str] | None = None,
+    blocks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return a typed JSON patch. Honest fail if nothing can be applied without inventing facts."""
     text = (prompt or "").strip()
@@ -61,6 +136,7 @@ def patch_slide_from_prompt(
         return {"ok": False, "error": "empty_prompt", "message": "Enter a prompt for this slide."}
 
     excerpts = [e.strip() for e in (attach_excerpts or []) if str(e).strip()]
+    current_blocks = [b for b in (blocks or []) if isinstance(b, dict)]
     chart_type = chart_type_from_prompt(text)
     layout = layout_from_prompt(text)
     wants_notes = bool(re.search(r"\b(rewrite|notes|speaker)\b", text, re.I))
@@ -78,6 +154,11 @@ def patch_slide_from_prompt(
 
     if chart_type:
         patch["action"] = "chart_type"
+        return patch
+
+    tree = _document_tree_patch(text, slide_text=slide_text, notes=notes, blocks=current_blocks)
+    if tree:
+        patch.update(tree)
         return patch
 
     if layout:

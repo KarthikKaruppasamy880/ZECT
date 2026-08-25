@@ -72,6 +72,7 @@ class SlideAiIn(BaseModel):
     selected_kind: str = ""
     selected_chart_type: str = ""
     attach_excerpts: list[str] = Field(default_factory=list)
+    blocks: list[dict] = Field(default_factory=list)
 
 
 @router.get("/audiences")
@@ -103,6 +104,7 @@ def slide_ai(body: SlideAiIn, current_user: CurrentUser = Depends(get_current_us
         selected_kind=body.selected_kind,
         selected_chart_type=body.selected_chart_type,
         attach_excerpts=body.attach_excerpts,
+        blocks=body.blocks,
     )
 
 

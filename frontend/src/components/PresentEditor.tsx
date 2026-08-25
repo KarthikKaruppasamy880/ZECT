@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileDown, HelpCircle, Redo2, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import SplitPane from "@/components/SplitPane";
 import PresentVisualBlocks from "@/components/PresentVisualBlocks";
 import PresentEditorRail, { newEditorBlock } from "@/components/PresentEditorRail";
 import PresentEditDataTable from "@/components/PresentEditDataTable";
-import { geometryPercentStyle, geometryValid, NUDGE_EMU } from "@/lib/presentGeometry";
+import PresentDocumentCanvas from "@/components/PresentDocumentCanvas";
+import { geometryValid, NUDGE_EMU } from "@/lib/presentGeometry";
+import { documentBlocks, slideTextFromBlocks } from "@/lib/presentDocument";
 import {
   mentrixAnalyzeDeck,
   mentrixParsePptxFromPath,
@@ -12,7 +14,6 @@ import {
   mentrixPresentQualityGate,
   mentrixPresentSaveNotes,
   mentrixPresentSlideAi,
-  mentrixPresentSlidePreview,
   mentrixPresentationAssetUpload,
   type PresentBlock,
   type PresentSlide,
@@ -29,7 +30,6 @@ type PresentEditorProps = {
 };
 
 const storageKey = (path: string) => `zect_present_editor:${path}`;
-const SELECTABLE = new Set(["chart", "table", "image", "quote", "metric", "shape"]);
 
 const fingerprint = (rows: Slide[]) =>
   rows
@@ -41,56 +41,20 @@ function cloneSlides(rows: Slide[]): Slide[] {
 }
 
 function SlideThumbPreview({
-  path,
-  index,
-  nonce,
-  blocks,
+  slide,
   slideEmu,
 }: {
-  path: string;
-  index: number;
-  nonce: number;
-  blocks?: PresentBlock[];
+  slide: PresentSlide;
   slideEmu: { cx: number; cy: number };
 }) {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    let active = true;
-    let created = "";
-    mentrixPresentSlidePreview(path, index)
-      .then((preview) => {
-        const u = preview.url;
-        if (!active) {
-          URL.revokeObjectURL(u);
-          return;
-        }
-        created = u;
-        setUrl(u);
-      })
-      .catch(() => {
-        if (active) setUrl("");
-      });
-    return () => {
-      active = false;
-      if (created) URL.revokeObjectURL(created);
-    };
-  }, [path, index, nonce]);
-  const overlays = (blocks || []).filter((b) => geometryValid(b.geometry));
   return (
-    <div className="relative mb-1 h-14 w-full overflow-hidden rounded border border-slate-200" data-testid={`present-editor-thumb-canvas-${index}`}>
-      {url ? <img src={url} alt="" className="h-full w-full object-cover" /> : null}
-      {overlays.map((block, i) => {
-        const style = geometryPercentStyle(block.geometry, slideEmu);
-        return (
-          <span
-            key={block.id || `${block.kind}-${i}`}
-            data-testid={`present-editor-thumb-hit-${index}-${block.kind}`}
-            className="pointer-events-none absolute border border-teal-500/40"
-            style={style}
-          />
-        );
-      })}
-    </div>
+    <PresentDocumentCanvas
+      slide={slide}
+      slideEmu={slideEmu}
+      interactive={false}
+      testId={`present-editor-thumb-canvas-${slide.index}`}
+      className="mb-1 h-14"
+    />
   );
 }
 
@@ -103,9 +67,6 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [filename, setFilename] = useState("");
   const [sourceFp, setSourceFp] = useState("");
   const [savedFp, setSavedFp] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [previewKind, setPreviewKind] = useState("");
-  const [previewNonce, setPreviewNonce] = useState(0);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(!studio);
   const [chat, setChat] = useState("");
@@ -119,13 +80,6 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [slideEmu, setSlideEmu] = useState({ cx: 9144000, cy: 5143500 });
   const [zoom, setZoom] = useState(100);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<{
-    id: string;
-    startX: number;
-    startY: number;
-    orig: { x: number; y: number; cx: number; cy: number };
-    mode: "move" | "resize";
-  } | null>(null);
 
   const persist = useCallback((path: string, next: Slide[], fp: string) => {
     try {
@@ -190,33 +144,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   }, [load]);
 
   const current = slides[selected];
-  const selectedBlock = (current?.blocks || []).find((b) => b.id && b.id === selectedBlockId) || null;
-
-  useEffect(() => {
-    let active = true;
-    let created = "";
-    if (!pptxPath || !current) {
-      setPreviewUrl("");
-      return;
-    }
-    mentrixPresentSlidePreview(pptxPath, selected, { force: previewNonce > 0 })
-      .then((preview) => {
-        if (!active) {
-          URL.revokeObjectURL(preview.url);
-          return;
-        }
-        created = preview.url;
-        setPreviewUrl(preview.url);
-        setPreviewKind(preview.kind || "");
-      })
-      .catch(() => {
-        if (active) setPreviewUrl("");
-      });
-    return () => {
-      active = false;
-      if (created) URL.revokeObjectURL(created);
-    };
-  }, [pptxPath, selected, current, previewNonce]);
+  const selectedBlock =
+    (current?.blocks || []).find((b) => b.id && b.id === selectedBlockId) ||
+    documentBlocks(current, slideEmu).find((b) => b.id && b.id === selectedBlockId) ||
+    null;
 
   const commitSlides = useCallback(
     (updater: (prev: Slide[]) => Slide[], opts?: { skipHistory?: boolean }) => {
@@ -324,7 +255,6 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       const out = await mentrixPresentSaveNotes(pptxPath, payload);
       persist(pptxPath, payload, sourceFp);
       setSavedFp(fingerprint(payload));
-      setPreviewNonce((n) => n + 1);
       setSaveState("saved");
       setStatus(
         out.ooxml_roundtrip
@@ -362,6 +292,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         selected_kind: selectedBlock?.kind || "",
         selected_chart_type: String(selectedBlock?.content?.chart_type || ""),
         attach_excerpts: aiAttach,
+        blocks: documentBlocks(current, slideEmu),
       });
       if (!out.ok) {
         setStatus(out.message || out.error || "Could not apply a typed patch.");
@@ -374,6 +305,15 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       }
       if (out.layout) {
         setStatus(`Layout ${out.layout} — mapped to imported master placeholders`);
+        return;
+      }
+      if (Array.isArray(out.blocks) && out.blocks.length) {
+        patchSlide(current.index, {
+          blocks: out.blocks,
+          ...(out.text ? { text: out.text } : {}),
+          ...(out.notes ? { notes: out.notes } : {}),
+        });
+        setStatus(`Applied ${out.action || "document"} patch to this slide.`);
         return;
       }
       if (out.notes || out.text) {
@@ -480,10 +420,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
     addBlock(block, "Chart");
   };
 
-  const visualBlocks = useMemo(
-    () => (current?.blocks || []).filter((b) => SELECTABLE.has(String(b.kind))),
-    [current],
-  );
+  const visualBlocks = useMemo(() => documentBlocks(current, slideEmu), [current, slideEmu]);
 
   const patchSelectedGeometry = useCallback(
     (next: { x: number; y: number; cx: number; cy: number }, opts?: { skipHistory?: boolean }) => {
@@ -785,13 +722,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                   selected === i ? "bg-teal-50 text-teal-900" : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                <SlideThumbPreview
-                  path={pptxPath}
-                  index={s.index}
-                  nonce={previewNonce}
-                  blocks={s.blocks}
-                  slideEmu={slideEmu}
-                />
+                <SlideThumbPreview slide={s} slideEmu={slideEmu} />
                 <div className="font-medium">Slide {s.index + 1}</div>
                 <div className="line-clamp-3 text-slate-500">{s.text || s.notes || "(empty)"}</div>
               </button>
@@ -828,147 +759,43 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
           <div className="flex h-full min-w-0 flex-1 flex-col gap-2 overflow-auto p-3">
             <div
               ref={canvasFrameRef}
-              className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100"
+              className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
               style={{ width: `${zoom}%`, maxWidth: "100%" }}
               data-testid="present-editor-canvas-frame"
             >
-            {previewUrl ? (
-              <img
-                src={previewUrl}
-                alt={`Slide ${current.index + 1} canvas`}
-                data-testid="present-editor-canvas"
-                className="max-h-full max-w-full object-contain"
-              />
-            ) : (
-              <div
-                data-testid="present-editor-canvas"
-                className="px-3 py-8 text-center text-xs text-slate-500"
-              >
-                Preview unavailable
-              </div>
-            )}
-            {previewKind === "ooxml" ? (
-              <p
-                className="pointer-events-none absolute bottom-1 left-1 right-1 rounded bg-amber-50/90 px-2 py-0.5 text-[10px] text-amber-900"
-                data-testid="present-editor-preview-kind"
-              >
-                Approximate layout — PowerPoint did not rasterize this slide
-              </p>
-            ) : null}
-            {visualBlocks.length ? (
-              <div
-                className="absolute inset-0"
-                data-testid="present-editor-block-overlay"
-              >
-                {visualBlocks.map((block, i) => {
-                  const selectedHit = block.id === selectedBlockId;
-                  const geo = block.geometry;
-                  const hasGeo = geometryValid(geo);
-                  const raster = previewKind === "com" || previewKind === "libreoffice";
-                  const emuCx = slideEmu.cx || 9144000;
-                  const emuCy = slideEmu.cy || 5143500;
-                  const style = geometryPercentStyle(geo, { cx: emuCx, cy: emuCy });
-                  const startDrag = (mode: "move" | "resize") => (e: ReactPointerEvent) => {
-                    if (!hasGeo || !block.id) return;
-                    e.stopPropagation();
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    dragRef.current = {
-                      id: block.id,
-                      startX: e.clientX,
-                      startY: e.clientY,
-                      orig: {
-                        x: geo?.x || 0,
-                        y: geo?.y || 0,
-                        cx: geo?.cx || 1,
-                        cy: geo?.cy || 1,
-                      },
-                      mode,
-                    };
-                    setSelectedBlockId(block.id);
-                  };
-                  const onMove = (e: ReactPointerEvent) => {
-                    const d = dragRef.current;
-                    if (!d || d.id !== block.id) return;
-                    const rect = canvasFrameRef.current?.getBoundingClientRect();
-                    if (!rect?.width || !rect.height) return;
-                    const dx = ((e.clientX - d.startX) / rect.width) * emuCx;
-                    const dy = ((e.clientY - d.startY) / rect.height) * emuCy;
-                    const next =
-                      d.mode === "resize"
-                        ? {
-                            x: d.orig.x,
-                            y: d.orig.y,
-                            cx: Math.max(1, Math.round(d.orig.cx + dx)),
-                            cy: Math.max(1, Math.round(d.orig.cy + dy)),
-                          }
-                        : {
-                            x: Math.round(d.orig.x + dx),
-                            y: Math.round(d.orig.y + dy),
-                            cx: d.orig.cx,
-                            cy: d.orig.cy,
-                          };
+              <div className="absolute inset-0" data-testid="present-editor-block-overlay">
+                <PresentDocumentCanvas
+                  slide={current}
+                  slideEmu={slideEmu}
+                  selectedId={selectedBlockId}
+                  testId="present-editor-canvas"
+                  className="h-full w-full"
+                  onSelect={setSelectedBlockId}
+                  onChangeText={(id, text) => {
+                    const nextBlocks = documentBlocks(current, slideEmu).map((b) =>
+                      b.id === id ? { ...b, content: { ...(b.content || {}), text } } : b,
+                    );
+                    patchSlide(current.index, { blocks: nextBlocks, text: slideTextFromBlocks({ ...current, blocks: nextBlocks }) });
+                  }}
+                  onDoubleClick={(block) => {
+                    if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
+                  }}
+                  onGeometry={(id, geo, opts) => {
                     commitSlides(
                       (prev) =>
                         prev.map((s) =>
                           s.index === current.index
                             ? {
                                 ...s,
-                                blocks: (s.blocks || []).map((b) =>
-                                  b.id === d.id ? { ...b, geometry: next } : b,
-                                ),
+                                blocks: documentBlocks(s, slideEmu).map((b) => (b.id === id ? { ...b, geometry: geo } : b)),
                               }
                             : s,
                         ),
-                      { skipHistory: true },
+                      opts,
                     );
-                  };
-                  return (
-                    <button
-                      key={block.id || `${block.kind}-${i}`}
-                      type="button"
-                      data-testid={`present-editor-block-hit-${block.kind}`}
-                      data-block-id={block.id || `${block.kind}-${i}`}
-                      style={style}
-                      className={`pointer-events-auto text-left text-[10px] text-teal-900 ${
-                        hasGeo
-                          ? `rounded border-2 bg-transparent ${
-                              selectedHit
-                                ? "border-teal-600"
-                                : raster
-                                  ? "border-teal-400/20"
-                                  : "border-teal-400/40"
-                            }`
-                          : `rounded border-2 bg-teal-500/5 ${selectedHit ? "border-teal-600" : "border-teal-400/70"}`
-                      }`}
-                      onClick={() => setSelectedBlockId(block.id || null)}
-                      onPointerDown={hasGeo ? startDrag("move") : undefined}
-                      onPointerMove={hasGeo ? onMove : undefined}
-                      onPointerUp={() => {
-                        dragRef.current = null;
-                      }}
-                      onDoubleClick={() => {
-                        if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
-                      }}
-                    >
-                      {hasGeo ? (
-                        <span className="sr-only">{block.kind}</span>
-                      ) : raster ? (
-                        <span className="sr-only">{block.kind}</span>
-                      ) : (
-                        <span className="block truncate px-1 py-0.5 uppercase">{block.kind}</span>
-                      )}
-                      {selectedHit && hasGeo ? (
-                        <span
-                          data-testid="present-editor-resize"
-                          className="absolute bottom-0 right-0 h-2.5 w-2.5 cursor-nwse-resize bg-teal-700"
-                          onPointerDown={startDrag("resize")}
-                        />
-                      ) : null}
-                    </button>
-                  );
-                })}
+                  }}
+                />
               </div>
-            ) : null}
             </div>
             {studio ? (
               <button
@@ -1137,8 +964,9 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
             onAddImage={(file) => void addImageFile(file)}
             onAddText={(role) =>
               addBlock(
-                newEditorBlock("quote", current.index, {
+                newEditorBlock("text", current.index, {
                   text: role === "title" ? "Title" : role === "subtitle" ? "Subtitle" : role === "bullets" ? "• Point" : "Body",
+                  role,
                 }),
                 role,
               )
@@ -1147,6 +975,12 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
               addBlock(
                 newEditorBlock("shape", current.index, { shape, text: shape }),
                 shape,
+              )
+            }
+            onAddDiagram={() =>
+              addBlock(
+                newEditorBlock("diagram", current.index, { nodes: ["Context", "Status", "Ask"], diagram_type: "flow" }),
+                "Diagram",
               )
             }
             onApplyLayout={(layout) => setStatus(`Layout ${layout} — mapped to imported master placeholders`)}

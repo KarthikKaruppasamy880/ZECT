@@ -15,6 +15,7 @@ type PresentEditorRailProps = {
   onAddImage: (file: File) => void;
   onAddText?: (role: "title" | "subtitle" | "bullets" | "quote" | "body") => void;
   onAddShape?: (shape: "rect" | "ellipse" | "arrow") => void;
+  onAddDiagram?: () => void;
   onApplyLayout?: (layout: "title_body" | "split_image" | "two_col") => void;
   slideLabel?: string;
   selectedLabel?: string;
@@ -49,6 +50,9 @@ const QUICK_PROMPTS = [
   { id: "rewrite", label: "Rewrite this slide", prompt: "Rewrite speaker notes for an executive audience." },
   { id: "layout", label: "Suggest a layout", prompt: "Apply title + body layout on this slide." },
   { id: "notes", label: "Tighten notes", prompt: "Rewrite speaker notes shorter, keep facts from attached sources only." },
+  { id: "diagram", label: "Bullets to diagram", prompt: "Turn these bullets into a diagram." },
+  { id: "table", label: "Add comparison table", prompt: "Add a comparison table from this slide." },
+  { id: "density", label: "Reduce density", prompt: "Reduce density — keep the first three points." },
 ];
 
 export default function PresentEditorRail({
@@ -62,6 +66,7 @@ export default function PresentEditorRail({
   onAddImage,
   onAddText,
   onAddShape,
+  onAddDiagram,
   onApplyLayout,
   slideLabel,
   selectedLabel,
@@ -269,6 +274,15 @@ export default function PresentEditorRail({
             className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
           >
             Metric
+          </button>
+          <button
+            type="button"
+            data-testid="present-editor-add-diagram"
+            disabled={busy}
+            onClick={() => onAddDiagram?.()}
+            className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          >
+            Diagram
           </button>
           {(["rect", "ellipse", "arrow"] as const).map((shape) => (
             <button

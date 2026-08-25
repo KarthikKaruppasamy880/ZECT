@@ -1043,6 +1043,7 @@ export const mentrixPresentSlideAi = (data: {
   selected_kind?: string;
   selected_chart_type?: string;
   attach_excerpts?: string[];
+  blocks?: PresentBlock[];
 }) =>
   request<{
     ok: boolean;
@@ -1053,6 +1054,7 @@ export const mentrixPresentSlideAi = (data: {
     layout?: string | null;
     notes?: string;
     text?: string;
+    blocks?: PresentBlock[];
   }>("/api/mentrix/presentation/slide-ai", { method: "POST", body: JSON.stringify(data) });
 
 export const mentrixAnalyzeDeck = (data: {

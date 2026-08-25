@@ -4,7 +4,8 @@ READY means no known release-blocking Critical/High, not “100% / zero error.�
 
 ## Narration
 
-- Present All uses Presenter Intelligence (`POST /api/mentrix/presentation/narrate-slides`) grounded in slide text, notes, and chart/table/diagram markers.
+- Present All uses Presenter Intelligence (`POST /api/mentrix/presentation/narrate-slides`) grounded in slide text, notes, document blocks, and chart/table/diagram/image kinds.
+- Editor AI (`/slide-ai`) patches the canonical block tree (bullets→diagram, comparison table, reduce density, overlap nudge). It does not invent KPIs or regenerate the deck.
 - No 500-character meaning cap (`PRESENT_SLIDE_SCRIPT_CAP` is a high ceiling only).
 - Word budget: 220 words per slide. Numbers not on the slide are not invented.
 - Wait for full audio. Empty/error/cancel does **not** send PowerPoint Right Arrow.

@@ -4,6 +4,7 @@ import { composeChildGeometry, geometryPercentStyle, geometryValid, WIDESCREEN_C
 describe("presentGeometry", () => {
   it("rejects missing or zero extents so overlays never cover the slide", () => {
     expect(geometryValid(undefined)).toBe(false);
+    expect(geometryValid(null)).toBe(false);
     expect(geometryValid({ cx: 0, cy: 10 })).toBe(false);
     expect(geometryValid({ x: 0, y: 0, cx: 100, cy: 50 })).toBe(true);
   });
@@ -13,6 +14,7 @@ describe("presentGeometry", () => {
     expect(style?.left).toBe("10%");
     expect(style?.width).toBe("10%");
     expect(geometryPercentStyle({ cx: 0, cy: 1 }, { cx: WIDESCREEN_CX, cy: 1000 })).toBeUndefined();
+    expect(geometryPercentStyle(null, { cx: WIDESCREEN_CX, cy: 1000 })).toBeUndefined();
   });
 
   it("composes group child offsets onto the parent origin", () => {

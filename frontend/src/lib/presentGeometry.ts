@@ -10,7 +10,7 @@ export function geometryValid(geo?: EmuBox | null): boolean {
 }
 
 export function geometryPercentStyle(
-  geo: EmuBox | undefined,
+  geo: EmuBox | undefined | null,
   slide: { cx: number; cy: number },
 ): { position: "absolute"; left: string; top: string; width: string; height: string } | undefined {
   if (!geometryValid(geo)) return undefined;

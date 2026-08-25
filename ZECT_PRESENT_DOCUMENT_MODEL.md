@@ -35,4 +35,4 @@ One module: `backend/app/services/mentrix/presentation/geometry.py` and `fronten
 
 ## Remaining
 
-Master/layout XML is not yet a first-class tree on the document. COM raster remains a **proof** path, not the editor model. Full group-transform + placeholder inheritance on every imported shape is not proven on a golden Zinnia corpus in this tranche.
+Slide XML plus **locked** master/layout graphics (non-placeholder pictures/shapes) are parsed into the same block list. COM raster remains a **proof** path, not the editor model. Full run-level typography and every imported SmartArt variant are not a golden Zinnia visual PASS until headed COM comparison exists.

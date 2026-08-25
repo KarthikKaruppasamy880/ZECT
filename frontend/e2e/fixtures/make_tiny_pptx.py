@@ -55,7 +55,7 @@ def _slide(text: str) -> str:
     <p:grpSpPr/>
     <p:sp>
       <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-      <p:spPr/>
+      <p:spPr><a:xfrm><a:off x="457200" y="274320"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr>
       <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody>
     </p:sp>
   </p:spTree></p:cSld>

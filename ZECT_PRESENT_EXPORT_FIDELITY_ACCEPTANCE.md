@@ -17,5 +17,5 @@
 ## Remaining
 
 - Full COM golden (`PresentationDocument → PPTX → PowerPoint COM → raster`) is **BLOCKED_EXTERNAL** without `ZECT_LIVE_PPT_COM=1` and a headed machine.
-- Overlay geometry edits persist in the document/sidecar; not every drag is proven as a python-pptx shape-tree rewrite for every kind.
-- PowerPoint “needs repair” is not re-proven in this tranche on a live desktop.
+- Overlay geometry edits persist in the document/sidecar. Named `shape_name` text/geometry writes into the matching OOXML shape; new editor images require `asset_id`.
+- `validate_export_document` checks zip + slide count + media/chart/table presence. PowerPoint “needs repair” remains `BLOCKED_EXTERNAL` without `ZECT_LIVE_PPT_COM=1`.

@@ -14,31 +14,62 @@ SCHEMA_VERSION = 2
 
 
 def _copy_missing_geometry(sidecar: list[Any], parsed: list[Any]) -> list[dict[str, Any]]:
-    unused = [p for p in parsed if isinstance(p, dict)]
+    """PPTX parse is the visual base; sidecar overlays editor deltas onto matching blocks."""
+    parsed_rows = [p for p in parsed if isinstance(p, dict)]
+    sidecar_rows = [s for s in sidecar if isinstance(s, dict)]
+    if not sidecar_rows:
+        return parsed_rows
+
+    def _overlay(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+        out = dict(base)
+        out["id"] = extra.get("id") or base.get("id")
+        pc = dict(base.get("content") or {}) if isinstance(base.get("content"), dict) else {}
+        sc = dict(extra.get("content") or {}) if isinstance(extra.get("content"), dict) else {}
+        content = {**pc, **sc}
+        if sc.get("asset_id"):
+            content.pop("data_url", None)
+        elif not sc.get("data_url") and pc.get("data_url"):
+            content["data_url"] = pc["data_url"]
+        if extra.get("geometry") and geometry_valid(extra.get("geometry")):
+            out["geometry"] = extra["geometry"]
+        out["content"] = content
+        if extra.get("kind"):
+            out["kind"] = extra.get("kind") or out.get("kind")
+        return out
+
+    used: set[str] = set()
+    by_id = {str(s.get("id") or ""): s for s in sidecar_rows if s.get("id")}
     out: list[dict[str, Any]] = []
-    for raw in sidecar:
-        if not isinstance(raw, dict):
+    for pb in parsed_rows:
+        sid = str(pb.get("id") or "")
+        extra = by_id.get(sid)
+        if extra:
+            used.add(sid)
+            out.append(_overlay(pb, extra))
             continue
-        block = dict(raw)
-        geo = block.get("geometry")
-        has_geo = geometry_valid(geo)
-        if not has_geo:
-            kind = str(block.get("kind") or "")
-            bid = str(block.get("id") or "")
-            match_i: int | None = None
-            if bid:
-                for i, pb in enumerate(unused):
-                    if str(pb.get("id") or "") == bid and pb.get("geometry"):
-                        match_i = i
-                        break
-            if match_i is None:
-                for i, pb in enumerate(unused):
-                    if str(pb.get("kind") or "") == kind and pb.get("geometry"):
-                        match_i = i
-                        break
-            if match_i is not None:
-                block["geometry"] = unused.pop(match_i).get("geometry")
-        out.append(block)
+        kind = str(pb.get("kind") or "")
+        match: dict[str, Any] | None = None
+        for s in sidecar_rows:
+            other = str(s.get("id") or "")
+            if other in used:
+                continue
+            if str(s.get("kind") or "") == kind:
+                match = s
+                break
+        if match:
+            used.add(str(match.get("id") or ""))
+            out.append(_overlay(pb, match))
+        else:
+            out.append(pb)
+    for s in sidecar_rows:
+        sid = str(s.get("id") or "")
+        if sid and sid in used:
+            continue
+        if not sid and s in out:
+            continue
+        if sid and any(str(row.get("id") or "") == sid for row in out):
+            continue
+        out.append(s)
     return out
 
 

@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => ({
   mentrixPresentSaveNotes: vi.fn(async () => ({ ok: true, ooxml_roundtrip: true })),
   mentrixPresentSlidePreview: vi.fn(async () => ({ url: "blob:preview", kind: "ooxml" })),
   mentrixPresentationAssetUpload: vi.fn(),
-  mentrixPresentationAssetBlob: vi.fn(),
+  mentrixPresentationAssetBlob: vi.fn(async () => "blob:asset"),
 }));
 
 import PresentEditor from "@/components/PresentEditor";
@@ -164,7 +164,8 @@ describe("PresentEditor v1", () => {
     expect(hit.getAttribute("data-block-id")).toBe("blk_0_chart_0");
     expect(hit.style.left).toBe("10%");
     expect(hit.style.position).toBe("absolute");
-    expect(hit.className).toMatch(/bg-transparent/);
+    expect(screen.getByTestId("present-editor-canvas").getAttribute("data-canvas")).toBe("document");
+    expect(screen.getByTestId("present-editor-chart-glyph")).toBeTruthy();
     expect(screen.getByTestId("present-editor-block-overlay").className).not.toMatch(/grid-cols-2/);
   });
 
@@ -211,5 +212,15 @@ describe("PresentEditor v1", () => {
     expect(screen.getByTestId("present-editor-layers")).toBeTruthy();
     expect(screen.getByTestId("present-editor-layer-chart")).toBeTruthy();
     expect(screen.getByTestId("present-editor-props")).toBeTruthy();
+  });
+
+  it("uses a shared document canvas for thumbs and the editor, not a PNG overlay", async () => {
+    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    const canvas = await screen.findByTestId("present-editor-canvas");
+    expect(canvas.getAttribute("data-canvas")).toBe("document");
+    expect(screen.getByTestId("present-editor-inline-text")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-thumb-canvas-0").getAttribute("data-canvas")).toBe("document");
+    expect(screen.getByTestId("present-editor-block-overlay").className).not.toMatch(/grid-cols-2/);
+    expect(canvas.querySelector("img[alt]")).toBeFalsy();
   });
 });

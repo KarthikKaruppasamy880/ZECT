@@ -37,3 +37,23 @@ def test_parse_pptx_bytes_extracts_slide_text():
     assert len(slides) == 1
     assert "Hello Mentrix Present" in (slides[0].get("text") or "")
     assert "visuals" in slides[0]
+
+
+def test_zinnia_large_hero_image_resolves_to_asset_id():
+    """Regression: ppt/media/image12.png (~1.93MB) must not be dropped by _MAX_PART_BYTES."""
+    from pathlib import Path
+
+    master = Path(__file__).resolve().parents[3] / ".zect" / "present-templates" / "masters" / "zinnia-executive-v1.pptx"
+    if not master.is_file() or master.stat().st_size < 1_000_000:
+        import pytest
+
+        pytest.skip("real Zinnia master not present locally")
+    slides = parse_pptx_bytes(master.read_bytes())
+    images = [
+        b
+        for b in (slides[0].get("blocks") or [])
+        if isinstance(b, dict) and b.get("kind") == "image"
+    ]
+    assert images
+    hero = images[0].get("content") or {}
+    assert hero.get("asset_id") or str(hero.get("data_url") or "").startswith("data:image/")

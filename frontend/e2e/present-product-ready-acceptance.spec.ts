@@ -121,9 +121,12 @@ test.describe("Present product READY acceptance", () => {
         execFileSync(
           process.env.ZECT_PYTHON || "python",
           [path.join(REPO, "backend", "scripts", "present_product_fidelity_proof.py"), canvasShot],
-          { cwd: REPO, stdio: "pipe", env: { ...process.env, ZECT_LIVE_PPT_COM: "1" } },
+          { cwd: REPO, encoding: "utf8", env: { ...process.env, ZECT_LIVE_PPT_COM: "1" } },
         );
-        writeEvidence({ com_raster_fidelity: "PASS" });
+        const proofPath = path.join(REPO, "test-results", "present-product-ready", "fidelity-proof.json");
+        const proof = JSON.parse(fs.readFileSync(proofPath, "utf8")) as Record<string, unknown>;
+        writeEvidence({ com_raster_fidelity: proof });
+        expect(proof.com_vs_canvas_pass, `COM-vs-canvas SSIM proxy ${proof.com_vs_canvas_ssim_proxy}`).toBeTruthy();
       } catch (err) {
         writeEvidence({ com_raster_fidelity: "FAIL", com_error: String(err) });
         throw err;
@@ -171,6 +174,7 @@ test.describe("Present product READY acceptance", () => {
     if (!fs.existsSync(dest)) {
       runPythonScript(path.join(FRONTEND, "e2e/fixtures/make_mixed_acceptance_deck.py"), [dest]);
     }
+    await gotoAuthed(page, "/present/create", "zect-present-page");
     const token = await page.evaluate(() => localStorage.getItem("zect_token"));
     const parseRes = await page.request.post(`${API}/api/mentrix/present/parse-pptx-path`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -195,6 +199,8 @@ test.describe("Present product READY acceptance", () => {
     await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}/rehearse`, "present-rehearse");
     const voice = page.getByTestId("present-deck-voice-select");
     await voice.selectOption("stock:nova");
+    await page.locator('input[type="file"]').setInputFiles(dest);
+    await expect(page.getByText(/Selected:.*zect-mixed-acceptance\.pptx/i)).toBeVisible({ timeout: 10_000 });
     const presentAll = page.getByTestId("present-deck-present-all");
     await expect(presentAll).toBeEnabled({ timeout: 15_000 });
     writeEvidence({
@@ -203,20 +209,28 @@ test.describe("Present product READY acceptance", () => {
     });
     if (process.env.ZECT_LIVE_VOICE_STOCK === "1") {
       await presentAll.click();
-      await expect(page.getByTestId("present-deck-panel")).toContainText(/slide \d+ \/ \d+/i, { timeout: 60_000 });
-      await expect(page.getByTestId("present-deck-panel")).toContainText(/Finished presenting/i, {
+      const status = page.getByTestId("present-deck-status");
+      await expect(status).toContainText(/slide \d+ \/ \d+/i, { timeout: 90_000 });
+      await expect(status).toContainText(/Finished presenting/i, {
         timeout: 8 * 60_000,
       });
-      writeEvidence({ presenter_full_audio: "PASS" });
+      writeEvidence({ presenter_full_audio: "PASS", presenter_voice: "stock:nova" });
     }
   });
 
-  test("export PPTX gate on mixed deck", async ({ page }) => {
-    const dest = path.join(os.homedir(), "Documents", "zect-mixed-acceptance.pptx");
-    if (!fs.existsSync(dest)) {
-      runPythonScript(path.join(FRONTEND, "e2e/fixtures/make_mixed_acceptance_deck.py"), [dest]);
-    }
-    await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}/export`, "present-export");
+  test("export PPTX gate on Zinnia-edited deck", async ({ page }) => {
+    await gotoAuthed(page, "/present/create", "zect-present-page");
+    await page.getByTestId("zect-present-template-zinnia-executive-v1").click();
+    await page.getByTestId("zect-present-open-editor").click();
+    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 45_000 });
+    await page.getByTestId("present-editor-save").click();
+    await expect(page.getByTestId("present-editor-status")).toContainText(/Saved|local/i, { timeout: 20_000 });
+    const deckPath = await page.evaluate(() => {
+      const m = window.location.pathname.match(/\/present\/d\/([^/]+)\/edit/);
+      return m ? m[1] : "";
+    });
+    expect(deckPath).toBeTruthy();
+    await page.getByTestId("present-open-export").click();
     await expect(page.getByTestId("present-export-gate")).toBeVisible();
     const hard = await page.getByTestId("present-export-hard-block").isVisible().catch(() => false);
     expect(hard).toBeFalsy();

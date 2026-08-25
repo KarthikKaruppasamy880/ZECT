@@ -1,6 +1,6 @@
 # ZECT Present — product final acceptance (E12)
 
-**Reviewed:** 2026-08-25 — final closure tranche on `feat/present-product-ready-closure` atop merged PR **#187**.
+**Reviewed:** 2026-08-25 — closure tranche on `feat/present-product-ready-closure` atop merged PR **#187**.
 
 | Milestone | SHA |
 |---|---|
@@ -19,37 +19,62 @@
 
 ## Verdict: `ZECT_PRESENT_PRODUCT_PARTIAL`
 
-Backend COM proof on the real Zinnia clone (11 slides, slide-0 kinds: image/shape/text) **PASS** locally (`ZECT_LIVE_PPT_COM=1`): save/reopen, export validate, open-without-repair, COM raster export. Headed/Electron viewport matrix + Presenter **full live audio** + COM-vs-canvas raster golden require opt-in headed run (`ZECT_LIVE_PRESENT_READY=1`).
+Root-cause fix landed for Zinnia hero image (`ppt/media/image12.png` ~1.93 MB excluded by `_MAX_PART_BYTES`). Headed browser + Electron acceptance PASS locally with real master. **Clone-voice full Presenter audio** and **backend process restart** remain open.
 
 | Phase | Status | Evidence |
 |---|---|---|
 | E0–E7, E9–E10 | Core | On `develop` after #186+#187 |
 | E5–E6 | Core | `PresentDocumentCanvas` shared with thumbs |
-| E8 | Partial→Core* | Local COM open-without-repair + raster on real Zinnia clone; COM-vs-canvas SSIM proxy in `present_product_fidelity_proof.py` when canvas PNG supplied |
-| E11 | Partial | API grounded scripts for all slides on mixed deck; live stock/clone **full audio** = `ZECT_LIVE_VOICE_STOCK=1` |
-| E12 | Partial | Opt-in `present-product-ready-acceptance.spec.ts` — 1280–1920 matrix; Electron 20+ / maximize not re-run this SHA |
+| E8 | **PASS (local)** | COM open-without-repair; COM-vs-canvas SSIM proxy **0.4938** (≥ 0.42); save/reopen text OK |
+| E11 | **Partial** | Grounded scripts 8/8 slides; **stock:nova full audio PASS** (`ZECT_LIVE_VOICE_STOCK=1`); **clone voice not re-run** (Voicebox offline at `127.0.0.1:17493`) |
+| E12 | **PASS (local opt-in)** | Browser viewports 1280–1920; Electron 22-slide rail + maximize/restore + restart reopen |
 
-### Local backend proof (2026-08-25)
-- `ZECT_LIVE_PPT_COM=1 python backend/scripts/present_product_fidelity_proof.py` → `verdict: true`
-- Artifacts: `test-results/present-product-ready/fidelity-proof.json`, `zinnia-com-representative.png`
+### Root cause fixed (this PR)
 
-### Opt-in headed proof (not CI — `.zect/` gitignored)
+- `backend/app/services/pptx_parse.py`: `_MAX_MEDIA_BYTES = 8MB` for `ppt/media/*` parts so large Zinnia hero resolves to `asset_id` instead of being dropped.
+- Regression: `test_zinnia_large_hero_image_resolves_to_asset_id`
+
+### Local proof (2026-08-25)
+
+**Backend COM (`ZECT_LIVE_PPT_COM=1`):**
+```bash
+python backend/scripts/present_product_fidelity_proof.py test-results/present-product-ready/zinnia-canvas-representative.png
+```
+→ `com_vs_canvas_ssim_proxy: 0.4938`, `com_vs_canvas_pass: true`, `repair: false`
+
+**Headed browser + Electron (`ZECT_LIVE_PRESENT_READY=1`):**
+```bash
+set ZECT_LIVE_PRESENT_READY=1
+set ZECT_LIVE_PPT_COM=1
+set ZECT_LIVE_VOICE_STOCK=1
+cd frontend && npm run test:e2e:present-ready
+```
+→ 6 browser + 1 electron tests PASS (2026-08-25)
+
+| Artifact | Path |
+|---|---|
+| Browser evidence | `test-results/present-product-ready/evidence.json` |
+| COM raster | `test-results/present-product-ready/zinnia-com-representative.png` |
+| Canvas raster | `test-results/present-product-ready/zinnia-canvas-representative.png` |
+| Fidelity JSON | `test-results/present-product-ready/fidelity-proof.json` |
+| Electron evidence | `test-results/present-product-ready-electron/evidence.json` |
+| Viewport shells | `test-results/present-product-ready/shell-*.png` |
+
+### Still required for `ZECT_PRESENT_PRODUCT_READY`
+
+1. **Clone voice Presenter full audio** — start ZECT Voicebox (`services/zect-voicebox/scripts/up.ps1`, `models_ready: true`), re-run with saved clone (Karthik) on ≥7-slide mixed deck; prove no overlap/cutoff/skips.
+2. **Backend process restart + reopen** — prove edited Zinnia deck survives API stop/start (Electron restart reopen PASS; browser reload PASS; cold API restart not yet captured).
+3. **CI green** on closure PR (Zinnia master gitignored — fidelity tests remain opt-in locally).
+
+Green `present-product` / synthetic PPTX / canvas-only screenshots / “PowerPoint opened” alone are **not** visual-fidelity PASS.
+
+## Opt-in commands
+
 ```bash
 # Terminal 1: API + frontend per docs/RUNBOOK_LOCAL.md
 # Terminal 2:
 set ZECT_LIVE_PRESENT_READY=1
 set ZECT_LIVE_PPT_COM=1
+set ZECT_LIVE_VOICE_STOCK=1   # stock TTS; requires OPENAI_API_KEY in backend/.env
 cd frontend && npm run test:e2e:present-ready
-# Optional full Presenter audio:
-set ZECT_LIVE_VOICE_STOCK=1
 ```
-
-## Still required for `ZECT_PRESENT_PRODUCT_READY`
-
-1. Headed run of `present-product-ready-acceptance.spec.ts` with evidence in `test-results/present-product-ready/` (all tests PASS, not skipped)
-2. COM-vs-canvas raster proxy ≥ threshold on representative Zinnia slide (script enforces when canvas PNG captured)
-3. Presenter **full audio** completion on mixed ≥7-slide deck (`ZECT_LIVE_VOICE_STOCK=1` or live clone + Voicebox)
-4. Electron viewport matrix including maximize/restore and 20+ slide rail
-5. Mandatory CI green on closure PR + Ultra Review 0 Critical/High
-
-Green `present-product` / `present-document-canvas` e2e alone is **not** visual-fidelity PASS.

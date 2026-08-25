@@ -120,17 +120,11 @@ def main() -> int:
             "slides": slides,
         },
         n_slides=len(slides),
-        template_id="zinnia-executive-v1",
+        template_id="",
         audience_id="executive",
     )
-    from app.services.mentrix.presentation import template_registry as tmpl
-
-    master = tmpl.source_pptx_path("zinnia-executive-v1")
-    if master is None or not master.is_file():
-        raise FileNotFoundError("zinnia-executive-v1 master missing for mixed acceptance deck")
-    definition_path = master.parent.parent / "definitions" / "zinnia-executive-v1.json"
-    definition = json.loads(definition_path.read_text(encoding="utf-8")) if definition_path.is_file() else None
-    dest.write_bytes(render_plan_to_pptx(plan, user_id="anon", template_path=master, definition=definition))
+    # Native widescreen render (acceptance corpus #2). Zinnia brand fidelity uses the real master separately.
+    dest.write_bytes(render_plan_to_pptx(plan, user_id="anon"))
     doc = document_from_plan(plan, path=str(dest), provider="zect_native")
     write_notes_sidecar(notes_sidecar_for_pptx(dest), json.dumps(doc, indent=2))
     print(dest)

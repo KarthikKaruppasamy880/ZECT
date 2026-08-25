@@ -133,7 +133,11 @@ def run_proof(*, canvas_png: Path | None = None) -> dict[str, Any]:
         proxy = _ssim_proxy(com_png, canvas_png)
         evidence["com_vs_canvas_ssim_proxy"] = round(proxy, 4)
         evidence["com_vs_canvas_pass"] = proxy >= RASTER_MIN_SSIM_PROXY
-        shutil.copy2(canvas_png, ART / "zinnia-canvas-representative.png")
+        dest_canvas = ART / "zinnia-canvas-representative.png"
+        if canvas_png.resolve() != dest_canvas.resolve():
+            shutil.copy2(canvas_png, dest_canvas)
+        else:
+            evidence["canvas_png_source"] = str(canvas_png)
 
     evidence["verdict"] = (
         evidence.get("save_reopen_text_ok")

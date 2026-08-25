@@ -1,40 +1,55 @@
 # ZECT Present — product final acceptance (E12)
 
-**Reviewed:** 2026-08-25 against `prompts/ZECT_PRESENT_STUDIO_EDITOR_PARITY_ROOT_CAUSE_MASTER.md` on `feat/present-document-canvas-ready` rebased onto PR **#186** merge.
+**Reviewed:** 2026-08-25 — final closure tranche on `feat/present-product-ready-closure` atop merged PR **#187**.
 
-**#186 merge SHA (canonical `develop` base):** `5d916f194838e35c9e376b6179ada26604d1578c` — merged 2026-08-25T05:05:21Z.
+| Milestone | SHA |
+|---|---|
+| **#186 merge (`develop` base)** | `5d916f194838e35c9e376b6179ada26604d1578c` |
+| **#187 merge (canonical `develop`)** | `75aebb15bfea52df4c31d5a41d8a4de77a03ac87` — merged 2026-08-25T11:23:59Z |
 
-**#187-only commit (rebased):** `0d38b46` — document canvas + richer parse/save; no duplicated #186 history.
+## Real Zinnia master (located — not synthetic)
 
-**Verdict: `ZECT_PRESENT_PRODUCT_PARTIAL`**
+| Field | Value |
+|---|---|
+| **Path** | `.zect/present-templates/masters/zinnia-executive-v1.pptx` (also `~/Documents/zinnia-executive-v1.pptx`, same bytes) |
+| **SHA256** | `74cb1f7a50c2dcd3ce6c1a41547c45f9666fcb1e353801b87a174c63ecf70dc2` |
+| **Bytes** | 12,275,249 |
+| **Definition** | `.zect/present-templates/definitions/zinnia-executive-v1.json` — 18 layouts, accent2 `#FF7500`, `native_ready: true` |
+| **Fallback `prompts/Template.pptx`** | 212 KB — **not** used for Zinnia fidelity PASS |
 
-Headed browser + Electron proved the editor canvas is `data-canvas="document"` (including Zinnia **Open in editor**). That is not Presenton-class COM visual READY and is not live Presenter full-audio READY.
+## Verdict: `ZECT_PRESENT_PRODUCT_PARTIAL`
+
+Backend COM proof on the real Zinnia clone (11 slides, slide-0 kinds: image/shape/text) **PASS** locally (`ZECT_LIVE_PPT_COM=1`): save/reopen, export validate, open-without-repair, COM raster export. Headed/Electron viewport matrix + Presenter **full live audio** + COM-vs-canvas raster golden require opt-in headed run (`ZECT_LIVE_PRESENT_READY=1`).
 
 | Phase | Status | Evidence |
 |---|---|---|
-| E0–E4, E7, E9 | Core | Shipped on #186 cores + this branch |
-| E5 | Core | Document compositor: text/image/shape/chart/table/diagram; unused placeholders dropped; locked master/layout graphics parsed |
-| E6 | Core | Thumbs = same `PresentDocumentCanvas` |
-| E8 | Partial→Core* | Atomic save + named-shape OOXML + `validate_export_document`. **Local Windows COM** (`ZECT_LIVE_PPT_COM=1`, Office16, pywin32): text + chart export open **without repair** on this machine (2026-08-25). CI/ubuntu remains **BLOCKED_EXTERNAL** for COM. *Not* COM raster golden compare |
-| E10 | Core | `/slide-ai` document-tree patches with undo; no invented KPIs |
-| E11 | Partial | Grounded scripts include block kinds/text. Live clone+standard **full audio completion** not re-run this SHA |
-| E12 | Core* | Headed 1280×720 `present-document-canvas.spec.ts` **PASS** (tiny PPTX + Zinnia open-editor). Electron 1280×720 **PASS**. *Not* a multi-DPI matrix |
+| E0–E7, E9–E10 | Core | On `develop` after #186+#187 |
+| E5–E6 | Core | `PresentDocumentCanvas` shared with thumbs |
+| E8 | Partial→Core* | Local COM open-without-repair + raster on real Zinnia clone; COM-vs-canvas SSIM proxy in `present_product_fidelity_proof.py` when canvas PNG supplied |
+| E11 | Partial | API grounded scripts for all slides on mixed deck; live stock/clone **full audio** = `ZECT_LIVE_VOICE_STOCK=1` |
+| E12 | Partial | Opt-in `present-product-ready-acceptance.spec.ts` — 1280–1920 matrix; Electron 20+ / maximize not re-run this SHA |
 
-### Headed this SHA
-- `npx playwright test e2e/present-document-canvas.spec.ts --headed` → 3 passed (auth + canvas save/reopen + Zinnia Open in editor)
-- `npx playwright test e2e/present-document-canvas-electron.spec.ts` → 2 passed
-- Artifacts: `test-results/present-document-canvas/`, `test-results/present-document-canvas-electron/`
+### Local backend proof (2026-08-25)
+- `ZECT_LIVE_PPT_COM=1 python backend/scripts/present_product_fidelity_proof.py` → `verdict: true`
+- Artifacts: `test-results/present-product-ready/fidelity-proof.json`, `zinnia-com-representative.png`
 
-### Local COM proof (Windows, 2026-08-25)
-- `ZECT_LIVE_PPT_COM=1` + pywin32 + Office16 `POWERPNT.EXE`
-- `powerpoint_open_without_repair` after `apply_document_to_pptx`: text deck + chart fixture → `status: opened`, `repair: False`, `slide_count: 1`
-- Does **not** satisfy thumbs≈canvas COM raster goldens or real Zinnia master lockup compare
+### Opt-in headed proof (not CI — `.zect/` gitignored)
+```bash
+# Terminal 1: API + frontend per docs/RUNBOOK_LOCAL.md
+# Terminal 2:
+set ZECT_LIVE_PRESENT_READY=1
+set ZECT_LIVE_PPT_COM=1
+cd frontend && npm run test:e2e:present-ready
+# Optional full Presenter audio:
+set ZECT_LIVE_VOICE_STOCK=1
+```
 
-## Still required for READY
+## Still required for `ZECT_PRESENT_PRODUCT_READY`
 
-- Headed **Zinnia** template: real master composition visual fidelity (`ZECT_LIVE_PRESENT=1`; repo master PPTX not present in workspace)
-- PowerPoint COM **raster golden**: canvas/thumb vs COM export pixels on mixed/Zinnia slides (open-without-repair alone is insufficient)
-- Presenter clone + standard voice **full audio** completion on a real deck (`ZECT_LIVE_VOICE_STOCK` / live clone path)
-- Mandatory **CI** on PR #187 (backend + frontend + e2e + e2e-electron must run, not skip) + Ultra Review with no unresolved Critical/High
+1. Headed run of `present-product-ready-acceptance.spec.ts` with evidence in `test-results/present-product-ready/` (all tests PASS, not skipped)
+2. COM-vs-canvas raster proxy ≥ threshold on representative Zinnia slide (script enforces when canvas PNG captured)
+3. Presenter **full audio** completion on mixed ≥7-slide deck (`ZECT_LIVE_VOICE_STOCK=1` or live clone + Voicebox)
+4. Electron viewport matrix including maximize/restore and 20+ slide rail
+5. Mandatory CI green on closure PR + Ultra Review 0 Critical/High
 
-Green `present-product` e2e is **not** visual PASS.
+Green `present-product` / `present-document-canvas` e2e alone is **not** visual-fidelity PASS.

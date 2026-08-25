@@ -1655,6 +1655,10 @@ class PresentPathIn(BaseModel):
     slides: list[dict[str, Any]] | None = None
 
 
+class PresentTemplateIdIn(BaseModel):
+    template_id: str
+
+
 def _pptx_from_request(path_str: str):
     from app.services.pptx_paths import resolve_allowlisted_pptx
 
@@ -1733,6 +1737,31 @@ def present_blank_deck(_user: CurrentUser = Depends(get_current_user)):
 
     dest = create_blank_pptx()
     return {"ok": True, "path": str(dest), "filename": dest.name}
+
+
+@router.post("/present/from-template")
+def present_from_template(body: PresentTemplateIdIn, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.deck_catalog import instantiate_from_template
+
+    tid = (body.template_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="template_id_required")
+    try:
+        dest = instantiate_from_template(tid, _user.user_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="template_master_missing") from exc
+    from app.services.mentrix.presentation.document import document_from_pptx_bytes
+
+    doc = document_from_pptx_bytes(dest.read_bytes(), path=str(dest), provider="template")
+    return {
+        "ok": True,
+        "path": str(dest),
+        "filename": dest.name,
+        "template_id": tid,
+        "slide_count": len(doc.get("slides") or []),
+        "slide_cx": doc.get("slide_cx"),
+        "slide_cy": doc.get("slide_cy"),
+    }
 
 
 @router.post("/present/import")
@@ -1818,6 +1847,18 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
         sidecar_slides = None
     slides = merge_sidecar_slides(slides, sidecar_slides)
     slide_cx, slide_cy = slide_emu_size(data)
+    from app.services.mentrix.presentation.document import normalize_document
+
+    document = normalize_document(
+        {
+            "path": str(pptx),
+            "slides": slides,
+            "slide_cx": slide_cx,
+            "slide_cy": slide_cy,
+            "visuals": inspect_pptx_visuals(data),
+        },
+        path=str(pptx),
+    )
     return {
         "ok": True,
         "count": len(slides),
@@ -1827,6 +1868,7 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
         "visuals": inspect_pptx_visuals(data),
         "slide_cx": slide_cx,
         "slide_cy": slide_cy,
+        "document": document,
     }
 
 

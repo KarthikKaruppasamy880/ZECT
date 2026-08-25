@@ -6,10 +6,11 @@ type Props = {
   selected: boolean;
   testId: string;
   onSelect: () => void;
+  onOpen?: () => void;
   onDelete?: () => void;
 };
 
-export default function PresentTemplateCardView({ tmpl, selected, testId, onSelect, onDelete }: Props) {
+export default function PresentTemplateCardView({ tmpl, selected, testId, onSelect, onOpen, onDelete }: Props) {
   const colors = tmpl.visual?.colors || [];
   const layouts = tmpl.visual?.layout_names || [];
   const ready = tmpl.visual?.ready ?? tmpl.native_ready;
@@ -24,6 +25,10 @@ export default function PresentTemplateCardView({ tmpl, selected, testId, onSele
         type="button"
         data-testid={testId}
         onClick={onSelect}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          onOpen?.();
+        }}
         className="w-full text-left hover:border-teal-500"
       >
         {cover ? (

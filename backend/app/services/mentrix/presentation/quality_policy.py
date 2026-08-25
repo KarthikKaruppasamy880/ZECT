@@ -6,6 +6,13 @@ from typing import Any
 
 from pptx.util import Inches, Pt
 
+from app.services.mentrix.presentation.geometry import (
+    WIDESCREEN_CX,
+    WIDESCREEN_CY,
+    boxes_overlap as geometry_boxes_overlap,
+    within_slide,
+)
+
 MIN_FONT_PT = 12
 TITLE_MIN_PT = 18
 MAX_BULLETS = 6
@@ -20,7 +27,7 @@ DENSITY_CRAMPED = 0.92
 MIN_READABLE_CY = int(Inches(0.28))
 
 
-def slide_size_emu(definition: dict[str, Any] | None, *, fallback: tuple[int, int] = (9144000, 5143500)) -> tuple[int, int]:
+def slide_size_emu(definition: dict[str, Any] | None, *, fallback: tuple[int, int] = (WIDESCREEN_CX, WIDESCREEN_CY)) -> tuple[int, int]:
     size = (definition or {}).get("slide_size") or {}
     try:
         cx = int(size.get("cx") or fallback[0])
@@ -38,21 +45,11 @@ def safe_rect(definition: dict[str, Any] | None) -> dict[str, int]:
 
 def within_bounds(geom: dict[str, int], definition: dict[str, Any] | None, *, pad: int = 20000) -> bool:
     cx, cy = slide_size_emu(definition)
-    return (
-        geom["x"] >= -pad
-        and geom["y"] >= -pad
-        and geom["x"] + geom["cx"] <= cx + pad
-        and geom["y"] + geom["cy"] <= cy + pad
-    )
+    return within_slide(geom, cx, cy, pad=pad)
 
 
 def boxes_overlap(a: dict[str, int], b: dict[str, int], *, pad: int = 8000) -> bool:
-    return not (
-        a["x"] + a["cx"] + pad <= b["x"]
-        or b["x"] + b["cx"] + pad <= a["x"]
-        or a["y"] + a["cy"] + pad <= b["y"]
-        or b["y"] + b["cy"] + pad <= a["y"]
-    )
+    return geometry_boxes_overlap(a, b, pad=pad)
 
 
 def min_font_pt() -> int:

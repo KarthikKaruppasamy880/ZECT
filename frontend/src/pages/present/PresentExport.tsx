@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { FileDown } from "lucide-react";
+import PresentPhaseStrip from "@/pages/present/PresentPhaseStrip";
 import { decodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
 
 export default function PresentExport() {
@@ -67,11 +68,9 @@ export default function PresentExport() {
 
   return (
     <div className="space-y-4" data-testid="present-export">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-slate-900">Export / Present</h2>
-        <Link to={`/present/d/${deckId}`} className="text-xs text-teal-800">
-          Back to review
-        </Link>
+        <PresentPhaseStrip deckId={deckId} current="export" />
       </div>
       {gate ? (
         <ul className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 space-y-1" data-testid="present-export-gate">

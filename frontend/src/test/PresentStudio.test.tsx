@@ -29,5 +29,7 @@ describe("PresentStudio", () => {
     expect(screen.getByTestId("present-studio")).toBeTruthy();
     expect(screen.getByTestId("present-editor")).toHaveAttribute("data-variant", "studio");
     expect(screen.getByTestId("present-studio-review-link")).toHaveAttribute("href", "/present/d/abc");
+    expect(screen.getByTestId("present-studio-phases")).toBeTruthy();
+    expect(screen.getByTestId("present-studio-phase-edit")).toHaveAttribute("aria-current", "page");
   });
 });

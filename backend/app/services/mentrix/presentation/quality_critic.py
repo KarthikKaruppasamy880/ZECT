@@ -245,3 +245,65 @@ def critique_plan(
         "final_quality_status": status,
         "generic_title_count": generic,
     }
+
+
+def critique_document(doc: dict[str, Any], *, prompt: str = "") -> dict[str, Any]:
+    """E9: run the critic against a PresentationDocument (editor / export path)."""
+    slides: list[dict[str, Any]] = []
+    for spec in list(doc.get("slides") or []):
+        if not isinstance(spec, dict):
+            continue
+        slides.append(
+            {
+                "title": str(spec.get("text") or "").split("\n")[0][:80],
+                "notes_intent": spec.get("notes") or "",
+                "content_blocks": [{"text": spec.get("text") or ""}],
+                "blocks": spec.get("blocks") or [],
+            }
+        )
+    out = critique_plan({"slides": slides}, None, prompt=prompt)
+    out["path"] = str(doc.get("path") or "")
+    out["schema_version"] = int(doc.get("schema_version") or 1)
+    out["slide_cx"] = int(doc.get("slide_cx") or 0)
+    out["slide_cy"] = int(doc.get("slide_cy") or 0)
+    try:
+        from app.services.mentrix.presentation.geometry import (
+            boxes_overlap,
+            geometry_valid,
+            normalize_geometry,
+            within_slide,
+        )
+
+        slide_cx = int(doc.get("slide_cx") or 0)
+        slide_cy = int(doc.get("slide_cy") or 0)
+        overlap = 0
+        oob = 0
+        boxes: list[dict[str, int]] = []
+        for spec in list(doc.get("slides") or []):
+            if not isinstance(spec, dict):
+                continue
+            for raw in list(spec.get("blocks") or []):
+                if not isinstance(raw, dict):
+                    continue
+                geo = raw.get("geometry")
+                parent = raw.get("parent_geometry")
+                if parent and geometry_valid(parent) and geometry_valid(geo):
+                    from app.services.mentrix.presentation.geometry import compose_child_geometry
+
+                    composed = compose_child_geometry(parent, geo)
+                    geo = composed or geo
+                g = normalize_geometry(geo)
+                if not g:
+                    continue
+                if not within_slide(g, slide_cx, slide_cy):
+                    oob += 1
+                for prev in boxes:
+                    if boxes_overlap(prev, g):
+                        overlap += 1
+                boxes.append(g)
+        out["document_overlap_count"] = overlap
+        out["document_out_of_bounds_count"] = oob
+    except Exception:
+        out["document_overlap_count"] = 0
+        out["document_out_of_bounds_count"] = 0
+    return out

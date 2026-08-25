@@ -68,6 +68,9 @@ Prompt/files/project evidence
 
 RESTRICTED/CONFIDENTIAL decks cannot be sent to Presenton (`restricted_external_provider`).
 
+Editor SoT is `PresentationDocument` schema 2 (`document.py`) plus EMU `geometry.py`. Template **Open in editor** clones a master PPTX; Generate still uses **Use this template**. COM/LibreOffice raster is proof, not the editor model. See `ZECT_PRESENT_DOCUMENT_MODEL.md`.
+
+
 ## RAG / intelligence (actual path)
 
 ```text

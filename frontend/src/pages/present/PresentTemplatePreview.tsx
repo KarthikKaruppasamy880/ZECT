@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  encodeDeckId,
+  mentrixPresentFromTemplate,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplateSlides,
 } from "@/lib/api";
@@ -12,6 +14,7 @@ export default function PresentTemplatePreview() {
   const [reason, setReason] = useState("");
   const [slides, setSlides] = useState<string[]>([]);
   const [cover, setCover] = useState("");
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     if (!templateId) return;
@@ -29,6 +32,17 @@ export default function PresentTemplatePreview() {
 
   const thumbs = slides.length ? slides : cover ? [cover] : [];
 
+  const openInEditor = async () => {
+    setOpening(true);
+    try {
+      const out = await mentrixPresentFromTemplate(templateId);
+      nav(`/present/d/${encodeDeckId(out.path)}/edit`);
+    } catch {
+      setReason("Could not open template in editor");
+      setOpening(false);
+    }
+  };
+
   return (
     <div className="space-y-4" data-testid="present-template-preview">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -41,6 +55,15 @@ export default function PresentTemplatePreview() {
             onClick={() => nav(`/present/create?template=${encodeURIComponent(templateId)}`)}
           >
             Use template
+          </button>
+          <button
+            type="button"
+            className="zect-btn zect-btn-secondary text-xs"
+            data-testid="present-template-open-editor"
+            disabled={opening}
+            onClick={() => void openInEditor()}
+          >
+            Open in editor
           </button>
           <Link to="/present/templates" className="zect-btn zect-btn-secondary text-xs">
             Gallery

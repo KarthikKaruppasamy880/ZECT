@@ -29,3 +29,14 @@ Dedicated full-viewport editor: `/present/d/:deckId/edit`
 - Speaker notes sit behind a control in Studio; they are not the primary canvas UI
 - Export stays PPTX
 - Gallery tabs: **Built-in** = Zinnia ids with master cover PNGs; **Custom** = org/user uploaded PPTX. No Presenton Community packs and no `:5000` iframe
+
+## E4–E6 editor (this tranche)
+
+- Zoom in / out / fit (`present-editor-zoom-*`); canvas frame width follows zoom
+- Overlay uses shared `geometryPercentStyle`; invalid geometry does not cover the slide
+- Select, drag, resize handle, keyboard nudge (arrows on a selected object), Delete object, Esc clears selection
+- Layers list + object property EMU fields; thumbs reuse the same EMU overlay (`present-editor-thumb-canvas-*`)
+- Undo/redo and Save remain slide-document + OOXML round-trip (`document_io.apply_document_to_pptx` atomic temp replace)
+
+**Not PASS:** true on-canvas typography, crop/aspect image tools, PowerPoint-class snapping, COM-free pixel golden vs Zinnia masters.
+

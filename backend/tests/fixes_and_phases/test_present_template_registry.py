@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from io import BytesIO
 
+import pytest
 from fastapi import UploadFile
 
 from app.services.mentrix.presentation import template_registry as tmpl
+from app.services.mentrix.presentation.deck_catalog import instantiate_from_template
+from app.services.mentrix.presentation.document import geometry_valid
 from app.services.mentrix.presentation.template_definition import native_ready
 from app.services.presenton_client import resolve_presenton_template_id
 from tests.fixes_and_phases.pptx_fixtures import make_master_pptx_bytes
@@ -269,3 +272,38 @@ def test_delete_uploaded_template_and_reject_builtin(tmp_path, monkeypatch):
     import asyncio
 
     asyncio.run(_run())
+
+
+def test_geometry_valid_rejects_empty_or_zero_extent():
+    assert geometry_valid({"x": 0, "y": 0, "cx": 100, "cy": 50}) is True
+    assert geometry_valid({"cx": 0, "cy": 10}) is False
+    assert geometry_valid(None) is False
+    assert geometry_valid({"cx": "n", "cy": 1}) is False
+
+
+def test_instantiate_from_template_copies_master(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.deck_catalog.default_pptx_save_dir",
+        lambda: out_dir,
+    )
+    masters = tmp_path / "masters"
+    masters.mkdir()
+    blob = make_master_pptx_bytes()
+    (masters / "zinnia-executive-v1.pptx").write_bytes(blob)
+    dest = instantiate_from_template("zinnia-executive-v1")
+    assert dest.is_file()
+    assert dest.read_bytes() == blob
+    assert dest.parent == out_dir
+
+
+def test_instantiate_from_template_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_PRESENT_TEMPLATE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.deck_catalog.default_pptx_save_dir",
+        lambda: tmp_path,
+    )
+    with pytest.raises(FileNotFoundError):
+        instantiate_from_template("not-a-template")

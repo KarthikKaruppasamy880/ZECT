@@ -28,6 +28,15 @@ vi.mock("@/lib/api", async (importOriginal) => {
       reachable: true,
     })),
     mentrixPresentationTemplatePreview: vi.fn(async () => ({ ok: true, name: "Exec", preview: "ok" })),
+    mentrixPresentationTemplateSlides: vi.fn(async () => ({
+      ok: true,
+      slides: ["data:image/png;base64,xx"],
+    })),
+    mentrixPresentFromTemplate: vi.fn(async () => ({
+      ok: true,
+      path: "C:\\decks\\zinnia-executive-v1.pptx",
+      filename: "zinnia-executive-v1.pptx",
+    })),
     mentrixPresentationTemplateUpload: vi.fn(),
     mentrixPresentationTemplateDelete: vi.fn(),
     mentrixPresentationDeleteUnmapped: vi.fn(),
@@ -36,6 +45,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
 
 import PresentCreate from "./PresentCreate";
 import PresentTemplateCardView from "./PresentTemplateCardView";
+import { mentrixPresentFromTemplate } from "@/lib/api";
 
 describe("Present template gallery", () => {
   beforeEach(() => {
@@ -57,6 +67,36 @@ describe("Present template gallery", () => {
     fireEvent.click(screen.getByTestId("zect-present-tab-custom"));
     expect(screen.getByTestId("zect-present-template-org-upload")).toBeTruthy();
     expect(screen.queryByTestId("zect-present-template-zinnia-executive-v1")).toBeNull();
+  });
+
+  it("opens the selected template in the editor", async () => {
+    render(
+      <MemoryRouter>
+        <PresentCreate />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("zect-present-open-editor")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("zect-present-open-editor"));
+    await waitFor(() => {
+      expect(mentrixPresentFromTemplate).toHaveBeenCalledWith("zinnia-executive-v1");
+    });
+  });
+
+  it("double-clicks a gallery card to open the template in the editor", async () => {
+    render(
+      <MemoryRouter>
+        <PresentCreate />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("zect-present-template-zinnia-executive-v1")).toBeTruthy();
+    });
+    fireEvent.doubleClick(screen.getByTestId("zect-present-template-zinnia-executive-v1"));
+    await waitFor(() => {
+      expect(mentrixPresentFromTemplate).toHaveBeenCalledWith("zinnia-executive-v1");
+    });
   });
 });
 

@@ -121,6 +121,26 @@ def canonical_id(choice: str | None) -> str:
     return _ALIAS_TO_CANONICAL.get(raw, raw)
 
 
+def zinnia_canonical_ids() -> frozenset[str]:
+    return frozenset(str(row["id"]) for row in _CANONICAL_ZINNIA)
+
+
+def repo_zinnia_master_pptx() -> Path | None:
+    """Checked-in Zinnia PPTX under prompts/, when present."""
+    prompts = Path(__file__).resolve().parents[5] / "prompts"
+    if not prompts.is_dir():
+        return None
+    named: list[Path] = []
+    for path in sorted(prompts.glob("*.pptx")):
+        n = path.name.lower()
+        if "template" in n or "zinnia" in n:
+            named.append(path)
+    if named:
+        return named[0]
+    sized = [p for p in sorted(prompts.glob("*.pptx")) if p.stat().st_size > 1000]
+    return sized[0] if sized else None
+
+
 def is_verified_provider_id(provider_id: str | None) -> bool:
     tid = (provider_id or "").strip()
     return bool(tid) and tid not in FALLBACK_PROVIDER_IDS
@@ -540,6 +560,12 @@ def source_pptx_path(zect_id: str, user_id: str | int | None = None) -> Path | N
                 p = Path(str(row.get("path") or ""))
                 if p.is_file():
                     return p
+    # Isolated test roots set ZECT_PRESENT_TEMPLATE_ROOT; skip the repo PPTX there.
+    if not (os.environ.get("ZECT_PRESENT_TEMPLATE_ROOT") or "").strip():
+        if zid in zinnia_canonical_ids():
+            repo = repo_zinnia_master_pptx()
+            if repo is not None:
+                return repo
     return None
 
 

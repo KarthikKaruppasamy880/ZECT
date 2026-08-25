@@ -9,6 +9,7 @@ READY means no known release-blocking Critical/High, not â€œ100% / zero error.â€
 - Word budget: 220 words per slide. Numbers not on the slide are not invented.
 - Wait for full audio. Empty/error/cancel does **not** send PowerPoint Right Arrow.
 - Manual Narrate (talking points) stays separate from Present All.
+- Rehearse is on the Edit | Quality | Rehearse | Export strip (`present-studio-phases`). Do not narrate from Generate.
 
 ## Gallery
 

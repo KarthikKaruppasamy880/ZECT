@@ -1,6 +1,6 @@
 # ZECT Present — Reference Editor Gap Analysis (E0)
 
-**Status:** E0 complete. **Stop for human review. No editor patches in this pass.**
+**Status:** E0 complete. E1–E12 **core implementation** is on `feat/present-e0-gap-analysis` (PR 186). Verdict remains **`ZECT_PRESENT_PRODUCT_PARTIAL`** — see `ZECT_PRESENT_PRODUCT_FINAL_ACCEPTANCE.md`.
 
 | Field | Value |
 |---|---|
@@ -119,4 +119,4 @@ The unacceptable editor behavior is **architectural**, not a missing CSS tweak:
 
 E1 should start with document + geometry unification and golden tests on real Zinnia slides. **Do not** add another isolated placeholder/CSS workaround.
 
-**STOP.** E1–E12 wait for human approval of this E0.
+**STOP.** E0 recorded the architecture. E1–E12 cores shipped on this branch; remaining defects are listed in `ZECT_PRESENT_PRODUCT_FINAL_ACCEPTANCE.md`. A valid PPTX or green present-product spec is still **not** visual parity PASS.

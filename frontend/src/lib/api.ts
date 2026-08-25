@@ -885,6 +885,7 @@ export const mentrixParsePptxFromPath = (path: string) =>
     visuals?: { has_image?: boolean; has_chart?: boolean; has_table?: boolean };
     slide_cx?: number;
     slide_cy?: number;
+    document?: { kind?: string; schema_version?: number; slide_cx?: number; slide_cy?: number };
   }>("/api/mentrix/present/parse-pptx-path", {
     method: "POST",
     body: JSON.stringify({ path }),
@@ -939,7 +940,7 @@ export const mentrixPresentBlank = () =>
   request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/blank", { method: "POST" });
 
 export const mentrixPresentFromTemplate = (template_id: string) =>
-  request<{ ok: boolean; path: string; filename: string; template_id?: string }>(
+  request<{ ok: boolean; path: string; filename: string; template_id?: string; slide_count?: number; slide_cx?: number; slide_cy?: number }>(
     "/api/mentrix/present/from-template",
     { method: "POST", body: JSON.stringify({ template_id }) },
   );
@@ -991,6 +992,7 @@ export const mentrixPresentQualityGate = (path: string) =>
     hard_findings?: string[];
     warnings?: string[];
     final_quality_status?: string;
+    document_critic?: { final_quality_status?: string; document_overlap_count?: number; document_out_of_bounds_count?: number };
   }>(`/api/mentrix/present/quality-gate?path=${encodeURIComponent(path)}`);
 
 export function encodeDeckId(path: string): string {

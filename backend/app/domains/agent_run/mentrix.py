@@ -1750,7 +1750,18 @@ def present_from_template(body: PresentTemplateIdIn, _user: CurrentUser = Depend
         dest = instantiate_from_template(tid, _user.user_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="template_master_missing") from exc
-    return {"ok": True, "path": str(dest), "filename": dest.name, "template_id": tid}
+    from app.services.mentrix.presentation.document import document_from_pptx_bytes
+
+    doc = document_from_pptx_bytes(dest.read_bytes(), path=str(dest), provider="template")
+    return {
+        "ok": True,
+        "path": str(dest),
+        "filename": dest.name,
+        "template_id": tid,
+        "slide_count": len(doc.get("slides") or []),
+        "slide_cx": doc.get("slide_cx"),
+        "slide_cy": doc.get("slide_cy"),
+    }
 
 
 @router.post("/present/import")
@@ -1836,6 +1847,18 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
         sidecar_slides = None
     slides = merge_sidecar_slides(slides, sidecar_slides)
     slide_cx, slide_cy = slide_emu_size(data)
+    from app.services.mentrix.presentation.document import normalize_document
+
+    document = normalize_document(
+        {
+            "path": str(pptx),
+            "slides": slides,
+            "slide_cx": slide_cx,
+            "slide_cy": slide_cy,
+            "visuals": inspect_pptx_visuals(data),
+        },
+        path=str(pptx),
+    )
     return {
         "ok": True,
         "count": len(slides),
@@ -1845,6 +1868,7 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
         "visuals": inspect_pptx_visuals(data),
         "slide_cx": slide_cx,
         "slide_cy": slide_cy,
+        "document": document,
     }
 
 

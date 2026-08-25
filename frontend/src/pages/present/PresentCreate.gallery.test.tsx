@@ -83,6 +83,21 @@ describe("Present template gallery", () => {
       expect(mentrixPresentFromTemplate).toHaveBeenCalledWith("zinnia-executive-v1");
     });
   });
+
+  it("double-clicks a gallery card to open the template in the editor", async () => {
+    render(
+      <MemoryRouter>
+        <PresentCreate />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("zect-present-template-zinnia-executive-v1")).toBeTruthy();
+    });
+    fireEvent.doubleClick(screen.getByTestId("zect-present-template-zinnia-executive-v1"));
+    await waitFor(() => {
+      expect(mentrixPresentFromTemplate).toHaveBeenCalledWith("zinnia-executive-v1");
+    });
+  });
 });
 
 describe("PresentTemplateCardView cover vs swatch", () => {

@@ -29,6 +29,7 @@ export function newEditorBlock(kind: string, slideIndex: number, content: Record
     kind,
     slide_index: slideIndex,
     content,
+    geometry: { x: 914400, y: 914400, cx: 3657600, cy: 1828800 },
     provenance: { source: "editor", generated: false },
     validation: { ok: true, errors: [] },
   };

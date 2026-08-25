@@ -7,17 +7,10 @@ import zipfile
 from typing import Any
 
 from app.services.mentrix.presentation.blocks import normalize_blocks
-from app.services.pptx_parse import parse_pptx_bytes
+from app.services.mentrix.presentation.geometry import WIDESCREEN_CX, WIDESCREEN_CY, geometry_valid
+from app.services.pptx_parse import parse_pptx_bytes, slide_emu_size
 
-
-def geometry_valid(geo: Any) -> bool:
-    """True when EMU cx/cy can drive overlay placement (never a slide-sized fallback)."""
-    if not isinstance(geo, dict):
-        return False
-    try:
-        return int(geo.get("cx") or 0) > 0 and int(geo.get("cy") or 0) > 0
-    except (TypeError, ValueError):
-        return False
+SCHEMA_VERSION = 2
 
 
 def _copy_missing_geometry(sidecar: list[Any], parsed: list[Any]) -> list[dict[str, Any]]:
@@ -105,9 +98,12 @@ def document_from_plan(plan: dict[str, Any], *, path: str = "", provider: str = 
             }
         )
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
+        "kind": "PresentationDocument",
         "path": path,
         "provider": provider or "",
+        "slide_cx": WIDESCREEN_CX,
+        "slide_cy": WIDESCREEN_CY,
         "slides": slides,
     }
 
@@ -115,11 +111,15 @@ def document_from_plan(plan: dict[str, Any], *, path: str = "", provider: str = 
 def document_from_pptx_bytes(data: bytes, *, path: str = "", provider: str = "") -> dict[str, Any]:
     slides = parse_pptx_bytes(data)
     visuals = inspect_pptx_visuals(data)
+    slide_cx, slide_cy = slide_emu_size(data)
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
+        "kind": "PresentationDocument",
         "path": path,
         "provider": provider or "",
         "visuals": visuals,
+        "slide_cx": slide_cx,
+        "slide_cy": slide_cy,
         "slides": [
             {
                 "index": int(s.get("index", i)),
@@ -191,9 +191,30 @@ def normalize_document(raw: Any, *, path: str = "") -> dict[str, Any]:
                 "blocks": normalize_blocks(spec.get("blocks") or [], slide_index=i),
             }
         )
+    try:
+        slide_cx = int(row.get("slide_cx") or WIDESCREEN_CX)
+        slide_cy = int(row.get("slide_cy") or WIDESCREEN_CY)
+    except (TypeError, ValueError):
+        slide_cx, slide_cy = WIDESCREEN_CX, WIDESCREEN_CY
+    visuals = row.get("visuals") if isinstance(row.get("visuals"), dict) else {}
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
+        "kind": "PresentationDocument",
         "path": str(row.get("path") or path or ""),
         "provider": str(row.get("provider") or ""),
+        "slide_cx": slide_cx if slide_cx > 0 else WIDESCREEN_CX,
+        "slide_cy": slide_cy if slide_cy > 0 else WIDESCREEN_CY,
+        "visuals": visuals,
         "slides": slides,
     }
+
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "document_from_plan",
+    "document_from_pptx_bytes",
+    "geometry_valid",
+    "inspect_pptx_visuals",
+    "merge_sidecar_slides",
+    "normalize_document",
+]

@@ -132,6 +132,14 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
     warnings: list[str] = []
     if not report.get("has_notes"):
         warnings.append("notes_missing")
+    critic: dict[str, Any] = {}
+    try:
+        from app.services.mentrix.presentation.document import document_from_pptx_bytes
+        from app.services.mentrix.presentation.quality_critic import critique_document
+
+        critic = critique_document(document_from_pptx_bytes(pptx.read_bytes(), path=str(pptx)))
+    except Exception:
+        critic = {"ok": False, "error": "document_critic_unavailable"}
     return {
         "ok": True,
         "path": str(pptx),
@@ -148,4 +156,5 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
         "broken_rel_count": report.get("broken_rel_count") or 0,
         "final_quality_status": report.get("status"),
         "inspector": report,
+        "document_critic": critic,
     }

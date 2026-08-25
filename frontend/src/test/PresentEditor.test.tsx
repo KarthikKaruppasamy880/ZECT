@@ -198,4 +198,18 @@ describe("PresentEditor v1", () => {
     expect(hit.style.width).toBe("20%");
     expect(hit.style.height).toBe("20%");
   });
+
+  it("exposes zoom fit and a layers panel", async () => {
+    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    await waitFor(() => {
+      expect(screen.getByTestId("present-editor-zoom-in")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("present-editor-zoom-in"));
+    expect(screen.getByTestId("present-editor-zoom-fit").textContent).toMatch(/110%/);
+    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
+    fireEvent.click(screen.getByTestId("present-editor-add-chart"));
+    expect(screen.getByTestId("present-editor-layers")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-layer-chart")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-props")).toBeTruthy();
+  });
 });

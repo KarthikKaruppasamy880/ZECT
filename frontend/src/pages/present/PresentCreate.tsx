@@ -89,11 +89,12 @@ export default function PresentCreate() {
     setPanelKey((k) => k + 1);
   };
 
-  const openInEditor = async () => {
+  const openInEditor = async (templateId?: string) => {
+    const tid = templateId || selected;
     setOpening(true);
     setStatus("");
     try {
-      const out = await mentrixPresentFromTemplate(selected);
+      const out = await mentrixPresentFromTemplate(tid);
       nav(`/present/d/${encodeDeckId(out.path)}/edit`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Could not open template");
@@ -157,7 +158,7 @@ export default function PresentCreate() {
       </div>
       <p className="text-xs text-slate-500">
         Selected template: <strong data-testid="zect-present-selected">{selected}</strong>
-        {" · "}Generate opens Present Studio. Zinnia / org / uploaded PNG covers only — no Community packs.
+        {" · "}Use this template stays on Generate. Open in editor (or double-click a card) loads the real PPTX master into Present Studio.
       </p>
       {lifecycle === "PROVIDER_UNAVAILABLE" ? (
         <p
@@ -193,7 +194,7 @@ export default function PresentCreate() {
 
       <section className="space-y-4" data-testid="zect-present-gallery">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-slate-800">Template gallery</h3>
+          <h3 className="text-sm font-semibold text-slate-800">Template Studio</h3>
           <div className="flex items-center gap-3">
             <label className="inline-flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
               <input
@@ -270,6 +271,7 @@ export default function PresentCreate() {
                 selected={selected === t.id}
                 testId={`zect-present-template-${t.id}`}
                 onSelect={() => void selectTemplate(t.id)}
+                onOpen={() => void openInEditor(t.id)}
               />
             ))}
           </div>
@@ -286,6 +288,7 @@ export default function PresentCreate() {
                 selected={selected === t.id}
                 testId={`zect-present-template-${t.id}`}
                 onSelect={() => void selectTemplate(t.id)}
+                onOpen={() => void openInEditor(t.id)}
                 onDelete={canDeleteGalleryTemplate(t.id) ? () => void onDeleteTemplate(t.id) : undefined}
               />
             ))}
@@ -324,6 +327,7 @@ export default function PresentCreate() {
                   selected={selected === t.id}
                   testId={`zect-present-my-${t.id}`}
                   onSelect={() => void selectTemplate(t.id)}
+                  onOpen={() => void openInEditor(t.id)}
                   onDelete={() => void onDeleteTemplate(t.id)}
                 />
               ))}

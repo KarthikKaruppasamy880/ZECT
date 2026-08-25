@@ -381,7 +381,7 @@ export default function PresentCreate() {
             disabled={opening}
             onClick={() => void openInEditor()}
           >
-            Open in editor
+            Open in editor / Edit template
           </button>
         </div>
       </section>

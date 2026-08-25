@@ -1,5 +1,7 @@
 # ZECT Present — product final acceptance (E12)
 
+**Reviewed:** 2026-08-24 against `prompts/ZECT_PRESENT_STUDIO_EDITOR_PARITY_ROOT_CAUSE_MASTER.md` and the code on `feat/present-e0-gap-analysis`.
+
 **Verdict: `ZECT_PRESENT_PRODUCT_PARTIAL`**
 
 Template click can open a real cloned PPTX in Edit. That is not Presenton-class visual parity and is **not** `ZECT_PRESENT_PRODUCT_READY`.
@@ -9,7 +11,7 @@ Template click can open a real cloned PPTX in Edit. That is not Presenton-class 
 | E0 | Done | Gap analysis vs reference editor |
 | E1 | Core | `PresentationDocument` schema 2 + shared EMU geometry (groups compose parent+child) |
 | E2 | Core | Open in editor / double-click clones master PPTX into Studio |
-| E3 | Core | Template Studio = Built-in / Org / My + upload; not a separate master editor |
+| E3 | Core | Template Studio = Built-in / Org / My + upload; **Use** stays Generate; **Open in editor / Edit template** clones the master. Not a separate master-XML editor |
 | E4 | Core | Zoom/fit, select, drag/resize, nudge, layers, undo, keyboard |
 | E5 | Partial | Chart/table data, image replace, shapes, text as slide blob — not full run-level typography |
 | E6 | Core | Thumbs use the same EMU overlay math as the canvas |

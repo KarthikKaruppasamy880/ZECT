@@ -17,4 +17,4 @@ READY means no known release-blocking Critical/High.
 
 ## Verdict
 
-`ZECT_DEVELOPER_CODING_EXPERIENCE_PARTIAL` until headed Electron + ZOAS clone Run App is operator-proven. Known remaining: Agent Workspace still in primary nav (CI/e2e), Learning Studio not implemented (plan only).
+`ZECT_DEVELOPER_CODING_EXPERIENCE_PARTIAL` until headed Electron + ZOAS clone Run App is operator-proven. Agent Workspace hidden from primary nav (route stays live for e2e via direct URL). Known remaining: Learning Studio not implemented (plan only).

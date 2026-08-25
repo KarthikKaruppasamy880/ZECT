@@ -5,11 +5,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { gotoAuthed } from "./helpers/login";
 
-const SURFACES: { path: string; testId: string; nav: string; heading?: RegExp }[] = [
+const SURFACES: { path: string; testId: string; nav: string; heading?: RegExp; viaNav?: boolean }[] = [
   { path: "/mentrix-home", testId: "mentrix-companion-page", nav: "Mentrix Companion", heading: /Mentrix/i },
   { path: "/present", testId: "zect-present-page", nav: "Present", heading: /Presentations/ },
   { path: "/workspace", testId: "developer-workspace", nav: "Developer" },
-  { path: "/ask", testId: "agent-workspace", nav: "Agent Workspace", heading: /Agent Workspace/ },
+  // Agent Workspace is hidden from primary nav (superseded by Developer
+  // cockpit) — route stays live, reached directly rather than via sidebar.
+  { path: "/ask", testId: "agent-workspace", nav: "Agent Workspace", heading: /Agent Workspace/, viaNav: false },
   { path: "/projects", testId: "projects-page", nav: "Projects", heading: /^Projects$/ },
   { path: "/work-items", testId: "work-items-page", nav: "Work Items" },
   { path: "/fabric", testId: "mentrix-fabric-page", nav: "Processes" },
@@ -26,7 +28,11 @@ async function horizontalOverflow(page: Page): Promise<number> {
 }
 
 async function openSurface(page: Page, surface: (typeof SURFACES)[number]) {
-  await page.getByTestId("app-sidebar").getByRole("link", { name: surface.nav, exact: true }).click();
+  if (surface.viaNav === false) {
+    await page.goto(surface.path, { waitUntil: "domcontentloaded" });
+  } else {
+    await page.getByTestId("app-sidebar").getByRole("link", { name: surface.nav, exact: true }).click();
+  }
   await expect(page.getByTestId(surface.testId)).toBeVisible({ timeout: 30_000 });
   if (surface.path === "/fabric") {
     await expect(page.getByTestId("process-sample-card")).toBeVisible();

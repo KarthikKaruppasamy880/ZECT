@@ -19,6 +19,7 @@ _NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 _MAX_INLINE_IMAGE = 280_000
 _MAX_PART_BYTES = 1_500_000
+_MAX_MEDIA_BYTES = 8 * 1024 * 1024
 
 
 def slide_emu_size(data: bytes) -> tuple[int, int]:
@@ -302,6 +303,8 @@ def _rel_part(
     rid = ""
     if blip is not None:
         rid = blip.get(f"{{{_NS_R}}}{attr}") or blip.get(attr) or ""
+        if not rid and attr == "embed":
+            rid = blip.get(f"{{{_NS_R}}}link") or blip.get("link") or ""
     if not rid:
         chart = el.find(f".//{{{_NS_C}}}chart")
         if chart is not None:
@@ -411,10 +414,20 @@ def extract_slide_blocks(
             ident = _identity(el)
             ident["alt"] = _shape_text(el) or ident.get("shape_name") or "Slide image"
             part, blob = _rel_part(el, rels, parts, from_dir=from_dir)
+            if not blob:
+                part, blob = _rel_part(el, rels, parts, from_dir=from_dir, attr="link")
             if blob:
                 url = _data_url(blob, part)
                 if url:
                     ident["data_url"] = url
+                else:
+                    try:
+                        from app.services.mentrix.presentation.asset_resolver import store_image
+
+                        meta = store_image(blob, user_id="parse", filename=posixpath.basename(part) or "slide.png")
+                        ident["asset_id"] = meta.get("asset_id") or ""
+                    except Exception:
+                        pass
             _push("image", {"content": ident}, mapped)
             return
         if tag == "graphicFrame" and mapped:
@@ -480,12 +493,15 @@ def _collect_parts(root: Path) -> dict[str, bytes]:
     for path in ppt.rglob("*"):
         if not path.is_file():
             continue
+        rel = path.relative_to(root).as_posix()
         try:
-            if path.stat().st_size > _MAX_PART_BYTES:
-                continue
+            size = path.stat().st_size
         except OSError:
             continue
-        parts[path.relative_to(root).as_posix()] = path.read_bytes()
+        limit = _MAX_MEDIA_BYTES if "/media/" in rel else _MAX_PART_BYTES
+        if size > limit:
+            continue
+        parts[rel] = path.read_bytes()
     return parts
 
 

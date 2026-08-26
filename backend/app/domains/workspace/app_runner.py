@@ -6,8 +6,10 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -144,6 +146,7 @@ class ProcessInfo:
 
 _processes: Dict[str, ProcessInfo] = {}
 _bg_tasks: Dict[str, asyncio.Task] = {}
+_bg_threads: Dict[str, threading.Thread] = {}
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -198,6 +201,78 @@ async def _read_process_output(proc_info: ProcessInfo):
                 proc_info.append_output("[stderr] " + line.rstrip("\n"))
     except Exception as e:
         proc_info.append_output(f"[reader error] {e}")
+
+
+def _read_process_output_sync(proc_info: ProcessInfo) -> None:
+    """Thread-based twin of ``_read_process_output`` for callers with no
+    running event loop (the Mentrix Coding Agent tool loop is plain sync).
+    Daemon thread — exits on its own once the process ends, nothing to cancel."""
+    proc = proc_info.proc
+    try:
+        if proc.stdout:
+            for line in proc.stdout:
+                proc_info.append_output(line.rstrip("\n"))
+    except Exception as e:
+        proc_info.append_output(f"[reader error] {e}")
+
+
+def spawn_owned_process(
+    command: str, cwd: str, label: str = "", env_vars: Optional[Dict[str, str]] = None
+) -> ProcessInfo:
+    """Start a tracked, owned process — the one real implementation shared by
+    the /start and /configure routes and the Mentrix Coding Agent's start_app
+    tool. Registers a thread-based output reader so it works from both async
+    route handlers and the agent's plain-sync tool loop."""
+    env = os.environ.copy()
+    if env_vars:
+        env.update(env_vars)
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+        **_popen_kwargs(),
+    )
+    info = ProcessInfo(pid=proc.pid, proc=proc, label=label or command[:40], cwd=cwd, cmd=command)
+    _processes[info.id] = info
+    thread = threading.Thread(target=_read_process_output_sync, args=(info,), daemon=True)
+    thread.start()
+    _bg_threads[info.id] = thread
+    return info
+
+
+def _owns_workspace(info: ProcessInfo, workspace: str) -> bool:
+    try:
+        return Path(info.cwd).resolve() == Path(workspace).resolve()
+    except OSError:
+        return info.cwd == workspace
+
+
+def list_owned_processes_in_workspace(workspace: str) -> list[dict]:
+    """Never returns a process outside this exact workspace -- the safety
+    boundary the Mentrix Coding Agent's process tools rely on so they can
+    never see or touch a port/process they didn't start themselves."""
+    return [info.to_dict() for info in _processes.values() if _owns_workspace(info, workspace)]
+
+
+def stop_owned_processes_in_workspace(workspace: str) -> int:
+    """Stop only processes started in this exact workspace. Returns count stopped."""
+    stopped = 0
+    for process_id, info in list(_processes.items()):
+        if not _owns_workspace(info, workspace):
+            continue
+        try:
+            if info.is_running:
+                _stop_process_tree(info.proc, info.pid)
+                stopped += 1
+        except Exception:
+            continue
+        _bg_tasks.pop(process_id, None)
+        _bg_threads.pop(process_id, None)
+    return stopped
 
 
 # ---------------------------------------------------------------------------
@@ -279,37 +354,16 @@ async def start_process(
         details={"command": req.command[:300], "cwd": cwd, "label": req.label or ""},
     )
 
-    env = os.environ.copy()
-    if req.env_vars:
-        env.update(req.env_vars)
-
     try:
-        proc = subprocess.Popen(
-            req.command,
-            shell=True,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-            **_popen_kwargs(),
-        )
+        info = spawn_owned_process(req.command, cwd, label=req.label or "", env_vars=req.env_vars)
     except Exception as e:
         raise HTTPException(500, f"Failed to start process: {e}")
 
-    label = req.label or req.command[:40]
-    info = ProcessInfo(pid=proc.pid, proc=proc, label=label, cwd=cwd, cmd=req.command)
-    _processes[info.id] = info
-
-    # Start background reader
-    task = asyncio.create_task(_read_process_output(info))
-    _bg_tasks[info.id] = task
-
     return {
         "id": info.id,
-        "pid": proc.pid,
-        "label": label,
-        "message": f"Process started: {label}",
+        "pid": info.pid,
+        "label": info.label,
+        "message": f"Process started: {info.label}",
     }
 
 
@@ -323,10 +377,12 @@ async def stop_process(process_id: str):
     if info.is_running:
         _stop_process_tree(info.proc, info.pid)
 
-    # Cancel bg task
+    # Cancel bg reader (asyncio task or daemon thread -- thread exits on its
+    # own once the process dies, nothing to cancel there)
     task = _bg_tasks.pop(process_id, None)
     if task:
         task.cancel()
+    _bg_threads.pop(process_id, None)
 
     return {
         "id": process_id,
@@ -346,6 +402,7 @@ def stop_all_processes() -> int:
             task = _bg_tasks.pop(process_id, None)
             if task:
                 task.cancel()
+            _bg_threads.pop(process_id, None)
         except Exception:
             continue
     return stopped
@@ -434,31 +491,14 @@ async def configure_project(
 
     # 2. Start dev server if requested
     if req.startup_command:
-        env = os.environ.copy()
-        if req.env_vars:
-            env.update(req.env_vars)
-
-        proc = subprocess.Popen(
-            req.startup_command,
-            shell=True,
-            cwd=repo_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            env=env,
-            **_popen_kwargs(),
-        )
         label = f"Dev Server ({os.path.basename(repo_path)})"
-        info = ProcessInfo(pid=proc.pid, proc=proc, label=label, cwd=repo_path, cmd=req.startup_command)
-        _processes[info.id] = info
-        task = asyncio.create_task(_read_process_output(info))
-        _bg_tasks[info.id] = task
+        info = spawn_owned_process(req.startup_command, repo_path, label=label, env_vars=req.env_vars)
 
         results["steps"].append({
             "step": "start",
             "command": req.startup_command,
             "process_id": info.id,
-            "pid": proc.pid,
+            "pid": info.pid,
         })
         results["process_id"] = info.id
 

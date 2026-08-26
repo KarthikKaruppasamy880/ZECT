@@ -189,6 +189,209 @@ TOOL_SPECS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_app",
+            "description": (
+                "Start this workspace's application in the background. If command is omitted, "
+                "discovers the real start command from package.json/pyproject/etc instead of "
+                "guessing -- if more than one candidate exists, returns candidates for you to "
+                "choose from (call again with an explicit command)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Optional explicit start command"},
+                    "recipe_id": {"type": "string", "description": "Optional discovered recipe id to use"},
+                    "label": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restart_app",
+            "description": "Stop any process this mission started in this workspace, then start it again.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Optional explicit start command"},
+                    "recipe_id": {"type": "string"},
+                    "label": {"type": "string"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_app",
+            "description": "Stop every process this mission started in this workspace. Never touches unrelated ports/processes.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "health_check",
+            "description": "Poll a port until it accepts connections and answers HTTP, bounded by timeout_s.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "port": {"type": "integer"},
+                    "path": {"type": "string", "description": "HTTP path to probe, default /"},
+                    "timeout_s": {"type": "number", "description": "Max seconds to wait, default 20"},
+                },
+                "required": ["port"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_navigate",
+            "description": "Open a URL in a real browser and capture console errors + failed network requests.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_snapshot",
+            "description": "Get the visible text of the current/given page plus console+network evidence.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Click an element by CSS selector (optionally navigating to url first).",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}, "selector": {"type": "string"}},
+                "required": ["selector"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Type text into a form field by CSS selector (optionally navigating to url first). Never used on password fields.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["selector", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_select",
+            "description": "Choose an <select> option by value (optionally navigating to url first).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "value": {"type": "string"},
+                },
+                "required": ["selector", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": "Take a screenshot (optionally navigating to url first). Saved to workspace evidence; returns its relative path.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}, "full_page": {"type": "boolean"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_wait_for",
+            "description": "Wait for an element's state (default visible) or a fixed time if no selector given.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "state": {"type": "string", "description": "visible|hidden|attached|detached"},
+                    "timeout_ms": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_assert_text",
+            "description": "Assert an element (default body) contains expected text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "selector": {"type": "string"},
+                    "expected": {"type": "string"},
+                },
+                "required": ["expected"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_assert_visible",
+            "description": "Assert an element by CSS selector is visible.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}, "selector": {"type": "string"}},
+                "required": ["selector"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_console_errors",
+            "description": "Return console errors/warnings observed on the given (or current) page.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_network_failures",
+            "description": "Return failed requests and HTTP 4xx/5xx responses observed on the given (or current) page.",
+            "parameters": {
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+            },
+        },
+    },
 ]
 
 
@@ -578,5 +781,116 @@ def _execute_tool_inner(
             return {"ok": False, "error": str(exc)}
         finally:
             db.close()
+
+    if name in ("start_app", "restart_app"):
+        from app.domains.workspace.app_runner import (
+            spawn_owned_process,
+            stop_owned_processes_in_workspace,
+        )
+        from app.services.workspace.runtime_discovery import discover_runtime_recipes, resolve_recipe
+
+        if name == "restart_app":
+            stop_owned_processes_in_workspace(str(root))
+
+        command = str(args.get("command") or "").strip()
+        recipe_id = str(args.get("recipe_id") or "").strip()
+        cwd = str(root)
+        if not command:
+            discovered = discover_runtime_recipes(str(root))
+            recipes = list(discovered.get("recipes") or [])
+            if recipe_id:
+                chosen = next((r for r in recipes if r.get("id") == recipe_id), None)
+                if not chosen:
+                    return {"ok": False, "error": f"unknown_recipe_id:{recipe_id}"}
+            elif not recipes:
+                return {"ok": False, "error": "no_start_command_discovered"}
+            elif len(recipes) == 1:
+                # Only one real candidate -- nothing to disambiguate. Every
+                # discovered recipe carries confirmRequired for the human-UI
+                # picker elsewhere; within an already-approved mission this
+                # tool loop already runs shell commands via run_command at
+                # the same trust level, so a single unambiguous recipe here
+                # is not a new risk tier.
+                chosen = recipes[0]
+            else:
+                return {
+                    "ok": False,
+                    "needs_recipe_choice": True,
+                    "candidates": recipes,
+                    "default_id": discovered.get("default_id"),
+                    "hint": "Call start_app again with recipe_id or an explicit command.",
+                }
+            resolved = resolve_recipe(str(root), chosen["id"])
+            command = chosen.get("command") or ""
+            cwd = resolved.get("cwd") or str(root)
+            if not command:
+                return {"ok": False, "error": "recipe_has_no_command"}
+
+        label = str(args.get("label") or "").strip()
+        try:
+            info = spawn_owned_process(command, cwd, label=label)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"start_failed:{exc}"}
+        return {
+            "ok": True,
+            "process_id": info.id,
+            "pid": info.pid,
+            "label": info.label,
+            "command": command,
+            "cwd": cwd,
+        }
+
+    if name == "stop_app":
+        from app.domains.workspace.app_runner import stop_owned_processes_in_workspace
+
+        stopped = stop_owned_processes_in_workspace(str(root))
+        return {"ok": True, "stopped": stopped}
+
+    if name == "health_check":
+        from app.services.workspace.health_check import wait_for_port_healthy
+
+        try:
+            port = int(args.get("port"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "port_required"}
+        result = wait_for_port_healthy(
+            "127.0.0.1",
+            port,
+            path=str(args.get("path") or "/"),
+            timeout_s=float(args.get("timeout_s") or 20.0),
+        )
+        return {"ok": bool(result.get("ok")), **result}
+
+    _BROWSER_TOOL_MAP = {
+        "browser_navigate": "navigate",
+        "browser_snapshot": "snapshot",
+        "browser_click": "click",
+        "browser_type": "fill",
+        "browser_select": "select_option",
+        "browser_screenshot": "screenshot",
+        "browser_wait_for": "wait_for",
+        "browser_assert_text": "assert_text",
+        "browser_assert_visible": "assert_visible",
+        "browser_console_errors": "console_errors",
+        "browser_network_failures": "network_failures",
+    }
+    if name in _BROWSER_TOOL_MAP:
+        from app.adapters.playwright_adapter import execute as pw_execute
+
+        out = pw_execute(_BROWSER_TOOL_MAP[name], dict(args), config={}, enabled=True)
+        if name == "browser_screenshot" and isinstance(out.get("png_bytes"), (bytes, bytearray)):
+            import base64
+            import uuid as _uuid
+
+            shots_dir = root / ".zect" / "evidence" / "screenshots"
+            shots_dir.mkdir(parents=True, exist_ok=True)
+            fname = f"{_uuid.uuid4().hex[:12]}.png"
+            (shots_dir / fname).write_bytes(out["png_bytes"])
+            out = {k: v for k, v in out.items() if k != "png_bytes"}
+            out["screenshot_path"] = f".zect/evidence/screenshots/{fname}"
+            out["screenshot_preview_b64"] = base64.b64encode(
+                (shots_dir / fname).read_bytes()[:2000]
+            ).decode("ascii")
+        return {"ok": out.get("status") == "ok", **out}
 
     return {"ok": False, "error": f"unknown_tool:{name}"}

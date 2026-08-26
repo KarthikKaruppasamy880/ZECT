@@ -18,7 +18,8 @@ from app.domains.personal_agent import personal_actions
 from app.domains.personal_agent import presentation_api
 from app.domains.personal_agent import sheets_api
 from app.domains.personal_agent import learning
+from app.domains.personal_agent import learning_studio
 from app.domains.personal_agent import automation_loops_api
 from app.domains.personal_agent import long_running_api
 
-__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions', 'file_organize', 'automation_watches', 'personal_actions', 'presentation_api', 'sheets_api', 'learning', 'automation_loops_api', 'long_running_api']
+__all__ = ['memory', 'skills_engine', 'playbooks', 'scheduler', 'transfer', 'data_flywheel', 'data_layer', 'dream_engine', 'conversations', 'session_insights', 'persistent_sessions', 'user_sessions', 'file_organize', 'automation_watches', 'personal_actions', 'presentation_api', 'sheets_api', 'learning', 'learning_studio', 'automation_loops_api', 'long_running_api']

@@ -61,14 +61,39 @@ def _legacy_deck_repair() -> dict:
     }
 
 
+def _preview_png_checks(golden: dict) -> dict:
+    sys.path.insert(0, str(ROOT))
+    from app.services.mentrix.presentation.slide_preview import render_slide_png_bytes
+
+    path_str = str((golden.get("artifact") or {}).get("path") or golden.get("path") or "")
+    if not path_str:
+        report_path = ROOT / "artifacts" / "present-golden-v3" / "golden_v3_report.json"
+        if report_path.is_file():
+            body = json.loads(report_path.read_text(encoding="utf-8"))
+            path_str = str(body.get("path") or "")
+    pptx = Path(path_str) if path_str else None
+    if pptx is None or not pptx.is_file():
+        return {"ok": False, "skipped": True, "reason": "golden_pptx_missing"}
+    data = pptx.read_bytes()
+    slide_count = max(1, int(golden.get("slide_count") or 3))
+    previews: list[dict[str, int]] = []
+    for idx in range(slide_count):
+        png = render_slide_png_bytes(data, idx)
+        previews.append({"index": idx, "bytes": len(png)})
+    ok = all(row["bytes"] > 200 for row in previews)
+    return {"ok": ok, "path": str(pptx), "previews": previews}
+
+
 def main() -> int:
     golden = _run_golden_v3()
     legacy = _legacy_deck_repair()
+    previews = _preview_png_checks(golden)
     acceptance = bool(
         golden.get("acceptance")
         and golden.get("quality_gate", {}).get("final_quality_status") == "PASS"
         and not golden.get("quality_gate", {}).get("export_blocked")
         and (legacy.get("skipped") or legacy.get("ok"))
+        and (previews.get("skipped") or previews.get("ok"))
     )
     report = {
         "ok": acceptance,
@@ -76,6 +101,7 @@ def main() -> int:
         "verdict": "ZECT_PRESENT_PRODUCTION_RELEASE_CANDIDATE" if acceptance else "ZECT_PRESENT_PRODUCTION_BLOCKED",
         "golden_v3": golden,
         "legacy_deck_repair": legacy,
+        "preview_png_checks": previews,
     }
     out_dir = ROOT / "artifacts" / "present-production-release"
     out_dir.mkdir(parents=True, exist_ok=True)

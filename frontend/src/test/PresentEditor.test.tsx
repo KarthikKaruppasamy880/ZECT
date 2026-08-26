@@ -206,6 +206,8 @@ describe("PresentEditor v1", () => {
     expect(screen.getByTestId("present-editor-zoom-fit").textContent).toMatch(/110%/);
     fireEvent.click(screen.getByTestId("present-editor-tab-insert"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
+    fireEvent.click(screen.getByTestId("present-editor-tab-layers"));
+    fireEvent.click(screen.getByTestId("present-editor-advanced-toggle"));
     expect(screen.getByTestId("present-editor-layers")).toBeTruthy();
     expect(screen.getByTestId("present-editor-layer-chart")).toBeTruthy();
     expect(screen.getByTestId("present-editor-props")).toBeTruthy();

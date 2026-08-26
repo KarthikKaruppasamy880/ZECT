@@ -38,6 +38,7 @@ export default function PresentEditorSidePanel({
 }: PresentEditorSidePanelProps) {
   return (
     <div className="flex flex-col gap-2" data-testid="present-editor-side-panel">
+      {showAdvanced ? (
       <div className="rounded border border-slate-200 p-2" data-testid="present-editor-layers">
         <p className="mb-1 text-[11px] font-medium text-slate-600">Layers</p>
         {visualBlocks.length === 0 ? (
@@ -62,7 +63,7 @@ export default function PresentEditorSidePanel({
                   className="text-[10px] text-slate-500"
                   onClick={() => block.id && onReorderBlock(block.id, -1)}
                 >
-                  Back
+                  ↑
                 </button>
                 <button
                   type="button"
@@ -70,13 +71,14 @@ export default function PresentEditorSidePanel({
                   className="text-[10px] text-slate-500"
                   onClick={() => block.id && onReorderBlock(block.id, 1)}
                 >
-                  Front
+                  ↓
                 </button>
               </li>
             ))}
           </ul>
         )}
       </div>
+      ) : null}
       <div className="rounded border border-slate-200 p-2" data-testid="present-editor-props">
         <div className="mb-1 flex items-center justify-between">
           <p className="text-[11px] font-medium text-slate-600">Properties</p>

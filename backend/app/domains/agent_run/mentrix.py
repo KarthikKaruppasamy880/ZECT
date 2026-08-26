@@ -1782,11 +1782,57 @@ def present_download_pptx(
                 "hard_findings": gate.get("hard_findings") or [],
             },
         )
+    if not gate.get("quality_passed"):
+        if not accept_warnings or not gate.get("accept_warnings_allowed"):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "export_blocked_quality",
+                    "hint": "Quality gate failed. Repair the deck or accept non-critical warnings on the Export tab.",
+                    "hard_findings": gate.get("hard_findings") or [],
+                    "warnings": gate.get("warnings") or [],
+                    "accept_warnings_allowed": bool(gate.get("accept_warnings_allowed")),
+                },
+            )
     return FileResponse(
         path=str(pptx),
         filename=pptx.name,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
     )
+
+
+@router.post("/present/repair-deck")
+def present_repair_deck(body: PresentPathIn, _user: CurrentUser = Depends(get_current_user)):
+    """Run OOXML inspector repair on an allowlisted deck and refresh quality metadata."""
+    from app.services.mentrix.presentation.deck_catalog import quality_gate_for_path
+    from app.services.mentrix.presentation.final_pptx_inspector import inspect_and_repair_pptx
+    from app.services.mentrix.presentation.slide_preview import invalidate_slide_previews
+
+    try:
+        pptx = _pptx_from_request(body.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        repaired, repair_report = inspect_and_repair_pptx(pptx.read_bytes())
+        pptx.write_bytes(repaired)
+        invalidate_slide_previews(pptx)
+        gate = quality_gate_for_path(str(pptx))
+    except Exception as exc:  # noqa: BLE001 — repair must not 500 the editor
+        raise HTTPException(
+            status_code=422,
+            detail={"stage": "repair_deck", "error": str(exc)[:200]},
+        ) from exc
+    return {
+        "ok": True,
+        "path": str(pptx),
+        "filename": pptx.name,
+        "repair": repair_report,
+        "quality_gate": gate,
+    }
 
 
 @router.get("/present/decks")

@@ -64,7 +64,9 @@ export default function PresentExport() {
     setBusy(true);
     setStatus("Exporting…");
     try {
-      const { blob, filename } = await mentrixPresentPptxDownload(path);
+      const { blob, filename } = await mentrixPresentPptxDownload(path, {
+        acceptWarnings: canAcceptWarnings && acceptWarnings,
+      });
       const name = filename || "zect-deck.pptx";
       const desktop = desktopExportBridge();
       if (desktop?.isDesktopApp && desktop.savePresentationFile) {

@@ -815,6 +815,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
           >
             <HelpCircle className="h-3.5 w-3.5" /> ?
           </button>
+          {!reviewPreview ? (
           <button
             type="button"
             data-testid="present-editor-export"
@@ -824,10 +825,15 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
           >
             <FileDown className="h-3.5 w-3.5" /> Export PPTX
           </button>
+          ) : (
+            <span className="text-[10px] text-slate-500" data-testid="present-editor-export-hint">
+              Export on Export tab
+            </span>
+          )}
         </div>
       </div>
       <div className={visualEdit ? "flex min-h-0 flex-1" : "flex min-h-[280px]"}>
-      <SplitPane axis="horizontal" storageKey="zect_present_editor_h" initial={18} min={12} max={36} testId="present-editor-split">
+      <SplitPane axis="horizontal" storageKey="zect_present_editor_h" initial={14} min={10} max={28} testId="present-editor-split">
         <ul
           className="h-full overflow-auto border-r border-slate-100 p-1"
           data-testid="present-editor-thumbs"

@@ -551,3 +551,17 @@ def test_keep_cleanup_refuses_empty_keep_ids(authed_client):
     assert body["ok"] is True
     assert body["dry_run"] is True
     assert kid not in {row["id"] for row in body["would_delete"]}
+
+
+def test_repair_deck_endpoint(authed_client, tmp_path):
+    from app.services.pptx_paths import default_pptx_save_dir
+
+    dest = default_pptx_save_dir() / "_p0_repair_deck.pptx"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(_overlapping_dump_pptx())
+    resp = authed_client.post("/api/mentrix/present/repair-deck", json={"path": str(dest)})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("ok") is True
+    assert body.get("quality_gate")
+    dest.unlink(missing_ok=True)

@@ -12,7 +12,7 @@ const BUILTIN = [
 ];
 
 describe("mergePresentTemplateLists", () => {
-  it("keeps Zinnia/org/user registry cards when Presenton remote list is empty", () => {
+  it("keeps Zinnia/org/user registry cards when remote engine list is empty", () => {
     const list = mergePresentTemplateLists(
       BUILTIN,
       [],
@@ -29,7 +29,7 @@ describe("mergePresentTemplateLists", () => {
     expect(ids).toContain("general");
   });
 
-  it("does not wipe registry cards when a later empty Presenton payload is applied", () => {
+  it("does not wipe registry cards when a later empty engine payload is applied", () => {
     const first = mergePresentTemplateLists(BUILTIN, [], [{ id: "user-my-deck", name: "My deck" }]);
     const second = mergePresentTemplateLists(BUILTIN, [], [], first);
     expect(second.map((t) => t.id)).toContain("user-my-deck");
@@ -51,8 +51,8 @@ describe("mergePresentTemplateLists", () => {
     expect(
       isGenerateTemplateReady({ id: "zinnia-executive-v1", name: "Exec", native_ready: true }),
     ).toBe(true);
-    expect(isGenerateTemplateReady({ id: "general", name: "General" }, { presentonReady: true })).toBe(true);
-    expect(isGenerateTemplateReady({ id: "general", name: "General" }, { presentonReady: false })).toBe(false);
+    expect(isGenerateTemplateReady({ id: "general", name: "General" }, { engineReady: true })).toBe(true);
+    expect(isGenerateTemplateReady({ id: "general", name: "General" }, { engineReady: false })).toBe(false);
   });
 
   it("gallery always lists canonical Zinnia even when hide-not-ready is on", () => {

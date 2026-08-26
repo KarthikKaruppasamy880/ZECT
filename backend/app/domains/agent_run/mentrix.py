@@ -1475,9 +1475,13 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     browser = get_browser_runtime().status()
     uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
     present_status = PresentationService().status(user_id=str(uid))
-    is_presenton = str(present_status.get("provider") or "") == "presenton"
-    presenton_online = bool(
-        is_presenton and present_status.get("configured") and present_status.get("reachable")
+    provider = str(present_status.get("provider") or "zect_native")
+    is_legacy_external = provider == "presenton"
+    engine_configured = bool(present_status.get("configured"))
+    engine_reachable = bool(present_status.get("reachable"))
+    present_engine_online = engine_configured and engine_reachable
+    legacy_external_online = bool(
+        is_legacy_external and engine_configured and engine_reachable
     )
     return {
         "slack": slack,
@@ -1497,11 +1501,15 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
         "browser_label": browser.get("label") or "Browser automation",
         "browser_hint": browser.get("hint") or "",
         "browser_provider": browser.get("provider") or "playwright",
-        "presenton": presenton_online,
-        "presenton_configured": bool(is_presenton and present_status.get("configured")),
-        "presenton_reachable": bool(is_presenton and present_status.get("reachable")),
+        "present_engine": present_engine_online,
+        "present_engine_configured": engine_configured,
+        "present_engine_reachable": engine_reachable,
+        "presentation_provider": provider,
+        # Legacy field names — deprecated, do not use in new UI
+        "presenton": legacy_external_online,
+        "presenton_configured": bool(is_legacy_external and engine_configured),
+        "presenton_reachable": bool(is_legacy_external and engine_reachable),
         "presenton_base_url": str(present_status.get("base_url") or ""),
-        "presentation_provider": present_status.get("provider") or "presenton",
         "zinnia_presenton_template_id": "",
         "zoom_join_url_configured": bool(zoom_join),
         "zoom_desktop_path_configured": bool((os.getenv("ZOOM_DESKTOP_PATH") or "").strip()),
@@ -1509,11 +1517,10 @@ def companion_integrations_status(_user: CurrentUser = Depends(get_current_user)
     }
 
 
-class PresentonGenerateRequest(BaseModel):
+class PresentGenerateRequest(BaseModel):
     content: str
     n_slides: int = 6
     template: str = "general"
-    # UI gallery id (e.g. zinnia-exec) — preferred for honest zinnia_verified resolution
     ui_template_choice: str = ""
     custom_id: str = ""
     instructions: str = ""
@@ -1524,6 +1531,105 @@ class PresentonGenerateRequest(BaseModel):
     fast_basic: bool = False
     require_llm: bool = False
     run_id: str = ""
+
+
+# Deprecated alias — tests migrating to PresentGenerateRequest
+PresentonGenerateRequest = PresentGenerateRequest
+
+
+def _present_generate_impl(req: PresentGenerateRequest, uid: str) -> dict:
+    from app.services.mentrix.presentation.provider import PresentationGenerateRequest
+    from app.services.mentrix.presentation.service import PresentationService
+
+    content = req.content
+    lang = (req.language or "").strip()
+    if lang and lang.lower() not in {"en", "english", "auto", ""}:
+        content = f"Write the entire presentation in {lang}.\n\n{content}"
+    docs = [d.strip() for d in (req.documents or []) if str(d).strip()]
+    if docs:
+        content = content + "\n\nAttached source material:\n" + "\n\n".join(docs[:8])
+    return PresentationService().generate(
+        PresentationGenerateRequest(
+            content=content,
+            n_slides=req.n_slides,
+            template=req.template,
+            ui_template_choice=req.ui_template_choice,
+            custom_id=req.custom_id,
+            instructions=req.instructions,
+            filename=req.filename,
+            user_id=str(uid),
+            asset_ids=list(req.asset_ids or []),
+            require_llm=bool(req.require_llm),
+            fast_basic=bool(req.fast_basic),
+            run_id=(req.run_id or "").strip(),
+        )
+    )
+
+
+@router.get("/present/engine/status")
+def present_engine_status(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.service import PresentationService
+
+    uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
+    return PresentationService().status(user_id=str(uid))
+
+
+@router.get("/present/engine/templates")
+def present_engine_templates(_user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.service import PresentationService
+
+    return PresentationService().list_engine_templates()
+
+
+@router.post("/present/generate")
+def present_generate(req: PresentGenerateRequest, _user: CurrentUser = Depends(get_current_user)):
+    """Generate a PPTX through ZECT PresentationService (native LayoutComposer + PptxExporter)."""
+    uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
+    out = _present_generate_impl(req, str(uid))
+    if not out.get("ok"):
+        http_status = int(out.get("http_status") or 502)
+        if http_status < 400:
+            http_status = 502
+        raise HTTPException(
+            status_code=http_status,
+            detail={
+                "error": out.get("error") or "generation_failed",
+                "hint": out.get("hint") or "",
+                "detail": out.get("detail") or "",
+                "template_sent": out.get("template_sent"),
+                "ui_template_choice": out.get("ui_template_choice"),
+                "zinnia_verified": out.get("zinnia_verified"),
+                "zinnia_note": out.get("zinnia_note"),
+                "lifecycle": out.get("lifecycle"),
+                "canonical_id": out.get("canonical_id"),
+                "mapping_source": out.get("mapping_source"),
+                "blocked_external": bool(out.get("blocked_external")),
+                "block_code": out.get("block_code") or out.get("error") or "",
+                "retries": out.get("retries"),
+                "provider": out.get("provider"),
+                "planner_mode": out.get("planner_mode"),
+                "fallback": out.get("fallback"),
+                "fallback_reason": out.get("fallback_reason"),
+                "degraded": out.get("degraded"),
+                "final_quality_status": out.get("final_quality_status"),
+                "repair_attempts": out.get("repair_attempts"),
+                "overlap_count": out.get("overlap_count"),
+                "ungrounded_fact_count": out.get("ungrounded_fact_count"),
+                "generation_job_id": out.get("generation_job_id"),
+                "run_id": out.get("run_id") or req.run_id,
+            },
+        )
+    return out
+
+
+@router.get("/present/generation/{job_id}")
+def present_generation_job(job_id: str, _user: CurrentUser = Depends(get_current_user)):
+    from app.services.mentrix.presentation.generation_progress import get_job
+
+    row = get_job(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="generation_job_not_found")
+    return {"ok": True, "job": row}
 
 
 @router.get("/presenton/status")
@@ -1544,37 +1650,12 @@ def presenton_templates(_user: CurrentUser = Depends(get_current_user)):
 
 @router.post("/presenton/generate")
 def presenton_generate(
-    req: PresentonGenerateRequest,
+    req: PresentGenerateRequest,
     _user: CurrentUser = Depends(get_current_user),
 ):
-    """Generate a PPTX through PresentationService (Presenton default until S8C)."""
-    from app.services.mentrix.presentation.provider import PresentationGenerateRequest
-    from app.services.mentrix.presentation.service import PresentationService
-
+    """Legacy route alias — prefer POST /present/generate."""
     uid = getattr(_user, "user_id", None) or getattr(_user, "username", "anon")
-    content = req.content
-    lang = (req.language or "").strip()
-    if lang and lang.lower() not in {"en", "english", "auto", ""}:
-        content = f"Write the entire presentation in {lang}.\n\n{content}"
-    docs = [d.strip() for d in (req.documents or []) if str(d).strip()]
-    if docs:
-        content = content + "\n\nAttached source material:\n" + "\n\n".join(docs[:8])
-    out = PresentationService().generate(
-        PresentationGenerateRequest(
-            content=content,
-            n_slides=req.n_slides,
-            template=req.template,
-            ui_template_choice=req.ui_template_choice,
-            custom_id=req.custom_id,
-            instructions=req.instructions,
-            filename=req.filename,
-            user_id=str(uid),
-            asset_ids=list(req.asset_ids or []),
-            require_llm=bool(req.require_llm),
-            fast_basic=bool(req.fast_basic),
-            run_id=(req.run_id or "").strip(),
-        )
-    )
+    out = _present_generate_impl(req, str(uid))
     if not out.get("ok"):
         http_status = int(out.get("http_status") or 502)
         if http_status < 400:
@@ -1582,7 +1663,7 @@ def presenton_generate(
         raise HTTPException(
             status_code=http_status,
             detail={
-                "error": out.get("error") or "presenton_failed",
+                "error": out.get("error") or "generation_failed",
                 "hint": out.get("hint") or "",
                 "detail": out.get("detail") or "",
                 "template_sent": out.get("template_sent"),
@@ -1614,8 +1695,8 @@ class PresentCancelRequest(BaseModel):
     run_id: str
 
 
-@router.post("/presenton/generate/cancel")
-def presenton_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = Depends(get_current_user)):
+@router.post("/present/generate/cancel")
+def present_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = Depends(get_current_user)):
     from app.infrastructure.observability import cancel_operation
 
     if not (req.run_id or "").strip():
@@ -1623,6 +1704,11 @@ def presenton_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = De
     if not cancel_operation(req.run_id, user_id=_user.user_id):
         raise HTTPException(status_code=403, detail="not_operation_owner")
     return {"ok": True, "run_id": req.run_id, "cancelled": True}
+
+
+@router.post("/presenton/generate/cancel")
+def presenton_generate_cancel(req: PresentCancelRequest, _user: CurrentUser = Depends(get_current_user)):
+    return present_generate_cancel(req, _user)
 
 
 @router.post("/present/parse-pptx")
@@ -1657,6 +1743,10 @@ class PresentPathIn(BaseModel):
 
 class PresentTemplateIdIn(BaseModel):
     template_id: str
+
+
+class PresentBlankIn(BaseModel):
+    layout: str = "title_slide"
 
 
 def _pptx_from_request(path_str: str):
@@ -1732,11 +1822,12 @@ def present_duplicate_deck(body: PresentPathIn, _user: CurrentUser = Depends(get
 
 
 @router.post("/present/blank")
-def present_blank_deck(_user: CurrentUser = Depends(get_current_user)):
+def present_blank_deck(body: PresentBlankIn | None = None, _user: CurrentUser = Depends(get_current_user)):
     from app.services.mentrix.presentation.deck_catalog import create_blank_pptx
 
-    dest = create_blank_pptx()
-    return {"ok": True, "path": str(dest), "filename": dest.name}
+    layout = (body.layout if body else "title_slide") or "title_slide"
+    dest = create_blank_pptx(layout=layout)
+    return {"ok": True, "path": str(dest), "filename": dest.name, "layout": layout}
 
 
 @router.post("/present/from-template")
@@ -1836,6 +1927,13 @@ def present_parse_pptx_path(body: PresentPathIn, _user: CurrentUser = Depends(ge
     slides = parse_pptx_bytes(data)
     if not slides:
         raise HTTPException(status_code=400, detail="No slides found in that .pptx")
+    from app.services.mentrix.presentation.media_hydrate import hydrate_presentation_media
+
+    slides = hydrate_presentation_media(
+        slides,
+        data,
+        user_id=str(getattr(_user, "email", None) or _user.user_id or "anon"),
+    )
     sidecar_slides = None
     try:
         sidecar = notes_sidecar_for_pptx(pptx)

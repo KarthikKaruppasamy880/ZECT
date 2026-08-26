@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { FileDown } from "lucide-react";
 import PresentPhaseStrip from "@/pages/present/PresentPhaseStrip";
-import { decodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
+import { decodeDeckId, encodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
+
+declare global {
+  interface Window {
+    zectDesktop?: {
+      isDesktopApp?: boolean;
+      savePresentationFile?: (opts: {
+        defaultName?: string;
+        dataBase64?: string;
+      }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; bytes?: number }>;
+    };
+  }
+}
 
 export default function PresentExport() {
   const { deckId = "" } = useParams();
@@ -50,15 +62,30 @@ export default function PresentExport() {
   const exportPptx = async () => {
     if (!path || blocked || hardBlocked) return;
     setBusy(true);
+    setStatus("Exporting…");
     try {
       const { blob, filename } = await mentrixPresentPptxDownload(path);
+      const name = filename || "zect-deck.pptx";
+      if (window.zectDesktop?.isDesktopApp && window.zectDesktop.savePresentationFile) {
+        const buf = await blob.arrayBuffer();
+        const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        const saved = await window.zectDesktop.savePresentationFile({ defaultName: name, dataBase64 });
+        if (saved.canceled) {
+          setStatus("Export canceled");
+          return;
+        }
+        if (saved.ok && saved.path) {
+          setStatus(`Saved to ${saved.path} (${(saved.bytes || blob.size).toLocaleString()} bytes)`);
+          return;
+        }
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename || "zect-deck.pptx";
+      a.download = name;
       a.click();
       URL.revokeObjectURL(url);
-      setStatus(`Exported ${blob.size} bytes`);
+      setStatus(`Exported ${name} (${blob.size.toLocaleString()} bytes)`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Export failed");
     } finally {
@@ -93,8 +120,10 @@ export default function PresentExport() {
       )}
       {hardBlocked ? (
         <p className="text-xs text-rose-800" data-testid="present-export-hard-block">
-          Export is blocked until critical quality findings are repaired. Accepting warnings cannot override collisions,
-          duplicate content, clipping, broken assets, or corrupt relationships.
+          Export blocked: {(gate?.hard_findings || []).join(", ") || "critical quality"}.{" "}
+          <Link to={`/present/d/${deckId}`} className="underline">
+            Open Quality
+          </Link>
         </p>
       ) : null}
       {canAcceptWarnings ? (

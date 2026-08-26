@@ -15,7 +15,9 @@ sys.path.insert(0, str(BACKEND))
 from app.services.mentrix.presentation import template_registry as tmpl
 from app.services.mentrix.presentation.template_definition import load_definition, native_ready
 
-SRC = Path(r"C:\Users\karuppk\Downloads\ZECT\artifacts\zinnia-master-source.pptx")
+_A1 = Path(r"C:\Users\karuppk\Downloads\A1_Zinnia_PPT_Template.pptx")
+_ARTIFACT = Path(r"C:\Users\karuppk\Downloads\ZECT\artifacts\zinnia-master-source.pptx")
+SRC = _A1 if _A1.is_file() else _ARTIFACT
 OUT = Path(__file__).resolve().parents[2] / "test-results" / "s7-parity" / "zinnia-import.json"
 
 
@@ -29,8 +31,8 @@ def main() -> int:
     imported = tmpl.import_canonical_master(
         "zinnia-executive-v1",
         data,
-        name="Zinnia Executive",
-        filename="zinnia-master-source.pptx",
+        name="A1 Zinnia PPT Template" if SRC == _A1 else "Zinnia Executive",
+        filename=SRC.name,
     )
     definition = load_definition("zinnia-executive-v1") or {}
     theme = definition.get("theme") or {}

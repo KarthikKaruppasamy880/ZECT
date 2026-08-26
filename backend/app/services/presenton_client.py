@@ -423,7 +423,7 @@ def generate_presentation(
 
     payload: dict[str, Any] = {
         "content": prompt,
-        "n_slides": max(3, min(int(n_slides or 6), 20)),
+        "n_slides": max(1, min(int(n_slides or 6), 20)),
         "language": "English",
         "template": (template or "general").strip() or "general",
         "export_as": "pptx",

@@ -12,22 +12,154 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? { ...value } : {};
 }
 
+function TableEditor({
+  initial,
+  onSave,
+  onClose,
+}: {
+  initial: Record<string, unknown>;
+  onSave: (content: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState(String(initial.title || "Table"));
+  const [headers, setHeaders] = useState<string[]>(
+    Array.isArray(initial.headers) ? initial.headers.map(String) : ["Column 1", "Column 2", "Column 3"],
+  );
+  const [rows, setRows] = useState<string[][]>(() => {
+    const raw = Array.isArray(initial.rows) ? initial.rows : [];
+    return raw.map((r) => (Array.isArray(r) ? r.map(String) : []));
+  });
+
+  const setCell = (ri: number, ci: number, value: string) => {
+    setRows((prev) => prev.map((row, i) => (i === ri ? row.map((c, j) => (j === ci ? value : c)) : row)));
+  };
+
+  const addRow = () => setRows((prev) => [...prev, Array.from({ length: headers.length }, () => "")]);
+  const removeRow = (ri: number) => {
+    if (rows.length <= 1) return;
+    setRows((prev) => prev.filter((_, i) => i !== ri));
+  };
+  const addCol = () => {
+    setHeaders((prev) => [...prev, `Column ${prev.length + 1}`]);
+    setRows((prev) => prev.map((row) => [...row, ""]));
+  };
+  const removeCol = (ci: number) => {
+    if (headers.length <= 2) return;
+    setHeaders((prev) => prev.filter((_, i) => i !== ci));
+    setRows((prev) => prev.map((row) => row.filter((_, i) => i !== ci)));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      data-testid="present-edit-table-modal"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
+          <h3 className="text-sm font-semibold text-slate-900">Edit table</h3>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              data-testid="present-edit-table-save"
+              className="rounded bg-teal-700 px-3 py-1 text-xs text-white"
+              onClick={() => onSave({ ...initial, title, headers, rows })}
+            >
+              Save
+            </button>
+            <button type="button" className="px-2 text-slate-500" onClick={onClose} aria-label="Close">
+              ×
+            </button>
+          </div>
+        </div>
+        <div className="overflow-auto p-4">
+          <label className="mb-3 block text-xs text-slate-600">
+            Title
+            <input
+              className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          <table className="w-full border-collapse text-xs" data-testid="present-edit-table-grid">
+            <thead>
+              <tr>
+                {headers.map((h, ci) => (
+                  <th key={ci} className="border border-slate-200 bg-slate-50 p-1">
+                    <input
+                      className="w-full rounded border border-slate-300 px-1 py-0.5"
+                      value={h}
+                      onChange={(e) =>
+                        setHeaders((prev) => prev.map((col, i) => (i === ci ? e.target.value : col)))
+                      }
+                    />
+                    <button type="button" className="mt-0.5 text-[10px] text-rose-700" onClick={() => removeCol(ci)}>
+                      Del col
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {headers.map((_, ci) => (
+                    <td key={ci} className="border border-slate-200 p-1">
+                      <input
+                        data-testid={`present-edit-table-cell-${ri}-${ci}`}
+                        className="w-full rounded border border-slate-300 px-1 py-0.5"
+                        value={row[ci] || ""}
+                        onChange={(e) => setCell(ri, ci, e.target.value)}
+                      />
+                    </td>
+                  ))}
+                  <td className="p-1">
+                    <button type="button" className="text-[10px] text-rose-700" onClick={() => removeRow(ri)}>
+                      Del row
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="mt-2 flex gap-2">
+            <button type="button" data-testid="present-edit-table-add-row" className="rounded border px-2 py-1 text-xs" onClick={addRow}>
+              + Row
+            </button>
+            <button type="button" data-testid="present-edit-table-add-col" className="rounded border px-2 py-1 text-xs" onClick={addCol}>
+              + Column
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PresentEditDataTable({ block, onSave, onClose }: PresentEditDataTableProps) {
   const initial = asRecord(block.content);
+
+  if (block.kind === "table") {
+    return <TableEditor initial={initial} onSave={onSave} onClose={onClose} />;
+  }
+
   const [chartType, setChartType] = useState(String(initial.chart_type || "column"));
   const [title, setTitle] = useState(String(initial.title || ""));
   const [categories, setCategories] = useState<string[]>(
-    Array.isArray(initial.categories) ? initial.categories.map(String) : ["A", "B"],
+    Array.isArray(initial.categories) ? initial.categories.map(String) : ["Q1", "Q2", "Q3", "Q4"],
   );
   const [seriesName, setSeriesName] = useState(() => {
     const series = Array.isArray(initial.series) ? initial.series : [];
     const first = series[0] && typeof series[0] === "object" ? (series[0] as Record<string, unknown>) : {};
-    return String(first.name || "Series");
+    return String(first.name || "Series 1");
   });
   const [values, setValues] = useState<string[]>(() => {
     const series = Array.isArray(initial.series) ? initial.series : [];
     const first = series[0] && typeof series[0] === "object" ? (series[0] as Record<string, unknown>) : {};
-    const raw = Array.isArray(first.values) ? first.values : [1, 2];
+    const raw = Array.isArray(first.values) ? first.values : [12, 19, 8, 15];
     return raw.map((v) => String(v));
   });
 
@@ -43,7 +175,7 @@ export default function PresentEditDataTable({ block, onSave, onClose }: Present
   };
 
   const addRow = () => {
-    setCategories((prev) => [...prev, `Cat ${prev.length + 1}`]);
+    setCategories((prev) => [...prev, `Q${prev.length + 1}`]);
     setValues((prev) => [...prev, "0"]);
   };
 
@@ -75,15 +207,15 @@ export default function PresentEditDataTable({ block, onSave, onClose }: Present
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2">
-          <h3 className="text-sm font-semibold text-slate-900">Edit Data Table</h3>
+          <h3 className="text-sm font-semibold text-slate-900">Edit chart data</h3>
           <div className="flex gap-2">
             <button
               type="button"
               data-testid="present-edit-data-clear"
               className="rounded border border-slate-200 px-2 py-1 text-xs text-slate-700"
               onClick={() => {
-                setCategories(["A", "B"]);
-                setValues(["0", "0"]);
+                setCategories(["Q1", "Q2", "Q3", "Q4"]);
+                setValues(["0", "0", "0", "0"]);
                 setTitle("");
               }}
             >

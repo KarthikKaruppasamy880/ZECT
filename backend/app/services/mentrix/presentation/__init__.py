@@ -59,13 +59,17 @@ def prepare_prompt_deck(
     audience_id: str = "general",
     sensitivity_hint: str | None = None,
     documents: list[str] | None = None,
+    requested_slide_count: int | None = None,
 ) -> dict[str, Any]:
-    """Flow B: prompt/docs → classify → audience → outline → claims → approval gate before Presenton."""
+    """Flow B: prompt/docs → classify → audience → outline → claims → approval gate before generate."""
+    from app.services.mentrix.presentation.plan import clamp_slide_count
+
     docs = documents or []
     blob = "\n\n".join([prompt or "", *docs])
     sens = classify_deck_material(blob, hint=sensitivity_hint)
     audience = get_audience(audience_id)
-    adapted = prompt_adapter(audience_id, prompt or "Delivery status brief")
+    explicit_count = clamp_slide_count(requested_slide_count) if requested_slide_count is not None else None
+    adapted = prompt_adapter(audience_id, prompt or "Delivery status brief", requested_slide_count=explicit_count)
     claims = filter_presentable(extract_claims_from_text(blob, sensitivity=sens["sensitivity"]))
     # Mark numeric claims SOURCE_MISSING until user verifies
     for c in claims:
@@ -91,7 +95,9 @@ def prepare_prompt_deck(
         "claims": claims,
         "claims_markdown": claims_table_markdown(claims),
         "requires_user_approval": True,
-        "n_slides_hint": audience.get("slide_count_hint") or 6,
+        "requested_slide_count": explicit_count,
+        "n_slides_hint": explicit_count if explicit_count is not None else (audience.get("slide_count_hint") or 6),
+        "audience_slide_suggestion": audience.get("slide_count_hint") or 6,
         "presenton_ready": ok,
     }
 

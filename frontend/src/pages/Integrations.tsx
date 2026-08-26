@@ -45,8 +45,8 @@ export default function Integrations() {
   const [githubReady, setGithubReady] = useState(false);
   const [browserReady, setBrowserReady] = useState(false);
   const [browserHint, setBrowserHint] = useState("");
-  const [presentonReady, setPresentonReady] = useState(false);
-  const [presentonUrl, setPresentonUrl] = useState("");
+  const [presentEngineReady, setPresentEngineReady] = useState(false);
+  const [presentEngineUrl, setPresentEngineUrl] = useState("");
   const [zoomJoinReady, setZoomJoinReady] = useState(false);
   const [zoomPathReady, setZoomPathReady] = useState(false);
   const [processReady, setProcessReady] = useState(false);
@@ -77,12 +77,14 @@ export default function Integrations() {
         setGithubReady(!!integ.github);
         setBrowserReady(!!integ.browser);
         setBrowserHint(integ.browser_hint || "");
-        setPresentonReady(
-          integ.presenton_configured != null || integ.presenton_reachable != null
-            ? !!integ.presenton_configured && !!integ.presenton_reachable
-            : !!integ.presenton,
+        setPresentEngineReady(
+          integ.present_engine_configured != null || integ.present_engine_reachable != null
+            ? !!integ.present_engine_configured && !!integ.present_engine_reachable
+            : integ.presenton_configured != null || integ.presenton_reachable != null
+              ? !!integ.presenton_configured && !!integ.presenton_reachable
+              : !!(integ.present_engine ?? integ.presenton),
         );
-        setPresentonUrl(integ.presenton_base_url || "");
+        setPresentEngineUrl(integ.presenton_base_url || "");
         setZoomJoinReady(!!integ.zoom_join_url_configured);
         setZoomPathReady(!!integ.zoom_desktop_path_configured);
       } catch {
@@ -184,7 +186,7 @@ export default function Integrations() {
             <li><strong>GitHub</strong> — Set <code>GITHUB_TOKEN</code> in <code>backend/.env</code> (repo read + PR create). Status card below shows readiness (never shows the token).</li>
             <li><strong>Jira</strong> — UI form below <em>or</em> env names from runner: <code>JIRA_BASE_URL</code> / <code>MCP_JIRA_URL</code>, <code>JIRA_EMAIL</code> or <code>JIRA_USERNAME</code>, <code>JIRA_API_TOKEN</code>. Paste the token into local <code>backend/.env</code> — never commit it.</li>
             <li><strong>Slack</strong> — Get notifications when reviews complete, deployments happen, or budget alerts trigger. Create a Slack bot at api.slack.com/apps.</li>
-            <li><strong>Presenton</strong> — Self-host Docker; set <code>PRESENTON_BASE_URL</code>. Mentrix Companion → Present Deck → Generate deck → PPTX path.</li>
+            <li><strong>ZECT Present</strong> — Native LayoutComposer (default) or optional external Docker engine via <code>PRESENTON_BASE_URL</code>. Companion → Present Deck → Generate → PPTX path.</li>
             <li><strong>Zoom (Present Deck)</strong> — Optional <code>ZOOM_DESKTOP_PATH</code> / <code>ZOOM_DEFAULT_JOIN_URL</code>. Mentrix opens Zoom only; you join and share PowerPoint (no Meeting SDK).</li>
             <li><strong>MCP hub</strong> — Mentrix Integrator/Ops <em>execute</em> outbound tools via <code>/api/mcp</code> (Rules Engine gates every call).</li>
           </ul>
@@ -253,10 +255,10 @@ export default function Integrations() {
         <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-3 shadow-sm" data-testid="integrations-zoom-card">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-slate-900 font-semibold">Zoom + Presenton</h3>
+              <h3 className="text-slate-900 font-semibold">Zoom + ZECT Present</h3>
               <p className="text-xs text-slate-500">Present Deck assist (no auto-share)</p>
             </div>
-            {presentonReady || zoomJoinReady || zoomPathReady ? (
+            {presentEngineReady || zoomJoinReady || zoomPathReady ? (
               <CheckCircle className="h-5 w-5 text-green-500" />
             ) : (
               <XCircle className="h-5 w-5 text-slate-300" />
@@ -264,12 +266,12 @@ export default function Integrations() {
           </div>
           <ul className="text-sm text-slate-600 space-y-1">
             <li>
-              Presenton:{" "}
-              {presentonReady
-                ? `reachable (${presentonUrl || "configured"})`
-                : presentonUrl
-                  ? `configured but unreachable (${presentonUrl}) — BLOCKED_EXTERNAL until Docker is up`
-                  : "set PRESENTON_BASE_URL"}
+              Presentation engine:{" "}
+              {presentEngineReady
+                ? `ready (${presentEngineUrl || "configured"})`
+                : presentEngineUrl
+                  ? `configured but unreachable (${presentEngineUrl}) — BLOCKED_EXTERNAL until Docker is up`
+                  : "native engine (ZECT_PRESENTATION_PROVIDER=zect_native)"}
             </li>
             <li>Zoom path: {zoomPathReady ? "ZOOM_DESKTOP_PATH set" : "auto-detect Zoom.exe / set path"}</li>
             <li>Join URL: {zoomJoinReady ? "ZOOM_DEFAULT_JOIN_URL set" : "optional — paste in Present Deck"}</li>

@@ -55,7 +55,7 @@ describe("PresentDocumentCanvas", () => {
       />,
     );
     expect(screen.getByTestId("present-editor-canvas").getAttribute("data-canvas")).toBe("document");
-    expect(screen.getByTestId("present-editor-inline-text").textContent).toMatch(/Hello canvas/);
+    expect(screen.getByTestId("present-editor-block-hit-text").textContent).toMatch(/Hello canvas/);
     expect(screen.getByTestId("present-editor-chart-glyph")).toBeTruthy();
     expect(screen.getByTestId("present-editor-table-glyph").textContent).toMatch(/H1/);
     expect(screen.getByTestId("present-editor-diagram-glyph").textContent).toMatch(/N1/);
@@ -71,5 +71,39 @@ describe("PresentDocumentCanvas", () => {
       />,
     );
     expect(container.querySelector('[data-testid="present-editor-block-hit-shape"]')).toBeNull();
+  });
+
+  it("moves editable text blocks on pointer drag when not focused", () => {
+    const onGeometry = vi.fn();
+    render(
+      <PresentDocumentCanvas
+        slide={slide([
+          { id: "t", kind: "text", content: { text: "Move me" }, geometry: { x: 100, y: 100, cx: 200, cy: 50 } },
+        ])}
+        slideEmu={slideEmu}
+        testId="present-editor-canvas"
+        onGeometry={onGeometry}
+      />,
+    );
+    const canvas = screen.getByTestId("present-editor-canvas");
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 500,
+      top: 0,
+      left: 0,
+      bottom: 500,
+      right: 1000,
+      toJSON: () => ({}),
+    });
+    const block = screen.getByTestId("present-editor-block-hit-text");
+    block.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 50, clientY: 50, pointerId: 1, buttons: 1 }));
+    block.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: 120, clientY: 80, pointerId: 1, buttons: 1 }));
+    block.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 120, clientY: 80, pointerId: 1 }));
+    expect(onGeometry).toHaveBeenCalled();
+    const last = onGeometry.mock.calls[onGeometry.mock.calls.length - 1];
+    expect(last[1].x).toBeGreaterThan(100);
+    expect(last[1].y).toBeGreaterThan(100);
   });
 });

@@ -86,7 +86,12 @@ def _text_content(row: dict[str, Any]) -> dict[str, Any]:
     nested = row.get("content") if isinstance(row.get("content"), dict) else {}
     if not text:
         text = _str(nested.get("text"), limit=800)
-    return {"text": text, "role": _str(nested.get("role") or row.get("role") or "body", limit=24) or "body"}
+    out: dict[str, Any] = {"text": text, "role": _str(nested.get("role") or row.get("role") or "body", limit=24) or "body"}
+    for key in ("font_size_pt", "color", "align", "bold", "italic"):
+        if nested.get(key) is not None:
+            out[key] = nested.get(key)
+    out.update(_identity_fields(row))
+    return out
 
 
 def _safe_data_url(raw: Any) -> str:
@@ -112,6 +117,9 @@ def _identity_fields(row: dict[str, Any]) -> dict[str, Any]:
     hex_ok = fill.startswith("#") and len(fill) == 7 and all(c in "0123456789abcdefABCDEF" for c in fill[1:])
     if hex_ok:
         out["fill"] = fill
+    grad = nested.get("fill_gradient") if isinstance(nested.get("fill_gradient"), dict) else None
+    if grad and isinstance(grad.get("stops"), list):
+        out["fill_gradient"] = grad
     if nested.get("locked") or row.get("locked"):
         out["locked"] = True
         out["layer"] = _str(nested.get("layer") or "master", limit=24) or "master"
@@ -137,7 +145,13 @@ def _image_content(row: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     }
     if data_url:
         content["data_url"] = data_url
-    if not asset_id and not data_url:
+    media_part = _str(nested.get("media_part") or row.get("media_part"), limit=200)
+    media_sha = _str(nested.get("media_sha256") or row.get("media_sha256"), limit=80)
+    if media_part:
+        content["media_part"] = media_part
+    if media_sha:
+        content["media_sha256"] = media_sha
+    if not asset_id and not data_url and not media_part:
         errors.append("image_asset_required")
     return content, errors
 
@@ -301,6 +315,23 @@ def normalize_block(raw: Any, *, slide_index: int, ordinal: int) -> dict[str, An
     }
 
 
+def ensure_unique_block_ids(blocks: list[dict[str, Any]], *, slide_index: int) -> list[dict[str, Any]]:
+    """Reassign duplicate block ids so editor React keys and sidecar merges stay stable."""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for block in blocks:
+        row = dict(block)
+        kind = _str(row.get("kind") or "text", limit=24).lower() or "text"
+        block_id = _str(row.get("id"), limit=64)
+        if not block_id or block_id in seen:
+            block_id = stable_id(slide_index, kind, len(out))
+        seen.add(block_id)
+        row["id"] = block_id
+        row["slide_index"] = int(slide_index)
+        out.append(row)
+    return out
+
+
 def normalize_blocks(raw: Any, *, slide_index: int) -> list[dict[str, Any]]:
     items = raw if isinstance(raw, list) else []
     out: list[dict[str, Any]] = []
@@ -308,7 +339,7 @@ def normalize_blocks(raw: Any, *, slide_index: int) -> list[dict[str, Any]]:
         block = normalize_block(item, slide_index=slide_index, ordinal=len(out))
         if block:
             out.append(block)
-    return out
+    return ensure_unique_block_ids(out, slide_index=slide_index)
 
 
 def text_lines(blocks: list[dict[str, Any]]) -> list[str]:

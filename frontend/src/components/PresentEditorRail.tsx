@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { PresentBlock } from "@/lib/api";
 import { PRESENT_CHART_TYPES } from "@/lib/presentChartTypes";
+import { createEditorBlock } from "@/lib/presentInsertPlacement";
 
-export type EditorPaletteTab = "ai" | "blocks" | "texts" | "charts" | "tables" | "images" | "elements";
+/** @deprecated Use createEditorBlock from presentInsertPlacement */
+export function newEditorBlock(
+  kind: string,
+  slideIndex: number,
+  content: Record<string, unknown>,
+  existingBlocks: PresentBlock[] = [],
+): PresentBlock {
+  return createEditorBlock(kind, slideIndex, content, existingBlocks);
+}
+
+export type EditorPaletteTab = "ai" | "properties" | "insert" | "blocks" | "texts" | "charts" | "tables" | "images" | "elements" | "layers";
 
 type PresentEditorRailProps = {
   busy: boolean;
@@ -16,27 +27,26 @@ type PresentEditorRailProps = {
   onAddText?: (role: "title" | "subtitle" | "bullets" | "quote" | "body") => void;
   onAddShape?: (shape: "rect" | "ellipse" | "arrow") => void;
   onAddDiagram?: () => void;
+  onAddIcon?: () => void;
   onApplyLayout?: (layout: "title_body" | "split_image" | "two_col") => void;
   slideLabel?: string;
   selectedLabel?: string;
   attachLabels?: string[];
   onAttachFiles?: (files: File[]) => void;
   onQuickPrompt?: (prompt: string) => void;
+  sidePanel?: ReactNode;
+  studio?: boolean;
+  activeTab?: EditorPaletteTab;
+  onTabChange?: (tab: EditorPaletteTab) => void;
 };
 
-export function newEditorBlock(kind: string, slideIndex: number, content: Record<string, unknown>): PresentBlock {
-  return {
-    id: `blk_${slideIndex}_${kind}_${Date.now()}`,
-    kind,
-    slide_index: slideIndex,
-    content,
-    geometry: { x: 914400, y: 914400, cx: 3657600, cy: 1828800 },
-    provenance: { source: "editor", generated: false },
-    validation: { ok: true, errors: [] },
-  };
-}
+const STUDIO_TABS: Array<{ id: EditorPaletteTab; label: string }> = [
+  { id: "ai", label: "AI" },
+  { id: "properties", label: "Properties" },
+  { id: "insert", label: "Insert" },
+];
 
-const TABS: Array<{ id: EditorPaletteTab; label: string }> = [
+const REVIEW_TABS: Array<{ id: EditorPaletteTab; label: string }> = [
   { id: "ai", label: "AI" },
   { id: "blocks", label: "Blocks" },
   { id: "texts", label: "Texts" },
@@ -44,6 +54,7 @@ const TABS: Array<{ id: EditorPaletteTab; label: string }> = [
   { id: "tables", label: "Tables" },
   { id: "images", label: "Images" },
   { id: "elements", label: "Elements" },
+  { id: "layers", label: "Layers" },
 ];
 
 const QUICK_PROMPTS = [
@@ -54,6 +65,154 @@ const QUICK_PROMPTS = [
   { id: "table", label: "Add comparison table", prompt: "Add a comparison table from this slide." },
   { id: "density", label: "Reduce density", prompt: "Reduce density — keep the first three points." },
 ];
+
+function InsertPanel({
+  busy,
+  onAddChart,
+  onAddTable,
+  onAddElement,
+  onAddImage,
+  onAddText,
+  onAddShape,
+  onAddDiagram,
+  onAddIcon,
+  onApplyLayout,
+}: Pick<
+  PresentEditorRailProps,
+  | "busy"
+  | "onAddChart"
+  | "onAddTable"
+  | "onAddElement"
+  | "onAddImage"
+  | "onAddText"
+  | "onAddShape"
+  | "onAddDiagram"
+  | "onAddIcon"
+  | "onApplyLayout"
+>) {
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Insert</p>
+      <p className="text-[10px] text-slate-500">Layouts</p>
+      {(
+        [
+          ["title_body", "Title + body"],
+          ["split_image", "Split image"],
+          ["two_col", "Two column"],
+        ] as const
+      ).map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          data-testid={`present-editor-layout-${id}`}
+          disabled={busy}
+          onClick={() => onApplyLayout?.(id)}
+          className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          {label}
+        </button>
+      ))}
+      <p className="pt-1 text-[10px] text-slate-500">Text</p>
+      {(["title", "subtitle", "bullets", "quote", "body"] as const).map((role) => (
+        <button
+          key={role}
+          type="button"
+          data-testid={`present-editor-text-${role}`}
+          disabled={busy}
+          onClick={() => onAddText?.(role)}
+          className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] capitalize text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          {role}
+        </button>
+      ))}
+      <p className="pt-1 text-[10px] text-slate-500">Charts</p>
+      {PRESENT_CHART_TYPES.slice(0, 6).map((row) => (
+        <button
+          key={row.id}
+          type="button"
+          data-testid={row.id === "column" ? "present-editor-add-chart" : `present-editor-chart-${row.id}`}
+          disabled={busy}
+          onClick={() => onAddChart(row.id)}
+          className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          {row.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        data-testid="present-editor-add-table"
+        disabled={busy}
+        onClick={onAddTable}
+        className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        Table
+      </button>
+      <button
+        type="button"
+        data-testid="present-editor-add-quote"
+        disabled={busy}
+        onClick={() => onAddElement("quote")}
+        className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        Quote
+      </button>
+      <button
+        type="button"
+        data-testid="present-editor-add-metric"
+        disabled={busy}
+        onClick={() => onAddElement("metric")}
+        className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        Metric
+      </button>
+      <label className="block rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50">
+        Image
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          data-testid="present-editor-add-image"
+          disabled={busy}
+          className="mt-1 block w-full text-[10px]"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file && !file.name.toLowerCase().endsWith(".svg")) onAddImage(file);
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        data-testid="present-editor-add-diagram"
+        disabled={busy}
+        onClick={() => onAddDiagram?.()}
+        className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        Diagram
+      </button>
+      <button
+        type="button"
+        data-testid="present-editor-add-icon"
+        disabled={busy}
+        onClick={() => onAddIcon?.()}
+        className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+      >
+        Icon
+      </button>
+      {(["rect", "ellipse", "arrow"] as const).map((shape) => (
+        <button
+          key={shape}
+          type="button"
+          data-testid={`present-editor-shape-${shape}`}
+          disabled={busy}
+          onClick={() => onAddShape?.(shape)}
+          className="block w-full rounded border border-slate-200 px-2 py-1 text-left text-[11px] capitalize text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+        >
+          {shape}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function PresentEditorRail({
   busy,
@@ -67,27 +226,40 @@ export default function PresentEditorRail({
   onAddText,
   onAddShape,
   onAddDiagram,
+  onAddIcon,
   onApplyLayout,
   slideLabel,
   selectedLabel,
   attachLabels,
   onAttachFiles,
   onQuickPrompt,
+  sidePanel,
+  studio = false,
+  activeTab: controlledTab,
+  onTabChange,
 }: PresentEditorRailProps) {
-  const [tab, setTab] = useState<EditorPaletteTab>("ai");
+  const [internalTab, setInternalTab] = useState<EditorPaletteTab>("ai");
+  const tab = controlledTab ?? internalTab;
+  const setTab = (next: EditorPaletteTab) => {
+    onTabChange?.(next);
+    if (controlledTab === undefined) setInternalTab(next);
+  };
+  const tabs = studio ? STUDIO_TABS : REVIEW_TABS;
+  const propertiesTab = studio ? tab === "properties" : tab === "layers";
+
   return (
     <aside
-      className="flex w-64 shrink-0 flex-col gap-2 overflow-auto border-l border-slate-100 p-2"
+      className={`flex shrink-0 flex-col gap-2 overflow-auto border-l border-slate-100 p-2 ${studio ? "w-72" : "w-64"}`}
       data-testid="present-editor-rail"
     >
-      <div className="flex flex-wrap gap-0.5" data-testid="present-editor-palette">
-        {TABS.map((item) => (
+      <div className="flex flex-wrap gap-1" data-testid="present-editor-palette">
+        {tabs.map((item) => (
           <button
             key={item.id}
             type="button"
-            data-testid={`present-editor-tab-${item.id}`}
+            data-testid={`present-editor-tab-${item.id === "properties" ? "layers" : item.id}`}
             onClick={() => setTab(item.id)}
-            className={`rounded px-1.5 py-0.5 text-[10px] ${
+            className={`rounded px-2 py-1 text-[11px] font-medium ${
               tab === item.id ? "bg-teal-800 text-white" : "text-slate-600 hover:bg-slate-100"
             }`}
           >
@@ -172,7 +344,21 @@ export default function PresentEditorRail({
           </button>
         </>
       ) : null}
-      {tab === "blocks" ? (
+      {tab === "insert" && studio ? (
+        <InsertPanel
+          busy={busy}
+          onAddChart={onAddChart}
+          onAddTable={onAddTable}
+          onAddElement={onAddElement}
+          onAddImage={onAddImage}
+          onAddText={onAddText}
+          onAddShape={onAddShape}
+          onAddDiagram={onAddDiagram}
+          onAddIcon={onAddIcon}
+          onApplyLayout={onApplyLayout}
+        />
+      ) : null}
+      {tab === "blocks" && !studio ? (
         <>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Master layouts</p>
           {(
@@ -195,7 +381,7 @@ export default function PresentEditorRail({
           ))}
         </>
       ) : null}
-      {tab === "texts" ? (
+      {tab === "texts" && !studio ? (
         <>
           {(["title", "subtitle", "bullets", "quote", "body"] as const).map((role) => (
             <button
@@ -211,7 +397,7 @@ export default function PresentEditorRail({
           ))}
         </>
       ) : null}
-      {tab === "charts" ? (
+      {tab === "charts" && !studio ? (
         <>
           {PRESENT_CHART_TYPES.map((row) => (
             <button
@@ -227,7 +413,7 @@ export default function PresentEditorRail({
           ))}
         </>
       ) : null}
-      {tab === "tables" ? (
+      {tab === "tables" && !studio ? (
         <button
           type="button"
           data-testid="present-editor-add-table"
@@ -238,7 +424,7 @@ export default function PresentEditorRail({
           Table
         </button>
       ) : null}
-      {tab === "images" ? (
+      {tab === "images" && !studio ? (
         <label className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50">
           Image
           <input
@@ -255,7 +441,7 @@ export default function PresentEditorRail({
           />
         </label>
       ) : null}
-      {tab === "elements" ? (
+      {tab === "elements" && !studio ? (
         <>
           <button
             type="button"
@@ -298,6 +484,7 @@ export default function PresentEditorRail({
           ))}
         </>
       ) : null}
+      {propertiesTab ? sidePanel : null}
     </aside>
   );
 }

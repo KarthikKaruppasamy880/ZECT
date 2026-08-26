@@ -163,18 +163,33 @@ def _geom(sp: ET.Element) -> dict[str, Any]:
     return out
 
 
-def _parse_layout(root: ET.Element | None, name: str) -> dict[str, Any]:
+def _parse_layout(root: ET.Element | None, name: str, *, slide_cx: int = 12192000, slide_cy: int = 6858000) -> dict[str, Any]:
+    from app.services.mentrix.presentation.template_semantics import (
+        classify_decorative_shape,
+        classify_placeholder_type,
+    )
+
     placeholders: list[dict[str, Any]] = []
+    shapes: list[dict[str, Any]] = []
     if root is None:
-        return {"name": name, "placeholders": placeholders}
+        return {"name": name, "placeholders": placeholders, "shapes": shapes}
     c_sld = root.find(f"{{{_P}}}cSld")
     layout_name = (c_sld.get("name") if c_sld is not None else "") or name
     for sp in root.iter(f"{{{_P}}}sp"):
-        kind = _placeholder_kind(sp.find(f"{{{_P}}}nvSpPr"))
-        if not kind:
+        nv = sp.find(f"{{{_P}}}nvSpPr")
+        ph_kind = _placeholder_kind(nv)
+        geom = _geom(sp)
+        if not geom.get("cx"):
             continue
-        placeholders.append({"type": kind, "geometry": _geom(sp)})
-    return {"name": layout_name, "placeholders": placeholders}
+        cnv = sp.find(f"{{{_P}}}nvSpPr/{{{_P}}}cNvPr")
+        shape_name = str(cnv.get("name") or "") if cnv is not None else ""
+        if ph_kind:
+            role = classify_placeholder_type(ph_kind)
+            placeholders.append({"type": ph_kind, "role": role, "geometry": geom, "name": shape_name})
+        else:
+            role = classify_decorative_shape(geometry=geom, name=shape_name, slide_cx=slide_cx, slide_cy=slide_cy)
+            shapes.append({"role": role, "geometry": geom, "name": shape_name})
+    return {"name": layout_name, "layout_id": layout_name, "placeholders": placeholders, "shapes": shapes}
 
 
 def import_pptx_bytes(
@@ -210,7 +225,11 @@ def import_pptx_bytes(
             root = _read_xml(zf, m)
             c_sld = root.find(f"{{{_P}}}cSld") if root is not None else None
             master_names.append((c_sld.get("name") if c_sld is not None else "") or _xml_stem(m))
-        layout_defs = [_parse_layout(_read_xml(zf, n), _xml_stem(n)) for n in layouts]
+        slide_cx = int(slide_size.get("cx") or 12192000)
+        slide_cy = int(slide_size.get("cy") or 6858000)
+        layout_defs = [_parse_layout(_read_xml(zf, n), _xml_stem(n), slide_cx=slide_cx, slide_cy=slide_cy) for n in layouts]
+        from app.services.mentrix.presentation.template_semantics import enrich_definition_semantics
+
         content_regions = [p for lay in layout_defs for p in lay.get("placeholders") or []]
         ready = bool(theme_name and masters and layouts and slide_size.get("cx"))
         preview_bits = [
@@ -236,6 +255,7 @@ def import_pptx_bytes(
             "imported_at": _now(),
             "provider_bindings": {},
         }
+        row = enrich_definition_semantics(row) or row
         save_definition(row)
         return {"ok": True, "definition": row}
     finally:

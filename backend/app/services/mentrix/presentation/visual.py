@@ -296,6 +296,29 @@ def paint_chart_svg_png(slide, block: dict[str, Any], geometry: dict[str, int]) 
     return True
 
 
+def paint_icon(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
+    content = block.get("content") if isinstance(block.get("content"), dict) else {}
+    glyph = str(content.get("glyph") or "★")[:4]
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL,
+        Emu(int(geometry["x"])),
+        Emu(int(geometry["y"])),
+        Emu(int(geometry["cx"])),
+        Emu(int(geometry["cy"])),
+    )
+    fill_hex = str(content.get("fill") or "#00628B").lstrip("#")
+    try:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = RGBColor(int(fill_hex[0:2], 16), int(fill_hex[2:4], 16), int(fill_hex[4:6], 16))
+    except ValueError:
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = RGBColor(0x00, 0x62, 0x8B)
+    shape.line.fill.background()
+    if shape.has_text_frame:
+        _text(shape, glyph, size=18, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+    return True
+
+
 def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_id: str) -> bool:
     if not (block.get("validation") or {}).get("ok", True):
         errors = list((block.get("validation") or {}).get("errors") or [])
@@ -319,6 +342,8 @@ def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_
         return paint_chart_svg_png(slide, block, geometry)
     if kind == "shape":
         return paint_shape(slide, block, geometry)
+    if kind == "icon":
+        return paint_icon(slide, block, geometry)
     if kind == "table":
         return paint_table(slide, block, geometry)
     if kind == "metric":

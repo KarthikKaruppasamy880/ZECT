@@ -58,16 +58,19 @@ def list_recent_decks(*, limit: int = 24) -> list[dict[str, Any]]:
     return out
 
 
-def create_blank_pptx(*, filename: str = "untitled.pptx") -> Path:
+def create_blank_pptx(*, filename: str = "untitled.pptx", layout: str = "title_slide") -> Path:
+    from app.services.mentrix.presentation.blank_document import write_blank_sidecar
+
     prs = Presentation()
-    layout = prs.slide_layouts[0]
-    slide = prs.slides.add_slide(layout)
+    slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(slide_layout)
     if slide.shapes.title is not None:
         slide.shapes.title.text = "Untitled presentation"
     dest = _unique_pptx_path(default_pptx_save_dir(), filename)
     buf = io.BytesIO()
     prs.save(buf)
     dest.write_bytes(buf.getvalue())
+    write_blank_sidecar(dest, layout=layout)  # type: ignore[arg-type]
     return dest
 
 
@@ -133,13 +136,46 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
     if not report.get("has_notes"):
         warnings.append("notes_missing")
     critic: dict[str, Any] = {}
+    critic_blocked = False
     try:
         from app.services.mentrix.presentation.document import document_from_pptx_bytes
         from app.services.mentrix.presentation.quality_critic import critique_document
 
         critic = critique_document(document_from_pptx_bytes(pptx.read_bytes(), path=str(pptx)))
+        critic_status = str(critic.get("deck_status") or critic.get("status") or "").upper()
+        if critic_status == "FAIL" or critic.get("export_blocked"):
+            critic_blocked = True
     except Exception:
         critic = {"ok": False, "error": "document_critic_unavailable"}
+    if critic_blocked:
+        blocked = True
+        if "quality_critic_fail" not in hard:
+            hard.append("quality_critic_fail")
+        if int(critic.get("duplicate_block_id_count") or 0) > 0 and "duplicate_block_id" not in hard:
+            hard.append("duplicate_block_id")
+        rendered = critic.get("rendered_quality") if isinstance(critic.get("rendered_quality"), dict) else {}
+        if int(rendered.get("rendered_overlap_count") or 0) > 0 and "rendered_overlap" not in hard:
+            hard.append("rendered_overlap")
+        if int(rendered.get("rendered_clipped_text_count") or 0) > 0 and "rendered_clipping" not in hard:
+            hard.append("rendered_clipping")
+    from app.services.mentrix.presentation.quality_verdict import merge_quality_reports
+
+    rendered = critic.get("rendered_quality") if isinstance(critic.get("rendered_quality"), dict) else {}
+    doc_overlap = int(critic.get("document_overlap_count") or 0)
+    rendered_overlap = int(rendered.get("rendered_overlap_count") or 0)
+    rendered_clipped = int(rendered.get("rendered_clipped_text_count") or 0)
+    inspector_overlap = int(report.get("overlap_count") or 0)
+    inspector_clipped = int(report.get("out_of_bounds_count") or 0)
+    overlap_total = max(inspector_overlap, doc_overlap, rendered_overlap)
+    clipped_total = max(inspector_clipped, rendered_clipped)
+    template_conflicts = int(rendered.get("template_conflict_count") or 0)
+    near_empty = int(critic.get("near_empty_slide_count") or 0)
+    merged = merge_quality_reports(inspector=report, document_critic=critic)
+    verdict = merged["final_quality_status"]
+    blocked = bool(blocked or merged.get("export_blocked"))
+    for item in list(merged.get("hard_findings") or []):
+        if item not in hard:
+            hard.append(item)
     return {
         "ok": True,
         "path": str(pptx),
@@ -148,13 +184,19 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
         "accept_warnings_allowed": bool(warnings) and not blocked,
         "warnings": warnings,
         "hard_findings": hard,
-        "quality_passed": not blocked,
+        "quality_passed": verdict == "PASS",
         "slide_count": report.get("slide_count") or 0,
-        "overlap_count": report.get("overlap_count") or 0,
-        "clipped_text_count": report.get("out_of_bounds_count") or 0,
+        "overlap_count": overlap_total,
+        "clipped_text_count": clipped_total,
+        "rendered_overlap_count": rendered_overlap,
+        "rendered_clipped_count": rendered_clipped,
+        "template_conflict_count": template_conflicts,
+        "near_empty_slide_count": near_empty,
+        "duplicate_block_id_count": int(critic.get("duplicate_block_id_count") or 0),
         "covering_dump_count": report.get("covering_dump_count") or 0,
         "broken_rel_count": report.get("broken_rel_count") or 0,
-        "final_quality_status": report.get("status"),
+        "final_quality_status": verdict,
+        "quality_subchecks": merged.get("subchecks") or {},
         "inspector": report,
         "document_critic": critic,
     }

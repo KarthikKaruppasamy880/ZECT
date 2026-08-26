@@ -80,7 +80,7 @@ def _heuristic_plan(
     context_items: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     audience = get_audience(audience_id)
-    count = clamp_slide_count(n_slides or audience.get("slide_count_hint") or 6)
+    count = clamp_slide_count(n_slides)
     title = (prompt or "Status brief").strip().split("\n")[0][:160] or "Status brief"
     evidence: list[dict[str, Any]] = []
     for item in list(context_items or [])[:5]:
@@ -284,7 +284,7 @@ def build_presentation_plan(
         )
     context_blob = "\n\n".join(w for w in wrapped if w)[:MAX_CONTEXT_CHARS]
     audience = get_audience(audience_id)
-    count = clamp_slide_count(n_slides or audience.get("slide_count_hint") or 6)
+    count = clamp_slide_count(n_slides)
     user = (
         f"Prompt:\n{(prompt or '').strip()[:4000]}\n\n"
         f"Audience id: {audience['id']} ({audience.get('label')}; tone={audience.get('tone')})\n"
@@ -313,6 +313,7 @@ def build_presentation_plan(
             plan = validate_plan(
                 llm["plan"],
                 n_slides=count,
+                requested_slide_count=count,
                 template_id=template_id,
                 audience_id=audience["id"],
             )
@@ -354,6 +355,7 @@ def build_presentation_plan(
                 plan = validate_plan(
                     repaired["plan"],
                     n_slides=count,
+                    requested_slide_count=count,
                     template_id=template_id,
                     audience_id=audience["id"],
                 )
@@ -402,7 +404,13 @@ def build_presentation_plan(
         sensitivity=str(sens.get("sensitivity") or "PUBLIC"),
         context_items=context_items,
     )
-    plan = validate_plan(heuristic, n_slides=count, template_id=template_id, audience_id=audience["id"])
+    plan = validate_plan(
+        heuristic,
+        n_slides=count,
+        requested_slide_count=count,
+        template_id=template_id,
+        audience_id=audience["id"],
+    )
     t_vis = time.perf_counter()
     plan = apply_visual_plan(plan, audience_id=audience["id"], asset_ids=asset_ids, prompt=prompt)
     latency["visual_plan_ms"] = int((time.perf_counter() - t_vis) * 1000)

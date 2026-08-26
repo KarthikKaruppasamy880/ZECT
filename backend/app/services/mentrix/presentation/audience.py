@@ -105,11 +105,15 @@ def get_audience(audience_id: str) -> dict[str, Any]:
     return dict(PROFILES.get(key) or PROFILES["general"])
 
 
-def prompt_adapter(audience_id: str, base_prompt: str) -> str:
+def prompt_adapter(audience_id: str, base_prompt: str, *, requested_slide_count: int | None = None) -> str:
     a = get_audience(audience_id)
+    if requested_slide_count is not None and int(requested_slide_count) > 0:
+        slide_line = f"Target: {int(requested_slide_count)} slides."
+    else:
+        slide_line = f"Target ~{a['slide_count_hint']} slides."
     return (
         f"{base_prompt.strip()}\n\n"
         f"Audience profile: {a['label']}. Tone: {a['tone']}. Detail: {a['detail']}. "
-        f"Target ~{a['slide_count_hint']} slides. Terminology: {a['terminology']}. "
+        f"{slide_line} Terminology: {a['terminology']}. "
         f"Speaker notes: {a['notes_depth']}. Visual density: {a['visual_density']}."
     )

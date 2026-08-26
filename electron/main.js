@@ -422,6 +422,26 @@ ipcMain.handle("zect-select-file", async (_e, opts = {}) => {
   }
   return { ok: true, path: result.filePaths[0] };
 });
+ipcMain.handle("zect-save-presentation-file", async (_e, opts = {}) => {
+  const fs = require("fs");
+  const defaultName = String(opts.defaultName || "zect-deck.pptx");
+  const result = await dialog.showSaveDialog(mainWindow || undefined, {
+    title: opts.title || "Save presentation",
+    defaultPath: opts.defaultPath || path.join(app.getPath("documents"), defaultName),
+    filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+  });
+  if (result.canceled || !result.filePath) {
+    return { ok: false, canceled: true };
+  }
+  const dataBase64 = String(opts.dataBase64 || "");
+  if (!dataBase64) {
+    return { ok: false, error: "missing_data" };
+  }
+  const buf = Buffer.from(dataBase64, "base64");
+  fs.writeFileSync(result.filePath, buf);
+  const stat = fs.statSync(result.filePath);
+  return { ok: true, path: result.filePath, bytes: stat.size };
+});
 ipcMain.handle("zect-read-presentation-file", async (_e, filePath) => {
   return computer.readPresentationBytes(filePath || "");
 });

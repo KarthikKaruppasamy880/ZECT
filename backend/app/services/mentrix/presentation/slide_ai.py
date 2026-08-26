@@ -7,6 +7,13 @@ from typing import Any
 
 from app.services.mentrix.presentation.blocks import CHART_TYPES, example_diagram_block, example_table_block
 from app.services.mentrix.presentation.geometry import boxes_overlap, normalize_geometry
+from app.services.mentrix.presentation.insert_placement import place_insert_geometry
+
+
+def _placed_block(kind: str, block: dict[str, Any], existing: list[dict[str, Any]]) -> dict[str, Any]:
+    out = dict(block)
+    out["geometry"] = place_insert_geometry(kind, existing)
+    return out
 
 
 def _points_from_slide(slide_text: str, notes: str, blocks: list[dict[str, Any]]) -> list[str]:
@@ -41,12 +48,14 @@ def _document_tree_patch(
         if len(points) < 2:
             return None
         diagram = example_diagram_block(0, len(blocks), nodes=points[:5])
+        diagram = _placed_block("diagram", diagram, blocks)
         return {"action": "bullets_to_diagram", "blocks": [*blocks, diagram]}
     if re.search(r"comparison table|add a table", prompt, re.I):
         if not points:
             return None
         rows = [[p, "On slide"] for p in points[:4]]
-        table = example_table_block(0, len(blocks), headers=["Item", "Status"], rows=rows, title="Comparison")
+        table = example_table_block(0, len(blocks), headers=["Column 1", "Column 2", "Status"], rows=rows, title="Comparison")
+        table = _placed_block("table", table, blocks)
         return {"action": "add_table", "blocks": [*blocks, table]}
     if re.search(r"reduce density|fewer bullets|first three", prompt, re.I):
         kept = 0

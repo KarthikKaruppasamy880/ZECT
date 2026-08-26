@@ -2,9 +2,14 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
-  mentrixCompanionIntegrations: vi.fn(async () => ({ presenton: false })),
-  mentrixPresentonGenerate: vi.fn(),
-  mentrixPresentonStatus: vi.fn(async () => ({
+  mentrixCompanionIntegrations: vi.fn(async () => ({
+    present_engine: false,
+    present_engine_configured: false,
+    present_engine_reachable: false,
+  })),
+  mentrixPresentGenerate: vi.fn(),
+  mentrixPresentGenerationJob: vi.fn(async () => ({ ok: false })),
+  mentrixPresentEngineStatus: vi.fn(async () => ({
     configured: false,
     reachable: false,
     base_url: "",
@@ -29,7 +34,7 @@ vi.mock("@/lib/api", () => ({
     ok: true,
     slides: slides.map((s, i) => ({ index: i, script: (s.notes || s.text || `Slide ${i + 1}`).repeat(1), word_count: 12 })),
   })),
-  mentrixPresentonTemplates: vi.fn(async () => ({
+  mentrixPresentEngineTemplates: vi.fn(async () => ({
     ok: true,
     source: "builtin",
     templates: [
@@ -62,9 +67,9 @@ vi.mock("@/mentrix/speak", () => ({
 
 import {
   mentrixCompanionIntegrations,
-  mentrixPresentonGenerate,
-  mentrixPresentonStatus,
-  mentrixPresentonTemplates,
+  mentrixPresentGenerate,
+  mentrixPresentEngineStatus,
+  mentrixPresentEngineTemplates,
   mentrixPresentationTemplates,
   mentrixVoiceEngineStatus,
 } from "@/lib/api";
@@ -75,9 +80,13 @@ describe("PresentDeckPanel clone narrate gate", () => {
   beforeEach(() => {
     localStorage.clear();
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockReset();
-    (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockReset();
-    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
-    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixPresentGenerate as ReturnType<typeof vi.fn>).mockReset();
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({
+      present_engine: false,
+      present_engine_configured: false,
+      present_engine_reachable: false,
+    });
+    (mentrixPresentEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       configured: false,
       reachable: false,
       base_url: "",
@@ -152,14 +161,18 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
   });
 
-  it("disables Generate deck when Presenton is not configured", async () => {
+  it("disables Generate deck when presentation engine is not configured", async () => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       online: true,
       base_url: "http://localhost:17493",
       default_voice: null,
       hint: "online",
     });
-    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({
+      present_engine: false,
+      present_engine_configured: false,
+      present_engine_reachable: false,
+    });
 
     render(
       <MemoryRouter>
@@ -172,15 +185,19 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
   });
 
-  it("enables Generate when ZECT native provider is ready (no Presenton Docker)", async () => {
+  it("enables Generate when ZECT native provider is ready (no external Docker)", async () => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       online: true,
       base_url: "http://127.0.0.1:17493",
       default_voice: null,
       hint: "online",
     });
-    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: false });
-    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({
+      present_engine: true,
+      present_engine_configured: true,
+      present_engine_reachable: true,
+    });
+    (mentrixPresentEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       configured: true,
       reachable: true,
       base_url: "",
@@ -199,14 +216,14 @@ describe("PresentDeckPanel clone narrate gate", () => {
     });
   });
 
-  it("shows BLOCKED_EXTERNAL and keeps Zinnia templates when Presenton is down", async () => {
+  it("shows BLOCKED_EXTERNAL and keeps Zinnia templates when engine is down", async () => {
     (mentrixVoiceEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       online: true,
       base_url: "http://localhost:17493",
       default_voice: null,
       hint: "online",
     });
-    (mentrixPresentonTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixPresentEngineTemplates as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: false,
       reachable: false,
       templates: [],
@@ -246,14 +263,18 @@ describe("PresentDeckPanel clone narrate gate", () => {
       default_voice: null,
       hint: "online",
     });
-    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: true });
-    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({
+      present_engine: true,
+      present_engine_configured: true,
+      present_engine_reachable: true,
+    });
+    (mentrixPresentEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       configured: true,
       reachable: true,
       base_url: "http://127.0.0.1:5000",
       lifecycle: "READY",
     });
-    (mentrixPresentonGenerate as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixPresentGenerate as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       path: "C:\\Users\\me\\Documents\\mentrix-deck.pptx",
     });
@@ -280,12 +301,13 @@ describe("PresentDeckPanel clone narrate gate", () => {
     fireEvent.click(screen.getByTestId("present-deck-generate"));
 
     await waitFor(() => {
-      expect(mentrixPresentonGenerate).toHaveBeenCalledWith(
+      expect(mentrixPresentGenerate).toHaveBeenCalledWith(
         expect.objectContaining({
           content: "Q2 ZOAS delivery brief",
           template: "modern",
           n_slides: 8,
           language: "English",
+          run_id: expect.any(String),
         }),
       );
     });
@@ -298,8 +320,12 @@ describe("PresentDeckPanel clone narrate gate", () => {
       default_voice: null,
       hint: "online",
     });
-    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({ presenton: true });
-    (mentrixPresentonStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (mentrixCompanionIntegrations as ReturnType<typeof vi.fn>).mockResolvedValue({
+      present_engine: true,
+      present_engine_configured: true,
+      present_engine_reachable: true,
+    });
+    (mentrixPresentEngineStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
       configured: true,
       reachable: true,
       base_url: "http://127.0.0.1:5000",

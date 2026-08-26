@@ -895,6 +895,7 @@ export const mentrixPresentGenerate = (data: {
     requested_slide_count?: number;
     generation_blocked?: boolean;
     export_blocked?: boolean;
+    hard_findings?: string[];
   }>(
     "/api/mentrix/present/generate",
     { method: "POST", body: JSON.stringify(data), signal: controller.signal },
@@ -922,6 +923,7 @@ export type PresentSlide = {
   index: number;
   notes?: string;
   text?: string;
+  layout_intent?: string;
   blocks?: PresentBlock[];
   background?: { fill?: string; source?: string; media_part?: string; asset_id?: string };
 };
@@ -1124,6 +1126,7 @@ export const mentrixPreparePromptDeck = (data: {
     outline: string[];
     n_slides_hint?: number;
     requested_slide_count?: number;
+    audience_slide_suggestion?: number;
     sensitivity: { sensitivity: string };
     claims: Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>;
     claims_markdown?: string;

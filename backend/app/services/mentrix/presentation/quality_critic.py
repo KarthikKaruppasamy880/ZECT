@@ -273,7 +273,13 @@ def critique_plan(
     prompt: str = "",
     context_items: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    if definition and not any(isinstance(s.get("composed_regions"), dict) for s in list(plan.get("slides") or [])):
+    slides_in = list(plan.get("slides") or [])
+    pre_truncated = [
+        any(len(str(block.get("text") or "")) > MAX_BULLET_CHARS for block in list(slide.get("content_blocks") or []))
+        or len(str(slide.get("title") or "")) > MAX_TITLE_CHARS
+        for slide in slides_in
+    ]
+    if definition and not any(isinstance(s.get("composed_regions"), dict) for s in slides_in):
         compose_plan(plan, definition, prompt=prompt)
     evidence = evidence_blob(context_items, prompt)
     used: list[str] = []
@@ -284,6 +290,17 @@ def critique_plan(
         slides_out.append(row)
         if name:
             used.append(name)
+    for idx, row in enumerate(slides_out):
+        if not pre_truncated[idx]:
+            continue
+        findings = set(row.get("findings") or [])
+        if "truncated_text" not in findings:
+            findings.add("truncated_text")
+            row["findings"] = sorted(findings)
+            repairs = set(row.get("repairs") or [])
+            repairs.add("shorten_text")
+            row["repairs"] = sorted(repairs)
+            row["status"] = "FAIL"
     titles = [str(s.get("title") or "").strip().lower() for s in list(plan.get("slides") or [])]
     generic = sum(1 for t in titles if t in {"opening", "status", "title", "slide", "context"})
     layout_counts = Counter(str(s.get("master_layout_name") or "") for s in list(plan.get("slides") or []))
@@ -409,7 +426,7 @@ def critique_document(doc: dict[str, Any], *, prompt: str = "") -> dict[str, Any
         slide_cy = int(doc.get("slide_cy") or 0)
         overlap = 0
         oob = 0
-        _text_kinds = frozenset({"text", "body", "title", "subtitle", "bullet", "quote", "metric"})
+        _text_kinds = frozenset({"text", "body", "title", "subtitle", "bullet", "quote", "metric", "chart", "table"})
         for spec in list(doc.get("slides") or []):
             if not isinstance(spec, dict):
                 continue

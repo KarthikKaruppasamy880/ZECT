@@ -158,7 +158,7 @@ export default function PresentDocumentCanvas({
         };
         const finishDrag = () => {
           const d = drag.current;
-          if (d?.id === block.id && d.last) {
+          if (d && d.id === block.id && d.last) {
             onGeometry?.(d.id, d.last);
           }
           drag.current = null;

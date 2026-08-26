@@ -1,4 +1,4 @@
-import type { PresentBlock, PresentSlide } from "@/lib/api";
+import type { PresentBlock } from "@/lib/api";
 import { CHART_SERIES_COLORS } from "@/lib/presentInsertDefaults";
 import { blockLayerLabel, blockSemanticKindLabel, isParserDebugLabel } from "@/lib/presentEditorLabels";
 import PresentColorPicker from "@/components/PresentColorPicker";

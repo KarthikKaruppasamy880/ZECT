@@ -2,18 +2,18 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { FileDown } from "lucide-react";
 import PresentPhaseStrip from "@/pages/present/PresentPhaseStrip";
-import { decodeDeckId, encodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
+import { decodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
 
-declare global {
-  interface Window {
-    zectDesktop?: {
-      isDesktopApp?: boolean;
-      savePresentationFile?: (opts: {
-        defaultName?: string;
-        dataBase64?: string;
-      }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; bytes?: number }>;
-    };
-  }
+type DesktopExportBridge = {
+  isDesktopApp?: boolean;
+  savePresentationFile?: (opts: {
+    defaultName?: string;
+    dataBase64?: string;
+  }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; bytes?: number }>;
+};
+
+function desktopExportBridge(): DesktopExportBridge | undefined {
+  return (window as Window & { zectDesktop?: DesktopExportBridge }).zectDesktop;
 }
 
 export default function PresentExport() {
@@ -66,10 +66,11 @@ export default function PresentExport() {
     try {
       const { blob, filename } = await mentrixPresentPptxDownload(path);
       const name = filename || "zect-deck.pptx";
-      if (window.zectDesktop?.isDesktopApp && window.zectDesktop.savePresentationFile) {
+      const desktop = desktopExportBridge();
+      if (desktop?.isDesktopApp && desktop.savePresentationFile) {
         const buf = await blob.arrayBuffer();
         const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-        const saved = await window.zectDesktop.savePresentationFile({ defaultName: name, dataBase64 });
+        const saved = await desktop.savePresentationFile({ defaultName: name, dataBase64 });
         if (saved.canceled) {
           setStatus("Export canceled");
           return;

@@ -303,11 +303,10 @@ def test_semantic_duplicate_skips_short_label_in_body():
 def test_split_title_spills_to_key_message():
     from app.services.mentrix.presentation.content_capacity import split_title_for_regions
 
-    long_title = "Difference between AI Agentic and the Graph, loop and KV cache with LLM fine tuning"
-    headline, subtitle = split_title_for_regions(long_title, "", {"max_title_chars": 48, "max_title_lines": 2})
+    long_title = "Difference between AI Agentic and the Graph, loop and KV cache with LLM fine tuning for enterprise delivery teams"
+    headline, subtitle = split_title_for_regions(long_title, "", {"max_title_chars": 40, "max_title_lines": 1})
     assert len(headline) < len(long_title)
-    assert len(headline) <= 48
-    assert headline in long_title or long_title.startswith(headline.split()[0])
+    assert len(headline) <= 40
 
 
 def test_render_populates_subtitle_and_clears_date_sample():

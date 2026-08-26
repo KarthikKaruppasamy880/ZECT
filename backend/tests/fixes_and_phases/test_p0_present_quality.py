@@ -300,6 +300,39 @@ def test_semantic_duplicate_skips_short_label_in_body():
     assert _semantic_duplicate_text("same title", "same title")
 
 
+def test_split_title_spills_to_key_message():
+    from app.services.mentrix.presentation.content_capacity import split_title_for_regions
+
+    long_title = "Difference between AI Agentic and the Graph, loop and KV cache with LLM fine tuning"
+    headline, subtitle = split_title_for_regions(long_title, "", {"max_title_chars": 48, "max_title_lines": 2})
+    assert len(headline) < len(long_title)
+    assert len(headline) <= 48
+    assert headline in long_title or long_title.startswith(headline.split()[0])
+
+
+def test_render_populates_subtitle_and_clears_date_sample():
+    master = Path(__file__).resolve().parents[2].parent / ".zect/present-templates/masters/zinnia-executive-v1.pptx"
+    if not master.is_file():
+        return
+    plan = {
+        "slides": [
+            {
+                "title": "AI Agentic Systems Overview",
+                "key_message": "How agentic AI differs from graph and loop patterns.",
+                "purpose": "opening",
+                "layout_intent": "title",
+                "content_blocks": [],
+                "blocks": [],
+            }
+        ]
+    }
+    data = render_plan_to_pptx(plan, template_path=master)
+    assert b"Date Here" not in data
+    report = inspect_pptx_bytes(data)
+    findings = [f for slide in report["slides"] for f in slide.get("findings") or []]
+    assert "placeholder_and_generated" not in findings
+
+
 def test_fast_and_quality_both_call_inspector_and_critic():
     src = inspect.getsource(ZectNativePresentationProvider.generate)
     assert "repair_until_pass" in src

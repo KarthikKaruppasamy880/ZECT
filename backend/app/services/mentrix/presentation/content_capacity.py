@@ -30,7 +30,7 @@ def measure_layout_capacity(regions: dict[str, Any] | None) -> dict[str, int]:
     body_cx = max(1, int(body.get("cx") or Inches(9)))
     body_cy = max(1, int(body.get("cy") or Inches(4.5)))
     # Heuristic: ~1 char per 90k EMU width at 12pt; line height ~MIN_READABLE_CY
-    max_title_chars = max(24, min(MAX_TITLE_CHARS, int(title_cx / 90_000)))
+    max_title_chars = max(40, min(MAX_TITLE_CHARS, int(title_cx / 75_000)))
     max_bullets = max(2, min(MAX_BULLETS, int(body_cy / max(MIN_READABLE_CY, int(Inches(0.35))))))
     max_bullet_chars = max(48, min(MAX_BULLET_CHARS, int(body_cx / 75_000)))
     title_lines = max(1, min(3, int(title_cy / max(MIN_READABLE_CY, int(Inches(0.28))))))
@@ -44,12 +44,33 @@ def measure_layout_capacity(regions: dict[str, Any] | None) -> dict[str, int]:
     }
 
 
+def split_title_for_regions(title: str, key_message: str, cap: dict[str, int]) -> tuple[str, str]:
+    """Keep a readable headline in title; spill overflow into subtitle/key_message."""
+    headline = (title or "").strip()
+    subtitle = (key_message or "").strip()
+    max_head = max(40, int(cap.get("max_title_chars") or MAX_TITLE_CHARS))
+    max_lines = max(1, int(cap.get("max_title_lines") or 2))
+    line_budget = max_head * max_lines
+    if len(headline) <= max_head:
+        return headline, subtitle
+    if len(headline) <= line_budget:
+        return headline, subtitle
+    cut = headline[: max_head - 1].rsplit(" ", 1)[0] or headline[:max_head]
+    overflow = headline[len(cut) :].strip(" ,.-")
+    if overflow and overflow.lower() not in subtitle.lower():
+        subtitle = f"{overflow}. {subtitle}".strip(". ").strip() if subtitle else overflow
+    return cut.strip(), subtitle
+
+
 def apply_content_budget(slide: dict[str, Any], regions: dict[str, Any] | None) -> dict[str, int]:
     """Trim slide content to layout capacity before composition/render."""
     cap = measure_layout_capacity(regions)
     title = str(slide.get("title") or "")
+    key_message = str(slide.get("key_message") or "")
     if len(title) > cap["max_title_chars"]:
-        slide["title"] = title[: cap["max_title_chars"] - 1].rsplit(" ", 1)[0] or title[: cap["max_title_chars"]]
+        title, key_message = split_title_for_regions(title, key_message, cap)
+        slide["title"] = title
+        slide["key_message"] = key_message
     kept: list[dict[str, Any]] = []
     for block in list(slide.get("content_blocks") or [])[: cap["max_bullets"]]:
         text = str(block.get("text") or "").strip()

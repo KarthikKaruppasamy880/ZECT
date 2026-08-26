@@ -19,6 +19,7 @@ import {
   openWorkspace,
   sidebarOpen,
 } from "./helpers/releaseJourney";
+import { fillSpeakerNotes, openBlankPresentationStudio } from "./helpers/presentStudio";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(REPO, "test-results", "full-release-e2e-production");
@@ -149,10 +150,8 @@ test.describe("full release E2E production", () => {
     evidence.presenton_generate_enabled = genEnabled;
     if (!genEnabled) evidence.present_generate = "BLOCKED_EXTERNAL";
     await page.getByTestId("present-nav-dashboard").click();
-    await page.getByTestId("present-blank").click();
-    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
-    await page.getByTestId("present-editor-notes-toggle").click();
-    await page.getByTestId("present-editor-notes").fill("Full-release E2E note.");
+    await openBlankPresentationStudio(page);
+    await fillSpeakerNotes(page, "Full-release E2E note.");
     await page.getByTestId("present-editor-save").click();
     await page.getByTestId("present-open-export").click();
     await expect(page.getByTestId("present-export")).toBeVisible({ timeout: 15_000 });

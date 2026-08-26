@@ -159,11 +159,13 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "files": list(r.get("files") or []),
                 "commands": list(r.get("commands") or []),
                 "blocker": r.get("blocker") or "",
+                "auto_repair_attempts": r.get("auto_repair_attempts") or 0,
                 "committed_shas": list(r.get("committed_shas") or []),
                 "diff": str(r.get("diff") or "")[:8000],
                 "push": r.get("push") or {},
                 "pr": r.get("pr") or {},
                 "native_build": r.get("native_build") or {},
+                "browser_verification": r.get("browser_verification") or {},
             }
         )
     sibling = mission.get("sibling") or {}
@@ -899,6 +901,153 @@ def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list
     return []
 
 
+def _diagnose_and_repair_repo(
+    mission: dict[str, Any], repo: dict[str, Any], wt: Path, tests: dict[str, Any]
+) -> dict[str, Any]:
+    """On test failure, feed the failure output back into the same native agent
+    loop used for real edits (not a second implementation) to diagnose and
+    patch, then rerun. Bounded by MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a
+    persistently-broken repo still reaches ``blocked`` rather than looping
+    forever or getting silently reported as complete.
+    """
+    from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+
+    max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX", "2"))
+    attempts = int(repo.get("auto_repair_attempts") or 0)
+    current = tests
+    while not current.get("ok") and attempts < max_attempts:
+        attempts += 1
+        diagnostic_goal = (
+            "The previous change caused this test run to fail:\n\n"
+            f"{(current.get('stdout') or '').strip()}\n{(current.get('stderr') or '').strip()}\n\n"
+            "Diagnose the root cause and patch the affected source file(s) so the "
+            "tests pass. Do not modify test files unless the test itself is "
+            "provably wrong -- explain why in a comment if you do."
+        )
+        _emit(
+            mission,
+            "diagnose_attempt",
+            f"{repo.get('label')}: auto-repair attempt {attempts}/{max_attempts} after test failure",
+            repository_id=repo.get("repository_id"),
+            attempt=attempts,
+        )
+        out = run_mentrix_native_build(
+            goal=diagnostic_goal,
+            workspace=str(wt),
+            project_id=mission.get("project_id"),
+            timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
+            max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+        )
+        written = list(out.get("files_written") or [])
+        if written:
+            files = list(repo.get("files") or [])
+            for path in written:
+                if path not in files:
+                    files.append(path)
+            repo["files"] = files
+        current = run_repo_tests(wt)
+        _emit(
+            mission,
+            "diagnose_result",
+            f"{repo.get('label')}: repair attempt {attempts} -> {current.get('status')} "
+            f"({len(written)} file(s) touched)",
+            repository_id=repo.get("repository_id"),
+            ok=current.get("ok"),
+            files_written=written,
+        )
+    repo["auto_repair_attempts"] = attempts
+    return current
+
+
+def _run_app_and_browser_verification(
+    mission: dict[str, Any], repo: dict[str, Any], wt: Path
+) -> dict[str, Any]:
+    """Once unit tests pass, ask the SAME native agent loop -- now with the
+    start_app/health_check/browser_* tools available -- to start this repo's
+    real application and verify the change in a real browser. Not a
+    hard-scripted sequence: the model decides whether/how to start the app,
+    what to click, and whether a browser-observed failure needs a code fix,
+    then reruns verification itself, bounded the same way as
+    _diagnose_and_repair_repo. If runtime_discovery finds no runnable app
+    here, this is a no-op (not every repo has a browsable UI) rather than a
+    failure.
+    """
+    from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.workspace.runtime_discovery import discover_runtime_recipes
+
+    discovered = discover_runtime_recipes(str(wt))
+    if not discovered.get("recipes"):
+        return {"ran": False, "reason": "no_runnable_app_detected"}
+
+    max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_BROWSER_VERIFY_MAX", "2"))
+    attempt = 0
+    verified = False
+    summary = ""
+    while attempt < max_attempts and not verified:
+        attempt += 1
+        goal = (
+            "The unit tests pass. Now verify the change actually works at runtime: "
+            "call start_app (with no command, so the real project start command is "
+            "discovered -- if it returns needs_recipe_choice, pick the most relevant "
+            "candidate and call start_app again with that recipe_id), then health_check "
+            "the port it reports, then use the browser_* tools to navigate to it and "
+            "confirm the change is visible/working with no new console errors or failed "
+            "network requests. If you find a real problem, fix the affected source "
+            "file(s), call restart_app, and verify again. When finished (including if "
+            "you determine this workspace has nothing browser-verifiable), call stop_app "
+            "and state clearly what you verified or could not verify."
+        )
+        _emit(
+            mission,
+            "browser_verify_attempt",
+            f"{repo.get('label')}: app/browser verification attempt {attempt}/{max_attempts}",
+            repository_id=repo.get("repository_id"),
+            attempt=attempt,
+        )
+        out = run_mentrix_native_build(
+            goal=goal,
+            workspace=str(wt),
+            project_id=mission.get("project_id"),
+            timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
+            max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+        )
+        summary = str(out.get("summary") or out.get("status") or "")
+        written = list(out.get("files_written") or [])
+        if written:
+            files = list(repo.get("files") or [])
+            for path in written:
+                if path not in files:
+                    files.append(path)
+            repo["files"] = files
+
+        retest = run_repo_tests(wt)
+        if not retest.get("ok"):
+            retest = _diagnose_and_repair_repo(mission, repo, wt, retest)
+        # "verified" requires BOTH: the agent's own browser-verification turn
+        # reported success (out.get("ok") -- it may have run out of steps,
+        # found the app unreachable, etc, distinct from unit-test status),
+        # AND the unit tests still pass (in case a "fix" broke something).
+        verified = bool(out.get("ok")) and bool(retest.get("ok"))
+        _emit(
+            mission,
+            "browser_verify_result",
+            f"{repo.get('label')}: attempt {attempt} -> {'verified' if verified else 'not verified'} "
+            f"({len(written)} file(s) touched)",
+            repository_id=repo.get("repository_id"),
+            ok=verified,
+            files_written=written,
+        )
+
+    try:
+        from app.domains.workspace.app_runner import stop_owned_processes_in_workspace
+
+        stop_owned_processes_in_workspace(str(wt))
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"ran": True, "verified": verified, "attempts": attempt, "summary": summary[:500]}
+
+
 def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
     patches_map = _stringify_patch_map(mission.get("patches_by_repo"))
     diffs: list[str] = []
@@ -921,6 +1070,8 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         repo["files"] = list(applied.get("files") or [])
         repo["commands"] = list(applied.get("commands") or [])
         tests = run_repo_tests(wt)
+        if not tests.get("ok"):
+            tests = _diagnose_and_repair_repo(mission, repo, wt, tests)
         repo["test_ok"] = bool(tests.get("ok"))
         repo["test_status"] = tests.get("status")
         repo["test"] = tests
@@ -928,26 +1079,37 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         if tests.get("command"):
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):
-            repo["blocker"] = f"tests_{tests.get('status')}"
+            attempts = repo.get("auto_repair_attempts") or 0
+            repo["blocker"] = f"tests_{tests.get('status')}_after_{attempts}_repair_attempt(s)"
         else:
             repo["blocker"] = ""
+            verify = _run_app_and_browser_verification(mission, repo, wt)
+            repo["browser_verification"] = verify
+            if verify.get("ran") and not verify.get("verified"):
+                repo["test_ok"] = False
+                repo["test_status"] = "fail"
+                attempts = verify.get("attempts") or 0
+                repo["blocker"] = f"browser_verification_failed_after_{attempts}_attempt(s)"
         diff = _collect_diff(wt)
         if diff:
             repo["diff"] = diff
         diffs.append(diff or str(repo.get("diff") or ""))
+        # Use repo["test_ok"], not the local `tests` dict -- browser
+        # verification (above) can flip a passing unit-test result to
+        # failed, and the aggregate/sibling gate below must see that.
         per_repo_status.append(
             {
                 "repository_id": repo.get("repository_id"),
                 "label": repo.get("label"),
-                "status": "pass" if tests.get("ok") else "fail",
+                "status": "pass" if repo.get("test_ok") else "fail",
             }
         )
         _emit(
             mission,
             "tests",
-            f"{repo.get('label')}: {tests.get('status')}",
+            f"{repo.get('label')}: {repo.get('test_status')}",
             repository_id=repo.get("repository_id"),
-            ok=tests.get("ok"),
+            ok=repo.get("test_ok"),
         )
 
     sibling = aggregate_sibling_status(per_repo_status)

@@ -23,6 +23,7 @@ import {
   mentrixPresentQualityGate,
   mentrixPresentSaveNotes,
   mentrixPresentSlideAi,
+  mentrixPresentSlidePreview,
   mentrixPresentationAssetUpload,
   type PresentBlock,
   type PresentSlide,
@@ -74,6 +75,7 @@ function SlideThumbPreview({
 export default function PresentEditor({ pptxPath, variant = "review" }: PresentEditorProps) {
   const studio = variant === "studio";
   const visualEdit = variant === "edit" || variant === "studio";
+  const reviewPreview = variant === "review";
   const [slides, setSlides] = useState<Slide[]>([]);
   const [selected, setSelected] = useState(0);
   const [status, setStatus] = useState("");
@@ -99,6 +101,9 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [slideEmu, setSlideEmu] = useState({ cx: 9144000, cy: 5143500 });
   const [zoom, setZoom] = useState(100);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const [slidePreviewUrl, setSlidePreviewUrl] = useState<string | null>(null);
+  const [slidePreviewKind, setSlidePreviewKind] = useState("");
+  const [slidePreviewError, setSlidePreviewError] = useState(false);
 
   const persist = useCallback((path: string, next: Slide[], fp: string) => {
     try {
@@ -169,6 +174,39 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   useEffect(() => {
     if (studio && selectedBlockId) setRailTab("properties");
   }, [selectedBlockId, studio]);
+
+  useEffect(() => {
+    if (!reviewPreview || !pptxPath || !slides.length) {
+      setSlidePreviewUrl(null);
+      setSlidePreviewKind("");
+      setSlidePreviewError(false);
+      return;
+    }
+    let alive = true;
+    let objectUrl: string | null = null;
+    setSlidePreviewError(false);
+    void mentrixPresentSlidePreview(pptxPath, selected)
+      .then(({ url, kind }) => {
+        if (!alive) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        objectUrl = url;
+        setSlidePreviewUrl(url);
+        setSlidePreviewKind(kind);
+      })
+      .catch(() => {
+        if (alive) {
+          setSlidePreviewUrl(null);
+          setSlidePreviewKind("");
+          setSlidePreviewError(true);
+        }
+      });
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [reviewPreview, pptxPath, selected, slides.length, savedFp]);
 
   const current = slides[selected];
   const selectedBlock =
@@ -858,6 +896,15 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                 style={{ width: studio ? `${zoom}%` : `${zoom}%`, maxWidth: "100%" }}
               >
               <div className="absolute inset-0" data-testid="present-editor-block-overlay">
+                {reviewPreview && slidePreviewUrl ? (
+                  <img
+                    src={slidePreviewUrl}
+                    alt={`Slide ${selected + 1} preview`}
+                    className="h-full w-full object-contain bg-white"
+                    data-testid="present-editor-slide-preview"
+                    data-preview-kind={slidePreviewKind || "ooxml"}
+                  />
+                ) : (
                 <PresentDocumentCanvas
                   slide={current}
                   slideEmu={slideEmu}
@@ -892,6 +939,12 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                     );
                   }}
                 />
+                )}
+                {reviewPreview && slidePreviewError ? (
+                  <p className="absolute bottom-2 left-2 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-900" data-testid="present-editor-preview-fallback">
+                    PowerPoint preview unavailable — showing document canvas fallback
+                  </p>
+                ) : null}
               </div>
               </div>
             </div>

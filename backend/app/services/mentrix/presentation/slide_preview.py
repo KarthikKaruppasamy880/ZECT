@@ -85,8 +85,9 @@ def _document_shapes(data: bytes, index: int) -> tuple[list[dict[str, Any]], dic
                 "y": int(geo.get("y") or 0),
                 "cx": int(geo.get("cx") or 1),
                 "cy": int(geo.get("cy") or 1),
-                "text": str(content.get("text") or content.get("title") or content.get("alt") or "")[:80],
+                "text": str(content.get("text") or content.get("title") or content.get("alt") or "")[:800],
                 "fill": str(content.get("fill") or ""),
+                "color": str(content.get("color") or ""),
                 "data_url": str(content.get("data_url") or ""),
             }
         )
@@ -151,7 +152,28 @@ def render_slide_png_bytes(data: bytes, index: int = 0, *, width: int = 960) -> 
         except ValueError:
             return None
 
-    for shape in shapes:
+    def _wrap_text(text: str, max_px: int, size: int) -> list[str]:
+        words = text.split()
+        if not words:
+            return []
+        lines: list[str] = []
+        current = words[0]
+        for word in words[1:]:
+            trial = f"{current} {word}"
+            if len(trial) * (size * 0.55) <= max_px:
+                current = trial
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+        return lines[:8]
+
+    locked_first = sorted(
+        shapes,
+        key=lambda s: (0 if str(s.get("kind") or "") in {"shape", "image"} and s.get("fill") else 1, int(s.get("y") or 0)),
+    )
+
+    for shape in locked_first:
         kind = str(shape.get("kind") or "shape")
         x = int(shape["x"] * scale)
         y = int(shape["y"] * scale)
@@ -169,14 +191,27 @@ def render_slide_png_bytes(data: bytes, index: int = 0, *, width: int = 960) -> 
                 continue
             except Exception:
                 pass
-        fill = fill_hex or ((226, 232, 240) if kind == "image" else (255, 255, 255))
-        outline = (15, 118, 110) if kind != "text" else fill
-        if kind == "text":
-            fill = (255, 255, 255, 0)
-        draw.rectangle([x, y, x2, y2], outline=outline if kind != "text" else None, fill=fill if kind != "text" else None)
+        if kind in {"text", "quote", "metric", "body", "title", "subtitle"}:
+            label = str(shape.get("text") or "").strip()
+            if not label or font is None:
+                continue
+            size = max(10, min(28, int(max(12, (y2 - y) / max(1, len(label.split()) // 6 + 1)))))
+            try:
+                tfont = ImageFont.truetype("arial.ttf", size)
+            except Exception:
+                tfont = font
+            color = _parse_hex(str(shape.get("color") or "")) or (15, 23, 42)
+            if fill_hex and kind == "shape":
+                draw.rectangle([x, y, x2, y2], fill=fill_hex)
+            line_h = size + 2
+            for li, line in enumerate(_wrap_text(label, max(8, x2 - x - 8), size)):
+                draw.text((x + 4, y + 4 + li * line_h), line[:120], fill=color, font=tfont)
+            continue
+        fill = fill_hex or ((226, 232, 240) if kind == "image" else (232, 236, 241))
+        draw.rectangle([x, y, x2, y2], fill=fill)
         label = str(shape.get("text") or "").strip()[:80]
-        if label and font is not None and kind == "text":
-            draw.text((x + 4, y + 2), label[:80], fill=(15, 23, 42), font=font)
+        if label and font is not None and kind not in {"shape", "image"}:
+            draw.text((x + 4, y + 2), label, fill=(15, 23, 42), font=font)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

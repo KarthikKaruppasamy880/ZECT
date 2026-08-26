@@ -1885,12 +1885,23 @@ def present_slide_preview(
 ):
     from app.services.mentrix.presentation.slide_preview import cache_slide_preview
 
-    pptx = _pptx_from_request(path)
-    png, kind = cache_slide_preview(pptx, max(0, index), force=force)
+    try:
+        pptx = _pptx_from_request(path)
+        png, kind = cache_slide_preview(pptx, max(0, index), force=force)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"stage": "slide_preview", "error": str(exc)[:200]}) from exc
+    except Exception as exc:  # noqa: BLE001 — preview must not 500 the editor
+        raise HTTPException(
+            status_code=422,
+            detail={"stage": "slide_preview", "error": str(exc)[:200]},
+        ) from exc
     resp = FileResponse(path=str(png), media_type="image/png", filename=png.name)
     resp.headers["X-Zect-Preview-Kind"] = kind
-    resp.headers["X-Zect-Preview-Kind"] = kind
-    resp.headers["Access-Control-Expose-Headers"] = "X-Zect-Preview-Kind, X-Zect-Preview-Kind"
+    resp.headers["Access-Control-Expose-Headers"] = "X-Zect-Preview-Kind"
     return resp
 
 

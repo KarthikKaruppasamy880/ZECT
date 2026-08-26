@@ -23,6 +23,8 @@ vi.mock("@/lib/api", () => ({
 import PresentEditor from "@/components/PresentEditor";
 import { mentrixParsePptxFromPath, mentrixPresentSaveNotes } from "@/lib/api";
 
+const deckPath = "C:\\Users\\me\\Documents\\deck.pptx";
+
 const defaultSlides = [
   { index: 0, text: "One", notes: "n1" },
   { index: 1, text: "Two", notes: "n2" },
@@ -44,7 +46,7 @@ describe("PresentEditor v1", () => {
   });
 
   it("duplicates a slide and reports OOXML save", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     await waitFor(() => {
       expect(screen.getByTestId("present-editor-thumb-0")).toBeTruthy();
     });
@@ -62,48 +64,43 @@ describe("PresentEditor v1", () => {
     expect(screen.getByTestId("present-editor-rail")).toBeTruthy();
     expect(screen.getByTestId("present-editor-palette")).toBeTruthy();
     expect(screen.getByTestId("present-editor-tab-ai")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-blocks")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-texts")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-tables")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-images")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-tab-elements")).toBeTruthy();
     expect(screen.getByTestId("present-editor-canvas")).toBeTruthy();
     expect(screen.getByTestId("present-editor-ai-intro")).toBeTruthy();
   });
 
   it("toasts that Save is required after adding a chart", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     await waitFor(() => {
-      expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
+      expect(screen.getByTestId("present-editor-tab-insert")).toBeTruthy();
     });
-    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
+    fireEvent.click(screen.getByTestId("present-editor-tab-insert"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
     expect(screen.getByTestId("present-editor-status").textContent).toMatch(/Save to persist/i);
   });
 
   it("changes selected chart type to radar instead of appending another stub", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     await waitFor(() => {
-      expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
+      expect(screen.getByTestId("present-editor-tab-insert")).toBeTruthy();
     });
-    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
+    fireEvent.click(screen.getByTestId("present-editor-tab-insert"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
     await waitFor(() => {
       expect(screen.getByTestId("present-editor-block-hit-chart")).toBeTruthy();
     });
     fireEvent.click(screen.getByTestId("present-editor-block-hit-chart"));
-    fireEvent.click(screen.getByTestId("present-editor-chart-radar"));
-    expect(screen.getByTestId("present-editor-status").textContent).toMatch(/Chart type changed to Radar/i);
+    fireEvent.click(screen.getByTestId("present-editor-tab-layers"));
+    fireEvent.change(screen.getByTestId("present-editor-props-chart-type"), { target: { value: "radar" } });
     expect(screen.getAllByTestId("present-editor-block-hit-chart")).toHaveLength(1);
+    expect((screen.getByTestId("present-editor-props-chart-type") as HTMLSelectElement).value).toBe("radar");
   });
 
   it("opens Edit Data Table on double-click and saves into PPTX", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     await waitFor(() => {
-      expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
+      expect(screen.getByTestId("present-editor-tab-insert")).toBeTruthy();
     });
-    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
+    fireEvent.click(screen.getByTestId("present-editor-tab-insert"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
     fireEvent.doubleClick(screen.getByTestId("present-editor-block-hit-chart"));
     expect(screen.getByTestId("present-edit-data-table")).toBeTruthy();
@@ -115,7 +112,7 @@ describe("PresentEditor v1", () => {
   });
 
   it("exposes every Presenton chart type on the palette", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" variant="studio" />);
+    render(<PresentEditor pptxPath={deckPath} />);
     await waitFor(() => {
       expect(screen.getByTestId("present-editor-tab-charts")).toBeTruthy();
     });
@@ -159,7 +156,7 @@ describe("PresentEditor v1", () => {
         },
       ],
     });
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     const hit = await screen.findByTestId("present-editor-block-hit-chart");
     expect(hit.getAttribute("data-block-id")).toBe("blk_0_chart_0");
     expect(hit.style.left).toBe("10%");
@@ -192,7 +189,7 @@ describe("PresentEditor v1", () => {
         },
       ],
     });
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     const hit = await screen.findByTestId("present-editor-block-hit-chart");
     expect(hit.style.left).toBe("10%");
     expect(hit.style.top).toBe("10%");
@@ -201,26 +198,25 @@ describe("PresentEditor v1", () => {
   });
 
   it("exposes zoom fit and a layers panel", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
+    render(<PresentEditor pptxPath={deckPath} variant="studio" />);
     await waitFor(() => {
       expect(screen.getByTestId("present-editor-zoom-in")).toBeTruthy();
     });
     fireEvent.click(screen.getByTestId("present-editor-zoom-in"));
     expect(screen.getByTestId("present-editor-zoom-fit").textContent).toMatch(/110%/);
-    fireEvent.click(screen.getByTestId("present-editor-tab-charts"));
+    fireEvent.click(screen.getByTestId("present-editor-tab-insert"));
     fireEvent.click(screen.getByTestId("present-editor-add-chart"));
     expect(screen.getByTestId("present-editor-layers")).toBeTruthy();
     expect(screen.getByTestId("present-editor-layer-chart")).toBeTruthy();
     expect(screen.getByTestId("present-editor-props")).toBeTruthy();
   });
 
-  it("uses a shared document canvas for thumbs and the editor, not a PNG overlay", async () => {
-    render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
-    const canvas = await screen.findByTestId("present-editor-canvas");
-    expect(canvas.getAttribute("data-canvas")).toBe("document");
-    expect(screen.getByTestId("present-editor-block-hit-text")).toBeTruthy();
-    expect(screen.getByTestId("present-editor-thumb-canvas-0").getAttribute("data-canvas")).toBe("document");
-    expect(screen.getByTestId("present-editor-block-overlay").className).not.toMatch(/grid-cols-2/);
-    expect(canvas.querySelector("img[alt]")).toBeFalsy();
+  it("uses PNG preview for review and thumbs with template preview banner", async () => {
+    render(<PresentEditor pptxPath={deckPath} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("present-editor-slide-preview")).toBeTruthy();
+    });
+    expect(screen.getByTestId("present-editor-thumb-img-0")).toBeTruthy();
+    expect(screen.queryByTestId("present-editor-canvas")).toBeFalsy();
   });
 });

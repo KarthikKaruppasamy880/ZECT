@@ -53,24 +53,52 @@ function cloneSlides(rows: Slide[]): Slide[] {
 }
 
 function SlideThumbPreview({
-  slide,
-  slideEmu,
+  pptxPath,
+  slideIndex,
+  refreshKey,
 }: {
-  slide: PresentSlide;
-  slideEmu: { cx: number; cy: number };
+  pptxPath: string;
+  slideIndex: number;
+  refreshKey: string;
 }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | null = null;
+    void mentrixPresentSlidePreview(pptxPath, slideIndex)
+      .then(({ url: nextUrl }) => {
+        if (!alive) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+        objectUrl = nextUrl;
+        setUrl(nextUrl);
+      })
+      .catch(() => {
+        if (alive) setUrl(null);
+      });
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [pptxPath, slideIndex, refreshKey]);
+
   return (
     <div className="relative mb-1 aspect-video w-full overflow-hidden rounded border border-slate-100 bg-white">
-      <PresentDocumentCanvas
-        slide={slide}
-        slideEmu={slideEmu}
-        interactive={false}
-        testId={`present-editor-thumb-canvas-${slide.index}`}
-        className="absolute inset-0 h-full w-full"
-      />
+      {url ? (
+        <img src={url} alt="" className="h-full w-full object-contain" data-testid={`present-editor-thumb-img-${slideIndex}`} />
+      ) : (
+        <div className="flex h-full items-center justify-center text-[9px] text-slate-400">…</div>
+      )}
     </div>
   );
 }
+
+const previewKindLabel = (kind: string) => {
+  if (kind === "com") return "PowerPoint preview";
+  if (kind === "libreoffice") return "LibreOffice preview";
+  return "Template preview";
+};
 
 export default function PresentEditor({ pptxPath, variant = "review" }: PresentEditorProps) {
   const studio = variant === "studio";
@@ -176,7 +204,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   }, [selectedBlockId, studio]);
 
   useEffect(() => {
-    if (!reviewPreview || !pptxPath || !slides.length) {
+    if (!pptxPath || !slides.length) {
       setSlidePreviewUrl(null);
       setSlidePreviewKind("");
       setSlidePreviewError(false);
@@ -206,7 +234,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [reviewPreview, pptxPath, selected, slides.length, savedFp]);
+  }, [pptxPath, selected, slides.length, savedFp]);
 
   const current = slides[selected];
   const selectedBlock =
@@ -817,7 +845,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                   selected === i ? "bg-teal-50 text-teal-900" : "text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                <SlideThumbPreview slide={s} slideEmu={slideEmu} />
+                <SlideThumbPreview pptxPath={pptxPath} slideIndex={s.index} refreshKey={savedFp} />
                 <div className="font-medium">Slide {s.index + 1}</div>
                 {!studio ? (
                   <div className="line-clamp-2 text-slate-500">{s.text || s.notes || "(empty)"}</div>
@@ -896,50 +924,103 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                 style={{ width: studio ? `${zoom}%` : `${zoom}%`, maxWidth: "100%" }}
               >
               <div className="absolute inset-0" data-testid="present-editor-block-overlay">
-                {reviewPreview && slidePreviewUrl ? (
+                {slidePreviewUrl ? (
                   <img
                     src={slidePreviewUrl}
                     alt={`Slide ${selected + 1} preview`}
-                    className="h-full w-full object-contain bg-white"
+                    className="absolute inset-0 h-full w-full object-contain bg-white"
                     data-testid="present-editor-slide-preview"
                     data-preview-kind={slidePreviewKind || "ooxml"}
                   />
-                ) : (
-                <PresentDocumentCanvas
-                  slide={current}
-                  slideEmu={slideEmu}
-                  selectedId={selectedBlockId}
-                  testId="present-editor-canvas"
-                  className="h-full w-full"
-                  onSelect={(id) => {
-                    setSelectedBlockId(id);
-                    if (studio && id) setRailTab("properties");
-                  }}
-                  onChangeText={(id, text) => {
-                    const nextBlocks = documentBlocks(current, slideEmu).map((b) =>
-                      b.id === id ? { ...b, content: { ...(b.content || {}), text } } : b,
-                    );
-                    patchSlide(current.index, { blocks: nextBlocks, text: slideTextFromBlocks({ ...current, blocks: nextBlocks }) });
-                  }}
-                  onDoubleClick={(block) => {
-                    if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
-                  }}
-                  onGeometry={(id, geo, opts) => {
-                    commitSlides(
-                      (prev) =>
-                        prev.map((s) =>
-                          s.index === current.index
-                            ? {
-                                ...s,
-                                blocks: documentBlocks(s, slideEmu).map((b) => (b.id === id ? { ...b, geometry: geo } : b)),
-                              }
-                            : s,
-                        ),
-                      opts,
-                    );
-                  }}
-                />
+                ) : null}
+                {reviewPreview && slidePreviewError ? (
+                  <PresentDocumentCanvas
+                    slide={current}
+                    slideEmu={slideEmu}
+                    selectedId={selectedBlockId}
+                    testId="present-editor-canvas"
+                    className="h-full w-full"
+                    onSelect={(id) => {
+                      setSelectedBlockId(id);
+                      if (studio && id) setRailTab("properties");
+                    }}
+                    onChangeText={(id, text) => {
+                      const nextBlocks = documentBlocks(current, slideEmu).map((b) =>
+                        b.id === id ? { ...b, content: { ...(b.content || {}), text } } : b,
+                      );
+                      patchSlide(current.index, { blocks: nextBlocks, text: slideTextFromBlocks({ ...current, blocks: nextBlocks }) });
+                    }}
+                    onDoubleClick={(block) => {
+                      if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
+                    }}
+                    onGeometry={(id, geo, opts) => {
+                      commitSlides(
+                        (prev) =>
+                          prev.map((s) =>
+                            s.index === current.index
+                              ? {
+                                  ...s,
+                                  blocks: documentBlocks(s, slideEmu).map((b) => (b.id === id ? { ...b, geometry: geo } : b)),
+                                }
+                              : s,
+                          ),
+                        opts,
+                      );
+                    }}
+                  />
+                ) : visualEdit ? (
+                  <PresentDocumentCanvas
+                    slide={current}
+                    slideEmu={slideEmu}
+                    selectedId={selectedBlockId}
+                    overlayMode={Boolean(slidePreviewUrl)}
+                    testId="present-editor-canvas"
+                    className="absolute inset-0 h-full w-full"
+                    onSelect={(id) => {
+                      setSelectedBlockId(id);
+                      if (studio && id) setRailTab("properties");
+                    }}
+                    onChangeText={(id, text) => {
+                      const nextBlocks = documentBlocks(current, slideEmu).map((b) =>
+                        b.id === id ? { ...b, content: { ...(b.content || {}), text } } : b,
+                      );
+                      patchSlide(current.index, { blocks: nextBlocks, text: slideTextFromBlocks({ ...current, blocks: nextBlocks }) });
+                    }}
+                    onDoubleClick={(block) => {
+                      if (block.kind === "chart" || block.kind === "table") setDataTableBlock(block);
+                    }}
+                    onGeometry={(id, geo, opts) => {
+                      commitSlides(
+                        (prev) =>
+                          prev.map((s) =>
+                            s.index === current.index
+                              ? {
+                                  ...s,
+                                  blocks: documentBlocks(s, slideEmu).map((b) => (b.id === id ? { ...b, geometry: geo } : b)),
+                                }
+                              : s,
+                          ),
+                        opts,
+                      );
+                    }}
+                  />
+                ) : slidePreviewUrl ? null : (
+                  <PresentDocumentCanvas
+                    slide={current}
+                    slideEmu={slideEmu}
+                    selectedId={selectedBlockId}
+                    testId="present-editor-canvas"
+                    className="h-full w-full"
+                  />
                 )}
+                {slidePreviewKind ? (
+                  <p
+                    className="absolute right-2 top-2 rounded bg-slate-900/75 px-2 py-0.5 text-[10px] text-white"
+                    data-testid="present-editor-preview-kind"
+                  >
+                    {previewKindLabel(slidePreviewKind)}
+                  </p>
+                ) : null}
                 {reviewPreview && slidePreviewError ? (
                   <p className="absolute bottom-2 left-2 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-900" data-testid="present-editor-preview-fallback">
                     PowerPoint preview unavailable — showing document canvas fallback

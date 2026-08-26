@@ -62,6 +62,21 @@ def _norm(text: str) -> str:
     return " ".join((text or "").lower().split())
 
 
+def _semantic_duplicate_text(a: str, b: str) -> bool:
+    """True when overlapping boxes likely duplicate content — not label + body pairs."""
+    ta, tb = _norm(a), _norm(b)
+    if not ta or not tb:
+        return False
+    if ta == tb:
+        return True
+    short, long = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+    if short not in long:
+        return False
+    if len(short) < 20 and len(long) >= len(short) * 3:
+        return False
+    return len(short) / max(len(long), 1) >= 0.45
+
+
 _REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 
@@ -225,7 +240,7 @@ def inspect_pptx_bytes(data: bytes, *, definition: dict[str, Any] | None = None)
                         ta, tb = _norm(a["text"]), _norm(b["text"])
                         if not ta or not tb:
                             continue
-                        if ta == tb or ta in tb or tb in ta:
+                        if _semantic_duplicate_text(ta, tb):
                             findings.append("duplicate_overlap")
                             overlap_count += 1
                 dump = _find_dump_shape(shapes)
@@ -334,6 +349,94 @@ def _placeholder_plus_generated(shapes: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _shape_text_meta(shape) -> dict[str, Any] | None:
+    if not getattr(shape, "has_text_frame", False):
+        return None
+    text = (shape.text_frame.text or "").strip()
+    if not text:
+        return None
+    is_ph = False
+    try:
+        _ = shape.placeholder_format.type
+        is_ph = True
+    except (ValueError, AttributeError):
+        is_ph = False
+    try:
+        geom = {
+            "x": int(shape.left or 0),
+            "y": int(shape.top or 0),
+            "cx": int(shape.width or 0),
+            "cy": int(shape.height or 0),
+        }
+    except Exception:
+        return None
+    if geom["cx"] <= 0 or geom["cy"] <= 0:
+        return None
+    name = str(getattr(shape, "name", "") or "")
+    return {
+        "shape": shape,
+        "name": name,
+        "is_ph": is_ph,
+        "text": text,
+        "norm": _norm(text),
+        "geom": geom,
+        "area": geom["cx"] * geom["cy"],
+    }
+
+
+def _duplicate_text(a: str, b: str) -> bool:
+    return _semantic_duplicate_text(a, b)
+
+
+def _pick_overlap_victim(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Prefer keeping placeholders; drop generated duplicates and smaller boxes."""
+    if a["is_ph"] and not b["is_ph"]:
+        return b
+    if b["is_ph"] and not a["is_ph"]:
+        return a
+    a_gen = "textbox" in a["name"].lower() and not a["is_ph"]
+    b_gen = "textbox" in b["name"].lower() and not b["is_ph"]
+    if a_gen and not b_gen:
+        return a
+    if b_gen and not a_gen:
+        return b
+    return a if a["area"] <= b["area"] else b
+
+
+def strip_duplicate_overlapping_textboxes(data: bytes) -> tuple[bytes, int]:
+    """Remove generated/duplicate text boxes that overlap placeholders or each other."""
+    prs = Presentation(io.BytesIO(data))
+    removed = 0
+    for slide in prs.slides:
+        metas = [m for m in (_shape_text_meta(sh) for sh in slide.shapes) if m]
+        doomed: set[int] = set()
+        for i, a in enumerate(metas):
+            if id(a["shape"]) in doomed:
+                continue
+            for b in metas[i + 1 :]:
+                if id(b["shape"]) in doomed:
+                    continue
+                if not boxes_overlap(a["geom"], b["geom"], pad=12000):
+                    continue
+                dup = _duplicate_text(a["norm"], b["norm"])
+                ph_gen = (a["is_ph"] ^ b["is_ph"]) and (a["norm"] or b["norm"])
+                if not dup and not ph_gen:
+                    continue
+                victim = _pick_overlap_victim(a, b)
+                doomed.add(id(victim["shape"]))
+        for shape in list(slide.shapes):
+            if id(shape) not in doomed:
+                continue
+            el = shape._element  # noqa: SLF001 — python-pptx has no public delete
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+                removed += 1
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue(), removed
+
+
 def strip_covering_dump_shapes(data: bytes) -> tuple[bytes, int]:
     """Remove covering dump textboxes from a PPTX. Returns (bytes, removed_count)."""
     prs = Presentation(io.BytesIO(data))
@@ -376,11 +479,24 @@ def strip_covering_dump_shapes(data: bytes) -> tuple[bytes, int]:
 
 def inspect_and_repair_pptx(data: bytes, *, definition: dict[str, Any] | None = None) -> tuple[bytes, dict[str, Any]]:
     report = inspect_pptx_bytes(data, definition=definition)
-    repaired = 0
+    dump_removed = 0
+    overlap_removed = 0
     if report.get("covering_dump_count"):
-        data, repaired = strip_covering_dump_shapes(data)
+        data, dump_removed = strip_covering_dump_shapes(data)
         report = inspect_pptx_bytes(data, definition=definition)
-        report["dump_shapes_removed"] = repaired
+    for _ in range(4):
+        if not (report.get("overlap_count") or report.get("hard_findings")):
+            break
+        before = int(report.get("overlap_count") or 0)
+        data, n = strip_duplicate_overlapping_textboxes(data)
+        overlap_removed += n
+        report = inspect_pptx_bytes(data, definition=definition)
+        if n == 0 or int(report.get("overlap_count") or 0) >= before:
+            break
+    if dump_removed:
+        report["dump_shapes_removed"] = dump_removed
+    if overlap_removed:
+        report["duplicate_shapes_removed"] = overlap_removed
     report["final_artifact_status"] = report.get("status")
     return data, report
 

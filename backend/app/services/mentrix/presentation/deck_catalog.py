@@ -188,6 +188,8 @@ def quality_gate_for_path(path_str: str) -> dict[str, Any]:
         "slide_count": report.get("slide_count") or 0,
         "overlap_count": overlap_total,
         "clipped_text_count": clipped_total,
+        "inspector_overlap_count": inspector_overlap,
+        "inspector_clipped_count": inspector_clipped,
         "rendered_overlap_count": rendered_overlap,
         "rendered_clipped_count": rendered_clipped,
         "template_conflict_count": template_conflicts,

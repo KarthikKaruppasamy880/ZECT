@@ -1,8 +1,10 @@
 # ZECT Present — V3 Layout Generation Closure
 
-**Verdict:** `READY_FOR_HUMAN_PRESENT_LAYOUT_GENERATION_REVIEW_V3` — golden V3 proof passes (`acceptance=true`).
+**Verdict:** `ZECT_PRESENT_PRODUCTION_RELEASE_CANDIDATE` — golden V3 + legacy deck repair proof passes (`present_production_release_proof.py`).
 
 **Golden (2026-08-26):** 3 slides, outline `Target: 3 slides`, `final_quality_status=PASS`, `overlap_count=0`, `rendered_overlap_count=0`. A1 template re-imported to `zinnia-executive-v1` (20 layouts, semantic enrichment).
+
+**Production PR (#191):** OOXML duplicate-overlap repair, semantic label/body inspector tuning, Review slide PNG preview, quality banner OOXML vs rendered metrics.
 
 **Previous gate:** V2 human review **FAILED** (outline ~6 vs slides=3, rendered_overlap, contradictory quality summary, raw Edit UI).
 

@@ -167,6 +167,13 @@ export default function MentrixCompanion() {
         >
           Mentrix Delivery
         </Link>
+        <Link
+          to="/learning?studio=1"
+          data-testid="mentrix-open-learning-studio"
+          className="inline-flex min-h-11 items-center rounded-lg border border-slate-700 px-3 py-1.5"
+        >
+          Open Learning Studio
+        </Link>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {moreField(

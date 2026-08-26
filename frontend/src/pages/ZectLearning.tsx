@@ -3,6 +3,7 @@
  * Reuses Mentrix spine; external tutorials stay link-only; GUIDED never auto-solves.
  */
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   BookOpen,
   Loader2,
@@ -15,6 +16,7 @@ import {
   Award,
 } from "lucide-react";
 import { authHeaders } from "@/lib/api";
+import LearningStudioPanel from "@/components/LearningStudioPanel";
 
 const API = import.meta.env.VITE_API_URL || "";
 
@@ -89,6 +91,7 @@ function errMsg(data: unknown, fallback: string): string {
 }
 
 export default function ZectLearning() {
+  const [searchParams] = useSearchParams();
   const [resources, setResources] = useState<Resource[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [paths, setPaths] = useState<PathSummary[]>([]);
@@ -112,6 +115,7 @@ export default function ZectLearning() {
   const [firstRunOpen, setFirstRunOpen] = useState(
     () => localStorage.getItem("zect.learning.firstRunDismissed") !== "1",
   );
+  const [studioOpen, setStudioOpen] = useState(() => searchParams.get("studio") === "1");
   const busy = op !== "";
 
   const activeProject = projects.find((p) => p.id === activeProjectId) || null;
@@ -433,6 +437,18 @@ export default function ZectLearning() {
       >
         Guided catalog only — not a general university. Empty PBL lists need Sync catalog.
       </p>
+
+      <div>
+        <button
+          type="button"
+          data-testid="learning-studio-toggle"
+          className="text-xs font-medium text-teal-800 underline"
+          onClick={() => setStudioOpen((v) => !v)}
+        >
+          {studioOpen ? "Hide" : "Show"} Learning Studio (indexed workspace content)
+        </button>
+        {studioOpen && <LearningStudioPanel />}
+      </div>
 
       {firstRunOpen ? (
         <div

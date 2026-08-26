@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import posixpath
 import re
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree as ET
 
 _NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
@@ -18,8 +20,23 @@ _NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 
 _MAX_INLINE_IMAGE = 280_000
-_MAX_PART_BYTES = 1_500_000
-_MAX_MEDIA_BYTES = 8 * 1024 * 1024
+_MAX_PART_BYTES = 2_000_000
+_MAX_MEDIA_BYTES = 8_000_000
+
+_SCHEME_ALIASES = {
+    "bg1": "lt1",
+    "bg2": "lt2",
+    "tx1": "dk1",
+    "tx2": "dk2",
+    "accent1": "accent1",
+    "accent2": "accent2",
+    "accent3": "accent3",
+    "accent4": "accent4",
+    "accent5": "accent5",
+    "accent6": "accent6",
+    "hlink": "hlink",
+    "folHlink": "folHlink",
+}
 
 
 def slide_emu_size(data: bytes) -> tuple[int, int]:
@@ -144,7 +161,78 @@ def _nv_pr(el: ET.Element) -> dict[str, str]:
     return {"name": node.get("name") or "", "id": node.get("id") or ""}
 
 
-def _solid_fill(el: ET.Element) -> str | None:
+def _hex_from_rgb(val: str) -> str | None:
+    raw = (val or "").strip().upper()
+    if len(raw) == 6 and re.fullmatch(r"[0-9A-Fa-f]{6}", raw):
+        return f"#{raw}"
+    return None
+
+
+def _resolve_color_node(node: ET.Element | None, theme: dict[str, str] | None) -> str | None:
+    if node is None:
+        return None
+    tag = node.tag.rsplit("}", 1)[-1]
+    if tag == "srgbClr":
+        return _hex_from_rgb(node.get("val") or "")
+    if tag == "sysClr":
+        return _hex_from_rgb(node.get("lastClr") or node.get("val") or "")
+    if tag == "schemeClr":
+        name = str(node.get("val") or "").strip()
+        if not name:
+            return None
+        key = _SCHEME_ALIASES.get(name, name)
+        colors = theme or {}
+        return _hex_from_rgb(colors.get(key) or colors.get(name) or "")
+    return None
+
+
+def _resolve_fill(el: ET.Element | None, theme: dict[str, str] | None) -> str | None:
+    if el is None:
+        return None
+    for child in list(el):
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "solidFill":
+            for sub in list(child):
+                hit = _resolve_color_node(sub, theme)
+                if hit:
+                    return hit
+        if tag in {"srgbClr", "schemeClr", "sysClr"}:
+            hit = _resolve_color_node(child, theme)
+            if hit:
+                return hit
+    return None
+
+
+def _gradient_fill(sp_pr: ET.Element | None, theme: dict[str, str] | None) -> dict[str, Any] | None:
+    if sp_pr is None:
+        return None
+    grad = sp_pr.find(f"{{{_NS_A}}}gradFill")
+    if grad is None:
+        grad = sp_pr.find(f".//{{{_NS_A}}}gradFill")
+    if grad is None:
+        return None
+    stops: list[dict[str, Any]] = []
+    for gs in grad.findall(f".//{{{_NS_A}}}gs"):
+        try:
+            pos = int(gs.get("pos") or 0)
+        except (TypeError, ValueError):
+            pos = 0
+        for sub in list(gs):
+            color = _resolve_color_node(sub, theme)
+            if color:
+                stops.append({"pos": pos, "color": color})
+                break
+    if not stops:
+        return None
+    lin = grad.find(f"{{{_NS_A}}}lin")
+    try:
+        angle = int(lin.get("ang") or 0) if lin is not None else 0
+    except (TypeError, ValueError):
+        angle = 0
+    return {"stops": sorted(stops, key=lambda row: row["pos"]), "angle": angle}
+
+
+def _shape_fill(el: ET.Element, theme: dict[str, str] | None) -> tuple[str | None, dict[str, Any] | None]:
     sp_pr = None
     for child in list(el):
         tag = child.tag.rsplit("}", 1)[-1]
@@ -152,11 +240,142 @@ def _solid_fill(el: ET.Element) -> str | None:
             sp_pr = child
             break
     if sp_pr is None:
+        return None, None
+    grad = _gradient_fill(sp_pr, theme)
+    solid = _resolve_fill(sp_pr, theme)
+    if grad and grad.get("stops"):
+        first = str(grad["stops"][0].get("color") or "")
+        return first or solid, grad
+    return solid, None
+
+
+def _solid_fill(el: ET.Element) -> str | None:
+    fill, _grad = _shape_fill(el, None)
+    return fill
+
+
+def _load_theme_colors(parts: dict[str, bytes]) -> dict[str, str]:
+    pres = parts.get("ppt/presentation.xml")
+    if not pres:
+        return {}
+    try:
+        pres_root = ET.fromstring(pres)
+    except ET.ParseError:
+        return {}
+    pres_rels = _parse_rels(parts.get("ppt/_rels/presentation.xml.rels") or b"")
+    theme_target = _rel_of_type(pres_rels, "/theme")
+    if not theme_target:
+        return {}
+    theme_part = _resolve_part(theme_target, from_dir="ppt")
+    theme_xml = parts.get(theme_part)
+    if not theme_xml:
+        return {}
+    try:
+        root = ET.fromstring(theme_xml)
+    except ET.ParseError:
+        return {}
+    scheme = root.find(f".//{{{_NS_A}}}clrScheme")
+    if scheme is None:
+        return {}
+    colors: dict[str, str] = {}
+    for child in list(scheme):
+        tag = child.tag.rsplit("}", 1)[-1]
+        for sub in list(child):
+            val = _resolve_color_node(sub, None)
+            if val:
+                colors[tag] = val.lstrip("#")
+                break
+    return colors
+
+
+def _text_style(el: ET.Element, theme: dict[str, str] | None) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    tx = el.find(f".//{{{_NS_A}}}txBody")
+    if tx is None:
+        return out
+    def_rpr: ET.Element | None = None
+    p = tx.find(f"{{{_NS_A}}}p")
+    if p is not None:
+        p_pr = p.find(f"{{{_NS_A}}}pPr")
+        if p_pr is not None:
+            algn = (p_pr.get("algn") or "").strip().lower()
+            if algn in {"l", "ctr", "r", "just"}:
+                out["align"] = {"l": "left", "ctr": "center", "r": "right", "just": "justify"}[algn]
+            def_rpr = p_pr.find(f"{{{_NS_A}}}defRPr")
+        if def_rpr is None:
+            r = p.find(f"{{{_NS_A}}}r")
+            if r is not None:
+                def_rpr = r.find(f"{{{_NS_A}}}rPr")
+    if def_rpr is None:
+        lst = tx.find(f"{{{_NS_A}}}lstStyle")
+        if lst is not None:
+            for lvl in range(1, 10):
+                lvl_el = lst.find(f"{{{_NS_A}}}lvl{lvl}pPr")
+                if lvl_el is None:
+                    continue
+                def_rpr = lvl_el.find(f"{{{_NS_A}}}defRPr")
+                if def_rpr is not None:
+                    break
+    if def_rpr is not None:
+        sz = def_rpr.get("sz")
+        if sz:
+            try:
+                out["font_size_pt"] = round(int(sz) / 100, 1)
+            except (TypeError, ValueError):
+                pass
+        if def_rpr.get("b") in {"1", "true"}:
+            out["bold"] = True
+        if def_rpr.get("i") in {"1", "true"}:
+            out["italic"] = True
+        color = _resolve_fill(def_rpr, theme)
+        if color:
+            out["color"] = color
+    return out
+
+
+def _extract_background(
+    xml: bytes,
+    *,
+    rels: dict[str, dict[str, str]] | None,
+    parts: dict[str, bytes] | None,
+    from_dir: str,
+    theme: dict[str, str] | None,
+) -> dict[str, Any] | None:
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
         return None
-    srgb = sp_pr.find(f".//{{{_NS_A}}}srgbClr")
-    val = (srgb.get("val") if srgb is not None else None) or ""
-    if len(val) == 6 and re.fullmatch(r"[0-9A-Fa-f]{6}", val):
-        return f"#{val}"
+    c_sld = root.find(f".//{{{_NS_P}}}cSld")
+    if c_sld is None:
+        return None
+    bg = c_sld.find(f"{{{_NS_P}}}bg")
+    if bg is None:
+        return None
+    bg_pr = bg.find(f"{{{_NS_P}}}bgPr")
+    if bg_pr is not None:
+        fill = _resolve_fill(bg_pr, theme)
+        if fill:
+            return {"fill": fill, "source": "bgPr"}
+        blip = bg_pr.find(f".//{{{_NS_A}}}blip")
+        if blip is not None:
+            rid = blip.get(f"{{{_NS_R}}}embed") or blip.get("embed") or ""
+            if rid and rels and rid in rels:
+                target = rels[rid].get("target") or ""
+                part = _resolve_part(target, from_dir=from_dir)
+                blob = (parts or {}).get(part)
+                row: dict[str, Any] = {"source": "bgPr", "media_part": part}
+                if blob:
+                    row["media_sha256"] = hashlib.sha256(blob).hexdigest()
+                    url = _data_url(blob, part)
+                    if url:
+                        row["data_url"] = url
+                return row
+    bg_ref = bg.find(f"{{{_NS_P}}}bgRef")
+    if bg_ref is not None:
+        for child in list(bg_ref):
+            fill = _resolve_color_node(child, theme)
+            if fill:
+                return {"fill": fill, "source": "bgRef"}
     return None
 
 
@@ -333,6 +552,7 @@ def extract_slide_blocks(
     skip_all_placeholders: bool = False,
     locked: bool = False,
     id_prefix: str = "",
+    theme: dict[str, str] | None = None,
 ) -> list[dict]:
     """EMU-aligned document blocks for p:sp, p:pic, groups, and graphicFrame (charts/tables)."""
     try:
@@ -362,12 +582,14 @@ def extract_slide_blocks(
 
     def _identity(el: ET.Element) -> dict:
         nv = _nv_pr(el)
-        fill = _solid_fill(el)
+        fill, gradient = _shape_fill(el, theme)
         out: dict = {}
         if nv.get("name"):
             out["shape_name"] = nv["name"]
         if fill:
             out["fill"] = fill
+        if gradient:
+            out["fill_gradient"] = gradient
         return out
 
     def _walk(
@@ -404,6 +626,7 @@ def extract_slide_blocks(
                 return
             text = _shape_text(el)
             ident = _identity(el)
+            ident.update(_text_style(el, theme))
             if text:
                 ident["text"] = text
                 _push("text", {"content": ident}, mapped)
@@ -421,6 +644,8 @@ def extract_slide_blocks(
                 if url:
                     ident["data_url"] = url
                 else:
+                    ident["media_part"] = part
+                    ident["media_sha256"] = hashlib.sha256(blob).hexdigest()
                     try:
                         from app.services.mentrix.presentation.asset_resolver import store_image
 
@@ -428,6 +653,8 @@ def extract_slide_blocks(
                         ident["asset_id"] = meta.get("asset_id") or ""
                     except Exception:
                         pass
+            elif part:
+                ident["media_part"] = part
             _push("image", {"content": ident}, mapped)
             return
         if tag == "graphicFrame" and mapped:
@@ -494,12 +721,11 @@ def _collect_parts(root: Path) -> dict[str, bytes]:
         if not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
+        limit = _MAX_MEDIA_BYTES if rel.startswith("ppt/media/") else _MAX_PART_BYTES
         try:
-            size = path.stat().st_size
+            if path.stat().st_size > limit:
+                continue
         except OSError:
-            continue
-        limit = _MAX_MEDIA_BYTES if "/media/" in rel else _MAX_PART_BYTES
-        if size > limit:
             continue
         parts[rel] = path.read_bytes()
     return parts
@@ -536,11 +762,13 @@ def parse_pptx_bytes(data: bytes) -> list[dict]:
         if not slides_dir.is_dir():
             return []
         parts = _collect_parts(tmp_path)
+        theme_colors = _load_theme_colors(parts)
         slide_files = sorted(
             [p for p in slides_dir.iterdir() if re.fullmatch(r"slide\d+\.xml", p.name, re.I)],
             key=lambda p: int(re.search(r"\d+", p.name).group(0)) if re.search(r"\d+", p.name) else 0,
         )
         notes_dir = tmp_path / "ppt" / "notesSlides"
+        slide_cx, slide_cy = slide_emu_size(data)
         for i, slide_path in enumerate(slide_files):
             slide_xml = slide_path.read_text(encoding="utf-8", errors="ignore")
             text = _extract_at_text(slide_xml)[:2000]
@@ -556,53 +784,114 @@ def parse_pptx_bytes(data: bytes) -> list[dict]:
             slide_rels = _rels_for(parts, slide_part)
             layout_target = _rel_of_type(slide_rels, "/slideLayout")
             background: list[dict] = []
+            slide_bg: dict[str, Any] | None = None
+            layout_part = ""
+            layout_xml: bytes | None = None
+            layout_rels: dict[str, dict[str, str]] = {}
+            master_part = ""
+            master_xml: bytes | None = None
+            master_rels: dict[str, dict[str, str]] = {}
             if layout_target:
                 layout_part = _resolve_part(layout_target, from_dir="ppt/slides")
                 layout_xml = parts.get(layout_part)
                 layout_rels = _rels_for(parts, layout_part)
-                if layout_xml:
-                    background.extend(
-                        extract_slide_blocks(
-                            layout_xml,
-                            slide_index=i,
-                            rels=layout_rels,
-                            parts=parts,
-                            from_dir=posixpath.dirname(layout_part),
-                            skip_all_placeholders=True,
-                            locked=True,
-                            id_prefix="layout_",
-                        )
-                    )
                 master_target = _rel_of_type(layout_rels, "/slideMaster")
                 if master_target:
                     master_part = _resolve_part(master_target, from_dir=posixpath.dirname(layout_part))
                     master_xml = parts.get(master_part)
                     master_rels = _rels_for(parts, master_part)
-                    if master_xml:
-                        background = extract_slide_blocks(
-                            master_xml,
-                            slide_index=i,
-                            rels=master_rels,
-                            parts=parts,
-                            from_dir=posixpath.dirname(master_part),
-                            skip_all_placeholders=True,
-                            locked=True,
-                            id_prefix="master_",
-                        ) + background
+            for xml, rels, from_dir in (
+                (master_xml, master_rels, posixpath.dirname(master_part) if master_part else ""),
+                (layout_xml, layout_rels, posixpath.dirname(layout_part) if layout_part else ""),
+                (slide_path.read_bytes(), slide_rels, "ppt/slides"),
+            ):
+                if not xml:
+                    continue
+                hit = _extract_background(
+                    xml,
+                    rels=rels,
+                    parts=parts,
+                    from_dir=from_dir or "ppt/slides",
+                    theme=theme_colors,
+                )
+                if hit:
+                    slide_bg = hit
+            if master_xml:
+                background.extend(
+                    extract_slide_blocks(
+                        master_xml,
+                        slide_index=i,
+                        rels=master_rels,
+                        parts=parts,
+                        from_dir=posixpath.dirname(master_part),
+                        skip_all_placeholders=True,
+                        locked=True,
+                        id_prefix="master_",
+                        theme=theme_colors,
+                    )
+                )
+            if layout_xml:
+                background.extend(
+                    extract_slide_blocks(
+                        layout_xml,
+                        slide_index=i,
+                        rels=layout_rels,
+                        parts=parts,
+                        from_dir=posixpath.dirname(layout_part),
+                        skip_all_placeholders=True,
+                        locked=True,
+                        id_prefix="layout_",
+                        theme=theme_colors,
+                    )
+                )
             slide_blocks = extract_slide_blocks(
                 slide_path.read_bytes(),
                 slide_index=i,
                 rels=slide_rels,
                 parts=parts,
                 from_dir="ppt/slides",
+                theme=theme_colors,
             )
+            if slide_bg and slide_bg.get("media_part") and not slide_bg.get("data_url"):
+                bg_block = {
+                    "kind": "image",
+                    "slide_index": i,
+                    "geometry": {"x": 0, "y": 0, "cx": slide_cx, "cy": slide_cy},
+                    "id": f"blk_{i}_background_image",
+                    "content": {
+                        "locked": True,
+                        "layer": "background",
+                        "alt": "Slide background",
+                        "media_part": slide_bg.get("media_part"),
+                        "media_sha256": slide_bg.get("media_sha256"),
+                        "data_url": slide_bg.get("data_url"),
+                        "fit": "cover",
+                    },
+                    "provenance": {"source": "document", "generated": False},
+                }
+                background = [bg_block] + background
+            merged_blocks = background + slide_blocks
+            slide_area = max(1, slide_cx * slide_cy)
+            for block in merged_blocks:
+                if str(block.get("kind") or "") != "image":
+                    continue
+                geo = block.get("geometry") if isinstance(block.get("geometry"), dict) else {}
+                try:
+                    cover = int(geo.get("cx") or 0) * int(geo.get("cy") or 0)
+                except (TypeError, ValueError):
+                    cover = 0
+                if cover >= slide_area * 0.2:
+                    content = block.setdefault("content", {})
+                    if isinstance(content, dict):
+                        content.setdefault("fit", "cover")
             slides.append(
                 {
                     "index": i,
                     "notes": notes,
                     "text": text,
                     "visuals": _visual_markers(slide_xml),
-                    "blocks": background + slide_blocks,
+                    "background": slide_bg,
+                    "blocks": merged_blocks,
                 }
             )
     return slides

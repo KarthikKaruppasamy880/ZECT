@@ -14,6 +14,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
+import { fillSpeakerNotes, openBlankPresentationStudio } from "./helpers/presentStudio";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(FRONTEND, "..");
@@ -93,12 +94,9 @@ test.describe("present + voice production", () => {
 
     await page.getByTestId("present-nav-dashboard").click();
     await expect(page.getByTestId("present-dashboard")).toBeVisible();
-    await page.getByTestId("present-blank").click();
-    await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByTestId("present-editor")).toBeVisible();
+    await openBlankPresentationStudio(page);
     await expect(page.getByTestId("present-editor-thumbs")).toBeVisible();
-    await page.getByTestId("present-editor-notes-toggle").click();
-    await page.getByTestId("present-editor-notes").fill("Executive note: owners needed this week.");
+    await fillSpeakerNotes(page, "Executive note: owners needed this week.");
     await page.getByTestId("present-editor-save").click();
     await expect(page.getByTestId("present-editor-status")).toContainText(/Saved|local|ooxml/i, { timeout: 15_000 });
     await page.getByTestId("present-open-export").click();

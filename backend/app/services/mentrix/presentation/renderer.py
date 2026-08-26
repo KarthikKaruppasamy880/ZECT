@@ -142,10 +142,33 @@ def _clear_placeholder_sample_text(slide) -> None:
                 pass
 
 
-def _fill_text_frame(shape, lines: list[str]) -> None:
+def _norm_line(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _filter_bullets_against_title(title: str, lines: list[str]) -> list[str]:
+    """Drop body lines that repeat the slide title (common planner duplicate)."""
+    norm_title = _norm_line(title)
+    kept: list[str] = []
+    for line in lines:
+        raw = str(line or "").strip()
+        if not raw:
+            continue
+        norm = _norm_line(raw)
+        if norm_title:
+            if norm == norm_title or norm_title in norm or norm in norm_title:
+                continue
+            if norm.startswith("frame ") and norm_title in _norm_line(raw[6:]):
+                continue
+        kept.append(raw)
+    return kept
+
+
+def _fill_text_frame(shape, lines: list[str], *, title: str = "") -> None:
     tf = shape.text_frame
     tf.clear()
     tf.word_wrap = True
+    lines = _filter_bullets_against_title(title, lines)
     if not lines:
         tf.text = ""
         return
@@ -220,8 +243,15 @@ def _fill_placeholder(
         title_ph.text_frame.text = title[:160]
         title_set = True
     if not skip_body and body_ph is not None and body_ph is not title_ph and not prefer_generated_body:
-        _fill_text_frame(body_ph, bullets)
-        body_set = True
+        filtered = _filter_bullets_against_title(title, bullets)
+        if filtered:
+            _fill_text_frame(body_ph, filtered, title=title)
+            body_set = True
+        else:
+            try:
+                body_ph.text_frame.clear()
+            except Exception:
+                pass
     if not title_set:
         x, y, cx, cy = _geom_box(regions, "title", (0.5, 0.28, 9.0, 0.7))
         box = slide.shapes.add_textbox(x, y, cx, cy)
@@ -231,9 +261,11 @@ def _fill_placeholder(
     if skip_body:
         return
     if not body_set and bullets:
-        x, y, cx, cy = _geom_box(regions, "body", (0.5, 1.2, 9.0, 4.8))
-        box = slide.shapes.add_textbox(x, y, cx, cy)
-        _fill_text_frame(box, bullets)
+        filtered = _filter_bullets_against_title(title, bullets)
+        if filtered:
+            x, y, cx, cy = _geom_box(regions, "body", (0.5, 1.2, 9.0, 4.8))
+            box = slide.shapes.add_textbox(x, y, cx, cy)
+            _fill_text_frame(box, filtered, title=title)
 
 
 def _set_notes(slide, notes: str) -> None:
@@ -355,7 +387,8 @@ def render_plan_to_pptx(
     buf = io.BytesIO()
     prs.save(buf)
     data = buf.getvalue()
-    validate_generated_pptx(data, n_slides=len(slides_in))
+    expected = int(plan.get("requested_slide_count") or plan.get("n_slides") or len(slides_in))
+    validate_generated_pptx(data, n_slides=expected)
     return data
 
 

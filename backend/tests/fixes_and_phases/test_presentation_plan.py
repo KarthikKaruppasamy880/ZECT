@@ -11,7 +11,7 @@ from app.services.mentrix.presentation.service import PresentationService
 
 
 def test_clamp_slide_count():
-    assert clamp_slide_count(1) == 3
+    assert clamp_slide_count(1) == 1
     assert clamp_slide_count(99) == 20
     assert clamp_slide_count(6) == 6
 
@@ -143,13 +143,17 @@ def test_service_plan_does_not_call_presenton():
 
 def test_presenton_generate_fail_closed_on_restricted():
     with patch("app.services.presenton_client.generate_presentation") as gen:
-        out = PresentationService().generate(
-            PresentationGenerateRequest(
-                content="Board update",
-                n_slides=6,
-                sensitivity_hint="RESTRICTED",
+        with patch(
+            "app.services.mentrix.presentation.service.configured_provider_name",
+            return_value="presenton",
+        ):
+            out = PresentationService().generate(
+                PresentationGenerateRequest(
+                    content="Board update",
+                    n_slides=6,
+                    sensitivity_hint="RESTRICTED",
+                )
             )
-        )
         gen.assert_not_called()
     assert out["ok"] is False
     assert out["http_status"] == 403

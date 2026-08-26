@@ -9,6 +9,11 @@ from typing import Any
 from app.services.mentrix.presentation import template_registry as tmpl
 from app.services.mentrix.presentation.blocks import ensure_visual_blocks, visual_inventory
 from app.services.mentrix.presentation.document import document_from_plan
+from app.services.mentrix.presentation.generation_job import (
+    enforce_slide_count_contract,
+    new_generation_job,
+    trace_slide_count,
+)
 from app.services.mentrix.presentation.planner import build_presentation_plan
 from app.services.mentrix.presentation.provider import PresentationGenerateRequest, PresentationStatus
 from app.services.mentrix.presentation.renderer import (
@@ -45,7 +50,7 @@ class ZectNativePresentationProvider:
             reachable=True,
             lifecycle=lifecycle,
             provider=self.name,
-            hint="Native generate is experimental. Set ZECT_PRESENTATION_PROVIDER=zect_native. Presenton remains default.",
+            hint="Native generate uses ZECT LayoutComposer + PptxExporter. Set ZECT_PRESENTATION_PROVIDER=zect_native.",
             blocked_external=False,
             zinnia_ready=zinnia_ready,
         )
@@ -95,6 +100,17 @@ class ZectNativePresentationProvider:
                     "block_code": "generation_cancelled",
                     "run_id": req.run_id,
                 }
+        from app.services.mentrix.presentation.generation_progress import complete_job, create_job, set_stage
+
+        job = new_generation_job(requested_slide_count=req.n_slides, run_id=req.run_id or "")
+        progress = create_job(
+            job_id=job["generation_job_id"],
+            requested_slide_count=job["requested_slide_count"],
+            user_id=req.user_id or "anon",
+        )
+        set_stage(job["generation_job_id"], "UNDERSTANDING", label="Understanding request")
+        trace_slide_count(job, stage="planner_input", component="native_provider", count=req.n_slides)
+        set_stage(job["generation_job_id"], "STORY_PLANNING", label="Planning story")
         planned = build_presentation_plan(
             prompt=req.content,
             n_slides=req.n_slides,
@@ -128,12 +144,20 @@ class ZectNativePresentationProvider:
                 "latency": planned.get("latency") or {},
             }
         definition = load_definition(canon) if canon else None
+        if definition:
+            from app.services.mentrix.presentation.template_semantics import enrich_definition_semantics
+
+            definition = enrich_definition_semantics(definition)
         source = tmpl.source_pptx_path(canon, user_id=req.user_id) if canon else None
         used_master = bool(source and Path(source).is_file())
         plan = planned["plan"]
+        plan["requested_slide_count"] = int(job["requested_slide_count"])
+        plan["generation_job_id"] = job["generation_job_id"]
+        trace_slide_count(job, stage="plan_built", component="planner", count=len(plan.get("slides") or []))
         asset_ids = [str(a).strip() for a in list(req.asset_ids or []) if str(a).strip()]
         for slide in list(plan.get("slides") or []):
             ensure_visual_blocks(slide, asset_ids=asset_ids)
+        set_stage(job["generation_job_id"], "LAYOUT_PLANNING", label="Selecting layouts")
         from app.services.mentrix.presentation.quality_repair import repair_until_pass
 
         degraded = bool(planned.get("degraded"))
@@ -151,6 +175,7 @@ class ZectNativePresentationProvider:
                     "run_id": req.run_id,
                     "planner_mode": planned.get("planner_mode") or "",
                 }
+        set_stage(job["generation_job_id"], "QUALITY_CHECK", label="Quality inspection")
         plan, quality = repair_until_pass(
             plan,
             definition,
@@ -158,10 +183,18 @@ class ZectNativePresentationProvider:
             context_items=list(req.context_items or []),
             degraded=degraded,
         )
+        plan, slide_violations = enforce_slide_count_contract(plan, job=job)
+        if slide_violations:
+            quality["slide_count_violations"] = slide_violations
+            quality["status"] = "FAIL"
+            quality["final_quality_status"] = "FAIL"
+        set_stage(job["generation_job_id"], "FINAL_QUALITY_CHECK", label="Finalizing")
+        trace_slide_count(job, stage="post_repair", component="quality_repair", count=len(plan.get("slides") or []))
         # Always render a reviewable PPTX. Critic FAIL is reported on the deck;
         # inspector collisions/clipping/broken rels are hard *export* blockers.
         try:
             t_render = time.perf_counter()
+            set_stage(job["generation_job_id"], "VISUAL_COMPOSITION", label="Composing slides")
             data = render_plan_to_pptx(
                 plan,
                 template_path=source if used_master else None,
@@ -199,7 +232,9 @@ class ZectNativePresentationProvider:
         data, inspector = inspect_and_repair_pptx(data, definition=definition)
         quality = merge_inspector_into_quality(quality, inspector)
         layout_hard = bool(quality.get("layout_hard_fail"))
-        export_blocked = bool(layout_hard or inspector.get("status") == "FAIL")
+        critic_fail = str(quality.get("final_quality_status") or quality.get("status") or "") == "FAIL"
+        export_blocked = bool(layout_hard or inspector.get("status") == "FAIL" or critic_fail)
+        generation_blocked = bool(export_blocked)
         dest_dir = default_pptx_save_dir()
         dest = _unique_pptx_path(
             dest_dir,
@@ -226,6 +261,8 @@ class ZectNativePresentationProvider:
         latency = dict(planned.get("latency") or {})
         latency["render_ms"] = render_ms
         latency["total_generate_ms"] = int((time.perf_counter() - t0) * 1000)
+        outcome = "NEEDS_REVIEW" if generation_blocked else "COMPLETE"
+        complete_job(job["generation_job_id"], outcome=outcome, path=str(dest), quality=quality)
         return {
             "ok": True,
             "path": str(dest),
@@ -241,7 +278,7 @@ class ZectNativePresentationProvider:
                 if zinnia_verified
                 else ("Zinnia TemplateDefinition not applied" if zinnia_ui else "")
             ),
-            "lifecycle": tmpl.LIFECYCLE_READY,
+            "lifecycle": tmpl.LIFECYCLE_NEEDS_REVIEW if generation_blocked else tmpl.LIFECYCLE_READY,
             "planner_source": planned["plan"].get("planner_source"),
             "planner_mode": planned.get("planner_mode") or planned["plan"].get("planner_mode") or "LLM",
             "fallback": bool(planned.get("fallback")),
@@ -261,6 +298,12 @@ class ZectNativePresentationProvider:
             "repair_attempts": quality.get("repair_attempts"),
             "final_quality_status": quality.get("final_quality_status"),
             "export_blocked": export_blocked,
+            "generation_blocked": generation_blocked,
+            "generation_job": job,
+            "generation_progress": progress,
+            "requested_slide_count": job["requested_slide_count"],
+            "generation_job_id": job["generation_job_id"],
+            "slide_count_trace": job.get("trace") or [],
             "inspector": inspector,
             "blocked_external": False,
             "latency": latency,

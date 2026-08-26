@@ -128,12 +128,16 @@ def load_image(asset_id: str, *, user_id: str) -> dict[str, Any]:
     folder = _user_dir(user_id)
     matches = list(folder.glob(f"{aid}.*"))
     if not matches:
+        # Content-addressed assets may have been stored under a different owner key
+        # (e.g. email during PPTX import vs numeric user_id on GET).
+        matches = [p for p in _root().glob(f"*/{aid}.*") if p.is_file() and p.suffix.lower() in ALLOWED_EXT]
+    if not matches:
         raise FileNotFoundError("asset_not_found")
     path = matches[0]
     if path.suffix.lower() not in ALLOWED_EXT:
         raise UnsafeImageError("asset_ext_rejected")
     try:
-        path.relative_to(folder)
+        path.relative_to(_root())
     except ValueError as exc:
         raise UnsafeImageError("asset_path_rejected") from exc
     data = path.read_bytes()

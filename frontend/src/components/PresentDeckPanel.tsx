@@ -1,5 +1,5 @@
 /**
- * Companion Present Deck — Presenton generate + open PPTX/Zoom (Electron) + narrate (ZECT Voicebox).
+ * Companion Present Deck — ZECT Present generate + open PPTX/Zoom (Electron) + narrate (Voicebox).
  * Electron: parse notes → F5 → speak await → Right Arrow.
  * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
  */
@@ -9,9 +9,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
 import {
   mentrixCompanionIntegrations,
-  mentrixPresentonGenerate,
-  mentrixPresentonStatus,
-  mentrixPresentonTemplates,
+  mentrixPresentGenerate,
+  mentrixPresentGenerationJob,
+  mentrixPresentEngineStatus,
+  mentrixPresentEngineTemplates,
   mentrixParsePptx,
   mentrixPresentationAudiences,
   mentrixPresentationAssetUpload,
@@ -158,7 +159,7 @@ export default function PresentDeckPanel({
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [presenting, setPresenting] = useState(false);
-  const [presentonReady, setPresentonReady] = useState(false);
+  const [engineReady, setEngineReady] = useState(false);
   const [templates, setTemplates] = useState<PresentTemplateCard[]>(BUILTIN_TEMPLATES);
   const [language, setLanguage] = useState(() => {
     try {
@@ -233,20 +234,20 @@ export default function PresentDeckPanel({
       }
       setCustomTemplateId(localStorage.getItem(CUSTOM_TEMPLATE_KEY) || "");
       const savedSlides = Number(localStorage.getItem(N_SLIDES_KEY) || "6");
-      setNSlides(Number.isFinite(savedSlides) ? Math.max(3, Math.min(20, savedSlides)) : 6);
+      setNSlides(Number.isFinite(savedSlides) ? Math.max(1, Math.min(20, savedSlides)) : 6);
     } catch {
       /* ignore */
     }
     let statusCancelled = false;
-    const loadPresentonStatus = async () => {
+    const loadEngineStatus = async () => {
       for (let attempt = 0; attempt < 4 && !statusCancelled; attempt++) {
         try {
-          const s = await mentrixPresentonStatus();
+          const s = await mentrixPresentEngineStatus();
           if (statusCancelled) return;
-          setPresentonReady(!!s.configured && !!s.reachable);
+          setEngineReady(!!s.configured && !!s.reachable);
           const life = String(s.lifecycle || "") as ProviderLifecycle;
           if (s.provider === "zect_native" && (life === "READY" || life === "TEMPLATE_NOT_READY")) {
-            setPresentonReady(true);
+            setEngineReady(true);
           }
           if (
             life === "READY" ||
@@ -262,25 +263,29 @@ export default function PresentDeckPanel({
           if (s.configured && s.reachable) return;
         } catch {
           if (attempt === 3 && !statusCancelled) {
-            setPresentonReady(false);
+            setEngineReady(false);
             setLifecycle("PROVIDER_UNAVAILABLE");
           }
         }
         await new Promise((r) => setTimeout(r, 1500));
       }
     };
-    void loadPresentonStatus();
+    void loadEngineStatus();
     mentrixCompanionIntegrations()
       .then((s) => {
         // Prefer status endpoint for ready; integrations is backup if status fails earlier
-        if (s.presenton_reachable != null) {
-          setPresentonReady((prev) => prev || (!!s.presenton_configured && !!s.presenton_reachable));
+        if (s.present_engine_reachable != null) {
+          setEngineReady((prev) => prev || (!!s.present_engine_configured && !!s.present_engine_reachable));
+        } else if (s.presenton_reachable != null) {
+          setEngineReady((prev) => prev || (!!s.presenton_configured && !!s.presenton_reachable));
+        } else if (s.present_engine != null) {
+          setEngineReady((prev) => prev || !!s.present_engine);
         } else if (s.presenton != null) {
-          setPresentonReady((prev) => prev || !!s.presenton);
+          setEngineReady((prev) => prev || !!s.presenton);
         }
       })
       .catch(() => {});
-    mentrixPresentonTemplates()
+    mentrixPresentEngineTemplates()
       .then((res) => {
         if (res.reachable === false) {
           setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
@@ -321,9 +326,9 @@ export default function PresentDeckPanel({
   }, []);
 
   useEffect(() => {
-    const ready = templates.filter((t) => isGenerateTemplateReady(t, { presentonReady }));
+    const ready = templates.filter((t) => isGenerateTemplateReady(t, { engineReady }));
     if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
-      if (presentonReady) return;
+      if (engineReady) return;
       const fallback = ready[0]?.id || "zinnia-executive-v1";
       setTemplateChoice(fallback);
       try {
@@ -342,11 +347,11 @@ export default function PresentDeckPanel({
     } catch {
       /* ignore */
     }
-  }, [templates, presentonReady, templateChoice]);
+  }, [templates, engineReady, templateChoice]);
 
   const readyTemplates = useMemo(
-    () => templates.filter((t) => isGenerateTemplateReady(t, { presentonReady })),
-    [templates, presentonReady],
+    () => templates.filter((t) => isGenerateTemplateReady(t, { engineReady })),
+    [templates, engineReady],
   );
 
   useEffect(() => {
@@ -460,7 +465,7 @@ export default function PresentDeckPanel({
   };
 
   const persistNSlides = (value: number) => {
-    const n = Math.max(3, Math.min(20, Math.round(value) || 6));
+    const n = Math.max(1, Math.min(20, Math.round(value) || 6));
     setNSlides(n);
     try {
       localStorage.setItem(N_SLIDES_KEY, String(n));
@@ -544,9 +549,9 @@ export default function PresentDeckPanel({
     setGenerationProgress("Understanding request");
     setPlannerDegraded(false);
     try {
-      if (!presentonReady) {
+      if (!engineReady) {
         setLifecycle("PROVIDER_UNAVAILABLE");
-        setStatus("Presentation provider unavailable — BLOCKED_EXTERNAL until Presenton is configured and reachable.");
+        setStatus("Presentation engine unavailable — generation disabled until the engine is configured and reachable.");
         return;
       }
       if (opts?.fastBasic && !draftWithoutModel) {
@@ -558,20 +563,22 @@ export default function PresentDeckPanel({
         .filter(Boolean)
         .join("\n\n");
       if (!content) {
-        setStatus("Enter a deck prompt (topic + key points) for Presenton.");
+        setStatus("Enter a deck prompt (topic + key points).");
         return;
       }
       const template = resolveTemplateId();
       if (templateChoice === CUSTOM_TEMPLATE_OPTION && !customTemplateId.trim()) {
-        setStatus("Enter a custom template id (from Presenton uploaded master), or pick a built-in template.");
+        setStatus("Enter a custom template id from your uploaded master, or pick a built-in template.");
         return;
       }
-      // Flow B: classify → audience → claims → user approval gate before Presenton
+      // Flow B: classify → audience → claims → user approval gate before generate
+      const requestedSlideCount = Math.max(1, Math.min(20, Number(nSlides) || 6));
       const prep = await mentrixPreparePromptDeck({
         prompt: content,
         audience_id: audienceId,
         sensitivity_hint: sensitivityHint || undefined,
         documents: attachDocs.length ? attachDocs : undefined,
+        n_slides: requestedSlideCount,
       });
       setClaimsPreview(prep.claims || []);
       setAnalysisNote(
@@ -594,12 +601,15 @@ export default function PresentDeckPanel({
           "\n\nIMPORTANT: Do not present the following as verified facts:\n" +
           unverified.map((c) => `- ${c.claim}`).join("\n");
       }
-      const slidesHint = prep.n_slides_hint || nSlides;
-      if (prep.n_slides_hint) persistNSlides(Number(prep.n_slides_hint));
+      const audienceSlideSuggestion = prep.audience_slide_suggestion ?? prep.n_slides_hint;
       if (!outlineReady && generationMode === "smart") {
         setOutline(adapted);
         setOutlineReady(true);
-        setStatus("Confirm adapted prompt and slide count, then Generate.");
+        setStatus(
+          audienceSlideSuggestion && audienceSlideSuggestion !== requestedSlideCount
+            ? `Confirm adapted prompt (${requestedSlideCount} slides selected; audience suggests ~${audienceSlideSuggestion}), then Generate.`
+            : "Confirm adapted prompt and slide count, then Generate.",
+        );
         return;
       }
       if (!outlineReady) {
@@ -607,29 +617,30 @@ export default function PresentDeckPanel({
         setOutlineReady(true);
       }
       adapted = outline.trim() || adapted;
-      const stages = [
-        "Understanding request",
-        "Building story",
-        "Selecting layouts",
-        "Planning visuals",
-        `Composing slide 1 of ${slidesHint}`,
-        "Grounding",
-        "Quality",
-        "Repairing",
-        "Building PPTX",
-        "Ready for review",
-      ];
-      let stageIdx = 0;
-      setGenerationProgress(stages[0]);
-      const stageTimer = window.setInterval(() => {
-        stageIdx = Math.min(stageIdx + 1, stages.length - 1);
-        setGenerationProgress(stages[stageIdx]);
-      }, 3500);
-      let out: Awaited<ReturnType<typeof mentrixPresentonGenerate>> | undefined;
+      const generationRunId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `gen-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      setGenerationProgress("Queued");
+      const terminalStages = new Set(["COMPLETE", "NEEDS_REVIEW", "FAILED"]);
+      const pollTimer = window.setInterval(() => {
+        void mentrixPresentGenerationJob(generationRunId)
+          .then((row) => {
+            const job = row.job || {};
+            const label = String(job.progress_label || job.stage || "").trim();
+            if (label) setGenerationProgress(label);
+            const stage = String(job.stage || "");
+            if (terminalStages.has(stage)) window.clearInterval(pollTimer);
+          })
+          .catch(() => {
+            /* job row appears once native generate starts */
+          });
+      }, 800);
+      let out: Awaited<ReturnType<typeof mentrixPresentGenerate>> | undefined;
       try {
-        out = await mentrixPresentonGenerate({
+        out = await mentrixPresentGenerate({
           content: adapted,
-          n_slides: slidesHint,
+          n_slides: requestedSlideCount,
           template,
           ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
           custom_id: customTemplateId.trim() || undefined,
@@ -638,9 +649,10 @@ export default function PresentDeckPanel({
           language,
           documents: attachDocs.length ? attachDocs : undefined,
           asset_ids: attachAssetIds.length ? attachAssetIds : undefined,
+          run_id: generationRunId,
         });
       } finally {
-        window.clearInterval(stageTimer);
+        window.clearInterval(pollTimer);
       }
       setFlowBApproved(false);
       const sent = out?.template_sent || template;
@@ -657,25 +669,29 @@ export default function PresentDeckPanel({
           out.planner_mode,
           out.final_quality_status ? `quality=${out.final_quality_status}` : "",
           out.repair_attempts != null ? `repair=${out.repair_attempts}` : "",
+          out.generation_blocked ? "needs_review" : "",
         ].filter(Boolean);
         setQualitySummary(qualityBits.join(" · "));
         const degraded = Boolean(out.degraded || out.planner_mode === "HEURISTIC_FALLBACK");
         setPlannerDegraded(degraded);
+        const qualityNote = out.generation_blocked || out.export_blocked
+          ? ` Quality gate: ${(out.hard_findings || []).join(", ") || out.final_quality_status || "review required"} — open Review before export.`
+          : "";
         const zinniaNote =
           templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
             ? ` Zinnia NOT verified (wire template=${sent}; map zinnia-executive-v1 in the ZECT registry).`
             : out.zinnia_verified
               ? ` zinnia_verified=true (registry mapping, wire template=${sent}).`
-              : ` Presenton template_sent=${sent}.`;
+              : ` Template applied: ${sent}.`;
         const degradedNote = degraded
-          ? ` DEGRADED Fast-Basic (planner_mode=${out.planner_mode || "HEURISTIC_FALLBACK"}; ${out.fallback_reason || "llm unavailable"}). Retry for Model Gateway quality, or keep this draft. Presenton is not used automatically.`
+          ? ` DEGRADED Fast-Basic (planner_mode=${out.planner_mode || "HEURISTIC_FALLBACK"}; ${out.fallback_reason || "llm unavailable"}). Retry for Model Gateway quality, or keep this draft.`
           : "";
         setStatus(
-          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${slidesHint} slides).${zinniaNote}${degradedNote} Review claims, then Open → Zoom → share approve → Narrate.`,
+          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${requestedSlideCount} slides).${qualityNote}${zinniaNote}${degradedNote} Review claims, then Open → Zoom → share approve → Narrate.`,
         );
       } else {
         setLifecycle("GENERATION_FAILED");
-        setStatus("Presenton returned no path — BLOCKED_EXTERNAL or GENERATION_FAILED.");
+        setStatus("Generation returned no path — engine unavailable or generation failed.");
       }
     } catch (e) {
       const detail = (e as Error & { detail?: Record<string, unknown> })?.detail;
@@ -698,7 +714,7 @@ export default function PresentDeckPanel({
         const plannerMode = String(detail.planner_mode || "");
         const degradedHint =
           plannerMode === "HEURISTIC_FALLBACK" || String(detail.error || "") === "llm_planner_required"
-            ? " Model Gateway planner unavailable — use Retry or Fast-Basic. Presenton is not used automatically."
+            ? " Model Gateway planner unavailable — use Retry or Fast-Basic."
             : "";
         setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}${degradedHint}`);
       } else {
@@ -1103,9 +1119,7 @@ export default function PresentDeckPanel({
           }`}
           data-testid="present-create-blocked-external"
         >
-          BLOCKED_EXTERNAL — Presenton is not reachable. Start local Docker (Rancher dockerd):{" "}
-          <code className="break-all">docker run -d --name presenton -p 5000:80 ghcr.io/presenton/presenton:latest</code>
-          {" "}— see docs/PRESENTON_LOCAL.md. Generate stays disabled until READY.
+          BLOCKED_EXTERNAL — presentation engine is not reachable. Check backend configuration and retry.
         </p>
       ) : null}
       {isCreate ? (
@@ -1184,15 +1198,15 @@ export default function PresentDeckPanel({
                 {t.name}
               </option>
             ))}
-            {presentonReady ? <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option> : null}
+            {engineReady ? <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option> : null}
           </select>
         </label>
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
-          Slides (3–20)
+          Slides (1–20)
           <input
             data-testid="present-deck-n-slides"
             type="number"
-            min={3}
+            min={1}
             max={20}
             value={nSlides}
             onChange={(e) => persistNSlides(Number(e.target.value))}
@@ -1278,7 +1292,7 @@ export default function PresentDeckPanel({
             </p>
           ) : (
             <p className={`mt-1 text-[10px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
-              Text files become source material. Images upload as assets. No Presenton Community gallery.
+              Text files become source material. Images upload as assets.
             </p>
           )}
         </label>
@@ -1379,9 +1393,9 @@ export default function PresentDeckPanel({
         />
         Approve generation (Flow B — review claims first)
       </label>
-      {presentonReady && templateChoice === CUSTOM_TEMPLATE_OPTION && (
+      {engineReady && templateChoice === CUSTOM_TEMPLATE_OPTION && (
         <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
-          Custom template id (Presenton master)
+          Custom template id (uploaded master)
           <input
             data-testid="present-deck-custom-template"
             value={customTemplateId}
@@ -1409,13 +1423,13 @@ export default function PresentDeckPanel({
                 : "w-full rounded border border-slate-300 px-2 py-1 text-xs"
             }
           />
-          <p className="text-[10px] text-slate-500">{nSlides} slides · selected template {templateChoice}</p>
+          <p className="text-[10px] text-slate-500">Target: {nSlides} slides · selected template {templateChoice}</p>
         </div>
       ) : null}
       <button
         type="button"
         data-testid="present-deck-generate"
-        disabled={busy || !presentonReady}
+        disabled={busy || !engineReady}
         onClick={() => void generateDeck()}
         className={
           dark
@@ -1423,9 +1437,9 @@ export default function PresentDeckPanel({
             : "inline-flex items-center gap-1.5 rounded-lg bg-teal-800 px-3 py-2 text-xs text-white hover:bg-teal-900 disabled:opacity-40"
         }
         title={
-          presentonReady
+          engineReady
             ? "Generate a reviewable draft (Quality). Inspector and critic always run."
-            : "BLOCKED_EXTERNAL — start Presenton locally (docs/PRESENTON_LOCAL.md). Generate stays disabled until READY."
+            : "BLOCKED_EXTERNAL — presentation engine not ready. Generate stays disabled until READY."
         }
       >
         <Sparkles className="h-3.5 w-3.5" />
@@ -1452,7 +1466,7 @@ export default function PresentDeckPanel({
       <button
         type="button"
         data-testid="present-deck-generate-fast-basic"
-        disabled={busy || !presentonReady}
+        disabled={busy || !engineReady}
         onClick={() => void generateDeck({ fastBasic: true })}
         className={
           dark
@@ -1466,17 +1480,17 @@ export default function PresentDeckPanel({
       </details>
       {plannerDegraded ? (
         <p className={`text-[11px] mt-1 ${dark ? "text-amber-300" : "text-amber-800"}`} data-testid="present-planner-degraded">
-          Degraded mode: heuristic Fast-Basic draft. Retry Generate for Model Gateway quality. Presenton fallback is not automatic.
+          Degraded mode: heuristic Fast-Basic draft. Retry Generate for Model Gateway quality.
         </p>
       ) : null}
       {plannerDegraded ? (
         <button
           type="button"
           data-testid="present-deck-generate-retry"
-          disabled={busy || !presentonReady}
+          disabled={busy || !engineReady}
           onClick={() => void generateDeck()}
           className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-950 disabled:opacity-40 ml-2 mt-1"
-          title="Retry Model Gateway planner (not Presenton)"
+          title="Retry Model Gateway planner"
         >
           Retry Model Gateway
         </button>
@@ -1493,7 +1507,7 @@ export default function PresentDeckPanel({
       ) : null}
       {lastTemplateSent && (
         <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
-          Last Presenton template_sent: {lastTemplateSent}
+          Last template applied: {lastTemplateSent}
         </p>
       )}
       <button

@@ -7,10 +7,11 @@ type Props = {
   testId: string;
   onSelect: () => void;
   onOpen?: () => void;
+  onUse?: () => void;
   onDelete?: () => void;
 };
 
-export default function PresentTemplateCardView({ tmpl, selected, testId, onSelect, onOpen, onDelete }: Props) {
+export default function PresentTemplateCardView({ tmpl, selected, testId, onSelect, onOpen, onUse, onDelete }: Props) {
   const colors = tmpl.visual?.colors || [];
   const layouts = tmpl.visual?.layout_names || [];
   const ready = tmpl.visual?.ready ?? tmpl.native_ready;
@@ -62,7 +63,7 @@ export default function PresentTemplateCardView({ tmpl, selected, testId, onSele
         </span>
         {!ready ? (
           <p className="mt-1 text-[10px] text-amber-800" data-testid={`${testId}-not-ready-hint`}>
-            Not mapped to a Presenton master — pick a READY Zinnia card or upload PPTX. Community packs are not imported.
+            Not mapped to a Zinnia master — pick a READY Zinnia card or upload PPTX.
           </p>
         ) : null}
       </button>
@@ -79,13 +80,42 @@ export default function PresentTemplateCardView({ tmpl, selected, testId, onSele
           Delete
         </button>
       ) : null}
-      <Link
-        to={`/present/templates/${encodeURIComponent(tmpl.id)}`}
-        className="mt-2 inline-block text-[10px] text-teal-800"
-        data-testid={`${testId}-preview`}
-      >
-        Preview slides
-      </Link>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {onUse ? (
+          <button
+            type="button"
+            data-testid={`${testId}-use`}
+            className="rounded border border-teal-600 bg-teal-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-teal-700"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUse();
+            }}
+          >
+            Use template
+          </button>
+        ) : null}
+        {onOpen ? (
+          <button
+            type="button"
+            data-testid={`${testId}-edit`}
+            className="rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-700 hover:bg-slate-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          >
+            Edit template
+          </button>
+        ) : null}
+        <Link
+          to={`/present/templates/${encodeURIComponent(tmpl.id)}`}
+          className="rounded border border-slate-200 px-2 py-0.5 text-[10px] text-teal-800 hover:bg-teal-50"
+          data-testid={`${testId}-preview`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Preview
+        </Link>
+      </div>
     </div>
   );
 }

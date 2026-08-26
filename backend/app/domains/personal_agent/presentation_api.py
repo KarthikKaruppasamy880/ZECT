@@ -20,6 +20,14 @@ from app.services.mentrix.presentation import template_registry as tmpl
 router = APIRouter(prefix="/api/mentrix/presentation", tags=["mentrix-presentation"])
 
 
+def _presentation_owner(current_user: CurrentUser) -> str:
+    return str(
+        getattr(current_user, "email", None)
+        or getattr(current_user, "user_id", None)
+        or getattr(current_user, "username", "anon")
+    )
+
+
 class AnalyzeDeckIn(BaseModel):
     slides: list[dict[str, Any]] = Field(default_factory=list)
     notes_blob: str = ""
@@ -32,6 +40,7 @@ class PreparePromptIn(BaseModel):
     audience_id: str = "general"
     sensitivity_hint: Optional[str] = None
     documents: list[str] = Field(default_factory=list)
+    n_slides: int | None = None
 
 
 class VerifyClaimIn(BaseModel):
@@ -116,6 +125,7 @@ def prepare_prompt(body: PreparePromptIn, current_user: CurrentUser = Depends(ge
         audience_id=body.audience_id,
         sensitivity_hint=body.sensitivity_hint,
         documents=body.documents,
+        requested_slide_count=body.n_slides,
     )
 
 
@@ -275,7 +285,7 @@ async def presentation_asset_upload(
     """Store an authorized PNG/JPEG/GIF/WEBP for ImageBlocks. No URL fetch. SVG rejected."""
     from app.services.mentrix.presentation.asset_resolver import MAX_BYTES, UnsafeImageError, store_image
 
-    uid = str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon"))
+    uid = _presentation_owner(current_user)
     raw = await file.read(MAX_BYTES + 1)
     if not raw:
         return {"ok": False, "error": "image_empty"}
@@ -295,7 +305,7 @@ def presentation_asset_get(asset_id: str, current_user: CurrentUser = Depends(ge
 
     from app.services.mentrix.presentation.asset_resolver import UnsafeImageError, load_image
 
-    uid = str(getattr(current_user, "user_id", None) or getattr(current_user, "username", "anon"))
+    uid = _presentation_owner(current_user)
     try:
         asset = load_image(asset_id, user_id=uid)
     except FileNotFoundError as exc:

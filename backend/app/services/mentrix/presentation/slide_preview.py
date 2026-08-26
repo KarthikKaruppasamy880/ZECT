@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from app.services.pptx_parse import extract_slide_blocks, slide_emu_size
+from app.services.pptx_parse import extract_slide_blocks, parse_pptx_bytes, slide_emu_size
 
 _NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 
@@ -62,8 +62,39 @@ def invalidate_slide_previews(pptx: Path) -> None:
         _kind_path(path).unlink(missing_ok=True)
 
 
+def _document_shapes(data: bytes, index: int) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Merged master/layout/slide blocks plus slide background metadata."""
+    slides = parse_pptx_bytes(data)
+    if not slides:
+        return [], None
+    idx = max(0, min(index, len(slides) - 1))
+    row = slides[idx]
+    blocks = row.get("blocks") if isinstance(row.get("blocks"), list) else []
+    bg = row.get("background") if isinstance(row.get("background"), dict) else None
+    out: list[dict[str, Any]] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        geo = block.get("geometry") or {}
+        kind = str(block.get("kind") or "shape")
+        content = block.get("content") if isinstance(block.get("content"), dict) else {}
+        out.append(
+            {
+                "kind": kind,
+                "x": int(geo.get("x") or 0),
+                "y": int(geo.get("y") or 0),
+                "cx": int(geo.get("cx") or 1),
+                "cy": int(geo.get("cy") or 1),
+                "text": str(content.get("text") or content.get("title") or content.get("alt") or "")[:80],
+                "fill": str(content.get("fill") or ""),
+                "data_url": str(content.get("data_url") or ""),
+            }
+        )
+    return out, bg
+
+
 def _shapes(xml: bytes) -> list[dict[str, Any]]:
-    """Boxes from extract_slide_blocks (group-absolute EMU; unused placeholders skipped)."""
+    """Legacy slide-only boxes — prefer _document_shapes for previews."""
     out: list[dict[str, Any]] = []
     for block in extract_slide_blocks(xml):
         geo = block.get("geometry") or {}
@@ -80,6 +111,8 @@ def _shapes(xml: bytes) -> list[dict[str, Any]]:
                 "cx": int(geo.get("cx") or 1),
                 "cy": int(geo.get("cy") or 1),
                 "text": text[:80],
+                "fill": str(content.get("fill") or ""),
+                "data_url": str(content.get("data_url") or ""),
             }
         )
     return out
@@ -92,35 +125,58 @@ def render_slide_png_bytes(data: bytes, index: int = 0, *, width: int = 960) -> 
     if not slides:
         raise ValueError("no_slides")
     idx = max(0, min(index, len(slides) - 1))
-    shapes = _shapes(slides[idx])
+    shapes, bg = _document_shapes(data, idx)
     slide_w, slide_h = slide_emu_size(data)
     scale = width / max(slide_w, 1)
     height = max(1, int(slide_h * scale))
-    img = Image.new("RGB", (width, height), (248, 250, 252))
+    canvas_fill = (255, 255, 255)
+    if bg and str(bg.get("fill") or "").startswith("#"):
+        try:
+            raw = str(bg["fill"]).lstrip("#")
+            canvas_fill = tuple(int(raw[i : i + 2], 16) for i in (0, 2, 4))  # type: ignore[assignment]
+        except (TypeError, ValueError):
+            pass
+    img = Image.new("RGB", (width, height), canvas_fill)
     draw = ImageDraw.Draw(img)
     try:
         font = ImageFont.load_default()
     except Exception:
         font = None
-    fills = {
-        "chart": ((204, 251, 241), (13, 148, 136)),
-        "table": ((224, 242, 254), (2, 132, 199)),
-        "image": ((226, 232, 240), (71, 85, 105)),
-        "shape": ((255, 255, 255), (15, 118, 110)),
-    }
+
+    def _parse_hex(color: str) -> tuple[int, int, int] | None:
+        if not color.startswith("#") or len(color) != 7:
+            return None
+        try:
+            return tuple(int(color[i : i + 2], 16) for i in (1, 3, 5))  # type: ignore[return-value]
+        except ValueError:
+            return None
+
     for shape in shapes:
         kind = str(shape.get("kind") or "shape")
-        fill, outline = fills.get(kind, fills["shape"])
         x = int(shape["x"] * scale)
         y = int(shape["y"] * scale)
         x2 = x + max(4, int(shape["cx"] * scale))
         y2 = y + max(4, int(shape["cy"] * scale))
-        draw.rectangle([x, y, x2, y2], outline=outline, fill=fill)
-        label = str(shape.get("text") or kind).strip()[:80]
-        if kind in {"chart", "table", "image"}:
-            label = kind.upper() + (f" {label}" if label and label.lower() != kind else "")
-        if label and font is not None:
-            draw.text((x + 6, y + 4), label[:80], fill=(15, 23, 42), font=font)
+        fill_hex = _parse_hex(str(shape.get("fill") or ""))
+        if kind == "image" and str(shape.get("data_url") or "").startswith("data:image/"):
+            try:
+                import base64
+
+                _head, b64 = str(shape["data_url"]).split(",", 1)
+                im = Image.open(io.BytesIO(base64.b64decode(b64))).convert("RGBA")
+                im = im.resize((max(1, x2 - x), max(1, y2 - y)))
+                img.paste(im, (x, y), im if im.mode == "RGBA" else None)
+                continue
+            except Exception:
+                pass
+        fill = fill_hex or ((226, 232, 240) if kind == "image" else (255, 255, 255))
+        outline = (15, 118, 110) if kind != "text" else fill
+        if kind == "text":
+            fill = (255, 255, 255, 0)
+        draw.rectangle([x, y, x2, y2], outline=outline if kind != "text" else None, fill=fill if kind != "text" else None)
+        label = str(shape.get("text") or "").strip()[:80]
+        if label and font is not None and kind == "text":
+            draw.text((x + 4, y + 2), label[:80], fill=(15, 23, 42), font=font)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

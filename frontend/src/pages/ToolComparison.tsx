@@ -220,10 +220,10 @@ export default function ToolComparison() {
         <h2 className="text-sm font-semibold text-slate-900 mb-2">Implemented vs blocked</h2>
         <ul className="space-y-1 text-slate-700">
           <li>
-            <span className="font-medium text-emerald-800">Implemented:</span> Present generate (Presenton must be READY), clone TTS (Voicebox), Lattice ingest / Graphify.
+            <span className="font-medium text-emerald-800">Implemented:</span> Present generate (presentation engine must be READY), clone TTS (Voicebox), Lattice ingest / Graphify.
           </li>
           <li>
-            <span className="font-medium text-amber-800">Blocked:</span> Presenton down = BLOCKED_EXTERNAL. Voicebox offline = clone narrate disabled. Lattice STALE = re-index.
+            <span className="font-medium text-amber-800">Blocked:</span> Presentation engine down = BLOCKED_EXTERNAL. Voicebox offline = clone narrate disabled. Lattice STALE = re-index.
           </li>
         </ul>
       </section>

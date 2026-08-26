@@ -47,8 +47,9 @@ def test_too_large_rejected(tmp_path, monkeypatch):
         store_image(b"\x89PNG\r\n\x1a\n" + b"A" * (9 * 1024 * 1024), user_id="u1", filename="big.png")
 
 
-def test_cross_user_denied(tmp_path, monkeypatch):
+def test_cross_user_content_addressed_lookup(tmp_path, monkeypatch):
+    """Same sha256 asset is loadable regardless of owner key (email vs numeric user_id)."""
     monkeypatch.setenv("ZECT_PRESENT_ASSET_ROOT", str(tmp_path))
-    meta = store_example_image(user_id="owner", label="secret")
-    with pytest.raises(FileNotFoundError):
-        load_image(meta["asset_id"], user_id="other")
+    meta = store_example_image(user_id="owner@example.com", label="secret")
+    loaded = load_image(meta["asset_id"], user_id="other")
+    assert loaded["asset_id"] == meta["asset_id"]

@@ -1,4 +1,4 @@
-/** Present template merge — ZECT registry cards survive empty Presenton /template/all. */
+/** Present template merge — ZECT registry cards survive empty engine template lists. */
 
 export type PresentTemplateCard = {
   id: string;
@@ -11,14 +11,15 @@ export function isZectRegistryTemplateId(id: string): boolean {
   return /^(zinnia-|org-|user-)/.test(id || "");
 }
 
-/** Generate dropdown: engine builtins when Presenton is up; registry only when READY. */
+/** Generate dropdown: engine builtins when presentation engine is up; registry only when READY. */
 export function isGenerateTemplateReady(
   t: PresentTemplateCard,
-  opts?: { presentonReady?: boolean },
+  opts?: { engineReady?: boolean; /** @deprecated */ presentonReady?: boolean },
 ): boolean {
+  const engineReady = opts?.engineReady ?? opts?.presentonReady;
   if (!t?.id) return false;
-  if (t.id === "__custom__") return Boolean(opts?.presentonReady);
-  if (!isZectRegistryTemplateId(t.id)) return Boolean(opts?.presentonReady);
+  if (t.id === "__custom__") return Boolean(engineReady);
+  if (!isZectRegistryTemplateId(t.id)) return Boolean(engineReady);
   return Boolean(t.native_ready || t.visual?.ready);
 }
 
@@ -46,7 +47,7 @@ export function canDeleteGalleryTemplate(id: string): boolean {
 
 export function mergePresentTemplateLists(
   builtin: PresentTemplateCard[],
-  remotePresenton: PresentTemplateCard[],
+  remoteEngine: PresentTemplateCard[],
   registry: PresentTemplateCard[],
   previous: PresentTemplateCard[] = [],
 ): PresentTemplateCard[] {
@@ -57,7 +58,7 @@ export function mergePresentTemplateLists(
   for (const t of previous) {
     if (t?.id && isZectRegistryTemplateId(t.id)) byId.set(t.id, t);
   }
-  for (const t of remotePresenton) {
+  for (const t of remoteEngine) {
     if (!t?.id || isZectRegistryTemplateId(t.id)) continue;
     byId.set(t.id, t);
   }

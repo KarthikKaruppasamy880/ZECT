@@ -7,7 +7,7 @@ import { isGalleryTemplateVisible, canDeleteGalleryTemplate } from "@/lib/presen
 import {
   encodeDeckId,
   mentrixPresentFromTemplate,
-  mentrixPresentonStatus,
+  mentrixPresentEngineStatus,
   mentrixPresentationTemplateDelete,
   mentrixPresentationDeleteUnmapped,
   mentrixPresentationTemplatePreview,
@@ -66,7 +66,7 @@ export default function PresentCreate() {
         setMine(r.my_templates || []);
       })
       .catch(() => setStatus("Template gallery unavailable"));
-    mentrixPresentonStatus()
+    mentrixPresentEngineStatus()
       .then((s) => setLifecycle(String(s.lifecycle || (s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE"))))
       .catch(() => setLifecycle("PROVIDER_UNAVAILABLE"));
   }, [evidenceAudience]);
@@ -165,11 +165,7 @@ export default function PresentCreate() {
           className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
           data-testid="present-create-page-blocked"
         >
-          BLOCKED_EXTERNAL — Presenton is not reachable. Start local Docker (Rancher = dockerd, port 5000):{" "}
-          <code className="break-all">
-            docker run -d --name presenton -p 5000:80 ghcr.io/presenton/presenton:latest
-          </code>
-          . Full steps: docs/PRESENTON_LOCAL.md. Generate stays disabled until READY.
+          BLOCKED_EXTERNAL — presentation engine is not reachable. Check backend configuration. Generate stays disabled until READY.
         </p>
       ) : null}
       {evidenceProject || evidenceWorkItem || evidencePrompt ? (
@@ -189,7 +185,7 @@ export default function PresentCreate() {
         initialTemplateId={selected}
         initialPrompt={evidencePrompt || params.get("prompt") || undefined}
         toneHint={rewrite}
-        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}/edit`)}
+        onGenerated={(path) => nav(`/present/d/${encodeDeckId(path)}`)}
       />
 
       <section className="space-y-4" data-testid="zect-present-gallery">

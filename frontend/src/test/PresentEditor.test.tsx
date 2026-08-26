@@ -218,7 +218,7 @@ describe("PresentEditor v1", () => {
     render(<PresentEditor pptxPath="C:\\Users\\me\\Documents\\deck.pptx" />);
     const canvas = await screen.findByTestId("present-editor-canvas");
     expect(canvas.getAttribute("data-canvas")).toBe("document");
-    expect(screen.getByTestId("present-editor-inline-text")).toBeTruthy();
+    expect(screen.getByTestId("present-editor-block-hit-text")).toBeTruthy();
     expect(screen.getByTestId("present-editor-thumb-canvas-0").getAttribute("data-canvas")).toBe("document");
     expect(screen.getByTestId("present-editor-block-overlay").className).not.toMatch(/grid-cols-2/);
     expect(canvas.querySelector("img[alt]")).toBeFalsy();

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("zectDesktop", {
   getAppPath: () => ipcRenderer.invoke("get-app-path"),
   selectDirectory: (opts) => ipcRenderer.invoke("zect-select-directory", opts || {}),
   selectFile: (opts) => ipcRenderer.invoke("zect-select-file", opts || {}),
+  savePresentationFile: (opts) => ipcRenderer.invoke("zect-save-presentation-file", opts || {}),
   readPresentationFile: (filePath) => ipcRenderer.invoke("zect-read-presentation-file", filePath || ""),
   launcher: {
     getShortcutStatus: () => ipcRenderer.invoke("zect-shortcut-status"),

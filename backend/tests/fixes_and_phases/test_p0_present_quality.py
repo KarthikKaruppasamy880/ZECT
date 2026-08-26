@@ -70,10 +70,39 @@ def test_zect_deck_fixture_duplicate_overlap():
         return
     report = inspect_pptx_bytes(path.read_bytes())
     assert report["slide_count"] >= 1
+    assert report["status"] == "FAIL"
+    assert report["export_blocked"] is True
     assert report["covering_dump_count"] >= 1 or report["overlap_count"] >= 1
+    assert report.get("hard_findings")
     repaired, _n = strip_covering_dump_shapes(path.read_bytes())
     after = inspect_pptx_bytes(repaired)
     assert after["covering_dump_count"] == 0
+
+
+def test_critic_flags_duplicate_overlapping_text():
+    shared = {"x": 400000, "y": 1200000, "cx": 8000000, "cy": 3000000}
+    closing = "Thank you for your attention."
+    plan = {
+        "slides": [
+            {
+                "title": "Closing",
+                "composed_regions": {
+                    "title": {"x": 400000, "y": 200000, "cx": 8000000, "cy": 800000},
+                    "body": shared,
+                },
+                "content_blocks": [],
+                "blocks": [
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                ],
+            }
+        ]
+    }
+    report = critique_plan(plan, None, prompt="closing slide")
+    assert report["duplicate_semantic_count"] >= 1
+    assert report["status"] == "FAIL"
+    slide_findings = report["slides"][0]["findings"]
+    assert "duplicate_semantic_content" in slide_findings
 
 
 def test_zinnia_master_does_not_stack_title_textbox_on_object_placeholder():
@@ -281,6 +310,7 @@ def test_degraded_fast_does_not_override_layout_fail():
     if layout_hard:
         assert report["status"] == "FAIL"
         assert not report.get("degraded_override")
+        assert report.get("status") in {"FAIL", "NEEDS_REVIEW"}
 
 
 def test_export_blocked_on_quality_failed():
@@ -320,6 +350,69 @@ def test_accept_warnings_cannot_override_critical_export_block(authed_client, tm
     if isinstance(detail, dict):
         assert detail.get("error") == "export_blocked_critical_quality"
     dest.unlink(missing_ok=True)
+
+
+def test_compose_dedupes_duplicate_closing_text():
+    from app.services.mentrix.presentation.layout_composer import compose_plan
+
+    shared = {"x": 400000, "y": 1200000, "cx": 8000000, "cy": 3000000}
+    closing = "Thank you for your attention."
+    plan = {
+        "slides": [
+            {
+                "title": "Closing",
+                "content_blocks": [{"kind": "bullet", "text": closing}],
+                "blocks": [
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                ],
+            }
+        ]
+    }
+    compose_plan(plan, None)
+    texts = [
+        str((b.get("content") or {}).get("text") or "")
+        for b in list(plan["slides"][0].get("blocks") or [])
+        if str(b.get("kind") or "") in {"text", "bullet", "body"}
+    ]
+    assert texts.count(closing) <= 1
+    assert int(plan["slides"][0].get("dedupe_removed") or 0) >= 1
+
+
+def test_content_budget_trims_long_title():
+    from app.services.mentrix.presentation.content_capacity import apply_content_budget
+
+    regions = {
+        "title": {"x": 400000, "y": 200000, "cx": 2000000, "cy": 400000},
+        "body": {"x": 400000, "y": 900000, "cx": 8000000, "cy": 3000000},
+    }
+    slide = {"title": "X" * 200, "content_blocks": [{"text": "Y" * 300}]}
+    cap = apply_content_budget(slide, regions)
+    assert len(slide["title"]) <= cap["max_title_chars"]
+    assert len(slide["content_blocks"][0]["text"]) <= cap["max_bullet_chars"]
+
+
+def test_repair_dedupes_duplicate_semantic_fail():
+    shared = {"x": 400000, "y": 1200000, "cx": 8000000, "cy": 3000000}
+    closing = "Thank you for your attention."
+    plan = {
+        "slides": [
+            {
+                "title": "Closing",
+                "composed_regions": {
+                    "title": {"x": 400000, "y": 200000, "cx": 8000000, "cy": 800000},
+                    "body": shared,
+                },
+                "content_blocks": [],
+                "blocks": [
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                    {"kind": "text", "content": {"text": closing}, "geometry": shared},
+                ],
+            }
+        ]
+    }
+    _plan, report = repair_until_pass(plan, None, prompt="closing")
+    assert int(report.get("duplicate_semantic_count") or 0) == 0 or report.get("status") == "PASS"
 
 
 def test_kv_cache_grounding_wording():

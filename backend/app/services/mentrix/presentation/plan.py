@@ -13,7 +13,7 @@ from app.services.mentrix.presentation.blocks import (
 )
 
 PLAN_SCHEMA_VERSION = 1
-MIN_SLIDES = 3
+MIN_SLIDES = 1
 MAX_SLIDES = 20
 MAX_TITLE = 160
 MAX_TEXT = 4000
@@ -154,11 +154,21 @@ def normalize_slide(raw: Any, *, index: int) -> dict[str, Any]:
     return ensure_visual_blocks(slide)
 
 
-def validate_plan(raw: Any, *, n_slides: int, template_id: str, audience_id: str) -> dict[str, Any]:
-    """Return a schema-valid plan or raise ValueError."""
+def validate_plan(
+    raw: Any,
+    *,
+    n_slides: int,
+    template_id: str,
+    audience_id: str,
+    requested_slide_count: int | None = None,
+) -> dict[str, Any]:
+    """Return a schema-valid plan or raise ValueError.
+
+    User-selected ``requested_slide_count`` is immutable — LLM ``n_slides`` in JSON is ignored.
+    """
     if not isinstance(raw, dict):
         raise ValueError("plan_not_object")
-    count = clamp_slide_count(raw.get("n_slides") or n_slides)
+    count = clamp_slide_count(requested_slide_count if requested_slide_count is not None else n_slides)
     slides_in = raw.get("slides")
     if not isinstance(slides_in, list) or not slides_in:
         raise ValueError("slides_required")
@@ -172,14 +182,25 @@ def validate_plan(raw: Any, *, n_slides: int, template_id: str, audience_id: str
     objective = _str(raw.get("objective"), limit=MAX_TITLE)
     if not objective:
         raise ValueError("objective_required")
-    return {
+    llm_claimed = raw.get("n_slides")
+    slide_count_override = None
+    try:
+        if llm_claimed is not None and int(llm_claimed) != count:
+            slide_count_override = int(llm_claimed)
+    except (TypeError, ValueError):
+        slide_count_override = None
+    out = {
         "schema_version": PLAN_SCHEMA_VERSION,
         "objective": objective,
         "audience_id": _str(raw.get("audience_id") or audience_id, limit=40) or "general",
         "narrative": _str(raw.get("narrative"), limit=MAX_TEXT),
         "template_id": _str(raw.get("template_id") or template_id, limit=80),
         "n_slides": count,
+        "requested_slide_count": count,
         "slides": slides,
         "sensitivity": _str(raw.get("sensitivity") or "PUBLIC", limit=24) or "PUBLIC",
         "planner_source": _str(raw.get("planner_source"), limit=24),
     }
+    if slide_count_override is not None:
+        out["llm_n_slides_ignored"] = slide_count_override
+    return out

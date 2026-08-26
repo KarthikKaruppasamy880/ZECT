@@ -10,6 +10,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { loadEnvCreds } from "./helpers/env";
 import { API, makeGitRepo, openCodingAgentMission, openCompanionVoice, openWorkspace } from "./helpers/releaseJourney";
+import { openBlankPresentationStudio } from "./helpers/presentStudio";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ART = path.join(REPO, "test-results", "full-release-e2e-electron");
@@ -155,8 +156,7 @@ test.describe("full release E2E electron", () => {
       await expect(page.getByTestId("present-deck-generate")).toBeVisible();
       evidence.presenton_generate_enabled = await page.getByTestId("present-deck-generate").isEnabled();
       await page.getByTestId("present-nav-dashboard").click();
-      await page.getByTestId("present-blank").click();
-      await expect(page.getByTestId("present-studio")).toBeVisible({ timeout: 25_000 });
+      await openBlankPresentationStudio(page);
       await page.getByTestId("present-open-export").click();
       await expect(page.getByTestId("present-export")).toBeVisible({ timeout: 15_000 });
       await page.screenshot({ path: path.join(ART, "03-present.png") });

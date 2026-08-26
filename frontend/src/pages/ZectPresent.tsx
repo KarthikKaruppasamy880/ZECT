@@ -7,7 +7,7 @@ import { Presentation, Sparkles, Upload, FileText, Mic2 } from "lucide-react";
 import PresentDeckPanel from "@/components/PresentDeckPanel";
 import { isGalleryTemplateVisible } from "@/lib/presentTemplates";
 import {
-  mentrixPresentonStatus,
+  mentrixPresentEngineStatus,
   mentrixPresentationTemplates,
   mentrixPresentationTemplatePreview,
   mentrixPresentationTemplateUpload,
@@ -155,7 +155,7 @@ export default function ZectPresent() {
 
   useEffect(() => {
     refresh();
-    mentrixPresentonStatus()
+    mentrixPresentEngineStatus()
       .then((s) => {
         const life = String(s.lifecycle || "");
         if (LIFECYCLES.has(life)) {

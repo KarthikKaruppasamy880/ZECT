@@ -803,6 +803,10 @@ export const mentrixCompanionIntegrations = () =>
     browser_label?: string;
     browser_hint?: string;
     browser_provider?: string;
+    present_engine?: boolean;
+    present_engine_configured?: boolean;
+    present_engine_reachable?: boolean;
+    /** @deprecated use present_engine_* */
     presenton?: boolean;
     presenton_configured?: boolean;
     presenton_reachable?: boolean;
@@ -812,7 +816,7 @@ export const mentrixCompanionIntegrations = () =>
     zoom_desktop_path_configured?: boolean;
     slack_channel?: string;
   }>("/api/mentrix/companion/integrations");
-export const mentrixPresentonStatus = () =>
+export const mentrixPresentEngineStatus = () =>
   request<{
     configured: boolean;
     reachable?: boolean;
@@ -824,18 +828,29 @@ export const mentrixPresentonStatus = () =>
     blocked_external?: boolean;
     block_code?: string;
     provider?: string;
-  }>("/api/mentrix/presenton/status");
-export type PresentonTemplate = { id: string; name: string; native_ready?: boolean; visual?: { ready?: boolean } };
-export const mentrixPresentonTemplates = () =>
+  }>("/api/mentrix/present/engine/status");
+
+/** @deprecated Use mentrixPresentEngineStatus */
+export const mentrixPresentonStatus = mentrixPresentEngineStatus;
+
+export type PresentEngineTemplate = { id: string; name: string; native_ready?: boolean; visual?: { ready?: boolean } };
+/** @deprecated Use PresentEngineTemplate */
+export type PresentonTemplate = PresentEngineTemplate;
+
+export const mentrixPresentEngineTemplates = () =>
   request<{
     ok: boolean;
-    source: "presenton" | "builtin";
-    templates: PresentonTemplate[];
+    source: string;
+    templates: PresentEngineTemplate[];
     reachable?: boolean;
     configured?: boolean;
     hint?: string;
-  }>("/api/mentrix/presenton/templates");
-export const mentrixPresentonGenerate = (data: {
+  }>("/api/mentrix/present/engine/templates");
+
+/** @deprecated Use mentrixPresentEngineTemplates */
+export const mentrixPresentonTemplates = mentrixPresentEngineTemplates;
+
+export const mentrixPresentGenerate = (data: {
   content: string;
   n_slides?: number;
   template?: string;
@@ -848,6 +863,7 @@ export const mentrixPresentonGenerate = (data: {
   documents?: string[];
   fast_basic?: boolean;
   require_llm?: boolean;
+  run_id?: string;
 }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 600_000);
@@ -869,18 +885,28 @@ export const mentrixPresentonGenerate = (data: {
     fallback?: boolean;
     fallback_reason?: string;
     degraded?: boolean;
-    presenton_request?: { template?: string; n_slides?: number };
     provider?: string;
     final_quality_status?: string;
     repair_attempts?: number;
     overlap_count?: number;
     ungrounded_fact_count?: number;
     quality?: Record<string, unknown>;
+    generation_job_id?: string;
+    requested_slide_count?: number;
+    generation_blocked?: boolean;
+    export_blocked?: boolean;
+    hard_findings?: string[];
   }>(
-    "/api/mentrix/presenton/generate",
+    "/api/mentrix/present/generate",
     { method: "POST", body: JSON.stringify(data), signal: controller.signal },
   ).finally(() => clearTimeout(timer));
 };
+
+/** @deprecated Use mentrixPresentGenerate */
+export const mentrixPresentonGenerate = mentrixPresentGenerate;
+
+export const mentrixPresentGenerationJob = (jobId: string) =>
+  request<{ ok: boolean; job: Record<string, unknown> }>(`/api/mentrix/present/generation/${encodeURIComponent(jobId)}`);
 
 export type PresentBlock = {
   id?: string;
@@ -897,7 +923,9 @@ export type PresentSlide = {
   index: number;
   notes?: string;
   text?: string;
+  layout_intent?: string;
   blocks?: PresentBlock[];
+  background?: { fill?: string; source?: string; media_part?: string; asset_id?: string };
 };
 
 export const mentrixParsePptxFromPath = (path: string) =>
@@ -961,8 +989,11 @@ export const mentrixPresentDeckDuplicate = (path: string) =>
     body: JSON.stringify({ path }),
   });
 
-export const mentrixPresentBlank = () =>
-  request<{ ok: boolean; path: string; filename: string }>("/api/mentrix/present/blank", { method: "POST" });
+export const mentrixPresentBlank = (layout = "title_slide") =>
+  request<{ ok: boolean; path: string; filename: string; layout?: string }>("/api/mentrix/present/blank", {
+    method: "POST",
+    body: JSON.stringify({ layout }),
+  });
 
 export const mentrixPresentFromTemplate = (template_id: string) =>
   request<{ ok: boolean; path: string; filename: string; template_id?: string; slide_count?: number; slide_cx?: number; slide_cy?: number }>(
@@ -1086,6 +1117,7 @@ export const mentrixPreparePromptDeck = (data: {
   audience_id?: string;
   sensitivity_hint?: string;
   documents?: string[];
+  n_slides?: number;
 }) =>
   request<{
     ok: boolean;
@@ -1093,6 +1125,8 @@ export const mentrixPreparePromptDeck = (data: {
     adapted_prompt: string;
     outline: string[];
     n_slides_hint?: number;
+    requested_slide_count?: number;
+    audience_slide_suggestion?: number;
     sensitivity: { sensitivity: string };
     claims: Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>;
     claims_markdown?: string;

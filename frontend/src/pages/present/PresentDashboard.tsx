@@ -6,6 +6,7 @@ import {
   mentrixPresentDeckDelete,
   mentrixPresentDeckDuplicate,
   mentrixPresentDecks,
+  mentrixPresentFromTemplate,
   mentrixPresentSlidePreview,
   mentrixPresentationTemplates,
   type PresentTemplateCard,
@@ -227,6 +228,12 @@ export default function PresentDashboard() {
               selected={false}
               testId={`zect-present-template-${t.id}`}
               onSelect={() => nav(`/present/create?template=${encodeURIComponent(t.id)}`)}
+              onUse={() => nav(`/present/create?template=${encodeURIComponent(t.id)}`)}
+              onOpen={() => {
+                void mentrixPresentFromTemplate(t.id).then((r) => {
+                  if (r.path) nav(`/present/d/${encodeDeckId(r.path)}/edit`);
+                });
+              }}
             />
           ))}
         </div>

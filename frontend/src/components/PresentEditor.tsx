@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileDown, HelpCircle, Redo2, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, FileDown, HelpCircle, Redo2, Save, Trash2, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import SplitPane from "@/components/SplitPane";
 import PresentVisualBlocks from "@/components/PresentVisualBlocks";
-import PresentEditorRail, { newEditorBlock } from "@/components/PresentEditorRail";
+import PresentEditorRail, { type EditorPaletteTab } from "@/components/PresentEditorRail";
 import PresentEditDataTable from "@/components/PresentEditDataTable";
+import PresentInsertTableDialog from "@/components/PresentInsertTableDialog";
+import PresentInsertDiagramDialog from "@/components/PresentInsertDiagramDialog";
+import PresentInsertIconDialog from "@/components/PresentInsertIconDialog";
+import { defaultChartContent, defaultDiagramContent, defaultIconContent, defaultTableContent, defaultTextContent } from "@/lib/presentInsertDefaults";
+import { createEditorBlock } from "@/lib/presentInsertPlacement";
+import { applyEditorLayout, type EditorLayoutId } from "@/lib/presentLayouts";
+import { critiqueSlideBlocks, qualityStatusMessage } from "@/lib/presentEditorQuality";
 import PresentDocumentCanvas from "@/components/PresentDocumentCanvas";
+import PresentEditorSidePanel from "@/components/PresentEditorSidePanel";
 import { geometryValid, NUDGE_EMU } from "@/lib/presentGeometry";
-import { documentBlocks, slideTextFromBlocks } from "@/lib/presentDocument";
+import { documentBlocks, materializeSlideBlocks, mergeEditorCache, slideTextFromBlocks, slideThemeColors } from "@/lib/presentDocument";
+import { blockLayerLabel } from "@/lib/presentEditorLabels";
 import {
   mentrixAnalyzeDeck,
   mentrixParsePptxFromPath,
@@ -24,9 +33,11 @@ type Slide = PresentSlide;
 type SlideCache = { sourceFp: string; slides: Slide[] };
 type SaveState = "saved" | "saving" | "unsaved";
 
+export type PresentEditorVariant = "review" | "edit" | "studio";
+
 type PresentEditorProps = {
   pptxPath: string;
-  variant?: "review" | "studio";
+  variant?: PresentEditorVariant;
 };
 
 const storageKey = (path: string) => `zect_present_editor:${path}`;
@@ -48,18 +59,21 @@ function SlideThumbPreview({
   slideEmu: { cx: number; cy: number };
 }) {
   return (
-    <PresentDocumentCanvas
-      slide={slide}
-      slideEmu={slideEmu}
-      interactive={false}
-      testId={`present-editor-thumb-canvas-${slide.index}`}
-      className="mb-1 h-14"
-    />
+    <div className="relative mb-1 aspect-video w-full overflow-hidden rounded border border-slate-100 bg-white">
+      <PresentDocumentCanvas
+        slide={slide}
+        slideEmu={slideEmu}
+        interactive={false}
+        testId={`present-editor-thumb-canvas-${slide.index}`}
+        className="absolute inset-0 h-full w-full"
+      />
+    </div>
   );
 }
 
 export default function PresentEditor({ pptxPath, variant = "review" }: PresentEditorProps) {
   const studio = variant === "studio";
+  const visualEdit = variant === "edit" || variant === "studio";
   const [slides, setSlides] = useState<Slide[]>([]);
   const [selected, setSelected] = useState(0);
   const [status, setStatus] = useState("");
@@ -68,10 +82,15 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   const [sourceFp, setSourceFp] = useState("");
   const [savedFp, setSavedFp] = useState("");
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(!studio);
+  const [propsAdvanced, setPropsAdvanced] = useState(false);
+  const showImplementationFields = variant === "studio" && propsAdvanced;
+  const [railTab, setRailTab] = useState<EditorPaletteTab>("ai");
   const [chat, setChat] = useState("");
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [dataTableBlock, setDataTableBlock] = useState<PresentBlock | null>(null);
+  const [tableInsertOpen, setTableInsertOpen] = useState(false);
+  const [diagramInsertOpen, setDiagramInsertOpen] = useState(false);
+  const [iconInsertOpen, setIconInsertOpen] = useState(false);
   const [undoStack, setUndoStack] = useState<Slide[][]>([]);
   const [redoStack, setRedoStack] = useState<Slide[][]>([]);
   const [aiAttach, setAiAttach] = useState<string[]>([]);
@@ -103,19 +122,23 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         if (cached) {
           const saved = JSON.parse(cached) as SlideCache | Slide[];
           if (Array.isArray(saved) && saved.length === next.length) {
-            next = saved;
+            next = mergeEditorCache(next, saved);
           } else if (
             saved &&
             !Array.isArray(saved) &&
-            saved.sourceFp === fp &&
-            Array.isArray(saved.slides)
+            Array.isArray(saved.slides) &&
+            saved.slides.length === next.length
           ) {
-            next = saved.slides;
+            next = mergeEditorCache(next, saved.slides);
           }
         }
       } catch {
         /* keep parsed */
       }
+      next = materializeSlideBlocks(next, {
+        cx: parsed.slide_cx && parsed.slide_cx > 0 ? parsed.slide_cx : 9144000,
+        cy: parsed.slide_cy && parsed.slide_cy > 0 ? parsed.slide_cy : 5143500,
+      });
       setSourceFp(fp);
       setSavedFp(fingerprint(next));
       setSlides(next);
@@ -142,6 +165,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (studio && selectedBlockId) setRailTab("properties");
+  }, [selectedBlockId, studio]);
 
   const current = slides[selected];
   const selectedBlock =
@@ -304,16 +331,25 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         return;
       }
       if (out.layout) {
-        setStatus(`Layout ${out.layout} — mapped to imported master placeholders`);
+        const next = applyEditorLayout(current, out.layout as EditorLayoutId);
+        patchSlide(current.index, { blocks: next.blocks, layout_intent: next.layout_intent, text: next.text });
+        setStatus(`Layout applied: ${out.layout}`);
         return;
       }
       if (Array.isArray(out.blocks) && out.blocks.length) {
+        const placed = out.blocks.map((b, i) => {
+          const prior = out.blocks!.slice(0, i);
+          if (b.geometry?.cx && b.geometry?.cy) return b;
+          return createEditorBlock(String(b.kind || "text"), current.index, (b.content || {}) as Record<string, unknown>, prior);
+        });
         patchSlide(current.index, {
-          blocks: out.blocks,
+          blocks: placed,
           ...(out.text ? { text: out.text } : {}),
           ...(out.notes ? { notes: out.notes } : {}),
         });
-        setStatus(`Applied ${out.action || "document"} patch to this slide.`);
+        const qc = critiqueSlideBlocks(placed);
+        const warn = qualityStatusMessage(qc);
+        setStatus(warn || `Applied ${out.action || "document"} patch to this slide.`);
         return;
       }
       if (out.notes || out.text) {
@@ -357,14 +393,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       setSelectedBlockId(target.id || null);
       return;
     }
-    const block = newEditorBlock("chart", current.index, {
-      title: "New chart",
-      chart_type: chartType,
-      categories: ["A", "B"],
-      series: [{ name: "Series", values: [1, 2] }],
-    });
+    const block = createEditorBlock("chart", current.index, defaultChartContent(chartType), blocks);
     patchSlide(current.index, { blocks: [...blocks, block] });
     setSelectedBlockId(block.id || null);
+    setDataTableBlock(block);
   };
 
   const addBlock = (block: PresentBlock, kindLabel: string) => {
@@ -372,9 +404,12 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       setStatus("No slide to edit — Generate on Create with AI, or wait for the deck to parse.");
       return;
     }
-    patchSlide(current.index, { blocks: [...(current.blocks || []), block] });
+    const nextBlocks = [...(current.blocks || []), block];
+    patchSlide(current.index, { blocks: nextBlocks });
     setSelectedBlockId(block.id || null);
-    setStatus(`${kindLabel} added on this slide — click Save to persist into the PPTX.`);
+    const qc = critiqueSlideBlocks(nextBlocks);
+    const warn = qualityStatusMessage(qc);
+    setStatus(warn || `${kindLabel} added on this slide — click Save to persist into the PPTX.`);
   };
 
   const addImageFile = async (file: File) => {
@@ -385,8 +420,14 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         setStatus(out.error || "Image rejected");
         return;
       }
-      const nextBlock = newEditorBlock("image", current.index, { asset_id: out.asset_id, alt: file.name });
-      const without = (current.blocks || []).filter((b) => b.kind !== "image");
+      const blocks = current.blocks || [];
+      const nextBlock = createEditorBlock(
+        "image",
+        current.index,
+        { asset_id: out.asset_id, alt: file.name },
+        blocks.filter((b) => b.kind !== "image"),
+      );
+      const without = blocks.filter((b) => b.kind !== "image");
       patchSlide(current.index, { blocks: [...without, nextBlock] });
       setSelectedBlockId(nextBlock.id || null);
       setStatus("Image attached to this slide — click Save to persist into the PPTX.");
@@ -411,13 +452,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       setStatus(`Chart type changed to ${chartTypeLabel(kind)} — click Save to persist into the PPTX.`);
       return;
     }
-    const block = newEditorBlock("chart", current.index, {
-      title: "New chart",
-      chart_type: kind,
-      categories: ["A", "B"],
-      series: [{ name: "Series", values: [1, 2] }],
-    });
+    const block = createEditorBlock("chart", current.index, defaultChartContent(kind), blocks);
     addBlock(block, "Chart");
+    setDataTableBlock(block);
+    setRailTab("properties");
   };
 
   const visualBlocks = useMemo(() => documentBlocks(current, slideEmu), [current, slideEmu]);
@@ -438,6 +476,25 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
               : s,
           ),
         opts,
+      );
+    },
+    [commitSlides, current, selectedBlockId],
+  );
+
+  const patchSelectedContent = useCallback(
+    (patch: Record<string, unknown>) => {
+      if (!current || !selectedBlockId) return;
+      commitSlides((prev) =>
+        prev.map((s) =>
+          s.index === current.index
+            ? {
+                ...s,
+                blocks: (s.blocks || []).map((b) =>
+                  b.id === selectedBlockId ? { ...b, content: { ...(b.content || {}), ...patch } } : b,
+                ),
+              }
+            : s,
+        ),
       );
     },
     [commitSlides, current, selectedBlockId],
@@ -597,7 +654,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       a.download = name || filename || "zect-deck.pptx";
       a.click();
       URL.revokeObjectURL(url);
-      setStatus(`Exported ${blob.size} bytes`);
+      setStatus(`Exported ${name || filename || "zect-deck.pptx"} (${blob.size.toLocaleString()} bytes)`);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Export failed");
     } finally {
@@ -612,7 +669,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
 
   return (
     <div
-      className={studio ? "flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white" : "rounded-xl border border-slate-200 bg-white"}
+      className={visualEdit ? "flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white" : "rounded-xl border border-slate-200 bg-white"}
       data-testid="present-editor"
       data-variant={variant}
     >
@@ -703,7 +760,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
           </button>
         </div>
       </div>
-      <div className={studio ? "flex min-h-0 flex-1" : "flex min-h-[280px]"}>
+      <div className={visualEdit ? "flex min-h-0 flex-1" : "flex min-h-[280px]"}>
       <SplitPane axis="horizontal" storageKey="zect_present_editor_h" initial={18} min={12} max={36} testId="present-editor-split">
         <ul
           className="h-full overflow-auto border-r border-slate-100 p-1"
@@ -724,20 +781,54 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
               >
                 <SlideThumbPreview slide={s} slideEmu={slideEmu} />
                 <div className="font-medium">Slide {s.index + 1}</div>
-                <div className="line-clamp-3 text-slate-500">{s.text || s.notes || "(empty)"}</div>
+                {!studio ? (
+                  <div className="line-clamp-2 text-slate-500">{s.text || s.notes || "(empty)"}</div>
+                ) : null}
               </button>
-              <div className="mb-1 flex gap-1 px-1">
-                <button type="button" data-testid={`present-editor-up-${s.index}`} disabled={busy} className="text-[10px] text-slate-500 disabled:opacity-40" onClick={() => moveSlide(i, -1)}>
-                  Up
+              <div className="mb-1 flex items-center justify-center gap-0.5 px-1">
+                <button
+                  type="button"
+                  title="Move up"
+                  aria-label="Move slide up"
+                  data-testid={`present-editor-up-${s.index}`}
+                  disabled={busy || i === 0}
+                  className="rounded p-0.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                  onClick={() => moveSlide(i, -1)}
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" data-testid={`present-editor-down-${s.index}`} disabled={busy} className="text-[10px] text-slate-500 disabled:opacity-40" onClick={() => moveSlide(i, 1)}>
-                  Down
+                <button
+                  type="button"
+                  title="Move down"
+                  aria-label="Move slide down"
+                  data-testid={`present-editor-down-${s.index}`}
+                  disabled={busy || i >= slides.length - 1}
+                  className="rounded p-0.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                  onClick={() => moveSlide(i, 1)}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" data-testid={`present-editor-delete-${s.index}`} disabled={busy} className="text-[10px] text-rose-700 disabled:opacity-40" onClick={() => deleteSlide(s.index)}>
-                  Delete
+                <button
+                  type="button"
+                  title="Duplicate slide"
+                  aria-label="Duplicate slide"
+                  data-testid={`present-editor-duplicate-${s.index}`}
+                  disabled={busy}
+                  className="rounded p-0.5 text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                  onClick={() => duplicateSlide(i)}
+                >
+                  <Copy className="h-3.5 w-3.5" />
                 </button>
-                <button type="button" data-testid={`present-editor-duplicate-${s.index}`} disabled={busy} className="text-[10px] text-slate-500 disabled:opacity-40" onClick={() => duplicateSlide(i)}>
-                  Duplicate
+                <button
+                  type="button"
+                  title="Delete slide"
+                  aria-label="Delete slide"
+                  data-testid={`present-editor-delete-${s.index}`}
+                  disabled={busy || slides.length <= 1}
+                  className="rounded p-0.5 text-rose-700 hover:bg-rose-50 disabled:opacity-30"
+                  onClick={() => deleteSlide(s.index)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </li>
@@ -756,13 +847,16 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         </ul>
         {current ? (
           <div className="flex h-full min-w-0">
-          <div className="flex h-full min-w-0 flex-1 flex-col gap-2 overflow-auto p-3">
+          <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden p-3">
             <div
               ref={canvasFrameRef}
-              className="relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
-              style={{ width: `${zoom}%`, maxWidth: "100%" }}
+              className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
               data-testid="present-editor-canvas-frame"
             >
+              <div
+                className="relative aspect-video max-h-full w-full max-w-full"
+                style={{ width: studio ? `${zoom}%` : `${zoom}%`, maxWidth: "100%" }}
+              >
               <div className="absolute inset-0" data-testid="present-editor-block-overlay">
                 <PresentDocumentCanvas
                   slide={current}
@@ -770,7 +864,10 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                   selectedId={selectedBlockId}
                   testId="present-editor-canvas"
                   className="h-full w-full"
-                  onSelect={setSelectedBlockId}
+                  onSelect={(id) => {
+                    setSelectedBlockId(id);
+                    if (studio && id) setRailTab("properties");
+                  }}
                   onChangeText={(id, text) => {
                     const nextBlocks = documentBlocks(current, slideEmu).map((b) =>
                       b.id === id ? { ...b, content: { ...(b.content || {}), text } } : b,
@@ -796,18 +893,9 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                   }}
                 />
               </div>
+              </div>
             </div>
-            {studio ? (
-              <button
-                type="button"
-                data-testid="present-editor-notes-toggle"
-                className="self-start text-[11px] text-teal-800"
-                onClick={() => setNotesOpen((v) => !v)}
-              >
-                {notesOpen ? "Hide speaker notes" : "Speaker notes"}
-              </button>
-            ) : null}
-            {(!studio || notesOpen) ? (
+            {showImplementationFields ? (
               <>
                 <label className="text-[11px] font-medium text-slate-600">
                   Slide text
@@ -815,7 +903,7 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                     data-testid="present-editor-text"
                     value={current.text || ""}
                     onChange={(e) => patchSlide(current.index, { text: e.target.value })}
-                    rows={studio ? 3 : 5}
+                    rows={5}
                     className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900"
                   />
                 </label>
@@ -825,107 +913,49 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
                     data-testid="present-editor-notes"
                     value={current.notes || ""}
                     onChange={(e) => patchSlide(current.index, { notes: e.target.value })}
-                    rows={studio ? 3 : 4}
+                    rows={4}
                     className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm text-slate-900"
                   />
                 </label>
+                <PresentVisualBlocks
+                  blocks={current.blocks || []}
+                  busy={busy}
+                  onChange={(next) => patchSlide(current.index, { blocks: next })}
+                />
               </>
-            ) : null}
-            <div className="rounded border border-slate-200 p-2" data-testid="present-editor-layers">
-              <p className="mb-1 text-[11px] font-medium text-slate-600">Layers</p>
-              {visualBlocks.length === 0 ? (
-                <p className="text-[11px] text-slate-500">No selectable objects on this slide.</p>
-              ) : (
-                <ul className="space-y-1">
-                  {visualBlocks.map((block, i) => (
-                    <li key={block.id || `${block.kind}-${i}`} className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        data-testid={`present-editor-layer-${block.kind}`}
-                        className={`flex-1 truncate rounded px-1 py-0.5 text-left text-[11px] ${
-                          block.id === selectedBlockId ? "bg-teal-50 text-teal-900" : "text-slate-700"
-                        }`}
-                        onClick={() => setSelectedBlockId(block.id || null)}
-                      >
-                        {block.kind}
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="present-editor-layer-back"
-                        className="text-[10px] text-slate-500"
-                        onClick={() => {
-                          setSelectedBlockId(block.id || null);
-                          if (block.id) reorderBlock(block.id, -1);
-                        }}
-                      >
-                        Back
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="present-editor-layer-front"
-                        className="text-[10px] text-slate-500"
-                        onClick={() => {
-                          setSelectedBlockId(block.id || null);
-                          if (block.id) reorderBlock(block.id, 1);
-                        }}
-                      >
-                        Front
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <div className="rounded border border-slate-200 p-2" data-testid="present-editor-props">
-              <p className="mb-1 text-[11px] font-medium text-slate-600">Object</p>
-              {selectedBlock ? (
-                <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-700">
-                  <span data-testid="present-editor-props-kind">{selectedBlock.kind}</span>
-                  <span />
-                  {(["x", "y", "cx", "cy"] as const).map((key) => (
-                    <label key={key} className="flex items-center gap-1">
-                      {key}
-                      <input
-                        data-testid={`present-editor-props-${key}`}
-                        type="number"
-                        className="w-full rounded border border-slate-300 px-1 py-0.5"
-                        value={selectedBlock.geometry?.[key] || 0}
-                        onChange={(e) => {
-                          const geo = selectedBlock.geometry || { x: 0, y: 0, cx: 1, cy: 1 };
-                          patchSelectedGeometry({
-                            x: geo.x || 0,
-                            y: geo.y || 0,
-                            cx: geo.cx || 1,
-                            cy: geo.cy || 1,
-                            [key]: Number(e.target.value) || 0,
-                          });
-                        }}
-                      />
-                    </label>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500">Select a shape, chart, table, or image.</p>
-              )}
-            </div>
-            {!studio ? (
-              <PresentVisualBlocks
-                blocks={current.blocks || []}
-                busy={busy}
-                onChange={(next) => patchSlide(current.index, { blocks: next })}
-              />
             ) : null}
           </div>
           <PresentEditorRail
+            studio={studio}
+            activeTab={railTab}
+            onTabChange={setRailTab}
             busy={busy}
             chat={chat}
             onChatChange={setChat}
             onRewrite={() => void applyAi()}
             slideLabel={`Slide ${current.index + 1}`}
-            selectedLabel={
-              selectedBlock
-                ? `${selectedBlock.kind}${selectedBlock.kind === "chart" ? ` · ${chartTypeLabel(String(selectedBlock.content?.chart_type || "column"))}` : ""}`
-                : undefined
+            selectedLabel={selectedBlock ? blockLayerLabel(selectedBlock) : undefined}
+            sidePanel={
+              visualEdit ? (
+                <PresentEditorSidePanel
+                  visualBlocks={visualBlocks}
+                  selectedBlock={selectedBlock || null}
+                  selectedBlockId={selectedBlockId}
+                  showAdvanced={propsAdvanced}
+                  onToggleAdvanced={() => setPropsAdvanced((v) => !v)}
+                  onSelectBlock={setSelectedBlockId}
+                  onReorderBlock={reorderBlock}
+                  onPatchContent={patchSelectedContent}
+                  onPatchGeometry={patchSelectedGeometry}
+                  themeColors={slideThemeColors(current)}
+                  slideBackground={String(current.background?.fill || "#FFFFFF")}
+                  onSlideBackground={(fill) =>
+                    patchSlide(current.index, { background: { ...(current.background || {}), fill } })
+                  }
+                  speakerNotes={current.notes || ""}
+                  onSpeakerNotesChange={(value) => patchSlide(current.index, { notes: value })}
+                />
+              ) : undefined
             }
             attachLabels={aiAttachLabels}
             onAttachFiles={async (files) => {
@@ -944,46 +974,36 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
               void applyAi(prompt);
             }}
             onAddChart={(chartType) => onChartClick(chartType)}
-            onAddTable={() =>
+            onAddTable={() => setTableInsertOpen(true)}
+            onAddElement={(kind) => {
+              const blocks = current?.blocks || [];
               addBlock(
-                newEditorBlock("table", current.index, {
-                  headers: ["Item", "Value"],
-                  rows: [["Row 1", "—"]],
-                }),
-                "Table",
-              )
-            }
-            onAddElement={(kind) =>
-              addBlock(
-                kind === "quote"
-                  ? newEditorBlock("quote", current.index, { text: "Quote" })
-                  : newEditorBlock("metric", current.index, { label: "Metric", value: "—" }),
+                createEditorBlock(
+                  kind,
+                  current!.index,
+                  kind === "quote" ? { text: "Quote" } : { label: "Metric", value: "0" },
+                  blocks,
+                ),
                 kind === "quote" ? "Quote" : "Metric",
-              )
-            }
+              );
+            }}
             onAddImage={(file) => void addImageFile(file)}
-            onAddText={(role) =>
-              addBlock(
-                newEditorBlock("text", current.index, {
-                  text: role === "title" ? "Title" : role === "subtitle" ? "Subtitle" : role === "bullets" ? "• Point" : "Body",
-                  role,
-                }),
-                role,
-              )
-            }
-            onAddShape={(shape) =>
-              addBlock(
-                newEditorBlock("shape", current.index, { shape, text: shape }),
-                shape,
-              )
-            }
-            onAddDiagram={() =>
-              addBlock(
-                newEditorBlock("diagram", current.index, { nodes: ["Context", "Status", "Ask"], diagram_type: "flow" }),
-                "Diagram",
-              )
-            }
-            onApplyLayout={(layout) => setStatus(`Layout ${layout} — mapped to imported master placeholders`)}
+            onAddText={(role) => {
+              const blocks = current?.blocks || [];
+              addBlock(createEditorBlock("text", current!.index, defaultTextContent(role), blocks), role);
+            }}
+            onAddShape={(shape) => {
+              const blocks = current?.blocks || [];
+              addBlock(createEditorBlock("shape", current!.index, { shape, text: shape }, blocks), shape);
+            }}
+            onAddDiagram={() => setDiagramInsertOpen(true)}
+            onAddIcon={() => setIconInsertOpen(true)}
+            onApplyLayout={(layout) => {
+              if (!current) return;
+              const next = applyEditorLayout(current, layout);
+              patchSlide(current.index, { blocks: next.blocks, layout_intent: next.layout_intent, text: next.text });
+              setStatus(`Layout applied: ${layout}`);
+            }}
           />
           </div>
         ) : (
@@ -995,6 +1015,48 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
         )}
       </SplitPane>
       </div>
+      {diagramInsertOpen ? (
+        <PresentInsertDiagramDialog
+          onClose={() => setDiagramInsertOpen(false)}
+          onConfirm={(diagramType, nodes) => {
+            if (!current) return;
+            const blocks = current.blocks || [];
+            const block = createEditorBlock("diagram", current.index, defaultDiagramContent(diagramType, nodes), blocks);
+            addBlock(block, "Diagram");
+            setDiagramInsertOpen(false);
+            setSelectedBlockId(block.id || null);
+            setRailTab("properties");
+          }}
+        />
+      ) : null}
+      {iconInsertOpen ? (
+        <PresentInsertIconDialog
+          onClose={() => setIconInsertOpen(false)}
+          onConfirm={(iconId) => {
+            if (!current) return;
+            const blocks = current.blocks || [];
+            const block = createEditorBlock("icon", current.index, defaultIconContent(iconId), blocks);
+            addBlock(block, "Icon");
+            setIconInsertOpen(false);
+            setSelectedBlockId(block.id || null);
+            setRailTab("properties");
+          }}
+        />
+      ) : null}
+      {tableInsertOpen ? (
+        <PresentInsertTableDialog
+          onClose={() => setTableInsertOpen(false)}
+          onConfirm={(rows, cols) => {
+            if (!current) return;
+            const blocks = current.blocks || [];
+            const block = createEditorBlock("table", current.index, defaultTableContent(rows, cols), blocks);
+            addBlock(block, "Table");
+            setTableInsertOpen(false);
+            setDataTableBlock(block);
+            setRailTab("properties");
+          }}
+        />
+      ) : null}
       {dataTableBlock ? (
         <PresentEditDataTable
           block={dataTableBlock}

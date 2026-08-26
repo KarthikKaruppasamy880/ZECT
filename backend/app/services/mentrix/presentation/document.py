@@ -156,6 +156,7 @@ def document_from_pptx_bytes(data: bytes, *, path: str = "", provider: str = "")
                 "index": int(s.get("index", i)),
                 "text": str(s.get("text") or ""),
                 "notes": str(s.get("notes") or ""),
+                "background": s.get("background") if isinstance(s.get("background"), dict) else None,
                 "blocks": normalize_blocks(
                     s.get("blocks") or [{"kind": "body", "text": str(s.get("text") or "")}],
                     slide_index=int(s.get("index", i)),
@@ -183,6 +184,8 @@ def merge_sidecar_slides(parsed: list[dict[str, Any]], sidecar_slides: list[dict
             next_row = dict(row)
             next_row["index"] = idx
             next_row["blocks"] = _blocks_for(row, idx)
+            if row.get("background"):
+                next_row["background"] = row.get("background")
             out.append(next_row)
         return out
     by_index = {}
@@ -201,6 +204,7 @@ def merge_sidecar_slides(parsed: list[dict[str, Any]], sidecar_slides: list[dict
                 "index": idx,
                 "text": str(extra.get("text") or row.get("text") or "")[:4000],
                 "notes": str(extra.get("notes") or row.get("notes") or "")[:4000],
+                "background": extra.get("background") if isinstance(extra.get("background"), dict) else row.get("background"),
                 "blocks": _blocks_for(row, idx, extra),
             }
         )

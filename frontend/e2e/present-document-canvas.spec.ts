@@ -9,6 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { gotoAuthed } from "./helpers/login";
 import { runPythonScript } from "./helpers/python";
+import { editCanvasTextBlock } from "./helpers/presentStudio";
 
 const FRONTEND = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = path.resolve(FRONTEND, "..");
@@ -34,18 +35,14 @@ test.describe("Present document canvas", () => {
     await expect(canvas).toHaveAttribute("data-canvas", "document");
     await expect(page.getByTestId("present-editor-block-overlay")).not.toHaveClass(/grid-cols-2/);
     await expect(page.getByTestId("present-editor-thumb-canvas-0")).toHaveAttribute("data-canvas", "document");
-    const inline = page.getByTestId("present-editor-inline-text").first();
-    await expect(inline).toBeVisible();
-    await inline.click();
-    await page.keyboard.press("Control+A");
-    await page.keyboard.type("Edited on canvas");
+    await editCanvasTextBlock(page, "Edited on canvas");
     await page.getByTestId("present-editor-save").click();
     await expect(page.getByTestId("present-editor-status")).toContainText(/Saved|local/i, { timeout: 15_000 });
     await page.screenshot({ path: path.join(ART, "01-document-canvas-1280x720.png") });
 
     await page.reload();
     await expect(page.getByTestId("present-editor-canvas")).toHaveAttribute("data-canvas", "document");
-    await expect(page.getByTestId("present-editor-inline-text").first()).toBeVisible();
+    await expect(page.locator('[data-testid^="present-editor-block-hit-"]').first()).toBeVisible();
     await page.screenshot({ path: path.join(ART, "02-reopen.png") });
   });
 

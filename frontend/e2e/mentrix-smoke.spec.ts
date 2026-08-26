@@ -37,11 +37,12 @@ test.describe("Mentrix smoke", () => {
     await expect(page.getByRole("heading", { name: /Snippet Review/i })).toBeVisible();
   });
 
-  test("Workflow sidebar links to Agent Workspace", async ({ page }) => {
+  test("Agent Workspace hidden from primary nav; route still reachable directly", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("link", { name: /Agent Workspace/i })).toBeVisible();
-    await page.getByRole("link", { name: /Agent Workspace/i }).click();
-    await expect(page).toHaveURL(/\/ask/, { timeout: 15_000 });
+    // Superseded by the Developer cockpit — no longer a primary-nav entry.
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: /Agent Workspace/i })).toHaveCount(0);
+    await page.goto("/ask", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("agent-workspace")).toBeVisible({ timeout: 15_000 });
   });
 
   test("P2 nav surfaces Work Items and System Health", async ({ page }) => {

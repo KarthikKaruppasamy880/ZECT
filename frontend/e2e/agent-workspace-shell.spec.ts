@@ -29,7 +29,9 @@ test.describe("Agent Workspace shell", () => {
   test("Sidebar collapses phase tools into Agent Workspace entry", async ({ page }) => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("agent-workspace")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Agent Workspace", exact: true })).toBeVisible();
+    // Agent Workspace is hidden from primary nav (superseded by Developer
+    // cockpit) — the route remains live, just not a sidebar entry.
+    await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Agent Workspace", exact: true })).toHaveCount(0);
     // Phase tools live in Agent Workspace rail — not as Ask/Plan/Build sidebar entries
     await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Ask", exact: true })).toHaveCount(0);
     await expect(page.getByTestId("app-sidebar").getByRole("link", { name: "Plan", exact: true })).toHaveCount(0);

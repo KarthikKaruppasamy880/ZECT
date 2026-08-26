@@ -16,7 +16,7 @@ Do not delete working backend because UI is duplicated. READY means no known rel
 | Build Phase `/build` | DEPRECATE as coding path | LINK to Mentrix Delivery |
 | Review / Deploy rails | ADVANCED_VIEW | Quality / `workflow_dispatch` deep links |
 | Mentrix Delivery `/mentrix` | KEEP | Prepare PR hands same WorkItem + mission |
-| Sidebar Agent Workspace | KEEP for CI/e2e | Hide from primary nav only after headed e2e updated; Developer is cockpit |
+| Sidebar Agent Workspace | HIDDEN from primary nav | Done — e2e updated (agent-workspace-shell, mentrix-smoke, ux-accessibility-production now assert absence / navigate via direct URL); `/ask` route stays live, reached directly, not via sidebar |
 | Agent Mode `/agent-mode` | ADVANCED_VIEW | Settings flag; do not retire until compatibility audit |
 | Delivery Runs / Quality / Git & CI / Sandbox | ADVANCED_VIEW | LINK_FROM_DEVELOPER summaries |
 | Terminal Start app `npm run dev` at clone root | FIX | Runtime Discovery (ZOAS nested `zinnia-modern`) |

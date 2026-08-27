@@ -25,7 +25,14 @@ from app.services.work_items.context_engine import ProvenanceItem
 
 PARSER_VERSION = "di-1.0.0"
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
-ALLOWED_EXT = {".txt", ".md", ".markdown", ".docx", ".pdf", ".pptx"}
+# Plain-text-shaped formats decode straight to UTF-8 text like .txt/.md
+# already did -- the Developer composer's @file-attachment picker needs to
+# accept source/config/log files, not just prose documents.
+_PLAIN_TEXT_EXT = {
+    ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".log",
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".sql", ".sh", ".ps1",
+}
+ALLOWED_EXT = _PLAIN_TEXT_EXT | {".docx", ".pdf", ".pptx"}
 PARTIAL_CAPS = ("ocr_scanned_pdf", "xlsx", "image_layout", "table_formula_completeness")
 
 
@@ -58,7 +65,7 @@ class ParseResult:
 
 def parse_document(filename: str, data: bytes, mime_type: str = "") -> ParseResult:
     ext = Path(filename).suffix.lower()
-    if ext in (".txt", ".md", ".markdown"):
+    if ext in _PLAIN_TEXT_EXT:
         text = data.decode("utf-8", errors="replace")
         return ParseResult(
             markdown=text,

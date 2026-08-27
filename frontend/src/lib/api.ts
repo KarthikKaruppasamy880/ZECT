@@ -2169,6 +2169,35 @@ export const codingAgentRuntimeRecipes = (root: string) =>
     `/api/coding-agent/runtime-recipes?root=${encodeURIComponent(root)}`,
   );
 
+export type ContextPackItem = {
+  source_type: string;
+  source_id: string;
+  content: string;
+  verification_state: string;
+  freshness: string;
+  retrieval_score: number;
+  token_count: number;
+  selection_reason: string;
+};
+
+export type ContextPack = {
+  work_item_id: number | null;
+  token_budget: number;
+  token_used: number;
+  items: ContextPackItem[];
+};
+
+export const codingAgentResolveMentions = (body: {
+  text: string;
+  workspace: string;
+  project_key?: string;
+  work_item_id?: number | null;
+}) =>
+  request<{ ok: boolean; pack: ContextPack }>("/api/coding-agent/context/resolve-mentions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 // Git Operations
 export const gitStatus = (repoPath: string) =>
   request<any>(`/api/git/status?repo_path=${encodeURIComponent(repoPath)}`);

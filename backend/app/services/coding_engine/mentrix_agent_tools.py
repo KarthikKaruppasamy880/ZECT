@@ -904,9 +904,9 @@ def _execute_tool_inner(
         "browser_network_failures": "network_failures",
     }
     if name in _BROWSER_TOOL_MAP:
-        from app.adapters.playwright_adapter import execute as pw_execute
+        from app.services.browser.runtime import get_browser_runtime
 
-        out = pw_execute(_BROWSER_TOOL_MAP[name], dict(args), config={}, enabled=True)
+        out = get_browser_runtime().run(_BROWSER_TOOL_MAP[name], dict(args))
         if name == "browser_screenshot" and isinstance(out.get("png_bytes"), (bytes, bytearray)):
             import base64
             import uuid as _uuid

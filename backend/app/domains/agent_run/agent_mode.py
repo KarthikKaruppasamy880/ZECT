@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.infrastructure.database import SessionLocal
+
+# Modes that actually write files to disk (see _resolve_mode's docstring --
+# "deliver"'s builder is a guidance stub, "chat"/"review_only" never touch a
+# repo). Only these, with a real workspace path, are routed to the canonical
+# coding_engine Mission/Harness instead of forge_loop.orchestrator -- so a
+# read-only Ask/Plan-style legacy submission is left exactly as it was.
+_MISSION_BACKED_MODES = ("upgrade", "bugfix")
+
+_MISSION_RUN_PREFIX = "mission-"
 
 router = APIRouter(prefix="/api/agent", tags=["agent-mode"])
 
@@ -103,6 +114,83 @@ def _serialize_mentrix_run(run, *, task: str, stages: list[str], model: str) -> 
     }
 
 
+_MISSION_STATUS = {
+    "running": "running",
+    "completed": "completed",
+    "blocked": "blocked",
+    "recoverable": "paused",
+    "stopped": "stopped",
+}
+
+_EVENT_STAGE_PREFIXES = (
+    ("explore_", "explore"),
+    ("diagnose_", "debugger"),
+    ("browser_verify_", "tester"),
+    ("native_implement", "coder"),
+    ("evidence_verify_", "reviewer"),
+    ("review", "reviewer"),
+)
+
+
+def _mission_event_stage(event_name: str) -> str:
+    for prefix, stage in _EVENT_STAGE_PREFIXES:
+        if event_name.startswith(prefix):
+            return stage
+    return "orchestrator"
+
+
+def _serialize_mission_as_agent_run(mission: dict[str, Any], *, task: str, model: str, workspace: str) -> dict:
+    """Translate a real coding_engine Mission (see coding_engine/lifecycle.py)
+    into the legacy AgentModeRun JSON shape the frontend already parses, so
+    the redirect requires zero frontend changes. ``result.mission`` carries
+    the full, untranslated mission so opening a run always resolves to the
+    same canonical Mission -- not a lossy summary standing in for it.
+    """
+    mission_id = str(mission.get("id") or "")
+    events = list(mission.get("events") or [])
+    execution_state = str(mission.get("execution_state") or "")
+    status = _MISSION_STATUS.get(execution_state, execution_state or "running")
+    if mission.get("phase") == "cancelled":
+        status = "cancelled"
+    steps = [
+        {
+            "id": i,
+            "stage": _mission_event_stage(str(ev.get("event") or "")),
+            "step_index": i,
+            "output": str(ev.get("message") or ""),
+            "tokens_used": 0,
+            "duration_ms": 0,
+            "status": "completed",
+            "model": model,
+            "created_at": ev.get("at"),
+        }
+        for i, ev in enumerate(events)
+    ]
+    return {
+        "id": mission_id,
+        "run_id": f"{_MISSION_RUN_PREFIX}{mission_id}",
+        "task": task,
+        "status": status,
+        "engine": "coding_engine_mission",
+        "mode": mission.get("mode") or "",
+        "current_agent": (mission.get("agents") or [None])[-1],
+        "stages": ["explore", "coder", "debugger", "tester", "reviewer"],
+        "model": model,
+        "auto_advance": True,
+        "current_stage_index": 0 if status == "running" else max(0, len(steps) - 1),
+        "total_tokens": 0,
+        "workspace": workspace,
+        "files_written": list(mission.get("files") or []),
+        "events": events,
+        "result": {"mission": mission},
+        "gates": {},
+        "steps": steps,
+        "created_at": mission.get("started_at"),
+        "completed_at": mission.get("updated_at") if status in ("completed", "blocked", "cancelled") else None,
+        "warning": "; ".join(mission.get("blockers") or []) or None,
+    }
+
+
 @router.post("/run")
 def start_agent_run(req: AgentRunRequest, db: Session = Depends(get_db)):
     """Start a Mentrix-powered autonomous run (legacy agent shell preserved)."""
@@ -125,6 +213,25 @@ def start_agent_run(req: AgentRunRequest, db: Session = Depends(get_db)):
         if mode == "upgrade" and not workspace and req.repo_id is None:
             # Still allow run (LLM can draft), but warn — no disk write without path
             pass
+
+        if mode in _MISSION_BACKED_MODES and workspace and os.path.isdir(workspace):
+            # File-writing legacy submissions must not run on a second,
+            # independent coding engine (forge_loop.orchestrator writes
+            # files with no worktree isolation, no commit, no Ultra Review,
+            # no EvidenceVerifier). Hand off to the same canonical
+            # coding_engine Mission/Harness Developer Workspace uses.
+            from app.services.coding_engine.lifecycle import approve_plan_in_background, start_mission
+
+            label = Path(workspace).name or "workspace"
+            mission = start_mission(
+                goal=req.task,
+                roots=[{"id": req.repo_id or 1, "label": label, "path": workspace}],
+                propose_if_empty=True,
+                mode=mode,
+                source="legacy_agent_mode",
+            )
+            mission = approve_plan_in_background(mission["id"])
+            return _serialize_mission_as_agent_run(mission, task=req.task, model=req.model, workspace=workspace)
 
         run = run_mentrix(
             db,
@@ -159,6 +266,18 @@ def start_agent_run(req: AgentRunRequest, db: Session = Depends(get_db)):
 @router.post("/run/{run_id}/resume")
 def resume_run(run_id: str, req: AgentResumeRequest, db: Session = Depends(get_db)):
     """Resume a paused agent run."""
+    if run_id.startswith(_MISSION_RUN_PREFIX):
+        from app.services.coding_engine.lifecycle import get_mission, resume_mission_in_background
+
+        mid = run_id[len(_MISSION_RUN_PREFIX) :]
+        try:
+            base = get_mission(mid)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Run not found") from None
+        mission = resume_mission_in_background(mid)
+        return _serialize_mission_as_agent_run(
+            mission, task=base.get("goal") or "", model=req.model or "", workspace=""
+        )
     if run_id.startswith("mentrix-"):
         raise HTTPException(
             status_code=400,
@@ -174,9 +293,25 @@ def resume_run(run_id: str, req: AgentResumeRequest, db: Session = Depends(get_d
 
 @router.get("/run/{run_id}")
 def get_run(run_id: str, db: Session = Depends(get_db)):
-    """Get agent run details with all steps (legacy or Mentrix)."""
+    """Get agent run details with all steps (legacy, Mentrix, or Mission-backed).
+
+    Mission-backed ids resolve straight to lifecycle.get_mission() -- the
+    same durable Mission read Developer Workspace uses -- so opening a run
+    from History reconnects to the live/actual mission, never re-executes
+    or approximates it.
+    """
     from app.models import MentrixRun
     from app.services.agent_orchestrator import get_agent_run
+
+    if run_id.startswith(_MISSION_RUN_PREFIX):
+        from app.services.coding_engine.lifecycle import get_mission
+
+        mid = run_id[len(_MISSION_RUN_PREFIX) :]
+        try:
+            mission = get_mission(mid)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Run not found") from None
+        return _serialize_mission_as_agent_run(mission, task=mission.get("goal") or "", model="", workspace="")
 
     if run_id.startswith("mentrix-"):
         mid = int(run_id.split("-", 1)[1])
@@ -198,9 +333,16 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
 
 @router.get("/runs")
 def list_runs(limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
-    """List Mentrix + legacy agent runs."""
+    """List Mentrix + legacy + Mission-backed agent runs.
+
+    Mission-backed entries are a live projection of the canonical Mission
+    JSON store (lifecycle.list_missions) -- not a second history table --
+    per the migration direction: legacy route -> canonical Mission ->
+    Mission/Event persistence -> Runs projection/UI.
+    """
     from app.models import MentrixRun
     from app.services.agent_orchestrator import list_agent_runs
+    from app.services.coding_engine.lifecycle import list_missions
 
     legacy = list_agent_runs(db, limit, offset)
     mentrix_rows = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(limit).all()
@@ -224,13 +366,27 @@ def list_runs(limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
         }
         for r in mentrix_rows
     ]
-    return mentrix + (legacy if isinstance(legacy, list) else [])
+    missions = [
+        _serialize_mission_as_agent_run(m, task=m.get("goal") or "", model="", workspace="")
+        for m in list_missions(limit=limit, offset=offset)
+    ]
+    return missions + mentrix + (legacy if isinstance(legacy, list) else [])
 
 
 @router.delete("/run/{run_id}")
 def cancel_run(run_id: str, db: Session = Depends(get_db)):
-    """Cancel a running or paused agent run (legacy or Mentrix)."""
+    """Cancel a running or paused agent run (legacy, Mentrix, or Mission-backed)."""
     from app.models import AgentRun, MentrixRun
+
+    if run_id.startswith(_MISSION_RUN_PREFIX):
+        from app.services.coding_engine.lifecycle import cancel_mission
+
+        mid = run_id[len(_MISSION_RUN_PREFIX) :]
+        try:
+            cancel_mission(mid)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Run not found") from None
+        return {"status": "cancelled", "run_id": run_id}
 
     if run_id.startswith("mentrix-"):
         mid = int(run_id.split("-", 1)[1])

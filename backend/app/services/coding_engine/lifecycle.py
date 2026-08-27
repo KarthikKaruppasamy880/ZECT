@@ -8,6 +8,7 @@ Cancel/resume skips already-recorded commit SHAs so retries cannot duplicate the
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -167,6 +168,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "native_build": r.get("native_build") or {},
                 "browser_verification": r.get("browser_verification") or {},
                 "explore_findings": r.get("explore_findings") or "",
+                "evidence_verification": r.get("evidence_verification") or {},
             }
         )
     sibling = mission.get("sibling") or {}
@@ -176,6 +178,8 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "phase": mission.get("phase"),
         "status": mission.get("status"),
         "plan": mission.get("plan"),
+        "plan_hash": mission.get("plan_hash") or "",
+        "plan_approved_hash": mission.get("plan_approved_hash") or "",
         "plan_approved": bool(mission.get("plan_approved")),
         "git_approved": bool(mission.get("git_approved")),
         "repos": repos,
@@ -621,6 +625,61 @@ def _collect_diff(worktree: Path) -> str:
     return str(out.get("stdout") or "")[:12000]
 
 
+def verify_mission_evidence(mission: dict[str, Any], repo: dict[str, Any], worktree: Path) -> dict[str, Any]:
+    """Independently re-check this repo's claims against the actual worktree/git
+    state and the mission's own event timeline, instead of trusting self-reported
+    flags. Critical findings block the mission (see caller); warnings are recorded
+    but never block -- ``diff_text`` is truncated at 12000 chars by ``_collect_diff``,
+    so a legitimately large change can look "missing" from it without being wrong.
+    """
+    findings: list[dict[str, Any]] = []
+
+    claimed_files = list(repo.get("files") or [])
+    for path in claimed_files:
+        if not (worktree / path).exists():
+            findings.append({"severity": "critical", "code": "claimed_file_missing", "detail": path})
+
+    diff_text = str(repo.get("diff") or "")
+    if len(diff_text) < 12000:
+        for path in claimed_files:
+            marker = path.replace("\\", "/")
+            if marker and marker not in diff_text.replace("\\", "/") and (worktree / path).exists():
+                findings.append({"severity": "warning", "code": "claimed_file_not_in_diff", "detail": path})
+
+    current_head = _head(worktree)
+    committed = list(repo.get("committed_shas") or [])
+    expected_head = committed[-1] if committed else str(repo.get("head_sha") or "")
+    if expected_head and current_head and current_head != expected_head:
+        findings.append(
+            {
+                "severity": "critical",
+                "code": "worktree_sha_drift",
+                "detail": f"expected {expected_head[:12]}, found {current_head[:12]}",
+            }
+        )
+
+    browser = repo.get("browser_verification") or {}
+    if browser.get("ran") and browser.get("verified"):
+        events = mission.get("events") or []
+        has_evidence = any(
+            e.get("event") == "browser_verify_result"
+            and (e.get("data") or {}).get("repository_id") == repo.get("repository_id")
+            and bool((e.get("data") or {}).get("ok"))
+            for e in events
+        )
+        if not has_evidence:
+            findings.append(
+                {
+                    "severity": "critical",
+                    "code": "browser_verification_unevidenced",
+                    "detail": "verified=True has no matching browser_verify_result event in the mission timeline",
+                }
+            )
+
+    critical = [f for f in findings if f.get("severity") == "critical"]
+    return {"ok": not critical, "findings": findings}
+
+
 def _commit_if_needed(repo: dict[str, Any], message: str) -> dict[str, Any]:
     wt = Path(repo["worktree_path"])
     _ensure_zect_ignored(wt)
@@ -725,7 +784,9 @@ def start_mission(
         "phase": "awaiting_plan_approval",
         "status": "awaiting_plan_approval",
         "plan": plan_text,
+        "plan_hash": hashlib.sha256(plan_text.encode("utf-8")).hexdigest(),
         "plan_approved": False,
+        "plan_approved_hash": "",
         "git_approved": False,
         "project_id": project_id,
         "work_item_id": work_item_id,
@@ -785,10 +846,15 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
                 "native_implement",
                 "No JSON patches from PLAN — Mentrix native implementer will edit isolated worktrees.",
             )
+    current_plan_hash = hashlib.sha256(str(mission.get("plan") or "").encode("utf-8")).hexdigest()
+    if current_plan_hash != mission.get("plan_hash"):
+        _emit(mission, "plan_hash_drift", "PLAN text changed since it was recorded — re-hashing at approval time.")
+        mission["plan_hash"] = current_plan_hash
     mission["plan_approved"] = True
+    mission["plan_approved_hash"] = current_plan_hash
     mission["phase"] = "isolating"
     mission["status"] = "running"
-    _emit(mission, "plan_approved", "PLAN approved. Isolating worktrees.")
+    _emit(mission, "plan_approved", f"PLAN approved @{current_plan_hash[:12]}. Isolating worktrees.")
     parent = Path(mission["workspace_parent"])
     parent.mkdir(parents=True, exist_ok=True)
     for repo in mission["repos"]:
@@ -1169,6 +1235,29 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         mission["phase"] = "blocked"
         mission["status"] = "blocked"
         _emit(mission, "blocked", "Ultra Review / security Critical/High — not READY_TO_MERGE.")
+        return _public(mission)
+
+    evidence_blocked = False
+    for repo in mission["repos"]:
+        wt = Path(repo["worktree_path"])
+        verification = verify_mission_evidence(mission, repo, wt)
+        repo["evidence_verification"] = verification
+        _emit(
+            mission,
+            "evidence_verify_result",
+            f"{repo.get('label')}: {'verified' if verification.get('ok') else 'evidence mismatch'} "
+            f"({len(verification.get('findings') or [])} finding(s))",
+            repository_id=repo.get("repository_id"),
+            ok=verification.get("ok"),
+        )
+        if not verification.get("ok"):
+            evidence_blocked = True
+            codes = ",".join(f["code"] for f in verification["findings"] if f.get("severity") == "critical")
+            repo["blocker"] = f"evidence_verification_failed:{codes}"
+    if evidence_blocked:
+        mission["phase"] = "blocked"
+        mission["status"] = "blocked"
+        _emit(mission, "blocked", "EvidenceVerifier found unevidenced/inconsistent claims — not READY_TO_MERGE.")
         return _public(mission)
 
     mission["phase"] = "awaiting_git_approval"

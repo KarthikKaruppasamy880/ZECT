@@ -62,7 +62,7 @@ def test_real_tool_call_populates_action_observation_fields(tmp_path, monkeypatc
     (ws / "README.md").write_text("hi\n", encoding="utf-8")
     monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
 
-    import app.adapters.coding_engine_mentrix as mod
+    import app.adapters.llm.openai_compat as mod
 
     monkeypatch.setattr(mod, "openai_compat_available", lambda: True)
     responses = [
@@ -104,7 +104,7 @@ def test_denied_tool_call_is_recorded_with_policy_denied(tmp_path, monkeypatch):
     ws.mkdir()
     monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
 
-    import app.adapters.coding_engine_mentrix as mod
+    import app.adapters.llm.openai_compat as mod
 
     monkeypatch.setattr(mod, "openai_compat_available", lambda: True)
     responses = [

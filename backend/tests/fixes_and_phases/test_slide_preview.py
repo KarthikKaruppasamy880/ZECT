@@ -78,3 +78,23 @@ def test_com_export_skipped_when_opted_out(monkeypatch, tmp_path):
     pptx.write_bytes(b"not-used")
     dest = tmp_path / "out.png"
     assert _try_com_png(pptx, 0, dest) is False
+
+
+def test_ooxml_preview_golden_master(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.slide_preview._try_com_png",
+        lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        "app.services.mentrix.presentation.slide_preview._try_libreoffice_png",
+        lambda *_a, **_k: False,
+    )
+    master = Path(__file__).resolve().parents[3] / ".zect" / "present-templates" / "masters" / "zinnia-executive-v1.pptx"
+    if not master.is_file():
+        pytest.skip("golden master template missing")
+    data = master.read_bytes()
+    png = render_slide_png_bytes(data, 0)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(png) > 500

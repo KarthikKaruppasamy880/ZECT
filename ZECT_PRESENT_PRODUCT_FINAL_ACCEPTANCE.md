@@ -23,8 +23,8 @@
 |---|---|
 | **Harness / editor fidelity (#188)** | `ZECT_PRESENT_PRODUCT_READY` — COM SSIM 0.49, clone voice, cold restart, browser/Electron viewports |
 | **Generation layout (#190)** | `READY_FOR_HUMAN_PRESENT_LAYOUT_GENERATION_REVIEW_V3` — golden V3 proof `acceptance=true` |
-| **Export/editor parity (production PR)** | OOXML auto-repair for legacy overlap decks; Review uses slide PNG preview; quality banner shows OOXML vs rendered counts |
-| **Overall product** | `ZECT_PRESENT_PRODUCTION_RELEASE_CANDIDATE` after production proof passes — human PowerPoint sign-off still required for `PRODUCT_READY` |
+| **Export/editor parity (production PR)** | OOXML auto-repair + Repair deck action; Review/Edit/Studio unified PNG preview; Export wires `accept_warnings`; quality banner shows OOXML vs rendered counts |
+| **Overall product** | `ZECT_PRESENT_PRODUCTION_RELEASE_CANDIDATE` after production proof passes (golden generate + preview PNG + export gate) — human PowerPoint sign-off still required for `PRODUCT_READY` |
 
 ## Release gates (#188 — merged)
 

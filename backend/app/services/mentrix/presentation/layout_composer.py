@@ -159,7 +159,8 @@ def compose_regions(
     placeholders = _ph(layout or {})
     ordered = sorted(placeholders, key=lambda p: (int(p.get("y") or 0), int(p.get("x") or 0)))
     title_ph = next((p for p in ordered if str(p.get("type") or "").upper() in {"TITLE", "CTRTITLE"}), None)
-    body_phs = [p for p in ordered if p is not title_ph]
+    subtitle_ph = next((p for p in ordered if str(p.get("type") or "").upper() in {"SUBTITLE", "SUBTITLE"}), None)
+    body_phs = [p for p in ordered if p is not title_ph and p is not subtitle_ph]
     if title_ph is None and ordered:
         title_ph = ordered[0]
         body_phs = ordered[1:]
@@ -175,6 +176,20 @@ def compose_regions(
     else:
         body_y = title["y"] + title["cy"] + TITLE_BODY_GAP_EMU
         body = {"x": safe["x"], "y": body_y, "cx": safe["cx"], "cy": max(1, cy - SAFE_MARGIN_EMU - body_y)}
+    if subtitle_ph is not None:
+        subtitle = _geom(subtitle_ph)
+    elif sem.get("subtitle_region"):
+        subtitle = dict(sem["subtitle_region"])
+    else:
+        subtitle_y = title["y"] + title["cy"] + int(TITLE_BODY_GAP_EMU // 2)
+        subtitle = {
+            "x": safe["x"],
+            "y": subtitle_y,
+            "cx": safe["cx"],
+            "cy": max(int(Inches(0.45)), int(Inches(0.55))),
+        }
+        body["y"] = max(body["y"], subtitle["y"] + subtitle["cy"] + TITLE_BODY_GAP_EMU)
+        body["cy"] = max(int(Inches(0.6)), cy - SAFE_MARGIN_EMU - body["y"])
     visual = dict(body)
     if split_visual and visual.get("x") == body.get("x") and visual.get("y") == body.get("y"):
         gap = int(Inches(0.16))
@@ -196,7 +211,7 @@ def compose_regions(
             max_cy = sb["y"] + sb["cy"] - region["y"]
             region["cx"] = min(region["cx"], max(int(Inches(0.8)), max_cx))
             region["cy"] = min(region["cy"], max(int(Inches(0.6)), max_cy))
-    return {"title": title, "body": body, "visual": visual, "safe": safe, "semantic_map": sem}
+    return {"title": title, "subtitle": subtitle, "body": body, "visual": visual, "safe": safe, "semantic_map": sem}
 
 
 def compose_plan(plan: dict[str, Any], definition: dict[str, Any] | None, *, prompt: str = "") -> dict[str, Any]:

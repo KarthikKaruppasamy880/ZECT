@@ -18,7 +18,7 @@ export default function PresentStudio() {
         <PresentPhaseStrip deckId={deckId} current="edit" />
       </div>
       <div className="min-h-0 flex-1">
-        <PresentEditor pptxPath={path} variant="edit" />
+        <PresentEditor pptxPath={path} variant="studio" />
       </div>
     </div>
   );

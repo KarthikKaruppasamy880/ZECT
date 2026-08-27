@@ -989,6 +989,15 @@ export const mentrixPresentRepairDeck = (path: string) =>
     body: JSON.stringify({ path }),
   });
 
+export const mentrixPresentDuplicateSlide = (path: string, slideIndex: number) =>
+  request<{ ok: boolean; path: string; slide_count: number; inserted_at: number }>(
+    "/api/mentrix/present/slides/duplicate",
+    {
+      method: "POST",
+      body: JSON.stringify({ path, slide_index: slideIndex }),
+    },
+  );
+
 export const mentrixPresentDecks = () =>
   request<{ ok: boolean; items: Array<{ id: string; name: string; path: string; slide_count: number; modified: number; bytes: number }> }>(
     "/api/mentrix/present/decks",

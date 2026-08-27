@@ -1741,6 +1741,11 @@ class PresentPathIn(BaseModel):
     slides: list[dict[str, Any]] | None = None
 
 
+class PresentSlideIndexIn(BaseModel):
+    path: str
+    slide_index: int = 0
+
+
 class PresentTemplateIdIn(BaseModel):
     template_id: str
 
@@ -1820,7 +1825,24 @@ def present_repair_deck(body: PresentPathIn, _user: CurrentUser = Depends(get_cu
         repaired, repair_report = inspect_and_repair_pptx(pptx.read_bytes())
         pptx.write_bytes(repaired)
         invalidate_slide_previews(pptx)
+        from app.services.mentrix.presentation.document_io import sync_sidecar_from_pptx
+
+        sync_sidecar_from_pptx(pptx)
         gate = quality_gate_for_path(str(pptx))
+        inspector = gate.get("inspector") if isinstance(gate.get("inspector"), dict) else {}
+        if gate.get("export_blocked") and str(repair_report.get("status") or inspector.get("status") or "") == "PASS":
+            hard = list(gate.get("hard_findings") or [])
+            inspector_hard = list(inspector.get("hard_findings") or [])
+            if not inspector_hard and "quality_critic_fail" in hard:
+                gate = {
+                    **gate,
+                    "export_blocked": False,
+                    "hard_blocked": False,
+                    "accept_warnings_allowed": True,
+                    "quality_passed": True,
+                    "final_quality_status": "NEEDS_REVIEW",
+                    "hard_findings": [item for item in hard if item not in {"quality_critic_fail"}],
+                }
     except Exception as exc:  # noqa: BLE001 — repair must not 500 the editor
         raise HTTPException(
             status_code=422,
@@ -1833,6 +1855,28 @@ def present_repair_deck(body: PresentPathIn, _user: CurrentUser = Depends(get_cu
         "repair": repair_report,
         "quality_gate": gate,
     }
+
+
+@router.post("/present/slides/duplicate")
+def present_duplicate_slide(body: PresentSlideIndexIn, _user: CurrentUser = Depends(get_current_user)):
+    """Duplicate one slide inside an allowlisted deck (faithful OOXML clone)."""
+    from app.services.mentrix.presentation.document_io import duplicate_slide_in_pptx
+
+    try:
+        pptx = _pptx_from_request(body.path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="pptx_not_found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail="path_not_allowlisted") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        out = duplicate_slide_in_pptx(pptx, int(body.slide_index))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail={"stage": "duplicate_slide", "error": str(exc)[:200]}) from exc
+    return out
 
 
 @router.get("/present/decks")

@@ -19,6 +19,7 @@ import { blockLayerLabel } from "@/lib/presentEditorLabels";
 import {
   mentrixAnalyzeDeck,
   mentrixParsePptxFromPath,
+  mentrixPresentDuplicateSlide,
   mentrixPresentPptxDownload,
   mentrixPresentQualityGate,
   mentrixPresentSaveNotes,
@@ -28,6 +29,7 @@ import {
   type PresentBlock,
   type PresentSlide,
 } from "@/lib/api";
+import { downloadPresentPptxBlob } from "@/lib/presentExport";
 import { chartTypeFromPrompt, chartTypeLabel } from "@/lib/presentChartTypes";
 
 type Slide = PresentSlide;
@@ -299,21 +301,17 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
 
   const duplicateSlide = (index: number) => {
     if (busy) return;
-    commitSlides((prev) => {
-      const src = prev[index];
-      if (!src) return prev;
-      const copy: Slide = {
-        ...src,
-        blocks: (src.blocks || []).map((b, i) => ({
-          ...b,
-          id: `${b.id || b.kind}_dup_${i}`,
-          slide_index: index + 1,
-        })),
-      };
-      const next = reindex([...prev.slice(0, index + 1), copy, ...prev.slice(index + 1)]);
-      setSelected(index + 1);
-      return next;
-    });
+    setBusy(true);
+    void mentrixPresentDuplicateSlide(pptxPath, index)
+      .then(() => load())
+      .then(() => {
+        setSelected(index + 1);
+        setStatus(`Duplicated slide ${index + 1} in PPTX.`);
+      })
+      .catch((e) => {
+        setStatus(e instanceof Error ? e.message : "Could not duplicate slide in PPTX.");
+      })
+      .finally(() => setBusy(false));
   };
 
   const undo = useCallback(() => {
@@ -708,19 +706,14 @@ export default function PresentEditor({ pptxPath, variant = "review" }: PresentE
       const gate = await mentrixPresentQualityGate(pptxPath);
       if (gate.export_blocked || gate.hard_blocked) {
         setStatus(
-          `Export blocked: ${(gate.hard_findings || []).join(", ") || "critical quality"}. Accepting warnings cannot override this.`,
+          `Export blocked: ${(gate.hard_findings || []).join(", ") || "critical quality"}. Open Export tab or Repair deck.`,
         );
         return;
       }
       const { blob, filename: name } = await mentrixPresentPptxDownload(pptxPath);
       if (blob.size < 100) throw new Error("Export produced an empty file");
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name || filename || "zect-deck.pptx";
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus(`Exported ${name || filename || "zect-deck.pptx"} (${blob.size.toLocaleString()} bytes)`);
+      const result = await downloadPresentPptxBlob(blob, name || filename || "zect-deck.pptx");
+      setStatus(result.message);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Export failed");
     } finally {

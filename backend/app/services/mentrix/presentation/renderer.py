@@ -312,11 +312,11 @@ def _fill_placeholder(
     body_set = False
     if title_ph is not None:
         title_ph.text_frame.word_wrap = True
-        title_ph.text_frame.text = title[:160]
+        title_ph.text_frame.text = title[:200]
         title_set = True
     if subtitle_ph is not None and subtitle_text:
         subtitle_ph.text_frame.word_wrap = True
-        subtitle_ph.text_frame.text = subtitle_text[:240]
+        subtitle_ph.text_frame.text = subtitle_text[:400]
         subtitle_set = True
     if date_ph is not None and deck_date:
         date_ph.text_frame.text = deck_date[:80]
@@ -343,13 +343,13 @@ def _fill_placeholder(
         x, y, cx, cy = _geom_box(regions, "title", (0.5, 0.28, 9.0, 0.7))
         box = slide.shapes.add_textbox(x, y, cx, cy)
         box.text_frame.word_wrap = True
-        box.text_frame.text = title[:160]
+        box.text_frame.text = title[:200]
         title_set = True
     if not subtitle_set and subtitle_text:
         x, y, cx, cy = _geom_box(regions, "subtitle", (0.5, 0.95, 9.0, 0.45))
         box = slide.shapes.add_textbox(x, y, cx, cy)
         box.text_frame.word_wrap = True
-        box.text_frame.text = subtitle_text[:240]
+        box.text_frame.text = subtitle_text[:400]
         subtitle_set = True
     if skip_body:
         return

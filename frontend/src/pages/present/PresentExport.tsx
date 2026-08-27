@@ -3,18 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { FileDown } from "lucide-react";
 import PresentPhaseStrip from "@/pages/present/PresentPhaseStrip";
 import { decodeDeckId, mentrixPresentPptxDownload, mentrixPresentQualityGate } from "@/lib/api";
-
-type DesktopExportBridge = {
-  isDesktopApp?: boolean;
-  savePresentationFile?: (opts: {
-    defaultName?: string;
-    dataBase64?: string;
-  }) => Promise<{ ok: boolean; canceled?: boolean; path?: string; bytes?: number }>;
-};
-
-function desktopExportBridge(): DesktopExportBridge | undefined {
-  return (window as Window & { zectDesktop?: DesktopExportBridge }).zectDesktop;
-}
+import { downloadPresentPptxBlob } from "@/lib/presentExport";
 
 export default function PresentExport() {
   const { deckId = "" } = useParams();
@@ -67,28 +56,8 @@ export default function PresentExport() {
       const { blob, filename } = await mentrixPresentPptxDownload(path, {
         acceptWarnings: canAcceptWarnings && acceptWarnings,
       });
-      const name = filename || "zect-deck.pptx";
-      const desktop = desktopExportBridge();
-      if (desktop?.isDesktopApp && desktop.savePresentationFile) {
-        const buf = await blob.arrayBuffer();
-        const dataBase64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-        const saved = await desktop.savePresentationFile({ defaultName: name, dataBase64 });
-        if (saved.canceled) {
-          setStatus("Export canceled");
-          return;
-        }
-        if (saved.ok && saved.path) {
-          setStatus(`Saved to ${saved.path} (${(saved.bytes || blob.size).toLocaleString()} bytes)`);
-          return;
-        }
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatus(`Exported ${name} (${blob.size.toLocaleString()} bytes)`);
+      const result = await downloadPresentPptxBlob(blob, filename || "zect-deck.pptx");
+      setStatus(result.message);
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Export failed");
     } finally {

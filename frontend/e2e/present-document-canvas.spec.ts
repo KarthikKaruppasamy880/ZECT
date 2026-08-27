@@ -34,7 +34,8 @@ test.describe("Present document canvas", () => {
     await expect(canvas).toBeVisible();
     await expect(canvas).toHaveAttribute("data-canvas", "document");
     await expect(page.getByTestId("present-editor-block-overlay")).not.toHaveClass(/grid-cols-2/);
-    await expect(page.getByTestId("present-editor-thumb-canvas-0")).toHaveAttribute("data-canvas", "document");
+    await expect(page.getByTestId("present-editor-thumb-0")).toBeVisible();
+    await expect(page.getByTestId("present-editor-thumb-img-0")).toBeVisible({ timeout: 15_000 });
     await editCanvasTextBlock(page, "Edited on canvas");
     await page.getByTestId("present-editor-save").click();
     await expect(page.getByTestId("present-editor-status")).toContainText(/Saved|local/i, { timeout: 15_000 });

@@ -21,11 +21,29 @@ class RuntimeArtifact:
 
 @dataclass
 class RuntimeEvent:
+    """An Action/Observation record.
+
+    Action-side fields (mission_id/agent_id/repo_id/tool/policy/timestamp)
+    identify who did what, under what policy decision, and when. Observation
+    fields (status/duration_ms/evidence_refs) carry the outcome. All are
+    optional/defaulted so existing call sites that only set the original
+    five fields keep working unchanged.
+    """
+
     sequence_id: int
     event: str
     message: str
     phase: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+    mission_id: str = ""
+    agent_id: str = ""
+    repo_id: str = ""
+    tool: str = ""
+    policy: str = ""
+    timestamp: str = ""
+    status: str = ""
+    duration_ms: int | None = None
+    evidence_refs: list[str] = field(default_factory=list)
 
 
 class CodingAgentRuntime(Protocol):

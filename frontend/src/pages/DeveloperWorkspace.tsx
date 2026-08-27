@@ -1334,6 +1334,7 @@ export default function DeveloperWorkspace() {
                     label: r.repo_name || `repo-${r.repo_id}`,
                     path: r.local_path as string,
                   }))}
+                onWorkItemResolved={(id) => setWsSession((prev) => ({ ...prev, workItemId: id }))}
               />
               </div>
             </div>

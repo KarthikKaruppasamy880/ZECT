@@ -22,7 +22,7 @@ from app.domains.work_items.status import (
     STATUS_READY_TO_SHIP,
     STATUS_VERIFYING,
 )
-from app.models import MentrixRun, WorkItem
+from app.models import MentrixRun, WorkItem, WorkItemEvent
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.work_items.checkpoints import load_execution_state, record_checkpoint
 from app.services.work_items.context_engine import MentrixContextEngine, ProvenanceItem
@@ -368,6 +368,21 @@ class MentrixDeveloperService:
         ]
         if source_lines and not any(line.split(":", 1)[0] in answer for line in source_lines if line):
             answer = answer.rstrip() + "\n\nSources:\n" + "\n".join(source_lines[:8])
+        # Full (untruncated) turn, persisted separately from the truncated
+        # "ask" audit event above -- this is what ask_history() replays to
+        # restore the conversation across navigation/refresh/restart.
+        append_event(
+            self.db,
+            work_item_id=wi.id,
+            event_type="ask_turn",
+            payload={
+                "question": question,
+                "answer": answer,
+                "model": str(tel.get("actual_model") or tel.get("requested_model") or ""),
+                "offline": bool(result.get("offline")),
+            },
+            commit=True,
+        )
         return {
             "work_item_id": wi.id,
             "answer": answer,
@@ -378,6 +393,35 @@ class MentrixDeveloperService:
             "telemetry": tel,
             "result": result,
         }
+
+    def ask_history(self, work_item_id: int) -> list[dict[str, Any]]:
+        """Ordered Ask turns for a work item -- what AskPane replays on mount
+        to restore the conversation. Read-only; never mutates anything."""
+        rows = (
+            self.db.query(WorkItemEvent)
+            .filter(
+                WorkItemEvent.work_item_id == work_item_id,
+                WorkItemEvent.event_type == "ask_turn",
+            )
+            .order_by(WorkItemEvent.id)
+            .all()
+        )
+        turns: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payload = json.loads(row.payload_json or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            turns.append(
+                {
+                    "question": str(payload.get("question") or ""),
+                    "answer": str(payload.get("answer") or ""),
+                    "model": str(payload.get("model") or ""),
+                    "offline": bool(payload.get("offline")),
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+            )
+        return turns
 
     def plan(
         self,

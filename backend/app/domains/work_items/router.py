@@ -270,6 +270,19 @@ def developer_ask(
     )
 
 
+@developer_router.get("/ask/history")
+def developer_ask_history(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Replay a work item's prior Ask turns -- what AskPane fetches on mount
+    to restore the conversation across navigation/refresh/restart."""
+    from app.services.work_items.developer_service import MentrixDeveloperService
+
+    return {"turns": MentrixDeveloperService(db).ask_history(work_item_id)}
+
+
 @developer_router.post("/plan")
 def developer_plan(
     body: PlanIn,

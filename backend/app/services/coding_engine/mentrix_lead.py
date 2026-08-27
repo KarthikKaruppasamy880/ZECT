@@ -98,5 +98,7 @@ def run_explore_phase(mission: dict[str, Any], repo: dict[str, Any], wt: Path) -
         allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_EXPLORE],
         timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_EXPLORE_TIMEOUT", "120")),
         max_steps=int(os.getenv("MENTRIX_CODING_AGENT_EXPLORE_MAX_STEPS", "12")),
+        mission_id=mission.get("id"),
+        repo_id=repo.get("repository_id"),
     )
     return _last_completed_message(out)

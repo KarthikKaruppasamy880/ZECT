@@ -175,6 +175,17 @@ export const developerAsk = (body: {
     body: JSON.stringify(body),
   });
 
+export type DeveloperAskTurn = {
+  question: string;
+  answer: string;
+  model: string;
+  offline: boolean;
+  created_at: string | null;
+};
+
+export const developerAskHistory = (workItemId: number) =>
+  request<{ turns: DeveloperAskTurn[] }>(`/api/mentrix/developer/ask/history?work_item_id=${workItemId}`);
+
 export type DeveloperPlanResponse = {
   work_item_id: number;
   plan?: string;

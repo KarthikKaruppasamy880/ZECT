@@ -10,6 +10,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -88,6 +89,8 @@ class MentrixNativeCodingRuntime:
         role = str(kwargs.get("role") or "").strip() or None
         allowed_tools = kwargs.get("allowed_tools")
         allowed_tools = list(allowed_tools) if allowed_tools else None
+        mission_id = str(kwargs.get("mission_id") or "").strip()
+        repo_id = str(kwargs.get("repo_id") or "").strip()
 
         run: dict[str, Any] = {
             "id": run_id,
@@ -101,6 +104,8 @@ class MentrixNativeCodingRuntime:
             "agent_context": agent_context,
             "role": role,
             "allowed_tools": allowed_tools,
+            "mission_id": mission_id,
+            "repo_id": repo_id,
             "events": [],
             "artifacts": [],
             "messages": [],
@@ -140,6 +145,15 @@ class MentrixNativeCodingRuntime:
                     "message": e.message,
                     "phase": e.phase,
                     "data": e.data,
+                    "mission_id": e.mission_id,
+                    "agent_id": e.agent_id,
+                    "repo_id": e.repo_id,
+                    "tool": e.tool,
+                    "policy": e.policy,
+                    "timestamp": e.timestamp,
+                    "status": e.status,
+                    "duration_ms": e.duration_ms,
+                    "evidence_refs": e.evidence_refs,
                 }
                 for e in run["events"]
             ],
@@ -240,6 +254,11 @@ class MentrixNativeCodingRuntime:
         *,
         phase: str = "",
         data: dict[str, Any] | None = None,
+        tool: str = "",
+        policy: str = "",
+        status: str = "",
+        duration_ms: int | None = None,
+        evidence_refs: list[str] | None = None,
     ) -> RuntimeEvent:
         with self._lock:
             run["seq"] = int(run.get("seq") or 0) + 1
@@ -249,6 +268,15 @@ class MentrixNativeCodingRuntime:
                 message=message,
                 phase=phase or run.get("status") or "",
                 data=data or {},
+                mission_id=str(run.get("mission_id") or ""),
+                agent_id=str(run.get("role") or ""),
+                repo_id=str(run.get("repo_id") or ""),
+                tool=tool,
+                policy=policy,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                status=status,
+                duration_ms=duration_ms,
+                evidence_refs=list(evidence_refs or []),
             )
             run["events"].append(ev)
         return ev
@@ -437,9 +465,12 @@ class MentrixNativeCodingRuntime:
             f"{name}",
             phase="running",
             data={"tool": name, "args": safe_args},
+            tool=name,
         )
+        started_at = time.monotonic()
         allowed_tools = run.get("allowed_tools")
         if allowed_tools and name not in allowed_tools:
+            tool_policy = "denied"
             result: dict[str, Any] = {
                 "ok": False,
                 "error": (
@@ -448,9 +479,11 @@ class MentrixNativeCodingRuntime:
                 ),
             }
         else:
+            tool_policy = "allowed"
             result = execute_tool(name, args, workspace=workspace, auto_approve_edits=auto_approve)
 
         if result.get("needs_approval"):
+            tool_policy = "approval_required"
             action_id = str(uuid4())
             payload = {
                 "tool": result.get("action") or name,
@@ -472,10 +505,13 @@ class MentrixNativeCodingRuntime:
             approved = ev.wait(timeout=600)
             run["status"] = "running"
             if run.get("cancel") or action_id in (run.get("_rejected_actions") or set()):
+                tool_policy = "denied"
                 result = {"ok": False, "error": "rejected_by_user"}
             elif not approved:
+                tool_policy = "denied"
                 result = {"ok": False, "error": "approval_timeout"}
             else:
+                tool_policy = "allowed"
                 payload_args = dict(payload.get("args") or {})
                 payload_args["_approved"] = True
                 result = execute_tool(
@@ -513,12 +549,19 @@ class MentrixNativeCodingRuntime:
                 },
             )
 
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        evidence_refs = [ref for ref in (result.get("path"), result.get("screenshot_path")) if ref]
         self._emit(
             run,
             "tool_end",
             f"{name}: {'ok' if result.get('ok') else result.get('error') or 'error'}",
             phase="running",
             data={"tool": name, "ok": bool(result.get("ok")), "path": result.get("path")},
+            tool=name,
+            policy=tool_policy,
+            status="ok" if result.get("ok") else "error",
+            duration_ms=duration_ms,
+            evidence_refs=evidence_refs,
         )
 
         # Truncate large tool results for the model

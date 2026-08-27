@@ -16,11 +16,13 @@ from typing import Any
 from uuid import uuid4
 
 from app.adapters.coding_runtime import RuntimeArtifact, RuntimeEvent
-from app.adapters.llm.openai_compat import (
-    get_openai_compat_client,
-    mentrix_llm_chat_model,
-    openai_compat_available,
+from app.adapters.llm.agent_model_adapter import (
+    AUTO_ROUTED,
+    USER_SELECTED,
+    ModelProviderError,
+    get_agent_model_adapter,
 )
+from app.adapters.llm.openai_compat import mentrix_llm_chat_model, openai_compat_available
 from app.services.coding_engine.mentrix_agent_tools import (
     TOOL_SPECS,
     execute_tool,
@@ -60,7 +62,11 @@ class MentrixNativeCodingRuntime:
     def start_run(self, goal: str, workspace: str = "", **kwargs: Any) -> str:
         run_id = str(uuid4())
         auto_approve = bool(kwargs.get("auto_approve_edits", True))
-        model = (kwargs.get("model") or "").strip() or mentrix_llm_chat_model()
+        explicit_model = (kwargs.get("model") or "").strip()
+        model = explicit_model or mentrix_llm_chat_model()
+        model_route_mode = str(kwargs.get("model_route_mode") or "").strip() or (
+            USER_SELECTED if explicit_model else AUTO_ROUTED
+        )
         max_steps = int(kwargs.get("max_steps") or os.getenv("MENTRIX_CODING_AGENT_MAX_STEPS", "24"))
         expected_files = list(kwargs.get("expected_files") or [])
         project_id = kwargs.get("project_id")
@@ -106,6 +112,7 @@ class MentrixNativeCodingRuntime:
             "allowed_tools": allowed_tools,
             "mission_id": mission_id,
             "repo_id": repo_id,
+            "model_route_mode": model_route_mode,
             "events": [],
             "artifacts": [],
             "messages": [],
@@ -292,9 +299,19 @@ class MentrixNativeCodingRuntime:
             [t for t in TOOL_SPECS if t["function"]["name"] in allowed_tools] if allowed_tools else TOOL_SPECS
         )
 
-        if not openai_compat_available():
+        try:
+            adapter, model = get_agent_model_adapter(
+                model, mode=str(run.get("model_route_mode") or AUTO_ROUTED)
+            )
+        except ModelProviderError as exc:
             run["status"] = "failed"
-            self._emit(run, "failed", "No Mentrix LLM gateway or OPENAI_API_KEY configured", phase="failed")
+            self._emit(
+                run,
+                "failed",
+                f"blocked_external: model '{model}' unavailable ({exc.reason}) -- "
+                "not silently substituting a different provider",
+                phase="failed",
+            )
             return
 
         role_note = (
@@ -330,20 +347,18 @@ class MentrixNativeCodingRuntime:
             },
         ]
 
-        try:
-            client = get_openai_compat_client(timeout=90.0)
-        except Exception as exc:  # noqa: BLE001
-            run["status"] = "failed"
-            self._emit(run, "failed", f"LLM client error: {exc}", phase="failed")
-            return
-
-        self._emit(run, "thinking", "Mentrix Coding Agent planning…", phase="running")
+        self._emit(
+            run,
+            "thinking",
+            f"Mentrix Coding Agent planning… ({adapter.provider_name}/{model})",
+            phase="running",
+        )
 
         for step in range(max_steps):
             if run.get("cancel"):
                 return
             try:
-                resp = client.chat.completions.create(
+                resp = adapter.create(
                     model=model,
                     messages=history,
                     tools=role_tools,
@@ -354,7 +369,7 @@ class MentrixNativeCodingRuntime:
             except Exception:
                 # Local models often lack tools API — fall back to JSON protocol
                 try:
-                    resp = client.chat.completions.create(
+                    resp = adapter.create(
                         model=model,
                         messages=history
                         + [
@@ -368,6 +383,8 @@ class MentrixNativeCodingRuntime:
                                 ),
                             }
                         ],
+                        tools=None,
+                        tool_choice="none",
                         temperature=0.2,
                         max_tokens=1200,
                     )

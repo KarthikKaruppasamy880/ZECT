@@ -31,6 +31,7 @@ import {
   codingAgentListPlans,
   codingAgentSavePlan,
   developerAsk,
+  developerAskHistory,
   developerPlan,
   getDocumentMarkdown,
   mentrixStartRun,
@@ -38,6 +39,7 @@ import {
   type CodingAgentMission,
   type CodingAgentMissionRoot,
   type ContextPack,
+  type DeveloperAskTurn,
   type MentrixCodingAgentEvent,
 } from "@/lib/api";
 
@@ -53,6 +55,7 @@ type Props = {
   projectId?: number | null;
   workItemId?: number | null;
   roots?: CodingAgentMissionRoot[];
+  onWorkItemResolved?: (id: number) => void;
 };
 
 type Line = {
@@ -78,6 +81,7 @@ export default function MentrixCodingAgentPanel({
   projectId = null,
   workItemId = null,
   roots = [],
+  onWorkItemResolved,
 }: Props) {
   const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
@@ -152,6 +156,7 @@ export default function MentrixCodingAgentPanel({
           projectId={projectId}
           roots={roots}
           onCreatePlan={() => setTab("plan")}
+          onWorkItemResolved={onWorkItemResolved}
         />
       ) : tab === "plan" ? (
         <PlanPane
@@ -620,6 +625,7 @@ function AskPane({
   projectId,
   roots,
   onCreatePlan,
+  onWorkItemResolved,
 }: {
   workspaceRoot: string;
   model: string;
@@ -627,13 +633,42 @@ function AskPane({
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
   onCreatePlan: () => void;
+  onWorkItemResolved?: (id: number) => void;
 }) {
   const [q, setQ] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [turns, setTurns] = useState<DeveloperAskTurn[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   void workspaceRoot;
+
+  // Restore the conversation whenever this pane mounts with a known
+  // work item -- covers tab-switch (unmount/remount), navigate-away-and-back,
+  // browser refresh, and backend/Electron restart, all via the same durable
+  // source (WorkItemEvent rows), not client-only state.
+  useEffect(() => {
+    let cancelled = false;
+    setHistoryLoaded(false);
+    if (!workItemId) {
+      setTurns([]);
+      setHistoryLoaded(true);
+      return;
+    }
+    void developerAskHistory(workItemId)
+      .then((res) => {
+        if (!cancelled) setTurns(res.turns || []);
+      })
+      .catch(() => {
+        /* history is best-effort; a fresh Ask still works without it */
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workItemId]);
 
   const ask = async () => {
     const question = q.trim();
@@ -649,7 +684,17 @@ function AskPane({
         repository_id: ids[0],
         repository_ids: ids,
       });
-      setAnswer(res.answer || "");
+      // Reusing the same work_item_id on every subsequent call (instead of
+      // letting the backend spawn a fresh WorkItem each time) is what makes
+      // the conversation persist at all -- lift it to the parent once resolved.
+      if (res.work_item_id && res.work_item_id !== workItemId) {
+        onWorkItemResolved?.(res.work_item_id);
+      }
+      setTurns((prev) => [
+        ...prev,
+        { question, answer: res.answer || "", model: "", offline: false, created_at: null },
+      ]);
+      setQ("");
       setContextUsed(contextFromDeveloperPi(res.project_intelligence));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ask failed");
@@ -693,10 +738,20 @@ function AskPane({
         </p>
       ) : null}
       <ContextUsedStrip used={contextUsed} />
-      {answer ? (
-        <pre className="mt-2 flex-1 overflow-auto whitespace-pre-wrap rounded bg-slate-50 p-2 text-[11px]" data-testid="mentrix-coding-agent-ask-answer">
-          {answer}
-        </pre>
+      {historyLoaded && turns.length > 0 ? (
+        <div
+          className="mt-2 flex-1 overflow-auto rounded bg-slate-50 p-2"
+          data-testid="mentrix-coding-agent-ask-history"
+        >
+          {turns.map((t, i) => (
+            <div key={i} className="mb-2 border-b border-slate-200 pb-2 last:mb-0 last:border-0">
+              <p className="font-semibold text-slate-600">{t.question}</p>
+              <pre className="mt-1 whitespace-pre-wrap text-[11px]" data-testid={i === turns.length - 1 ? "mentrix-coding-agent-ask-answer" : undefined}>
+                {t.answer}
+              </pre>
+            </div>
+          ))}
+        </div>
       ) : null}
       <p className="mt-1 text-[10px] text-slate-400">WorkItem {workItemId ?? "—"} · zero edits</p>
     </div>

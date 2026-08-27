@@ -213,10 +213,17 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "restart_app",
-            "description": "Stop any process this mission started in this workspace, then start it again.",
+            "description": (
+                "Restart the app. If process_id is given, restarts ONLY that one "
+                "already-tracked process (the affected service) with its original "
+                "command/cwd, leaving any other process this mission started "
+                "untouched. Without process_id, stops every process this mission "
+                "started in this workspace, then starts it again (whole-workspace restart)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "process_id": {"type": "string", "description": "Restart only this tracked process (affected-service restart)"},
                     "command": {"type": "string", "description": "Optional explicit start command"},
                     "recipe_id": {"type": "string"},
                     "label": {"type": "string"},
@@ -784,10 +791,27 @@ def _execute_tool_inner(
 
     if name in ("start_app", "restart_app"):
         from app.domains.workspace.app_runner import (
+            restart_owned_process,
             spawn_owned_process,
             stop_owned_processes_in_workspace,
         )
-        from app.services.workspace.runtime_discovery import discover_runtime_recipes, resolve_recipe
+        from app.services.workspace.runtime_discovery import (
+            discover_runtime_recipes,
+            resolve_recipe,
+            save_confirmed_profile,
+        )
+
+        # Affected-service restart: given an already-tracked process_id, stop
+        # and re-spawn exactly that one process with its original command/cwd
+        # -- never touches any other service this (or another) workspace owns.
+        # Falls through to the discover/spawn path below only when no
+        # process_id is given, preserving the prior whole-workspace behavior.
+        restart_process_id = str(args.get("process_id") or "").strip()
+        if name == "restart_app" and restart_process_id:
+            info = restart_owned_process(restart_process_id)
+            if info is None:
+                return {"ok": False, "error": f"unknown_process_id:{restart_process_id}"}
+            return {"ok": True, "process_id": info.id, "pid": info.pid, "label": info.label, "restarted": True}
 
         if name == "restart_app":
             stop_owned_processes_in_workspace(str(root))
@@ -795,6 +819,7 @@ def _execute_tool_inner(
         command = str(args.get("command") or "").strip()
         recipe_id = str(args.get("recipe_id") or "").strip()
         cwd = str(root)
+        chosen: dict[str, Any] | None = None
         if not command:
             discovered = discover_runtime_recipes(str(root))
             recipes = list(discovered.get("recipes") or [])
@@ -831,6 +856,10 @@ def _execute_tool_inner(
             info = spawn_owned_process(command, cwd, label=label)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": f"start_failed:{exc}"}
+        if chosen is not None:
+            # Remember the confirmed choice so the next start_app call on
+            # this repo doesn't have to re-discover/re-disambiguate.
+            save_confirmed_profile(str(root), chosen)
         return {
             "ok": True,
             "process_id": info.id,

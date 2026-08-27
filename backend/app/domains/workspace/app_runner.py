@@ -275,6 +275,41 @@ def stop_owned_processes_in_workspace(workspace: str) -> int:
     return stopped
 
 
+def stop_owned_process(process_id: str) -> bool:
+    """Stop exactly one tracked process by id -- never touches any other
+    process this workspace (or any other) owns. Returns False if the id is
+    unknown or already stopped."""
+    info = _processes.get(process_id)
+    if info is None:
+        return False
+    stopped = False
+    try:
+        if info.is_running:
+            _stop_process_tree(info.proc, info.pid)
+            stopped = True
+    except Exception:
+        pass
+    _bg_tasks.pop(process_id, None)
+    _bg_threads.pop(process_id, None)
+    return stopped
+
+
+def restart_owned_process(process_id: str) -> Optional[ProcessInfo]:
+    """Restart exactly the ONE affected service by process_id -- stop it,
+    then re-spawn with the SAME command/cwd/label it was originally started
+    with. Distinct from "restart the whole workspace" (stop_owned_processes_
+    in_workspace + a fresh recipe pick): this targets one already-tracked
+    process, so starting a second, unrelated service in the same workspace
+    is never disturbed. Returns None if process_id is unknown."""
+    info = _processes.get(process_id)
+    if info is None:
+        return None
+    command, cwd, label = info.cmd, info.cwd, info.label
+    stop_owned_process(process_id)
+    _processes.pop(process_id, None)
+    return spawn_owned_process(command, cwd, label=label)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

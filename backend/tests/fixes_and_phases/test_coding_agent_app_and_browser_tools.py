@@ -18,6 +18,7 @@ from app.domains.workspace.app_runner import (
     stop_owned_processes_in_workspace,
 )
 from app.services.coding_engine.mentrix_agent_tools import execute_tool
+from app.services.workspace.runtime_discovery import load_confirmed_profile
 
 
 def _free_port() -> int:
@@ -96,6 +97,39 @@ class TestStartRestartStopHealthCheck:
         out = execute_tool("health_check", {}, workspace=tmp_path)
         assert out["ok"] is False
 
+    def test_restart_app_with_process_id_only_restarts_that_one_service(self, tmp_path):
+        """Affected-service restart (V2 closure §14): given process_id, restart
+        exactly that tracked process -- a sibling process in the same
+        workspace must be left running, untouched, same pid."""
+        port_a = _free_port()
+        port_b = _free_port()
+        ws = tmp_path / "app"
+        ws.mkdir()
+
+        first = execute_tool("start_app", {"command": _http_server_command(port_a), "label": "svc-a"}, workspace=ws)
+        second = execute_tool("start_app", {"command": _http_server_command(port_b), "label": "svc-b"}, workspace=ws)
+        assert first["ok"] is True and second["ok"] is True
+        try:
+            time.sleep(0.3)
+            restarted = execute_tool("restart_app", {"process_id": first["process_id"]}, workspace=ws)
+            assert restarted["ok"] is True
+            assert restarted.get("restarted") is True
+            assert restarted["pid"] != first["pid"], "the targeted process must actually be replaced"
+
+            owned = {p["id"]: p for p in list_owned_processes_in_workspace(str(ws.resolve()))}
+            assert owned[second["process_id"]]["running"] is True
+            assert owned[second["process_id"]]["pid"] == second["pid"], "the sibling service must be untouched"
+
+            health_b = execute_tool("health_check", {"port": port_b, "timeout_s": 5}, workspace=ws)
+            assert health_b["ok"] is True, "the untouched sibling service must still answer"
+        finally:
+            stop_owned_processes_in_workspace(str(ws.resolve()))
+
+    def test_restart_app_with_unknown_process_id_is_a_clean_error(self, tmp_path):
+        out = execute_tool("restart_app", {"process_id": "does-not-exist"}, workspace=tmp_path)
+        assert out["ok"] is False
+        assert "unknown_process_id" in out["error"]
+
 
 class TestRecipeDiscoveryNotHardcoded:
     def test_single_discovered_recipe_is_auto_selected_and_really_starts(self, tmp_path):
@@ -144,5 +178,11 @@ class TestRecipeDiscoveryNotHardcoded:
         try:
             assert out["ok"] is True
             assert out["command"] == "npm run test"
+
+            # The confirmed choice must be remembered so future calls on this
+            # repo don't have to re-disambiguate (V2 closure §14).
+            profile = load_confirmed_profile(str(ws.resolve()))
+            assert profile is not None
+            assert profile["recipe_id"] == "pkg-test"
         finally:
             stop_owned_processes_in_workspace(str(ws.resolve()))

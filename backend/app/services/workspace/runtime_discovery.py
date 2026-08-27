@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 _UNSAFE = re.compile(r"(\.\.|[;&|`$]|rm\s+-rf|curl\s+|wget\s+|powershell\s+-enc)", re.I)
 
 ALLOWED_KINDS = ("full", "frontend", "backend", "tests")
+
+RUN_PROFILES_DIR = ".zect/run-profiles"
+
+# Common Makefile targets worth offering as recipes -- deliberately small
+# and specific rather than every target, since Makefiles routinely define
+# targets (clean, lint, deploy, publish) that are not "run/start this app".
+_MAKE_TARGET_KINDS = {
+    "run": "full",
+    "start": "full",
+    "dev": "frontend",
+    "serve": "full",
+    "test": "tests",
+    "build": "full",
+}
 
 
 def _safe_command(cmd: str) -> bool:
@@ -167,6 +182,98 @@ def discover_runtime_recipes(workspace_root: str) -> dict[str, Any]:
                 }
             )
 
+    for compose_name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+        compose_path = root / compose_name
+        if compose_path.is_file() and not any(r["id"] == "docker-compose-up" for r in recipes):
+            recipes.append(
+                {
+                    "id": "docker-compose-up",
+                    "kind": "full",
+                    "label": "docker compose up",
+                    "command": "docker compose up",
+                    "cwdRel": ".",
+                    "confirmRequired": True,
+                    "evidence": compose_name,
+                }
+            )
+            break
+
+    pom = root / "pom.xml"
+    if pom.is_file():
+        if not any(r["kind"] == "backend" for r in recipes):
+            recipes.append(
+                {
+                    "id": "maven-run",
+                    "kind": "backend",
+                    "label": "mvn spring-boot:run",
+                    "command": "mvn spring-boot:run",
+                    "cwdRel": ".",
+                    "confirmRequired": True,
+                    "evidence": "pom.xml",
+                }
+            )
+        if not any(r["kind"] == "tests" for r in recipes):
+            recipes.append(
+                {
+                    "id": "maven-test",
+                    "kind": "tests",
+                    "label": "mvn test",
+                    "command": "mvn test",
+                    "cwdRel": ".",
+                    "confirmRequired": True,
+                    "evidence": "pom.xml",
+                }
+            )
+
+    gradle_file = next((root / n for n in ("build.gradle", "build.gradle.kts") if (root / n).is_file()), None)
+    if gradle_file is not None:
+        gradlew = "gradlew.bat" if (root / "gradlew.bat").is_file() else "./gradlew"
+        if not any(r["kind"] == "backend" for r in recipes):
+            recipes.append(
+                {
+                    "id": "gradle-run",
+                    "kind": "backend",
+                    "label": f"{gradlew} bootRun",
+                    "command": f"{gradlew} bootRun",
+                    "cwdRel": ".",
+                    "confirmRequired": True,
+                    "evidence": gradle_file.name,
+                }
+            )
+        if not any(r["kind"] == "tests" for r in recipes):
+            recipes.append(
+                {
+                    "id": "gradle-test",
+                    "kind": "tests",
+                    "label": f"{gradlew} test",
+                    "command": f"{gradlew} test",
+                    "cwdRel": ".",
+                    "confirmRequired": True,
+                    "evidence": gradle_file.name,
+                }
+            )
+
+    makefile = next((root / n for n in ("Makefile", "makefile") if (root / n).is_file()), None)
+    if makefile is not None:
+        try:
+            make_text = makefile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            make_text = ""
+        targets = set(re.findall(r"^([a-zA-Z0-9_-]+):(?!=)", make_text, re.MULTILINE))
+        for target, kind in _MAKE_TARGET_KINDS.items():
+            if target in targets and not any(r["id"] == f"make-{target}" for r in recipes):
+                recipes.append(
+                    {
+                        "id": f"make-{target}",
+                        "kind": kind,
+                        "label": f"make {target}",
+                        "command": f"make {target}",
+                        "cwdRel": ".",
+                        "confirmRequired": True,
+                        "evidence": f"{makefile.name} target '{target}'",
+                    }
+                )
+
     # Nested package.json (one level) — never follow ..
     if not recipes:
         for child in sorted(root.iterdir()):
@@ -190,11 +297,17 @@ def discover_runtime_recipes(workspace_root: str) -> dict[str, Any]:
             break
 
     safe = [r for r in recipes if _safe_command(str(r.get("command") or ""))]
-    default_id = next((r["id"] for r in safe if r["kind"] == "full"), safe[0]["id"] if safe else "")
+    confirmed = load_confirmed_profile(str(root))
+    confirmed_id = str((confirmed or {}).get("recipe_id") or "")
+    if confirmed_id and any(r["id"] == confirmed_id for r in safe):
+        default_id = confirmed_id
+    else:
+        default_id = next((r["id"] for r in safe if r["kind"] == "full"), safe[0]["id"] if safe else "")
     return {
         "ok": True,
         "root": str(root),
         "default_id": default_id,
+        "confirmed_profile": confirmed,
         "recipes": safe,
         "postgres_note": "ZECT does not start PostgreSQL. Use the project's local DATABASE_URL.",
     }
@@ -202,6 +315,38 @@ def discover_runtime_recipes(workspace_root: str) -> dict[str, Any]:
 
 def slug_id(rel: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "-", rel).strip("-").lower()[:32]
+
+
+def _profile_path(root: Path) -> Path:
+    return root / RUN_PROFILES_DIR / "profile.json"
+
+
+def save_confirmed_profile(workspace_root: str, recipe: dict[str, Any]) -> dict[str, Any]:
+    """Persist the human/agent-confirmed recipe for this repo to
+    .zect/run-profiles/profile.json, so start_app doesn't have to
+    re-discover/re-disambiguate every single call -- the next
+    discover_runtime_recipes() returns it as default_id directly."""
+    root = Path(workspace_root).expanduser().resolve()
+    path = _profile_path(root)
+    payload = {"recipe_id": recipe.get("id"), "recipe": recipe, "confirmed_at": time.time()}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return {"ok": True, "path": str(path)}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def load_confirmed_profile(workspace_root: str) -> dict[str, Any] | None:
+    root = Path(workspace_root).expanduser().resolve()
+    path = _profile_path(root)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def resolve_recipe(workspace_root: str, recipe_id: str) -> dict[str, Any]:

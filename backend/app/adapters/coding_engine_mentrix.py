@@ -85,6 +85,10 @@ class MentrixNativeCodingRuntime:
         except Exception as exc:  # noqa: BLE001
             raise ValueError(str(exc)) from exc
 
+        role = str(kwargs.get("role") or "").strip() or None
+        allowed_tools = kwargs.get("allowed_tools")
+        allowed_tools = list(allowed_tools) if allowed_tools else None
+
         run: dict[str, Any] = {
             "id": run_id,
             "goal": goal,
@@ -95,6 +99,8 @@ class MentrixNativeCodingRuntime:
             "max_steps": max_steps,
             "expected_files": expected_files,
             "agent_context": agent_context,
+            "role": role,
+            "allowed_tools": allowed_tools,
             "events": [],
             "artifacts": [],
             "messages": [],
@@ -253,16 +259,28 @@ class MentrixNativeCodingRuntime:
         model = run["model"]
         max_steps = int(run["max_steps"])
         auto_approve = bool(run["auto_approve_edits"])
+        allowed_tools = run.get("allowed_tools")
+        role_tools = (
+            [t for t in TOOL_SPECS if t["function"]["name"] in allowed_tools] if allowed_tools else TOOL_SPECS
+        )
 
         if not openai_compat_available():
             run["status"] = "failed"
             self._emit(run, "failed", "No Mentrix LLM gateway or OPENAI_API_KEY configured", phase="failed")
             return
 
+        role_note = (
+            f"\n\nYou are acting in the '{run['role']}' role for this mission. "
+            f"You only have access to these tools: {[t['function']['name'] for t in role_tools]}. "
+            "Do not claim to have done something outside that tool set."
+            if run.get("role")
+            else ""
+        )
         history: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": _SYSTEM
+                + role_note
                 + (
                     f"\n\nAdditional Mentrix context (skills/memory/Lattice/Blueprint):\n{run['agent_context']}"
                     if (run.get("agent_context") or "").strip()
@@ -300,7 +318,7 @@ class MentrixNativeCodingRuntime:
                 resp = client.chat.completions.create(
                     model=model,
                     messages=history,
-                    tools=TOOL_SPECS,
+                    tools=role_tools,
                     tool_choice="auto",
                     temperature=0.2,
                     max_tokens=2500,
@@ -318,7 +336,7 @@ class MentrixNativeCodingRuntime:
                                     "Return ONLY JSON: "
                                     '{"action":"tool","name":"<tool>","args":{...}} '
                                     'or {"action":"done","message":"..."} '
-                                    f"Tools: {[t['function']['name'] for t in TOOL_SPECS]}"
+                                    f"Tools: {[t['function']['name'] for t in role_tools]}"
                                 ),
                             }
                         ],
@@ -420,7 +438,17 @@ class MentrixNativeCodingRuntime:
             phase="running",
             data={"tool": name, "args": safe_args},
         )
-        result = execute_tool(name, args, workspace=workspace, auto_approve_edits=auto_approve)
+        allowed_tools = run.get("allowed_tools")
+        if allowed_tools and name not in allowed_tools:
+            result: dict[str, Any] = {
+                "ok": False,
+                "error": (
+                    f"policy_denied: tool '{name}' is not permitted for the "
+                    f"'{run.get('role') or 'current'}' role in this mission"
+                ),
+            }
+        else:
+            result = execute_tool(name, args, workspace=workspace, auto_approve_edits=auto_approve)
 
         if result.get("needs_approval"):
             action_id = str(uuid4())

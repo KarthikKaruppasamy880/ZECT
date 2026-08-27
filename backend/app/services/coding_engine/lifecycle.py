@@ -166,6 +166,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "pr": r.get("pr") or {},
                 "native_build": r.get("native_build") or {},
                 "browser_verification": r.get("browser_verification") or {},
+                "explore_findings": r.get("explore_findings") or "",
             }
         )
     sibling = mission.get("sibling") or {}
@@ -815,15 +816,39 @@ def approve_plan(mission_id: str) -> dict[str, Any]:
 
 
 def _run_native_implementer(mission: dict[str, Any]) -> None:
-    """Run Mentrix native tool loop inside isolated worktrees (same engine as HISTORY chat)."""
+    """Run Mentrix native tool loop inside isolated worktrees (same engine as HISTORY chat).
+
+    Each repo gets a bounded Explore pass (read-only role, see
+    mentrix_lead.run_explore_phase) before the Coder role is allowed to
+    touch any file, so edits are grounded in what actually exists rather
+    than the model's first guess.
+    """
+    from app.services.coding_engine.mentrix_lead import ROLE_CODER, ROLE_TOOL_ALLOWLISTS, run_explore_phase
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
 
-    goal = f"{mission.get('goal') or ''}\n\nPLAN:\n{mission.get('plan') or ''}"
+    base_goal = f"{mission.get('goal') or ''}\n\nPLAN:\n{mission.get('plan') or ''}"
     results: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         wt = str(repo.get("worktree_path") or "").strip()
         if not wt:
             continue
+        _emit(
+            mission,
+            "explore_start",
+            f"{repo.get('label')}: Explore role investigating repo before edits",
+            repository_id=repo.get("repository_id"),
+        )
+        findings = run_explore_phase(mission, repo, Path(wt))
+        repo["explore_findings"] = findings
+        _emit(
+            mission,
+            "explore_result",
+            f"{repo.get('label')}: Explore findings ready ({len(findings)} char(s))",
+            repository_id=repo.get("repository_id"),
+        )
+        goal = base_goal
+        if findings:
+            goal = f"{base_goal}\n\nEXPLORE FINDINGS:\n{findings}"
         out = run_mentrix_native_build(
             goal=goal,
             workspace=wt,
@@ -831,6 +856,8 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             project_id=mission.get("project_id"),
             timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
             max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+            role=ROLE_CODER,
+            allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_CODER],
         )
         results.append(out)
         repo["native_build"] = {
@@ -910,6 +937,7 @@ def _diagnose_and_repair_repo(
     persistently-broken repo still reaches ``blocked`` rather than looping
     forever or getting silently reported as complete.
     """
+    from app.services.coding_engine.mentrix_lead import ROLE_DEBUGGER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
 
     max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX", "2"))
@@ -927,7 +955,7 @@ def _diagnose_and_repair_repo(
         _emit(
             mission,
             "diagnose_attempt",
-            f"{repo.get('label')}: auto-repair attempt {attempts}/{max_attempts} after test failure",
+            f"{repo.get('label')}: Debugger role auto-repair attempt {attempts}/{max_attempts} after test failure",
             repository_id=repo.get("repository_id"),
             attempt=attempts,
         )
@@ -937,6 +965,8 @@ def _diagnose_and_repair_repo(
             project_id=mission.get("project_id"),
             timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
             max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+            role=ROLE_DEBUGGER,
+            allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_DEBUGGER],
         )
         written = list(out.get("files_written") or [])
         if written:
@@ -972,6 +1002,7 @@ def _run_app_and_browser_verification(
     here, this is a no-op (not every repo has a browsable UI) rather than a
     failure.
     """
+    from app.services.coding_engine.mentrix_lead import ROLE_TESTER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
     from app.services.workspace.runtime_discovery import discover_runtime_recipes
 
@@ -1000,7 +1031,7 @@ def _run_app_and_browser_verification(
         _emit(
             mission,
             "browser_verify_attempt",
-            f"{repo.get('label')}: app/browser verification attempt {attempt}/{max_attempts}",
+            f"{repo.get('label')}: Tester role app/browser verification attempt {attempt}/{max_attempts}",
             repository_id=repo.get("repository_id"),
             attempt=attempt,
         )
@@ -1010,6 +1041,8 @@ def _run_app_and_browser_verification(
             project_id=mission.get("project_id"),
             timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
             max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+            role=ROLE_TESTER,
+            allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_TESTER],
         )
         summary = str(out.get("summary") or out.get("status") or "")
         written = list(out.get("files_written") or [])

@@ -30,6 +30,53 @@ _MISSION_ID_RE = re.compile(r"^[0-9a-fA-F-]{8,64}$")
 _LOCK = threading.Lock()
 _MISSIONS: dict[str, dict[str, Any]] = {}
 
+# Process-local set of mission_ids with a live approve_plan/resume_mission
+# thread executing right now, in THIS process. Deliberately not persisted:
+# after a backend restart nothing is running until something resumes it,
+# which is the truthful signal mission_execution_state() needs.
+_RUNNING_LOCK = threading.Lock()
+_RUNNING_MISSIONS: set[str] = set()
+
+
+def _mark_running(mission_id: str) -> None:
+    with _RUNNING_LOCK:
+        _RUNNING_MISSIONS.add(mission_id)
+
+
+def _mark_stopped(mission_id: str) -> None:
+    with _RUNNING_LOCK:
+        _RUNNING_MISSIONS.discard(mission_id)
+
+
+def is_mission_running(mission_id: str) -> bool:
+    with _RUNNING_LOCK:
+        return mission_id in _RUNNING_MISSIONS
+
+
+def mission_execution_state(mission: dict[str, Any]) -> str:
+    """Truthful "is this mission actually executing right now" signal --
+    distinct from its last-saved phase. A mission can sit at a mid-flight
+    phase like "editing" with no live thread anywhere (backend restarted, or
+    the executing thread died) and that must read as "recoverable", not
+    "running", so History never lies about a stuck process.
+    """
+    mid = str(mission.get("id") or "")
+    if is_mission_running(mid):
+        return "running"
+    phase = mission.get("phase")
+    if phase == "blocked":
+        return "blocked"
+    if phase == "cancelled":
+        return "stopped"
+    if phase in ("ready_to_merge", "awaiting_git_approval"):
+        return "completed"
+    if phase == "awaiting_plan_approval":
+        return "stopped"
+    # isolating / editing / committing / pushing with nothing live executing
+    # it right now: mid-flight but not actually running -- recoverable via
+    # resume_mission()/retry_mission(), not silently shown as "running".
+    return "recoverable"
+
 
 def missions_dir() -> Path:
     override = (os.getenv("ZECT_CODING_MISSIONS_DIR") or "").strip()
@@ -136,6 +183,30 @@ def _head(cwd: Path) -> str:
     return _git(cwd, ["rev-parse", "HEAD"]).get("stdout") or ""
 
 
+_EVENT_TO_AGENT = (
+    ("explore_", "explore"),
+    ("diagnose_", "debugger"),
+    ("browser_verify_", "tester"),
+    ("native_implement", "coder"),
+    ("evidence_verify_", "reviewer"),
+    ("review", "reviewer"),
+)
+
+
+def _agents_involved(mission: dict[str, Any]) -> list[str]:
+    """Derive which Mentrix Lead roles actually touched this mission from its
+    own event names, rather than a separately-tracked field -- one source of
+    truth (the event stream), consistent everywhere a mission is read."""
+    seen: list[str] = []
+    for ev in mission.get("events") or []:
+        name = str(ev.get("event") or "")
+        for prefix, agent in _EVENT_TO_AGENT:
+            if name.startswith(prefix) and agent not in seen:
+                seen.append(agent)
+                break
+    return seen
+
+
 def _public(mission: dict[str, Any]) -> dict[str, Any]:
     repos = []
     for r in mission.get("repos") or []:
@@ -175,6 +246,10 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": mission["id"],
         "goal": mission.get("goal"),
+        "mode": mission.get("mode") or "",
+        "source": mission.get("source") or "coding_agent",
+        "agents": _agents_involved(mission),
+        "started_at": mission.get("created_at"),
         "phase": mission.get("phase"),
         "status": mission.get("status"),
         "plan": mission.get("plan"),
@@ -205,6 +280,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "native_implement": mission.get("native_implement") or [],
         "no_auto_merge": True,
         "persistence": "durable_json",
+        "execution_state": mission_execution_state(mission),
         "updated_at": mission.get("updated_at"),
         "events": list(mission.get("events") or [])[-40:],
         "evidence": list(mission.get("events") or [])[-40:],
@@ -213,6 +289,34 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
 
 def get_mission(mission_id: str) -> dict[str, Any]:
     return _public(_lookup(mission_id))
+
+
+def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+    """Project the canonical durable Mission store as a history list --
+    reads the same JSON files _lookup()/_load_mission_from_disk() use, so
+    History is never a second store: it is the Mission/Event persistence
+    itself, just enumerated. Survives navigation and backend restart because
+    the underlying files do.
+    """
+    directory = missions_dir()
+    if not directory.is_dir():
+        return []
+    entries: list[tuple[float, dict[str, Any]]] = []
+    for path in directory.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict) or not data.get("id"):
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        entries.append((mtime, data))
+    entries.sort(key=lambda pair: pair[0], reverse=True)
+    window = entries[offset : offset + max(0, limit)]
+    return [_public(data) for _, data in window]
 
 
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
@@ -759,6 +863,8 @@ def start_mission(
     project_id: int | None = None,
     workspace_parent: str = "",
     propose_if_empty: bool = False,
+    mode: str = "",
+    source: str = "",
 ) -> dict[str, Any]:
     if not (goal or "").strip():
         raise ValueError("goal_required")
@@ -780,6 +886,8 @@ def start_mission(
     mission = {
         "id": mid,
         "goal": goal.strip(),
+        "mode": mode.strip(),
+        "source": source.strip() or "coding_agent",
         "correlation_id": correlation_id,
         "phase": "awaiting_plan_approval",
         "status": "awaiting_plan_approval",
@@ -820,6 +928,36 @@ def tempfile_parent(root: dict[str, Any]) -> Path:
 
 
 def approve_plan(mission_id: str) -> dict[str, Any]:
+    mid = _safe_mission_id(mission_id)
+    _mark_running(mid)
+    try:
+        return _approve_plan_impl(mid)
+    finally:
+        _mark_stopped(mid)
+
+
+def approve_plan_in_background(mission_id: str) -> dict[str, Any]:
+    """Kick off approve_plan() on a daemon thread and return immediately with
+    the mission's current (pre-execution) state, for callers that must not
+    block the HTTP response on a multi-minute mission run (see
+    domains/agent_run/agent_mode.py). The mission is marked running before
+    the thread starts, so a caller that polls get_mission() right away still
+    observes "running", not a race where it briefly looks idle.
+    """
+    mid = _safe_mission_id(mission_id)
+    _mark_running(mid)
+
+    def _run() -> None:
+        try:
+            _approve_plan_impl(mid)
+        finally:
+            _mark_stopped(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return get_mission(mid)
+
+
+def _approve_plan_impl(mission_id: str) -> dict[str, Any]:
     mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
@@ -1166,7 +1304,14 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
             mission["status"] = "blocked"
             _emit(mission, "blocked", f"Edit failed on {repo.get('label')}", error=repo["blocker"])
             return _public(mission)
-        repo["files"] = list(applied.get("files") or [])
+        # Merge, don't overwrite -- the native implementer (Explore/Coder,
+        # taken when there are no JSON patches) may have already recorded
+        # files_written on this repo before this function ever ran.
+        files = list(repo.get("files") or [])
+        for path in applied.get("files") or []:
+            if path not in files:
+                files.append(path)
+        repo["files"] = files
         repo["commands"] = list(applied.get("commands") or [])
         tests = run_repo_tests(wt)
         if not tests.get("ok"):
@@ -1351,6 +1496,33 @@ def cancel_mission(mission_id: str) -> dict[str, Any]:
 
 
 def resume_mission(mission_id: str) -> dict[str, Any]:
+    mid = _safe_mission_id(mission_id)
+    _mark_running(mid)
+    try:
+        return _resume_mission_impl(mid)
+    finally:
+        _mark_stopped(mid)
+
+
+def resume_mission_in_background(mission_id: str) -> dict[str, Any]:
+    """Background-thread twin of approve_plan_in_background(), for a
+    "recoverable" mission (mid-flight phase, no live thread -- e.g. after a
+    backend restart) that a caller wants to genuinely resume rather than
+    just re-inspect."""
+    mid = _safe_mission_id(mission_id)
+    _mark_running(mid)
+
+    def _run() -> None:
+        try:
+            _resume_mission_impl(mid)
+        finally:
+            _mark_stopped(mid)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return get_mission(mid)
+
+
+def _resume_mission_impl(mission_id: str) -> dict[str, Any]:
     mission = _lookup(mission_id)
     if mission.get("phase") == "ready_to_merge":
         _save_mission(mission)
@@ -1361,7 +1533,7 @@ def resume_mission(mission_id: str) -> dict[str, Any]:
         _save_mission(mission)
         return _public(mission)
     if not all(r.get("worktree_path") for r in mission["repos"]):
-        return approve_plan(mission_id)
+        return _approve_plan_impl(mission_id)
     _emit(mission, "resume", "Resuming from checkpoint. Duplicate commits skipped.")
     return _run_edit_test_review(mission)
 

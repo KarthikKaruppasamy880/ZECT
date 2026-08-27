@@ -1,12 +1,13 @@
 # ZECT Present — product final acceptance
 
-**Reviewed:** 2026-08-26 — #188 merged; #190 (V3 layout closure) rebased on `develop`.
+**Reviewed:** 2026-08-26 — #188 and #190 merged on `develop`; production release PR pending.
 
 | Milestone | SHA |
 |---|---|
 | **#187 merge (canonical `develop` base)** | `75aebb15bfea52df4c31d5a41d8a4de77a03ac87` |
 | **#188 merge (media parse + acceptance harness)** | `fda86d1` |
-| **#190 closure branch** | `feat/present-final-closure-p1` (await human merge) |
+| **#190 merge (V3 layout closure)** | `b631632` |
+| **Production release PR** | `feat/present-production-release-p1` (pending) |
 
 ## Real Zinnia master (located — not synthetic)
 
@@ -22,7 +23,8 @@
 |---|---|
 | **Harness / editor fidelity (#188)** | `ZECT_PRESENT_PRODUCT_READY` — COM SSIM 0.49, clone voice, cold restart, browser/Electron viewports |
 | **Generation layout (#190)** | `READY_FOR_HUMAN_PRESENT_LAYOUT_GENERATION_REVIEW_V3` — golden V3 proof `acceptance=true` |
-| **Overall product** | `ZECT_PRESENT_PRODUCT_PARTIAL` — human headed UI still required before final sign-off |
+| **Export/editor parity (production PR)** | OOXML auto-repair for legacy overlap decks; Review uses slide PNG preview; quality banner shows OOXML vs rendered counts |
+| **Overall product** | `ZECT_PRESENT_PRODUCTION_RELEASE_CANDIDATE` after production proof passes — human PowerPoint sign-off still required for `PRODUCT_READY` |
 
 ## Release gates (#188 — merged)
 
@@ -34,22 +36,7 @@
 | Cold restart gate | **PASS** | API kill/start → Electron reopen → notes persisted → export validate |
 | Ultra Review | **PASS** | score 85, **0 Critical/High** |
 
-### Root cause fixed (#188)
-
-- `pptx_parse._collect_parts`: `ppt/media/*` allowed up to **8 MB** (Zinnia `image12.png` ~1.93 MB was previously dropped at 1.5 MB).
-
-### Opt-in harness
-
-```bash
-set ZECT_LIVE_PRESENT_READY=1
-set ZECT_LIVE_VOICE_CLONE=1
-set ZECT_LIVE_COLD_RESTART=1
-set ZECT_LIVE_PPT_COM=1
-set ZECT_LIVE_VOICE_STOCK=1
-cd frontend && npm run test:e2e:present-ready
-```
-
-## V3 generation gates (#190 — pending merge)
+## V3 generation gates (#190 — merged)
 
 | Gate | Status |
 |---|---|
@@ -59,10 +46,20 @@ cd frontend && npm run test:e2e:present-ready
 
 Script: `python backend/scripts/present_golden_v3_proof.py`
 
+## Production release proof (production PR)
+
+Combines golden V3 + legacy `zect-deck.pptx` repair:
+
+```bash
+python backend/scripts/present_production_release_proof.py
+```
+
+Artifact: `backend/artifacts/present-production-release/production_release_report.json`
+
 ## Related docs
 
 - `ZECT_PRESENT_V3_LAYOUT_GENERATION_CLOSURE_STATUS.md`
 - `ZECT_PRESENT_FINAL_ROOT_CAUSE_LAYOUT_GENERATION_CLOSURE_V3.md`
 - `ZECT_PRESENT_FINAL_CLOSURE_RECONCILIATION.md`
 
-**Human merge required for #190 — no auto-merge.**
+**Human merge required for production PR — no auto-merge.**

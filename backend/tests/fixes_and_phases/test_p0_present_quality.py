@@ -280,6 +280,26 @@ def test_editor_save_export_idempotent_shape_count(tmp_path):
     assert again["slides"][0]["shape_count"] == after["slides"][0]["shape_count"]
 
 
+def test_inspect_and_repair_clears_legacy_overlap_fixture():
+    path = _fixture_pptx()
+    if path is None:
+        return
+    before = inspect_pptx_bytes(path.read_bytes())
+    fixed, report = inspect_and_repair_pptx(path.read_bytes())
+    after = inspect_pptx_bytes(fixed)
+    assert before["status"] == "FAIL"
+    assert after["status"] == "PASS"
+    assert after["overlap_count"] == 0
+    assert not after.get("hard_findings")
+
+
+def test_semantic_duplicate_skips_short_label_in_body():
+    from app.services.mentrix.presentation.final_pptx_inspector import _semantic_duplicate_text
+
+    assert not _semantic_duplicate_text("repeat", "repeats adapt from earlier cycles")
+    assert _semantic_duplicate_text("same title", "same title")
+
+
 def test_fast_and_quality_both_call_inspector_and_critic():
     src = inspect.getsource(ZectNativePresentationProvider.generate)
     assert "repair_until_pass" in src

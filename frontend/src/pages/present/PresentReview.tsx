@@ -15,6 +15,8 @@ export default function PresentReview() {
     clipped_text_count: number;
     rendered_overlap_count?: number;
     rendered_clipped_count?: number;
+    inspector_overlap_count?: number;
+    inspector_clipped_count?: number;
     template_conflict_count?: number;
     near_empty_slide_count?: number;
     final_quality_status?: string;
@@ -47,8 +49,9 @@ export default function PresentReview() {
           data-testid="present-review-quality"
         >
           <p className="font-medium">
-            Quality: {verdict} · {gate.slide_count} slides · {gate.rendered_overlap_count ?? gate.overlap_count} rendered
-            overlaps · {gate.rendered_clipped_count ?? gate.clipped_text_count} clipped
+            Quality: {verdict} · {gate.slide_count} slides · OOXML overlaps {gate.inspector_overlap_count ?? gate.overlap_count} ·
+            rendered overlaps {gate.rendered_overlap_count ?? 0} · clipped{" "}
+            {gate.rendered_clipped_count ?? gate.clipped_text_count}
             {(gate.template_conflict_count ?? 0) > 0 ? ` · ${gate.template_conflict_count} template conflicts` : ""}
             {(gate.near_empty_slide_count ?? 0) > 0 ? ` · ${gate.near_empty_slide_count} near-empty` : ""}
           </p>

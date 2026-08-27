@@ -159,6 +159,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
                 "files": list(r.get("files") or []),
                 "commands": list(r.get("commands") or []),
                 "blocker": r.get("blocker") or "",
+                "auto_repair_attempts": r.get("auto_repair_attempts") or 0,
                 "committed_shas": list(r.get("committed_shas") or []),
                 "diff": str(r.get("diff") or "")[:8000],
                 "push": r.get("push") or {},
@@ -899,6 +900,64 @@ def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list
     return []
 
 
+def _diagnose_and_repair_repo(
+    mission: dict[str, Any], repo: dict[str, Any], wt: Path, tests: dict[str, Any]
+) -> dict[str, Any]:
+    """On test failure, feed the failure output back into the same native agent
+    loop used for real edits (not a second implementation) to diagnose and
+    patch, then rerun. Bounded by MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a
+    persistently-broken repo still reaches ``blocked`` rather than looping
+    forever or getting silently reported as complete.
+    """
+    from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+
+    max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX", "2"))
+    attempts = int(repo.get("auto_repair_attempts") or 0)
+    current = tests
+    while not current.get("ok") and attempts < max_attempts:
+        attempts += 1
+        diagnostic_goal = (
+            "The previous change caused this test run to fail:\n\n"
+            f"{(current.get('stdout') or '').strip()}\n{(current.get('stderr') or '').strip()}\n\n"
+            "Diagnose the root cause and patch the affected source file(s) so the "
+            "tests pass. Do not modify test files unless the test itself is "
+            "provably wrong -- explain why in a comment if you do."
+        )
+        _emit(
+            mission,
+            "diagnose_attempt",
+            f"{repo.get('label')}: auto-repair attempt {attempts}/{max_attempts} after test failure",
+            repository_id=repo.get("repository_id"),
+            attempt=attempts,
+        )
+        out = run_mentrix_native_build(
+            goal=diagnostic_goal,
+            workspace=str(wt),
+            project_id=mission.get("project_id"),
+            timeout_s=float(os.getenv("MENTRIX_CODING_AGENT_MISSION_TIMEOUT", "240")),
+            max_steps=int(os.getenv("MENTRIX_CODING_AGENT_MISSION_MAX_STEPS", "48")),
+        )
+        written = list(out.get("files_written") or [])
+        if written:
+            files = list(repo.get("files") or [])
+            for path in written:
+                if path not in files:
+                    files.append(path)
+            repo["files"] = files
+        current = run_repo_tests(wt)
+        _emit(
+            mission,
+            "diagnose_result",
+            f"{repo.get('label')}: repair attempt {attempts} -> {current.get('status')} "
+            f"({len(written)} file(s) touched)",
+            repository_id=repo.get("repository_id"),
+            ok=current.get("ok"),
+            files_written=written,
+        )
+    repo["auto_repair_attempts"] = attempts
+    return current
+
+
 def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
     patches_map = _stringify_patch_map(mission.get("patches_by_repo"))
     diffs: list[str] = []
@@ -921,6 +980,8 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         repo["files"] = list(applied.get("files") or [])
         repo["commands"] = list(applied.get("commands") or [])
         tests = run_repo_tests(wt)
+        if not tests.get("ok"):
+            tests = _diagnose_and_repair_repo(mission, repo, wt, tests)
         repo["test_ok"] = bool(tests.get("ok"))
         repo["test_status"] = tests.get("status")
         repo["test"] = tests
@@ -928,7 +989,8 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         if tests.get("command"):
             repo.setdefault("commands", []).append(tests["command"])
         if not tests.get("ok"):
-            repo["blocker"] = f"tests_{tests.get('status')}"
+            attempts = repo.get("auto_repair_attempts") or 0
+            repo["blocker"] = f"tests_{tests.get('status')}_after_{attempts}_repair_attempt(s)"
         else:
             repo["blocker"] = ""
         diff = _collect_diff(wt)

@@ -190,18 +190,68 @@ class ZectNativePresentationProvider:
             quality["final_quality_status"] = "FAIL"
         set_stage(job["generation_job_id"], "FINAL_QUALITY_CHECK", label="Finalizing")
         trace_slide_count(job, stage="post_repair", component="quality_repair", count=len(plan.get("slides") or []))
-        # Always render a reviewable PPTX. Critic FAIL is reported on the deck;
-        # inspector collisions/clipping/broken rels are hard *export* blockers.
-        try:
+
+        def _render_and_inspect(current_plan: dict[str, Any]) -> tuple[bytes, dict[str, Any], dict[str, Any], int]:
             t_render = time.perf_counter()
             set_stage(job["generation_job_id"], "VISUAL_COMPOSITION", label="Composing slides")
-            data = render_plan_to_pptx(
-                plan,
+            rendered = render_plan_to_pptx(
+                current_plan,
                 template_path=source if used_master else None,
                 definition=definition,
                 user_id=req.user_id or "anon",
             )
             render_ms = int((time.perf_counter() - t_render) * 1000)
+            from app.services.mentrix.presentation.final_pptx_inspector import (
+                inspect_and_repair_pptx,
+                merge_inspector_into_quality,
+            )
+            from app.services.mentrix.presentation.document import document_from_pptx_bytes
+            from app.services.mentrix.presentation.quality_critic import critique_document
+
+            repaired, inspector = inspect_and_repair_pptx(rendered, definition=definition)
+            merged = merge_inspector_into_quality(dict(quality), inspector)
+            doc = document_from_pptx_bytes(repaired, path="")
+            critic = critique_document(doc, prompt=req.content)
+            merged["document_critic"] = critic
+            if critic.get("deck_status") == "FAIL" or critic.get("export_blocked"):
+                merged["status"] = "FAIL"
+                merged["final_quality_status"] = "FAIL"
+            return repaired, merged, inspector, render_ms
+
+        def _post_render_plan_repair(current_plan: dict[str, Any], report: dict[str, Any]) -> dict[str, Any]:
+            from app.services.mentrix.presentation.content_capacity import dedupe_semantic_blocks
+            from app.services.mentrix.presentation.layout_composer import compose_plan
+
+            hard = set(report.get("hard_findings") or [])
+            doc_critic = report.get("document_critic") if isinstance(report.get("document_critic"), dict) else {}
+            if int(doc_critic.get("rendered_overlap_count") or 0) > 0:
+                hard.add("rendered_overlap")
+            for slide in list(current_plan.get("slides") or []):
+                exclude = list(slide.get("_layout_exclude") or [])
+                name = str(slide.get("master_layout_name") or "")
+                if name and name not in exclude:
+                    exclude.append(name)
+                slide["_layout_exclude"] = exclude
+                dedupe_semantic_blocks(slide)
+                if "rendered_overlap" in hard or "text_shape_collision" in hard:
+                    slide["blocks"] = [
+                        b
+                        for b in list(slide.get("blocks") or [])
+                        if str(b.get("kind") or "") not in {"text", "quote", "metric"}
+                    ]
+            return compose_plan(current_plan, definition, prompt=req.content)
+
+        try:
+            data, quality, inspector, render_ms = _render_and_inspect(plan)
+            post_render_attempts = 0
+            while post_render_attempts < 2 and (
+                inspector.get("status") == "FAIL"
+                or str(quality.get("final_quality_status") or "") == "FAIL"
+            ):
+                post_render_attempts += 1
+                plan = _post_render_plan_repair(plan, quality)
+                data, quality, inspector, render_ms = _render_and_inspect(plan)
+                quality["post_render_repair_attempts"] = post_render_attempts
         except UnsafePptxError as exc:
             return {
                 "ok": False,
@@ -224,13 +274,6 @@ class ZectNativePresentationProvider:
                 "zinnia_verified": False,
                 "block_code": "native_render_failed",
             }
-        from app.services.mentrix.presentation.final_pptx_inspector import (
-            inspect_and_repair_pptx,
-            merge_inspector_into_quality,
-        )
-
-        data, inspector = inspect_and_repair_pptx(data, definition=definition)
-        quality = merge_inspector_into_quality(quality, inspector)
         layout_hard = bool(quality.get("layout_hard_fail"))
         critic_fail = str(quality.get("final_quality_status") or quality.get("status") or "") == "FAIL"
         export_blocked = bool(layout_hard or inspector.get("status") == "FAIL" or critic_fail)

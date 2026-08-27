@@ -11,6 +11,7 @@ type Props = {
   slideEmu: { cx: number; cy: number };
   selectedId?: string | null;
   interactive?: boolean;
+  overlayMode?: boolean;
   testId?: string;
   className?: string;
   onSelect?: (id: string | null) => void;
@@ -60,6 +61,7 @@ export default function PresentDocumentCanvas({
   slideEmu,
   selectedId,
   interactive = true,
+  overlayMode = false,
   testId = "present-editor-document-canvas",
   className = "",
   onSelect,
@@ -89,7 +91,7 @@ export default function PresentDocumentCanvas({
     <div
       ref={canvasRef}
       className={`relative aspect-video w-full ${interactive ? "overflow-hidden" : "overflow-visible"} ${className}`}
-      style={{ backgroundColor: bgFill || "#ffffff" }}
+      style={{ backgroundColor: overlayMode ? "transparent" : bgFill || "#ffffff" }}
       data-testid={testId}
       data-canvas="document"
       data-slide-index={slide.index}
@@ -101,12 +103,14 @@ export default function PresentDocumentCanvas({
         const style = geometryPercentStyle(geo, size);
         const kind = String(block.kind);
         const locked = isLockedBlock(block);
+        if (overlayMode && locked) return null;
         const selected = Boolean(!locked && block.id && block.id === selectedId);
         const fill = String(block.content?.fill || "");
-        const gradient = cssGradientFill(block.content as Record<string, unknown> | undefined);
+        const gradient = overlayMode ? undefined : cssGradientFill(block.content as Record<string, unknown> | undefined);
         const shape = String(block.content?.shape || "rect");
         const showBlockFill =
-          locked || kind === "shape" || kind === "icon" || (kind !== "text" && kind !== "quote" && kind !== "metric");
+          !overlayMode &&
+          (locked || kind === "shape" || kind === "icon" || (kind !== "text" && kind !== "quote" && kind !== "metric"));
         const blockFill = showBlockFill ? fill || (kind === "shape" ? "#e8eef3" : "transparent") : "transparent";
         const text = String(block.content?.text || block.content?.value || "");
         const fontSizePt = Number(block.content?.font_size_pt) || 0;
@@ -167,7 +171,9 @@ export default function PresentDocumentCanvas({
           drag.current = null;
         };
         const body =
-          kind === "chart" ? (
+          overlayMode && !isEditing && kind !== "chart" && kind !== "table" ? (
+            <span className="sr-only">{text || kind}</span>
+          ) : kind === "chart" ? (
             <PresentChartPreview block={block} testId={interactive ? "present-editor-chart-glyph" : undefined} />
           ) : kind === "table" ? (
             <table className="h-full w-full table-fixed border-collapse text-[8px]" data-testid={interactive ? "present-editor-table-glyph" : undefined}>
@@ -258,9 +264,13 @@ export default function PresentDocumentCanvas({
             className={`absolute overflow-hidden text-left ${canDrag ? "cursor-move" : ""} ${
               locked
                 ? "pointer-events-none"
-                : selected
-                  ? "ring-2 ring-teal-700"
-                  : "ring-1 ring-transparent hover:ring-slate-300"
+                : overlayMode
+                  ? selected
+                    ? "ring-2 ring-teal-700 bg-teal-700/5"
+                    : "ring-1 ring-transparent hover:ring-teal-400/60"
+                  : selected
+                    ? "ring-2 ring-teal-700"
+                    : "ring-1 ring-transparent hover:ring-slate-300"
             }`}
             onClick={() => {
               if (!interactive || locked) return;

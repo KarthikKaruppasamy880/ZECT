@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -291,3 +292,64 @@ def _write_slide_text(slide, text: str) -> None:
                 p = tf.add_paragraph()
                 p.text = extra[:800]
             return
+
+
+def duplicate_slide_in_pptx(path: str | Path, index: int) -> dict[str, Any]:
+    """Clone an existing slide in-place (OOXML shape tree copy)."""
+    from copy import deepcopy
+
+    pptx = Path(path)
+    prs = Presentation(str(pptx))
+    idx = int(index)
+    if idx < 0 or idx >= len(prs.slides):
+        raise ValueError("slide_index_out_of_range")
+    source = prs.slides[idx]
+    dest = prs.slides.add_slide(source.slide_layout)
+    for shape in source.shapes:
+        newel = deepcopy(shape.element)
+        dest.shapes._spTree.insert_element_before(newel, "p:extLst")
+    # Move new slide directly after source (python-pptx appends at end).
+    slide_ids = prs.slides._sldIdLst
+    new_id = slide_ids[-1]
+    slide_ids.remove(new_id)
+    slide_ids.insert(idx + 1, new_id)
+    tmp = pptx.with_name(f"{pptx.stem}.zect-dup{pptx.suffix}")
+    try:
+        prs.save(str(tmp))
+        os.replace(tmp, pptx)
+        try:
+            from app.services.mentrix.presentation.slide_preview import invalidate_slide_previews
+
+            invalidate_slide_previews(pptx)
+        except Exception:
+            pass
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    sync_sidecar_from_pptx(pptx)
+    return {"ok": True, "path": str(pptx), "slide_count": len(prs.slides), "inserted_at": idx + 1}
+
+
+def sync_sidecar_from_pptx(pptx: Path) -> None:
+    """Refresh notes sidecar from current PPTX so editor slide count matches file."""
+    from app.services.mentrix.presentation.blocks import ensure_unique_block_ids
+    from app.services.mentrix.presentation.document import document_from_pptx_bytes
+    from app.services.pptx_paths import notes_sidecar_for_pptx, write_notes_sidecar
+
+    doc = document_from_pptx_bytes(pptx.read_bytes(), path=str(pptx))
+    slides = []
+    for row in list(doc.get("slides") or []):
+        if not isinstance(row, dict):
+            continue
+        slide_index = int(row.get("index") or len(slides))
+        blocks = ensure_unique_block_ids(list(row.get("blocks") or []), slide_index=slide_index)
+        slides.append(
+            {
+                "index": slide_index,
+                "text": str(row.get("text") or ""),
+                "notes": str(row.get("notes") or ""),
+                "blocks": blocks,
+            }
+        )
+    sidecar = notes_sidecar_for_pptx(pptx)
+    write_notes_sidecar(sidecar, json.dumps({"path": str(pptx), "slides": slides}, indent=2))

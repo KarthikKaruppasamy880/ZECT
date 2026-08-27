@@ -953,9 +953,14 @@ export const mentrixPresentSaveNotes = (path: string, slides: PresentSlide[]) =>
     },
   );
 
-export async function mentrixPresentPptxDownload(path: string): Promise<{ blob: Blob; filename: string }> {
+export async function mentrixPresentPptxDownload(
+  path: string,
+  opts?: { acceptWarnings?: boolean },
+): Promise<{ blob: Blob; filename: string }> {
   const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
-  const url = `${getApiBase()}/api/mentrix/present/pptx?path=${encodeURIComponent(path)}`;
+  const qs = new URLSearchParams({ path });
+  if (opts?.acceptWarnings) qs.set("accept_warnings", "true");
+  const url = `${getApiBase()}/api/mentrix/present/pptx?${qs}`;
   const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -971,6 +976,27 @@ export async function mentrixPresentPptxDownload(path: string): Promise<{ blob: 
   const match = disp.match(/filename="?([^"]+)"?/i);
   return { blob, filename: match?.[1] || "zect-deck.pptx" };
 }
+
+export const mentrixPresentRepairDeck = (path: string) =>
+  request<{
+    ok: boolean;
+    path: string;
+    filename: string;
+    repair: Record<string, unknown>;
+    quality_gate: Awaited<ReturnType<typeof mentrixPresentQualityGate>>;
+  }>("/api/mentrix/present/repair-deck", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+
+export const mentrixPresentDuplicateSlide = (path: string, slideIndex: number) =>
+  request<{ ok: boolean; path: string; slide_count: number; inserted_at: number }>(
+    "/api/mentrix/present/slides/duplicate",
+    {
+      method: "POST",
+      body: JSON.stringify({ path, slide_index: slideIndex }),
+    },
+  );
 
 export const mentrixPresentDecks = () =>
   request<{ ok: boolean; items: Array<{ id: string; name: string; path: string; slide_count: number; modified: number; bytes: number }> }>(

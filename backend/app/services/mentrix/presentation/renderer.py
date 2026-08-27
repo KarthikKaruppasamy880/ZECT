@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +127,22 @@ def _is_placeholder(shape) -> bool:
         return False
 
 
+_DATE_PATTERNS = (
+    "date here",
+    "click to add",
+    "subtitle",
+    "your title here",
+    "presentation title",
+)
+
+
+def _is_sample_layout_text(text: str) -> bool:
+    norm = _norm_line(text)
+    if not norm:
+        return False
+    return any(p in norm for p in _DATE_PATTERNS)
+
+
 def _clear_placeholder_sample_text(slide) -> None:
     """Wipe leftover master/layout sample text before a single canonical write."""
     for shape in slide.shapes:
@@ -140,6 +157,28 @@ def _clear_placeholder_sample_text(slide) -> None:
                 shape.text_frame.text = ""
             except Exception:
                 pass
+
+
+def _clear_layout_sample_text(slide) -> None:
+    """Clear non-placeholder layout sample strings (e.g. Date Here on title slides)."""
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        if _is_placeholder(shape):
+            continue
+        try:
+            text = (shape.text_frame.text or "").strip()
+        except Exception:
+            continue
+        name = str(getattr(shape, "name", "") or "").lower()
+        if _is_sample_layout_text(text) or "date" in name:
+            try:
+                shape.text_frame.clear()
+            except Exception:
+                try:
+                    shape.text_frame.text = ""
+                except Exception:
+                    pass
 
 
 def _norm_line(text: str) -> str:
@@ -188,6 +227,17 @@ _BODY_PH = {
     PP_PLACEHOLDER.BODY,
     PP_PLACEHOLDER.VERTICAL_BODY,
 }
+_SUBTITLE_PH = {
+    PP_PLACEHOLDER.SUBTITLE,
+}
+
+
+def _format_deck_date(metadata: dict[str, Any] | None = None) -> str:
+    meta = metadata if isinstance(metadata, dict) else {}
+    raw = str(meta.get("presentation_date") or meta.get("date") or "").strip()
+    if raw:
+        return raw[:80]
+    return date.today().strftime("%B %d, %Y")
 
 
 def _fill_placeholder(
@@ -195,6 +245,8 @@ def _fill_placeholder(
     *,
     title: str,
     bullets: list[str],
+    subtitle: str = "",
+    deck_date: str = "",
     regions: dict[str, Any] | None = None,
     skip_body: bool = False,
     prefer_generated_body: bool = False,
@@ -206,8 +258,11 @@ def _fill_placeholder(
     OBJECT slots (top-most unused → title, next → body). Never fill one shape twice.
     """
     _clear_placeholder_sample_text(slide)
+    _clear_layout_sample_text(slide)
     title_ph = None
+    subtitle_ph = None
     body_ph = None
+    date_ph = None
     object_phs: list[Any] = []
     if slide.shapes.title is not None:
         try:
@@ -225,23 +280,55 @@ def _fill_placeholder(
         if ph_type in _TITLE_PH:
             if title_ph is None:
                 title_ph = shape
+        elif ph_type in _SUBTITLE_PH:
+            if subtitle_ph is None:
+                subtitle_ph = shape
         elif ph_type in _BODY_PH:
             if body_ph is None:
                 body_ph = shape
+        elif ph_type == PP_PLACEHOLDER.DATE:
+            if date_ph is None:
+                date_ph = shape
         elif ph_type == PP_PLACEHOLDER.OBJECT:
             object_phs.append(shape)
-    unused = [s for s in object_phs if s is not title_ph and s is not body_ph]
+    unused = [
+        s
+        for s in object_phs
+        if s is not title_ph and s is not subtitle_ph and s is not body_ph and s is not date_ph
+    ]
     unused.sort(key=lambda s: (int(getattr(s, "top", 0) or 0), int(getattr(s, "height", 0) or 0)))
+    subtitle_text = (subtitle or "").strip()
     for shape in unused:
         if title_ph is None:
             title_ph = shape
+        elif body_ph is None and not subtitle_text:
+            body_ph = shape
+        elif subtitle_ph is None and subtitle_text:
+            subtitle_ph = shape
         elif body_ph is None:
             body_ph = shape
     title_set = False
+    subtitle_set = False
     body_set = False
     if title_ph is not None:
-        title_ph.text_frame.text = title[:160]
+        title_ph.text_frame.word_wrap = True
+        title_ph.text_frame.text = title[:200]
         title_set = True
+    if subtitle_ph is not None and subtitle_text:
+        subtitle_ph.text_frame.word_wrap = True
+        subtitle_ph.text_frame.text = subtitle_text[:400]
+        subtitle_set = True
+    if date_ph is not None and deck_date:
+        date_ph.text_frame.text = deck_date[:80]
+    elif deck_date:
+        for shape in slide.shapes:
+            if not shape.has_text_frame or _is_placeholder(shape):
+                continue
+            name = str(getattr(shape, "name", "") or "").lower()
+            text = (shape.text_frame.text or "").strip()
+            if "date" in name or _is_sample_layout_text(text):
+                shape.text_frame.text = deck_date[:80]
+                break
     if not skip_body and body_ph is not None and body_ph is not title_ph and not prefer_generated_body:
         filtered = _filter_bullets_against_title(title, bullets)
         if filtered:
@@ -256,8 +343,14 @@ def _fill_placeholder(
         x, y, cx, cy = _geom_box(regions, "title", (0.5, 0.28, 9.0, 0.7))
         box = slide.shapes.add_textbox(x, y, cx, cy)
         box.text_frame.word_wrap = True
-        box.text_frame.text = title[:160]
+        box.text_frame.text = title[:200]
         title_set = True
+    if not subtitle_set and subtitle_text:
+        x, y, cx, cy = _geom_box(regions, "subtitle", (0.5, 0.95, 9.0, 0.45))
+        box = slide.shapes.add_textbox(x, y, cx, cy)
+        box.text_frame.word_wrap = True
+        box.text_frame.text = subtitle_text[:400]
+        subtitle_set = True
     if skip_body:
         return
     if not body_set and bullets:
@@ -360,6 +453,8 @@ def render_plan_to_pptx(
         except (TypeError, ValueError):
             fallback_index = 0
         title = str(slide_spec.get("title") or f"Slide {fallback_index + 1}")
+        subtitle = str(slide_spec.get("key_message") or "").strip()
+        deck_date = _format_deck_date(plan.get("metadata") if isinstance(plan.get("metadata"), dict) else None)
         bullets = text_lines(list(slide_spec.get("blocks") or []))
         if not bullets:
             blocks = list(slide_spec.get("content_blocks") or [])
@@ -375,6 +470,8 @@ def render_plan_to_pptx(
         _fill_placeholder(
             slide,
             title=title,
+            subtitle=subtitle,
+            deck_date=deck_date if layout_intent in {"title", "title_body", "section", "closing"} else "",
             bullets=[] if skip_body else bullets,
             regions=regions,
             skip_body=skip_body,

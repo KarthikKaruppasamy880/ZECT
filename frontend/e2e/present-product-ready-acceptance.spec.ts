@@ -140,7 +140,8 @@ test.describe("Present product READY acceptance", () => {
     expect(fs.existsSync(dest)).toBeTruthy();
     await gotoAuthed(page, `/present/d/${encodeDeckId(dest)}/edit`, "present-studio");
     await assertEditorShell(page, "mixed-deck");
-    await expect(page.getByTestId("present-editor-thumb-canvas-0")).toHaveAttribute("data-canvas", "document");
+    await expect(page.getByTestId("present-editor-thumb-0")).toBeVisible();
+    await expect(page.getByTestId("present-editor-thumb-img-0")).toBeVisible({ timeout: 15_000 });
     const chartHit = page.locator('[data-testid^="present-editor-block-hit-chart"]').first();
     if (await chartHit.isVisible().catch(() => false)) {
       await chartHit.click();

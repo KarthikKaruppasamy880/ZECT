@@ -1933,6 +1933,25 @@ export const runnerConfigure = (repo_path: string, opts?: { env_vars?: Record<st
     body: JSON.stringify({ repo_path, ...opts }),
   });
 
+// Real governed PTY (V2 closure §10)
+export type PtySessionInfo = { id: string; cwd: string; label: string };
+
+export const ptyCreateSession = (workspaceRoot: string, opts?: { cwd?: string; label?: string; rows?: number; cols?: number }) =>
+  request<PtySessionInfo>("/api/workspace/pty/sessions", {
+    method: "POST",
+    body: JSON.stringify({ workspace_root: workspaceRoot, ...opts }),
+  });
+
+export const ptyCloseSession = (sessionId: string) =>
+  request<{ ok: boolean }>(`/api/workspace/pty/sessions/${sessionId}`, { method: "DELETE" });
+
+export function ptyStreamUrl(sessionId: string): string {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const wsBase = getApiBase().replace(/^http/, "ws");
+  const qs = new URLSearchParams({ token: token || "" });
+  return `${wsBase}/api/workspace/pty/sessions/${sessionId}/stream?${qs}`;
+}
+
 // File Explorer
 export const fileList = (path: string, showHidden = false) =>
   request<any[]>(`/api/files/list?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`);

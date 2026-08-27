@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, Play, Plus, Square, Terminal, X } from "lucide-react";
-import { runnerExecute, runnerOutput, runnerStart, runnerStop, codingAgentRuntimeRecipes, type RuntimeRecipe } from "@/lib/api";
+import { Plus, Square, Terminal, X } from "lucide-react";
+import { runnerOutput, runnerStart, runnerStop, codingAgentRuntimeRecipes, type RuntimeRecipe } from "@/lib/api";
 import type { WorkspaceTerminalSession } from "@/lib/workspaceSession";
+import RealTerminal from "./RealTerminal";
 
 type RootChoice = { repoId: number; rootPath: string; label: string };
 
@@ -30,8 +31,12 @@ function joinCwd(root: string, cwdRel: string): string {
 }
 
 /**
- * Per-root command forms: each session cwd is locked. This is App Runner, not a Cursor PTY.
- * Switching the Explorer root does not retarget an existing terminal.
+ * Real workspace-scoped PTY (V2 closure §10) per session tab, plus an App
+ * Runner strip for discovered-recipe / tracked background processes (health
+ * check, restart affected service, stop) -- a separate, backend-owned
+ * process lifecycle from whatever the human types into the interactive
+ * shell above it. Switching the Explorer root does not retarget an existing
+ * terminal.
  */
 export default function WorkspaceTerminal({
   workspaceRoot,
@@ -53,18 +58,12 @@ export default function WorkspaceTerminal({
   const [busy, setBusy] = useState(false);
   const [bgId, setBgId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const key = active?.id || "default";
   const lines = linesById[key] || [];
   const [recipes, setRecipes] = useState<RuntimeRecipe[]>([]);
   const [defaultRecipeId, setDefaultRecipeId] = useState("");
   const [selectedRecipeId, setSelectedRecipeId] = useState("");
   const [recipesReady, setRecipesReady] = useState(false);
-
-  const focusInput = () => {
-    if (!root || busy) return;
-    inputRef.current?.focus();
-  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -107,30 +106,6 @@ export default function WorkspaceTerminal({
   const append = (chunk: string | string[]) => {
     const next = Array.isArray(chunk) ? chunk : [chunk];
     setLinesById((prev) => ({ ...prev, [key]: [...(prev[key] || []), ...next] }));
-  };
-
-  const runOnce = async () => {
-    const cmd = command.trim();
-    if (!cmd || busy) return;
-    if (!root) {
-      append("[error] No workspace root — pick an authorized root for this terminal");
-      return;
-    }
-    setBusy(true);
-    append(["", `$ ${cmd}`]);
-    try {
-      const result = await runnerExecute(cmd, root, 30, root);
-      if (result.stdout) append(String(result.stdout).split("\n"));
-      if (result.stderr) {
-        append(String(result.stderr).split("\n").map((l: string) => `[stderr] ${l}`));
-      }
-      if (result.exit_code !== 0) append(`[exit code: ${result.exit_code}]`);
-    } catch (e) {
-      append(`[error] ${e instanceof Error ? e.message : "execute failed"}`);
-    } finally {
-      setCommand("");
-      setBusy(false);
-    }
   };
 
   const startBg = async (cmdOverride?: string, cwdOverride?: string) => {
@@ -226,11 +201,6 @@ export default function WorkspaceTerminal({
       className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-950 text-slate-100"
       data-testid="workspace-terminal"
       data-locked-root={root || ""}
-      onMouseDown={(e) => {
-        const el = e.target as HTMLElement;
-        if (el.closest("button, a, select, input, textarea, label")) return;
-        focusInput();
-      }}
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-800 px-3 py-1.5 text-[11px] text-slate-400">
         <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-slate-300">
@@ -243,7 +213,6 @@ export default function WorkspaceTerminal({
           data-testid="workspace-terminal-cwd"
         >
           {label ? `${label} · ` : ""}cwd: {root || "(none)"}
-          {root ? " — locked root, not a PTY" : ""}
         </span>
         {onClosePanel ? (
           <button
@@ -314,14 +283,10 @@ export default function WorkspaceTerminal({
           ) : null}
         </div>
       ) : null}
-      <div
-        ref={scrollRef}
-        className="flex-1 min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap"
-        data-testid="workspace-terminal-output"
-      >
+      <div className="flex-1 min-h-0" data-testid="workspace-terminal-output">
         {!root ? (
-          <div className="text-amber-200/90 space-y-2" data-testid="workspace-terminal-no-root">
-            <p>This is a command form (not a Cursor-style PTY). Input stays disabled until a workspace root is attached.</p>
+          <div className="p-3 text-amber-200/90 space-y-2" data-testid="workspace-terminal-no-root">
+            <p>A real terminal needs a workspace root. Input stays disabled until one is attached.</p>
             <p>
               Cursor-style “Add folder to workspace” is <strong>Project → Open local git</strong>{" "}
               (register-local), not an untitled multi-root IDE window.
@@ -334,56 +299,35 @@ export default function WorkspaceTerminal({
               Attach a git root
             </Link>
           </div>
-        ) : lines.length === 0 ? (
-          <div className="space-y-2 text-slate-400" data-testid="workspace-terminal-help">
-            <p>This folder is the locked root — not a PTY. Commands run here via App Runner.</p>
-            <p>Not a live Cursor shell. Commands run under this locked root via App Runner.</p>
-            <p>
-              <strong className="text-slate-300">Run</strong> = one-shot, 30 seconds (<code>git status</code>).{" "}
-              <strong className="text-slate-300">Start app / BG</strong> = long-running discovered recipe (not hardcoded <code>npm run dev</code> at clone root).
-              Mentrix chat cannot spawn a PTY. Postgres is never started by ZECT.
-            </p>
-            <p>
-              Preview and process list:{" "}
-              <Link to="/app-runner" className="text-teal-300 underline" data-testid="workspace-terminal-app-runner">
-                App Runner
-              </Link>
-            </p>
-          </div>
         ) : (
-          lines.map((line, i) => <div key={`${i}-${line.slice(0, 24)}`}>{line}</div>)
+          <RealTerminal key={key} workspaceRoot={root} label={label} />
         )}
+      </div>
+      <div
+        ref={scrollRef}
+        className="max-h-28 shrink-0 overflow-auto border-t border-slate-800 px-3 py-1 font-mono text-[10px] leading-relaxed whitespace-pre-wrap text-slate-400"
+        data-testid="workspace-terminal-app-runner-log"
+      >
+        {lines.length ? (
+          lines.map((line, i) => <div key={`${i}-${line.slice(0, 24)}`}>{line}</div>)
+        ) : root ? (
+          <p data-testid="workspace-terminal-help">
+            App Runner tracks background services separately from this shell —{" "}
+            <strong className="text-slate-300">Start app</strong> runs the discovered recipe as a health-checked,
+            restartable process; type directly into the terminal above for anything else.{" "}
+            <Link to="/app-runner" className="text-teal-300 underline" data-testid="workspace-terminal-app-runner">
+              App Runner
+            </Link>
+          </p>
+        ) : null}
       </div>
       <form
         className="relative z-20 flex shrink-0 flex-wrap items-center gap-1 border-t border-slate-800 bg-slate-950 p-2 pointer-events-auto"
         onSubmit={(e) => {
           e.preventDefault();
-          void runOnce();
+          void startBg();
         }}
       >
-        <span className="text-teal-400 font-mono text-xs">$</span>
-        <input
-          ref={inputRef}
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          disabled={!root || busy}
-          placeholder={root ? "Type a command, then Run or Start app" : "No workspace root — attach a git folder on the Project"}
-          title={!root ? "Attach a git root: Project → Open local git (register-local)" : "Command form: Run = 30s; Start app / BG = long-running"}
-          className="min-h-9 min-w-0 flex-1 bg-transparent px-1 py-2 font-mono text-xs text-slate-100 outline-none placeholder:text-slate-500 pointer-events-auto"
-          data-testid="workspace-terminal-input"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-        <button
-          type="submit"
-          disabled={!root || busy || !command.trim()}
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] bg-teal-700 text-white disabled:opacity-40"
-          data-testid="workspace-terminal-run"
-        >
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-          Run
-        </button>
         {recipes.length ? (
           <select
             value={selectedRecipeId || defaultRecipeId}
@@ -413,10 +357,20 @@ export default function WorkspaceTerminal({
         >
           Start app
         </button>
+        <input
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          disabled={!root || busy}
+          placeholder="Custom background command…"
+          className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-100 outline-none placeholder:text-slate-500"
+          data-testid="workspace-terminal-input"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
         <button
-          type="button"
+          type="submit"
           disabled={!root || busy || !command.trim()}
-          onClick={() => void startBg()}
           className="rounded px-2 py-1 text-[11px] border border-slate-600 text-slate-300 disabled:opacity-40"
           data-testid="workspace-terminal-start"
           title="Background process — use for servers that do not exit"

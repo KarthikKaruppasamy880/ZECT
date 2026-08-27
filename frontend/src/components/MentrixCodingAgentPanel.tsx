@@ -159,6 +159,7 @@ export default function MentrixCodingAgentPanel({
             setHandoffMission(mission);
             setTab("agent");
           }}
+          onFilesChanged={onFilesChanged}
         />
       ) : tab === "history" ? (
         <HistoryPane
@@ -704,6 +705,7 @@ function PlanPane({
   workspaceRoot,
   model,
   onApproved,
+  onFilesChanged,
 }: {
   goalSeed: string;
   workItemId?: number | null;
@@ -712,6 +714,7 @@ function PlanPane({
   workspaceRoot: string;
   model: string;
   onApproved: (mission: CodingAgentMission) => void;
+  onFilesChanged?: (paths: string[]) => void;
 }) {
   const [goal, setGoal] = useState(goalSeed);
   const [markdown, setMarkdown] = useState("");
@@ -786,9 +789,17 @@ function PlanPane({
         propose_if_empty: true,
       });
       onApproved(created);
+      if (created.files?.length) onFilesChanged?.(created.files);
       if (created.phase === "awaiting_plan_approval") {
         void codingAgentApprovePlan(created.id)
-          .then(onApproved)
+          .then((approved) => {
+            onApproved(approved);
+            // approve_plan runs edit -> test -> diagnose/repair -> app
+            // start/browser-verify synchronously -- its response already
+            // carries every file that loop touched, so the real Explorer/
+            // Diff must refresh now, not wait for a later manual click.
+            if (approved.files?.length) onFilesChanged?.(approved.files);
+          })
           .catch(() => {
             /* Agent tab polls / shows blockers; PLAN already handed off. */
           });

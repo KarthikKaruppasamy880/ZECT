@@ -2066,6 +2066,8 @@ export type CodingAgentMission = {
     diff?: string;
     push?: Record<string, unknown>;
     pr?: Record<string, unknown>;
+    auto_repair_attempts?: number;
+    browser_verification?: { ran?: boolean; verified?: boolean; attempts?: number; summary?: string };
   }>;
   files: string[];
   commands: string[];

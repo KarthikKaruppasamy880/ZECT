@@ -105,6 +105,9 @@ export default function PresentDocumentCanvas({
         const fill = String(block.content?.fill || "");
         const gradient = cssGradientFill(block.content as Record<string, unknown> | undefined);
         const shape = String(block.content?.shape || "rect");
+        const showBlockFill =
+          locked || kind === "shape" || kind === "icon" || (kind !== "text" && kind !== "quote" && kind !== "metric");
+        const blockFill = showBlockFill ? fill || (kind === "shape" ? "#e8eef3" : "transparent") : "transparent";
         const text = String(block.content?.text || block.content?.value || "");
         const fontSizePt = Number(block.content?.font_size_pt) || 0;
         const fontSizePx = fontSizePt > 0 ? `${Math.max(8, Math.round(fontSizePt * 1.333))}px` : undefined;
@@ -248,7 +251,7 @@ export default function PresentDocumentCanvas({
             data-locked={locked ? "true" : "false"}
             style={{
               ...style,
-              backgroundColor: gradient ? undefined : fill || (kind === "shape" ? "#e8eef3" : "transparent"),
+              backgroundColor: gradient ? undefined : blockFill,
               backgroundImage: gradient,
               borderRadius: shape === "ellipse" ? "999px" : undefined,
             }}

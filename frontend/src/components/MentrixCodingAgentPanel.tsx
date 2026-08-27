@@ -14,6 +14,8 @@ import {
   X,
 } from "lucide-react";
 import ModelSelector from "@/components/ModelSelector";
+import { MentionAutocomplete, MentionContextStrip } from "@/components/MentionComposerAddons";
+import { hasMentions } from "@/lib/mentions";
 import {
   codingAgentApprove,
   codingAgentApproveGit,
@@ -22,6 +24,7 @@ import {
   codingAgentCancelMission,
   codingAgentCreateMission,
   codingAgentCreateSession,
+  codingAgentResolveMentions,
   codingAgentResumeMission,
   codingAgentRetryMission,
   codingAgentStream,
@@ -29,9 +32,12 @@ import {
   codingAgentSavePlan,
   developerAsk,
   developerPlan,
+  getDocumentMarkdown,
   mentrixStartRun,
+  uploadDocument,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
+  type ContextPack,
   type MentrixCodingAgentEvent,
 } from "@/lib/api";
 
@@ -724,12 +730,61 @@ function PlanPane({
   void model;
 
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  const mdRef = useRef<HTMLTextAreaElement | null>(null);
+  const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const [attachments, setAttachments] = useState<{ id: number; filename: string; markdown: string }[]>([]);
+  const [attaching, setAttaching] = useState(false);
+
+  /** Resolve every @mention against real data and fold both that and any
+   * uploaded attachments into one context blob to prepend to what actually
+   * reaches the model -- @mentions in the PLAN.md text are decorative
+   * otherwise. */
+  const resolveContextAndBuildBlob = async (): Promise<string> => {
+    const parts: string[] = [];
+    if (hasMentions(markdown) && workspaceRoot) {
+      try {
+        const { pack } = await codingAgentResolveMentions({
+          text: markdown,
+          workspace: workspaceRoot,
+          work_item_id: workItemId ?? undefined,
+        });
+        setMentionPack(pack);
+        const resolved = pack.items.filter((i) => i.verification_state !== "unresolved");
+        for (const item of resolved) parts.push(`[${item.source_type}:${item.source_id}]\n${item.content}`);
+      } catch {
+        /* Context resolution failing must never block Save/Approve & Build. */
+      }
+    }
+    for (const a of attachments) parts.push(`[attachment:${a.filename}]\n${a.markdown}`);
+    return parts.length ? `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Plan\n\n` : "";
+  };
+
+  const attachFile = async (file: File) => {
+    setAttaching(true);
+    setError(null);
+    try {
+      const { artifact } = await uploadDocument({ file, projectId: projectId ?? undefined });
+      const doc = await getDocumentMarkdown(artifact.id);
+      setAttachments((prev) => [
+        ...prev,
+        { id: artifact.id, filename: file.name, markdown: doc.markdown || "" },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Attachment upload failed");
+    } finally {
+      setAttaching(false);
+    }
+  };
 
   const save = async () => {
     if (!markdown.trim()) return;
     setBusy(true);
     setError(null);
     try {
+      // Resolve for display (truthful Context Used while still drafting) --
+      // the persisted PLAN.md stays exactly what the user wrote; the
+      // resolved blob is only prepended when the mission is actually built.
+      await resolveContextAndBuildBlob();
       await codingAgentSavePlan({
         work_item_or_run: key,
         title: "coding",
@@ -778,13 +833,15 @@ function PlanPane({
     setBusy(true);
     setError(null);
     try {
-      await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown });
+      const contextBlob = await resolveContextAndBuildBlob();
+      const augmentedPlan = contextBlob ? `${contextBlob}${markdown}` : markdown;
+      await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown: augmentedPlan });
       const created = await codingAgentCreateMission({
         goal: goal.trim() || "Approved PLAN",
         project_id: projectId,
         work_item_id: workItemId,
         roots,
-        plan: markdown,
+        plan: augmentedPlan,
         workspace_parent: workspaceRoot,
         propose_if_empty: true,
       });
@@ -822,12 +879,43 @@ function PlanPane({
         data-testid="mentrix-coding-agent-plan-goal"
       />
       <textarea
+        ref={mdRef}
         value={markdown}
         onChange={(e) => setMarkdown(e.target.value)}
         className="mt-1 min-h-[8rem] flex-1 rounded border border-slate-200 px-2 py-1 font-mono text-[11px]"
-        placeholder="## Plan"
+        placeholder="## Plan  --  @file @folder @symbol @references @repo @plan @diff @terminal @error @test @lattice @skill @rule"
         data-testid="mentrix-coding-agent-plan-md"
       />
+      <MentionAutocomplete
+        value={markdown}
+        onChange={(next, cursor) => {
+          setMarkdown(next);
+          requestAnimationFrame(() => mdRef.current?.setSelectionRange(cursor, cursor));
+        }}
+        textareaRef={mdRef}
+      />
+      <MentionContextStrip pack={mentionPack} />
+      <div className="mt-1 flex items-center gap-2">
+        <label className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600">
+          {attaching ? "Uploading…" : "Attach file"}
+          <input
+            type="file"
+            className="hidden"
+            data-testid="mentrix-coding-agent-plan-attach"
+            accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,.py,.ts,.tsx,.js,.jsx,.pdf,.docx,.pptx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void attachFile(file);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {attachments.map((a) => (
+          <span key={a.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+            {a.filename}
+          </span>
+        ))}
+      </div>
       {error ? (
         <p className="text-rose-600" data-testid="mentrix-coding-agent-plan-error">
           {error}

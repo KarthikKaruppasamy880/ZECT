@@ -414,6 +414,26 @@ async def list_processes():
     return [info.to_dict() for info in _processes.values()]
 
 
+def get_output_sync(process_id: str, offset: int = 0, limit: int = 200) -> Optional[dict]:
+    """Same lookup as the /output route, callable from plain sync code (the
+    @terminal mention resolver has no request/event-loop context). Returns
+    None instead of raising when the process id is unknown."""
+    info = _processes.get(process_id)
+    if not info:
+        return None
+    lines = info.output_lines[offset:offset + limit]
+    return {
+        "id": process_id,
+        "running": info.is_running,
+        "exit_code": info.proc.returncode,
+        "total_lines": len(info.output_lines),
+        "offset": offset,
+        "lines": lines,
+        "label": info.label,
+        "cmd": info.cmd,
+    }
+
+
 @router.get("/output/{process_id}")
 async def get_output(process_id: str, offset: int = 0, limit: int = 200):
     """Get output lines from a process."""

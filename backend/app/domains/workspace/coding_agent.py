@@ -39,6 +39,13 @@ class SessionApprove(BaseModel):
     approve: bool = True
 
 
+class ResolveMentionsIn(BaseModel):
+    text: str = Field(..., min_length=1)
+    workspace: str = Field(..., min_length=1)
+    project_key: str = ""
+    work_item_id: int | None = None
+
+
 @router.post("/sessions")
 def create_session(req: SessionCreate, _user: CurrentUser = Depends(get_current_user)):
     """Start a Mentrix Coding Agent session against a workspace path."""
@@ -382,3 +389,33 @@ def coding_runtime_recipes(root: str = Query(..., min_length=1), _user: CurrentU
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     return discover_runtime_recipes(root)
+
+
+@router.post("/context/resolve-mentions")
+def coding_resolve_mentions(
+    req: ResolveMentionsIn,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Resolve every @mention in a composer message against real data and
+    return a truthful, bounded ContextPack -- the same one that should be
+    prepended to the goal/question actually sent to the model. Never 500s on
+    a bad individual mention; each becomes an "unresolved" item instead."""
+    from app.infrastructure.allowed_paths import path_under_allowed_roots
+    from app.services.coding_engine.mention_resolver import resolve_mentions
+    from app.services.work_items.context_engine import MentrixContextEngine
+
+    try:
+        root = path_under_allowed_roots(req.workspace)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    items = resolve_mentions(
+        req.text,
+        workspace=root,
+        project_key=req.project_key or "",
+        work_item_id=req.work_item_id,
+        db=db,
+    )
+    pack = MentrixContextEngine().build(work_item_id=req.work_item_id, extra_items=items)
+    return {"ok": True, "pack": pack.to_dict()}

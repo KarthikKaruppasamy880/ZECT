@@ -60,11 +60,11 @@ def workspace(tmp_path, monkeypatch):
 
 
 def _run_with_fake_llm(monkeypatch, workspace, *, role, allowed_tools, responses):
-    import app.adapters.coding_engine_mentrix as mod
+    import app.adapters.llm.openai_compat as openai_compat_mod
 
-    monkeypatch.setattr(mod, "openai_compat_available", lambda: True)
+    monkeypatch.setattr(openai_compat_mod, "openai_compat_available", lambda: True)
     fake_client = _FakeClient(responses)
-    monkeypatch.setattr(mod, "get_openai_compat_client", lambda **_k: fake_client)
+    monkeypatch.setattr(openai_compat_mod, "get_openai_compat_client", lambda **_k: fake_client)
 
     rt = MentrixNativeCodingRuntime()
     run_id = rt.start_run(

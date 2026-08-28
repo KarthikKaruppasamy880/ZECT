@@ -71,6 +71,30 @@ def _new_marker(label: str) -> str:
     return f"ZECT_{label}_{uuid.uuid4().hex[:8]}"
 
 
+def _write_with_timeout(session, data: str, timeout_s: float = 8.0) -> bool:
+    """PTY writes block when the shell is not reading stdin (e.g. during sleep).
+    Never call write() directly in tests without a ceiling — a blocked write
+    bypasses polling timeouts and can hang CI indefinitely."""
+    result: list[object] = []
+
+    def _do() -> None:
+        try:
+            result.append(session.write(data))
+        except Exception as exc:  # noqa: BLE001
+            result.append(exc)
+
+    thread = threading.Thread(target=_do, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_s)
+    if thread.is_alive():
+        return False
+    if len(result) == 1 and isinstance(result[0], Exception):
+        if isinstance(result[0], EOFError):
+            return False
+        raise result[0]
+    return True
+
+
 def _wait_for_execution(session, drain: _Drain, base_label: str, timeout_s: float) -> bool:
     """Writes `echo <marker>` and waits until the shell has actually
     *executed* it, not merely accepted the keystrokes.
@@ -92,14 +116,14 @@ def _wait_for_execution(session, drain: _Drain, base_label: str, timeout_s: floa
     deadline = time.time() + timeout_s
     retry_at = time.time() + timeout_s * 2 / 3
     marker = _new_marker(base_label)
-    session.write(f"echo {marker}\n")
+    _write_with_timeout(session, f"echo {marker}\n")
     retried = False
     while time.time() < deadline:
         if drain.text.count(marker) >= 2:
             return True
         if not retried and time.time() > retry_at:
             marker = _new_marker(base_label)
-            session.write(f"echo {marker}\n")
+            _write_with_timeout(session, f"echo {marker}\n")
             retried = True
         time.sleep(0.2)
     return drain.text.count(marker) >= 2
@@ -129,6 +153,7 @@ class TestWorkspaceJailing:
 
 
 @pytest.mark.skipif(not _SHELL, reason="no interactive shell available in this environment")
+@pytest.mark.timeout(120)
 class TestRealPtyLifecycle:
     def test_spawn_write_read_is_a_real_shell_round_trip(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
@@ -169,15 +194,14 @@ class TestRealPtyLifecycle:
             # until well after the interrupt, defeating the test below
             # regardless of whether Ctrl+C itself works.
             assert _wait_for_execution(session, drain, "READY", 40.0), "the shell never became ready"
-            session.write("sleep 30\n")
-            time.sleep(1.5)
+            assert _write_with_timeout(session, "sleep 3\n"), "could not start sleep in the shell"
+            time.sleep(1.0)
             session.interrupt()
-            # If the shell were still blocked inside `sleep 30`, this next
-            # command could not be *executed* (only echoed) until the full
-            # 30s elapsed -- seeing it actually execute well before that
-            # proves the sleep was interrupted, not merely outlived.
-            assert _wait_for_execution(session, drain, "AFTER_INTERRUPT", 15.0), (
-                "no command executed within 15s after Ctrl+C -- sleep 30 was not interrupted"
+            # If the shell were still blocked inside `sleep 3`, the next command
+            # could not be *executed* until sleep finished — seeing it execute
+            # well before that proves sleep was interrupted, not merely outlived.
+            assert _wait_for_execution(session, drain, "AFTER_INTERRUPT", 12.0), (
+                "no command executed within 12s after Ctrl+C -- sleep was not interrupted"
             )
             assert session.isalive() is True, "Ctrl+C must interrupt the foreground command, not kill the shell"
         finally:

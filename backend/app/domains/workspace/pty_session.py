@@ -57,9 +57,10 @@ class PtySession:
         return chunk or ""
 
     def write(self, data: str) -> int:
-        with self._write_lock:
-            payload: str | bytes = data.encode("utf-8") if not _IS_WINDOWS else data
-            return self.proc.write(payload)
+        # Do not hold _write_lock across proc.write() — it blocks when the shell
+        # is not reading stdin and would stall interrupt/close in tests and CI.
+        payload: str | bytes = data.encode("utf-8") if not _IS_WINDOWS else data
+        return self.proc.write(payload)
 
     def resize(self, rows: int, cols: int) -> None:
         with self._write_lock:

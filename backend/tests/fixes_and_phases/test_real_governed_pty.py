@@ -87,6 +87,10 @@ def _write_with_timeout(session, data: str, timeout_s: float = 8.0) -> bool:
     thread.start()
     thread.join(timeout=timeout_s)
     if thread.is_alive():
+        try:
+            session.interrupt()
+        except Exception:  # noqa: BLE001
+            pass
         return False
     if len(result) == 1 and isinstance(result[0], Exception):
         if isinstance(result[0], EOFError):

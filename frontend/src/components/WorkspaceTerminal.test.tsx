@@ -4,7 +4,6 @@ import { MemoryRouter } from "react-router-dom";
 import WorkspaceTerminal from "./WorkspaceTerminal";
 
 vi.mock("@/lib/api", () => ({
-  runnerExecute: vi.fn(),
   runnerOutput: vi.fn(),
   runnerStart: vi.fn(),
   runnerStop: vi.fn(),
@@ -13,6 +12,10 @@ vi.mock("@/lib/api", () => ({
     default_id: "pkg-dev",
     recipes: [{ id: "pkg-dev", kind: "frontend", label: "npm run dev", command: "npm run dev", cwdRel: ".", confirmRequired: false }],
   })),
+}));
+
+vi.mock("./RealTerminal", () => ({
+  default: ({ workspaceRoot }: { workspaceRoot: string }) => <div data-testid="real-terminal-stub">{workspaceRoot}</div>,
 }));
 
 describe("WorkspaceTerminal", () => {
@@ -25,20 +28,20 @@ describe("WorkspaceTerminal", () => {
     expect(screen.getByTestId("workspace-terminal-no-root")).toBeTruthy();
     expect(screen.getByTestId("workspace-terminal-attach-root")).toHaveAttribute("href", "/projects");
     expect(screen.getByTestId("workspace-terminal-input")).toBeDisabled();
-    expect(screen.getByTestId("workspace-terminal-input").getAttribute("placeholder") || "").toMatch(/No workspace root/i);
+    expect(screen.queryByTestId("real-terminal-stub")).toBeNull();
   });
 
-  it("enables the command field when a workspace root is attached", () => {
+  it("renders a real terminal and enables App Runner controls when a workspace root is attached", () => {
     render(
       <MemoryRouter>
         <WorkspaceTerminal workspaceRoot="C:/tmp/zect" />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("workspace-terminal-input")).not.toBeDisabled();
+    expect(screen.getByTestId("real-terminal-stub")).toHaveTextContent("C:/tmp/zect");
     expect(screen.getByTestId("workspace-terminal-cwd")).toHaveTextContent(/C:\/tmp\/zect/i);
-    expect(screen.getByTestId("workspace-terminal-cwd")).toHaveTextContent(/locked root/i);
+    expect(screen.getByTestId("workspace-terminal-input")).not.toBeDisabled();
     expect(screen.getByTestId("workspace-terminal-start-app")).not.toBeDisabled();
-    expect(screen.getByTestId("workspace-terminal-help")).toHaveTextContent(/This folder is the locked root/i);
+    expect(screen.getByTestId("workspace-terminal-help")).toHaveTextContent(/App Runner tracks background services/i);
     expect(screen.getByTestId("workspace-terminal-app-runner")).toHaveAttribute("href", "/app-runner");
   });
 
@@ -51,7 +54,7 @@ describe("WorkspaceTerminal", () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByTestId("workspace-terminal-input")).not.toBeDisabled();
+    expect(screen.getByTestId("real-terminal-stub")).toHaveTextContent("C:/tmp/zoas");
     expect(screen.getByTestId("workspace-terminal-cwd")).toHaveTextContent(/C:\/tmp\/zoas/i);
   });
 

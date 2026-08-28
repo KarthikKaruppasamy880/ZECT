@@ -13,6 +13,7 @@ import shutil
 import sys
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -66,6 +67,44 @@ class _Drain:
         self._stop = True
 
 
+def _new_marker(label: str) -> str:
+    return f"ZECT_{label}_{uuid.uuid4().hex[:8]}"
+
+
+def _wait_for_execution(session, drain: _Drain, base_label: str, timeout_s: float) -> bool:
+    """Writes `echo <marker>` and waits until the shell has actually
+    *executed* it, not merely accepted the keystrokes.
+
+    A cooked-mode pty echoes typed input immediately regardless of whether
+    the shell has finished starting up (or is even the current foreground
+    reader) -- so a marker appearing once only proves the pty accepted a
+    write, not that the shell ran the command. The shell's own `echo`
+    output is a *second*, separate occurrence of the same marker text (the
+    echoed input line "echo <marker>" plus the command's bare output line
+    "<marker>"). Requiring two occurrences of one attempt's marker is what
+    actually proves execution -- portable across shells/prompts/users,
+    unlike matching a literal "$" prompt (differs by shell/locale/root vs.
+    non-root, and is exactly what failed in CI on a plain bash prompt).
+    Retries use a fresh marker each time so a slow-starting shell can't
+    produce a false "executed" reading from two separate echoes of two
+    different attempts.
+    """
+    deadline = time.time() + timeout_s
+    retry_at = time.time() + timeout_s * 2 / 3
+    marker = _new_marker(base_label)
+    session.write(f"echo {marker}\n")
+    retried = False
+    while time.time() < deadline:
+        if drain.text.count(marker) >= 2:
+            return True
+        if not retried and time.time() > retry_at:
+            marker = _new_marker(base_label)
+            session.write(f"echo {marker}\n")
+            retried = True
+        time.sleep(0.2)
+    return drain.text.count(marker) >= 2
+
+
 class TestWorkspaceJailing:
     def test_workspace_root_outside_allowed_roots_is_rejected(self, monkeypatch):
         monkeypatch.delenv("ZECT_WORKSPACE_ROOT", raising=False)
@@ -98,9 +137,9 @@ class TestRealPtyLifecycle:
         drain = _Drain(session)
         try:
             assert session.isalive() is True
-            assert drain.wait_for("$", 20.0), "shell never produced a prompt"
-            session.write("echo HELLO_REAL_PTY\n")
-            assert drain.wait_for("HELLO_REAL_PTY", 10.0), "real command output never arrived"
+            assert _wait_for_execution(session, drain, "PTY_READY", 40.0), (
+                "the shell never actually executed a command -- only echoed the keystrokes, or nothing at all"
+            )
         finally:
             drain.stop()
             session.close()
@@ -123,21 +162,23 @@ class TestRealPtyLifecycle:
         session = mgr.create(str(tmp_path), shell=_SHELL)
         drain = _Drain(session)
         try:
-            assert drain.wait_for("$", 20.0), "shell never produced a prompt"
-            before = len(drain.text)
+            # Prove the shell has actually finished starting up and is
+            # executing commands before starting the long-running one -- a
+            # slow-starting shell could otherwise still be mid-startup when
+            # "sleep 30" is sent, so it wouldn't actually start running
+            # until well after the interrupt, defeating the test below
+            # regardless of whether Ctrl+C itself works.
+            assert _wait_for_execution(session, drain, "READY", 40.0), "the shell never became ready"
             session.write("sleep 30\n")
             time.sleep(1.5)
             session.interrupt()
-            # A fresh prompt reappearing well under 30s proves the sleep was
-            # interrupted, not merely waited out.
-            deadline = time.time() + 10.0
-            new_prompt_seen = False
-            while time.time() < deadline:
-                if drain.text[before:].rstrip().endswith("$"):
-                    new_prompt_seen = True
-                    break
-                time.sleep(0.3)
-            assert new_prompt_seen, "no fresh prompt after Ctrl+C -- sleep 30 was not interrupted"
+            # If the shell were still blocked inside `sleep 30`, this next
+            # command could not be *executed* (only echoed) until the full
+            # 30s elapsed -- seeing it actually execute well before that
+            # proves the sleep was interrupted, not merely outlived.
+            assert _wait_for_execution(session, drain, "AFTER_INTERRUPT", 15.0), (
+                "no command executed within 15s after Ctrl+C -- sleep 30 was not interrupted"
+            )
             assert session.isalive() is True, "Ctrl+C must interrupt the foreground command, not kill the shell"
         finally:
             drain.stop()

@@ -52,6 +52,8 @@ class _Drain:
                 chunk = self.session.read(4096)
             except Exception:  # noqa: BLE001
                 break
+            if self._stop:
+                break
             if chunk:
                 self.text += chunk
 

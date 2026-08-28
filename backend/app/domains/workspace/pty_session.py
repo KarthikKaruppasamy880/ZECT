@@ -46,9 +46,15 @@ class PtySession:
         self._write_lock = threading.Lock()
 
     def read(self, size: int = 4096) -> str:
-        """Blocking read — callers must run this off the asyncio event loop
-        (e.g. via asyncio.to_thread), same as any real terminal's stdout."""
+        """Blocking read with a short POSIX poll so drain threads and CI tests
+        can exit cleanly; callers still run this off the asyncio event loop."""
         try:
+            if not _IS_WINDOWS:
+                import select
+
+                ready, _, _ = select.select([self.proc.fd], [], [], 0.25)
+                if not ready:
+                    return ""
             chunk = self.proc.read(size)
         except EOFError:
             return ""

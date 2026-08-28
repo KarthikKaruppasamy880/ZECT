@@ -320,6 +320,8 @@ def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
 
 
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
+    if (mission.get("status") == "cancelled" or mission.get("phase") == "cancelled") and event != "cancelled":
+        return
     # Copy scalars only — never share the live kwargs dict with redact/telemetry
     # (that dict is also stored on the mission and JSON-persisted).
     extra: dict[str, Any] = {}
@@ -1012,6 +1014,9 @@ def _approve_plan_impl(mission_id: str) -> dict[str, Any]:
         repo["main_unchanged"] = iso.get("main_unchanged")
         _write_checkpoint(repo)
 
+    if mission.get("status") == "cancelled" or mission.get("phase") == "cancelled":
+        return _public(mission)
+
     mission["phase"] = "editing"
     _emit(mission, "isolating", "Worktrees ready.")
     if mission.get("native_implement_pending"):
@@ -1480,7 +1485,9 @@ def approve_git(mission_id: str, *, commit: bool = True, push: bool = True) -> d
 
 
 def cancel_mission(mission_id: str) -> dict[str, Any]:
-    mission = _lookup(mission_id)
+    mid = _safe_mission_id(mission_id)
+    _mark_stopped(mid)
+    mission = _lookup(mid)
     mission["status"] = "cancelled"
     mission["phase"] = "cancelled"
     _emit(mission, "cancelled", "Mission cancelled. Worktrees and recorded commits preserved.")

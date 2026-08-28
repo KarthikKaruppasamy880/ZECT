@@ -150,7 +150,7 @@ def _serialize_mission_as_agent_run(mission: dict[str, Any], *, task: str, model
     events = list(mission.get("events") or [])
     execution_state = str(mission.get("execution_state") or "")
     status = _MISSION_STATUS.get(execution_state, execution_state or "running")
-    if mission.get("phase") == "cancelled":
+    if mission.get("phase") == "cancelled" or mission.get("status") == "cancelled":
         status = "cancelled"
     steps = [
         {

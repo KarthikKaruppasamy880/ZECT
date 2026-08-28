@@ -49,13 +49,17 @@ class PtySession:
         """Blocking read — callers must run this off the asyncio event loop
         (e.g. via asyncio.to_thread), same as any real terminal's stdout."""
         try:
-            return self.proc.read(size)
+            chunk = self.proc.read(size)
         except EOFError:
             return ""
+        if isinstance(chunk, bytes):
+            return chunk.decode("utf-8", errors="replace")
+        return chunk or ""
 
     def write(self, data: str) -> int:
         with self._write_lock:
-            return self.proc.write(data)
+            payload: str | bytes = data.encode("utf-8") if not _IS_WINDOWS else data
+            return self.proc.write(payload)
 
     def resize(self, rows: int, cols: int) -> None:
         with self._write_lock:

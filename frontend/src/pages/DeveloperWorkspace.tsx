@@ -1278,7 +1278,10 @@ export default function DeveloperWorkspace() {
                         content={content}
                         selection={selection}
                         repoId={activeRepoId}
+                        workItemId={workItemId}
+                        projectId={activeProjectId}
                         onApplyCode={applyInlineCode}
+                        onWorkItemResolved={(id) => setWsSession((prev) => ({ ...prev, workItemId: id }))}
                       />
                     ) : null}
                     {showDiff ? (

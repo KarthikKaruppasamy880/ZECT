@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  Bot,
   ClipboardList,
   Hammer,
   MessageSquare,
@@ -9,7 +7,6 @@ import {
   Shield,
   Sparkles,
 } from "lucide-react";
-import { isAgentModeEnabled } from "@/lib/featureFlags";
 import { useActiveProject } from "@/contexts/ActiveProjectContext";
 import { ultraReviewHref } from "@/lib/deployPrefill";
 
@@ -31,35 +28,16 @@ const BASE_STEPS: Step[] = [
   { to: "/mentrix", label: "Mentrix Delivery", short: "Mentrix", icon: Sparkles, primary: true },
 ];
 
-const AGENT_MODE_STEP: Step = {
-  to: "/agent-mode",
-  label: "Agent Mode",
-  short: "Agent",
-  icon: Bot,
-  advanced: true,
-};
-
 /**
- * Shared chrome for Agent Run phase pages. Keeps existing URLs; Mentrix Delivery
- * is the primary spine. Agent Mode appears only when the power-user flag is on.
+ * Shared chrome for Agent Run phase pages. Keeps existing URLs; Mentrix
+ * Delivery is the primary spine. The legacy Agent Mode step is retired --
+ * /agent-mode now hard-redirects to /workspace with no flag able to bring
+ * it back.
  */
 export default function AgentWorkspaceShell() {
   const location = useLocation();
-  const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
   const { activeRepo } = useActiveProject();
   const qualityHref = ultraReviewHref(activeRepo);
-
-  useEffect(() => {
-    const sync = () => setAgentModeOn(isAgentModeEnabled());
-    window.addEventListener("zect-feature-flags", sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener("zect-feature-flags", sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
-
-  const steps = agentModeOn ? [...BASE_STEPS, AGENT_MODE_STEP] : BASE_STEPS;
 
   return (
     <div className="zect-page flex flex-col gap-4 lg:flex-row" data-testid="agent-workspace">
@@ -84,7 +62,7 @@ export default function AgentWorkspaceShell() {
           </p>
         </div>
         <nav className="flex flex-row flex-wrap gap-1.5 lg:flex-col lg:gap-1" aria-label="Agent Workspace">
-          {steps.map((step) => {
+          {BASE_STEPS.map((step) => {
             const Icon = step.icon;
             return (
               <NavLink
@@ -136,15 +114,6 @@ export default function AgentWorkspaceShell() {
           >
             Ultra Review this PR
           </Link>
-        )}
-        {!agentModeOn && (
-          <p className="mt-3 hidden text-[11px] text-slate-500 lg:block">
-            Need the legacy orchestrator? Enable{" "}
-            <Link to="/settings" className="text-teal-700 underline">
-              Agent Mode
-            </Link>{" "}
-            under Advanced in Settings.
-          </p>
         )}
       </aside>
       <div className="min-w-0 flex-1">

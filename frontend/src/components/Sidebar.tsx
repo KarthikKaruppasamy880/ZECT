@@ -29,7 +29,6 @@ import {
   KeyRound,
   HardDrive,
   PanelLeft,
-  Bot,
   Rocket,
   Network,
   FlaskConical,
@@ -37,7 +36,6 @@ import {
   Presentation,
   Table2,
 } from "lucide-react";
-import { isAgentModeEnabled } from "@/lib/featureFlags";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
 
@@ -72,8 +70,6 @@ const deliveryItemsBase: NavItem[] = [
   { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
   { href: "/sandbox", label: "Sandbox", icon: Box },
 ];
-
-const agentModeItem: NavItem = { href: "/agent-mode", label: "Agent Mode (Advanced)", icon: Bot };
 
 const securityItems: NavItem[] = [
   { href: "/security-incidents", label: "Security", icon: ShieldAlert },
@@ -127,7 +123,6 @@ export default function Sidebar({
   onMobileClose,
 }: SidebarProps) {
   const location = useLocation();
-  const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
   const [settingsMoreOpen, setSettingsMoreOpen] = useState(() =>
     settingsOwnedItems.some(
       (item) => item.href !== "/" && location.pathname === item.href,
@@ -138,15 +133,6 @@ export default function Sidebar({
     onMobileClose();
   }, [location.pathname]);
 
-  useEffect(() => {
-    const sync = () => setAgentModeOn(isAgentModeEnabled());
-    window.addEventListener("zect-feature-flags", sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener("zect-feature-flags", sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
 
   useEffect(() => {
     // Do not treat Dashboard "/" as a reason to force-open More settings
@@ -159,14 +145,7 @@ export default function Sidebar({
     }
   }, [location.pathname]);
 
-  const navSections = sections.map((section) =>
-    section.title === "Delivery"
-      ? {
-          ...section,
-          items: agentModeOn ? [...deliveryItemsBase, agentModeItem] : deliveryItemsBase,
-        }
-      : section,
-  );
+  const navSections = sections;
 
   const renderNavLink = (item: NavItem) => {
     const Icon = item.icon;

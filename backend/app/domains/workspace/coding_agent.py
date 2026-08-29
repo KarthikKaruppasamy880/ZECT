@@ -240,7 +240,7 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
         roots = _mission_roots(db, req)
         if is_pull_sync_intent(req.goal):
             return sync_authorized_roots(roots)
-        return start_mission(
+        mission = start_mission(
             goal=req.goal.strip(),
             roots=roots,
             plan=req.plan,
@@ -250,6 +250,16 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
             workspace_parent=req.workspace_parent,
             propose_if_empty=bool(req.propose_if_empty),
         )
+        if req.work_item_id:
+            # Canonical Mission-identity pointer -- lets the WorkItem always
+            # resolve "its" Mission (see WorkItem.coding_mission_id).
+            from app.models import WorkItem
+
+            wi = db.query(WorkItem).filter(WorkItem.id == req.work_item_id).first()
+            if wi is not None:
+                wi.coding_mission_id = str(mission.get("id") or "")
+                db.commit()
+        return mission
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except TypeError as exc:

@@ -85,3 +85,65 @@ def run_mentrix_in_background(
         if engine_slice is not None:
             cleanup_coding_engine_slice(engine_slice)
         db.close()
+
+
+def deliver_mission_in_background(run_id: int, mission_id: str) -> None:
+    """Ships an already Developer-reviewed coding_engine Mission: git
+    commit/push/PR only (lifecycle.approve_git) -- never re-plans, never
+    re-builds, never runs ForgeLoop. This is the Mentrix Delivery path for
+    a `coding_mission_id`-backed run (see
+    app/domains/agent_run/mentrix.py::start_run) -- distinct from the
+    goal-string ForgeLoop pipeline above, which remains for non-Mission
+    asks. Delivery consuming the SAME Mission rather than independently
+    re-planning/re-building is a governance requirement, not a style
+    choice: see ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md
+    Phase A.
+    """
+    from app.services.coding_engine.lifecycle import approve_git
+    from app.services.coding_engine.ship_handoff import mark_handoff_status
+
+    db = SessionLocal()
+    try:
+        run = db.query(MentrixRun).filter(MentrixRun.id == run_id).first()
+        if not run:
+            return
+        try:
+            shipped = approve_git(mission_id, commit=True, push=True)
+        except (ValueError, KeyError) as exc:
+            run.status = "failed"
+            run.events_json = json.dumps(
+                [
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "agent": "delivery",
+                        "message": f"Delivery blocked: {exc}",
+                        "event": "error",
+                    }
+                ]
+            )
+            db.commit()
+            mark_handoff_status(run_id, "failed")
+            return
+
+        blocked = shipped.get("phase") == "blocked" or shipped.get("status") == "blocked"
+        run.status = "failed" if blocked else "completed"
+        run.current_agent = "delivery"
+        ctx = json.loads(run.result_json or "{}").get("context", {})
+        run.result_json = json.dumps({"mission": shipped, "context": ctx})
+        run.events_json = json.dumps(
+            [
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "agent": "delivery",
+                    "message": (
+                        f"Mission {mission_id} {'blocked' if blocked else 'shipped'}: "
+                        f"phase={shipped.get('phase')}"
+                    ),
+                    "event": "delivery_blocked" if blocked else "delivery_complete",
+                }
+            ]
+        )
+        db.commit()
+        mark_handoff_status(run_id, run.status)
+    finally:
+        db.close()

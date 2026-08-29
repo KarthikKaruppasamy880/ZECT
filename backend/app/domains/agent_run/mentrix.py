@@ -29,7 +29,7 @@ from app.services.forge_loop.orchestrator import (
     gates_allow_create_pr,
     validate_context_pack,
 )
-from app.workers.mentrix_worker import run_mentrix_in_background
+from app.workers.mentrix_worker import deliver_mission_in_background, run_mentrix_in_background
 
 router = APIRouter(prefix="/api/mentrix", tags=["mentrix"])
 
@@ -235,6 +235,18 @@ def start_run(
     require_not_emergency_stopped(db)
     if not req.goal.strip():
         raise HTTPException(status_code=400, detail="goal is required")
+
+    coding_mission_id = (req.coding_mission_id or "").strip()
+    if coding_mission_id:
+        # Delivery for an existing Developer Mission is governance/shipping
+        # ONLY: git commit/push/PR of what that Mission already built,
+        # tested and reviewed. It must never independently re-plan or
+        # re-build through ForgeLoop -- that would be a second, disconnected
+        # coding engine re-deciding what to ship instead of shipping the
+        # Developer-reviewed diff. See
+        # ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase A.
+        return _start_mission_delivery(req, background_tasks, db, user)
+
     if req.mode not in MODE_PIPELINE:
         raise HTTPException(status_code=400, detail=f"Unknown mode. Use one of {list(MODE_PIPELINE)}")
     pack_errors = validate_context_pack(
@@ -244,21 +256,6 @@ def start_run(
     )
     if pack_errors:
         raise HTTPException(status_code=400, detail="; ".join(pack_errors))
-
-    coding_mission_id = (req.coding_mission_id or "").strip()
-    if coding_mission_id:
-        from app.services.coding_engine.ship_handoff import find_open_handoff
-
-        existing = find_open_handoff(req.work_item_id, coding_mission_id)
-        if existing:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "duplicate_delivery_run",
-                    "delivery_run_id": existing.get("delivery_run_id"),
-                    "coding_mission_id": coding_mission_id,
-                },
-            )
 
     run = MentrixRun(
         project_id=req.project_id,
@@ -277,7 +274,7 @@ def start_run(
                     "target_lang": req.target_lang or "",
                     "repo_id": req.repo_id,
                     "work_item_id": req.work_item_id,
-                    "coding_mission_id": coding_mission_id,
+                    "coding_mission_id": "",
                 }
             }
         ),
@@ -287,16 +284,6 @@ def start_run(
     db.add(run)
     db.commit()
     db.refresh(run)
-
-    if coding_mission_id:
-        from app.services.coding_engine.ship_handoff import register_handoff
-
-        register_handoff(
-            work_item_id=req.work_item_id,
-            coding_mission_id=coding_mission_id,
-            delivery_run_id=int(run.id),
-            status="running",
-        )
 
     log_audit(
         db,
@@ -321,6 +308,76 @@ def start_run(
         target_lang=req.target_lang,
         repo_id=req.repo_id,
     )
+    return _run_to_dict(run)
+
+
+def _start_mission_delivery(
+    req: "StartRunRequest", background_tasks: BackgroundTasks, db: Session, user: CurrentUser
+) -> dict:
+    from app.services.coding_engine.lifecycle import get_mission
+    from app.services.coding_engine.ship_handoff import find_open_handoff, register_handoff
+
+    mission_id = req.coding_mission_id.strip()
+    try:
+        get_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="coding_mission_not_found") from None
+
+    existing = find_open_handoff(req.work_item_id, mission_id)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_delivery_run",
+                "delivery_run_id": existing.get("delivery_run_id"),
+                "coding_mission_id": mission_id,
+            },
+        )
+
+    run = MentrixRun(
+        project_id=req.project_id,
+        mode="deliver_mission",
+        goal=f"Deliver coding_mission {mission_id}: {req.goal.strip()[:150]}",
+        status="running",
+        current_agent="delivery",
+        events_json="[]",
+        gates_json="{}",
+        result_json=json.dumps(
+            {
+                "context": {
+                    "project_key": req.project_key or "",
+                    "workspace": req.workspace or "",
+                    "repo_id": req.repo_id,
+                    "work_item_id": req.work_item_id,
+                    "coding_mission_id": mission_id,
+                }
+            }
+        ),
+        next_step="",
+        created_by=user.email,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    register_handoff(
+        work_item_id=req.work_item_id,
+        coding_mission_id=mission_id,
+        delivery_run_id=int(run.id),
+        status="running",
+    )
+
+    log_audit(
+        db,
+        action="mentrix_run_start",
+        resource_type="mentrix_run",
+        resource_id=run.id,
+        resource_name=(req.goal or "")[:120],
+        details=json.dumps({"mode": "deliver_mission", "coding_mission_id": mission_id}),
+        user_id=getattr(user, "id", None) if isinstance(getattr(user, "id", None), int) else None,
+    )
+
+    background_tasks.add_task(deliver_mission_in_background, run.id, mission_id)
     return _run_to_dict(run)
 
 

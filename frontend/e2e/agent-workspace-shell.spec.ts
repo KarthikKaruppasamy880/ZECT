@@ -1,29 +1,28 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Agent Workspace shell", () => {
-  test("Mentrix shows shared workspace rail; Agent Mode gated by default", async ({ page }) => {
+  test("Mentrix shows shared workspace rail; no Agent Mode step exists", async ({ page }) => {
     await page.goto("/mentrix");
     await expect(page.getByTestId("agent-workspace")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("agent-workspace-rail")).toBeVisible();
     await expect(page.getByTestId("agent-workspace-step-mentrix")).toBeVisible();
     await expect(page.getByTestId("mentrix-page")).toBeVisible();
     await expect(page.getByTestId("agent-workspace-step-agent")).toHaveCount(0);
-
-    await page.goto("/agent-mode");
-    await expect(page.getByTestId("agent-mode-gated")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByTestId("agent-mode-page")).toHaveCount(0);
   });
 
-  test("Settings Advanced enables Agent Mode in rail and page", async ({ page }) => {
-    await page.goto("/settings");
-    await expect(page.getByTestId("settings-advanced")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("settings-agent-mode-toggle").click();
-
-    await page.goto("/mentrix");
-    await expect(page.getByTestId("agent-workspace-step-agent")).toBeVisible({ timeout: 15_000 });
-
+  test("legacy /agent-mode hard-redirects to the Developer Workspace, no flag brings it back", async ({ page }) => {
+    // The legacy Agent Workspace (a second, disconnected coding engine) is
+    // retired -- /agent-mode always redirects, there is no feature flag or
+    // Settings toggle left that could resurrect it.
     await page.goto("/agent-mode");
-    await expect(page.getByTestId("agent-mode-page")).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(/\/workspace(\?|$)/, { timeout: 30_000 });
+    await expect(page.getByTestId("developer-workspace")).toBeVisible({ timeout: 30_000 });
+  });
+
+  test("Settings no longer has an Agent Mode toggle", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByTestId("settings-advanced")).toHaveCount(0);
+    await expect(page.getByTestId("settings-agent-mode-toggle")).toHaveCount(0);
   });
 
   test("Sidebar collapses phase tools into Agent Workspace entry", async ({ page }) => {

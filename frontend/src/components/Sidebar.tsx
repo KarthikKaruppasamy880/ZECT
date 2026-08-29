@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -7,100 +7,108 @@ import {
   BarChart3,
   FileText,
   Settings,
-  MessageSquare,
-  ClipboardList,
-  Hammer,
-  Rocket,
-  Microscope,
   Sparkles,
   BookOpen,
   ShieldCheck,
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Menu,
   X,
   Coins,
-  Shield,
   ScrollText,
   Plug,
   Scale,
-  Download,
-  History,
-  MonitorPlay,
-  FolderOpen,
   Activity,
   Brain,
-  Repeat,
   ShieldAlert,
-  ArrowRightLeft,
-  Layers,
   Wrench,
   BookMarked,
   Calendar,
   KeyRound,
-  Code2,
-  TrendingUp,
-  MessageCircle,
   HardDrive,
+  PanelLeft,
   Bot,
+  Rocket,
+  Network,
+  FlaskConical,
+  Box,
+  Presentation,
+  Table2,
 } from "lucide-react";
+import { isAgentModeEnabled } from "@/lib/featureFlags";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+type NavItem = { href: string; label: string; icon: typeof LayoutDashboard };
+
+/** P2 target navigation — routes kept; internals moved into composite sections. */
+const mentrixItems: NavItem[] = [
+  { href: "/mentrix-home", label: "Mentrix Companion", icon: Sparkles },
+  { href: "/present", label: "Present", icon: Presentation },
+  { href: "/sheets", label: "Sheets", icon: Table2 },
+  { href: "/workspace", label: "Developer", icon: PanelLeft },
+];
+
+const workItems: NavItem[] = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/orchestration", label: "Orchestration", icon: GitBranch },
-  { href: "/repo-analysis", label: "Repo Analysis", icon: Microscope },
-  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
-  { href: "/doc-generator", label: "Doc Generator", icon: BookOpen },
-  { href: "/code-review", label: "Code Review", icon: ShieldCheck },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/docs", label: "Docs Center", icon: FileText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/work-items", label: "Work Items", icon: ScrollText },
+  { href: "/fabric", label: "Processes", icon: Network },
 ];
 
-const stageItems = [
-  { href: "/ask", label: "Ask Mode", icon: MessageSquare },
-  { href: "/plan", label: "Plan Mode", icon: ClipboardList },
-  { href: "/build", label: "Build Phase", icon: Hammer },
-  { href: "/review", label: "Review Phase", icon: Shield },
-  { href: "/deploy", label: "Deployment", icon: Rocket },
-  { href: "/skills", label: "Skill Library", icon: BookOpen },
-  { href: "/token-controls", label: "Token Controls", icon: Coins },
-  { href: "/app-runner", label: "App Runner", icon: MonitorPlay },
-  { href: "/file-explorer", label: "File Explorer", icon: FolderOpen },
-  { href: "/git-ops", label: "Git Operations", icon: GitBranch },
-  { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
-  { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
-  { href: "/agent-mode", label: "Agent Mode", icon: Bot },
-];
-
-const zintelItems = [
-  { href: "/memory", label: "Memory System", icon: Brain },
-  { href: "/dream-engine", label: "Dream Engine", icon: Sparkles },
-  { href: "/data-layer", label: "Data Layer", icon: Layers },
-  { href: "/data-flywheel", label: "Data Flywheel", icon: Repeat },
-  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
-  { href: "/transfer", label: "Transfer & Onboard", icon: ArrowRightLeft },
-  { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
-];
-
-const featureItems = [
+const intelligenceItems: NavItem[] = [
+  { href: "/project-intelligence", label: "Project Intelligence", icon: Brain },
   { href: "/knowledge-base", label: "Knowledge Base", icon: BookMarked },
+  { href: "/learning", label: "ZECT Learning", icon: BookOpen },
+  { href: "/skills-engine", label: "Skills Engine", icon: Wrench },
   { href: "/playbooks", label: "Playbooks", icon: BookOpen },
-  { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
-  { href: "/secrets", label: "Secrets Manager", icon: KeyRound },
-  { href: "/code-index", label: "Code Index", icon: Code2 },
-  { href: "/session-insights", label: "Session Insights", icon: TrendingUp },
-  { href: "/conversations", label: "Conversations", icon: MessageCircle },
+  { href: "/lattice", label: "Lattice", icon: Network },
+  { href: "/blueprint", label: "Blueprint", icon: Sparkles },
 ];
 
-const enterpriseItems = [
-  { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
-  { href: "/rules", label: "Rules Engine", icon: Scale },
+const deliveryItemsBase: NavItem[] = [
+  { href: "/mentrix", label: "Runs", icon: Rocket },
+  { href: "/code-review", label: "Quality", icon: ShieldCheck },
+  { href: "/git-ops", label: "Git & CI", icon: GitBranch },
+  { href: "/ci-monitor", label: "CI Monitor", icon: Activity },
+  { href: "/sandbox", label: "Sandbox", icon: Box },
+];
+
+const agentModeItem: NavItem = { href: "/agent-mode", label: "Agent Mode (Advanced)", icon: Bot };
+
+const securityItems: NavItem[] = [
+  { href: "/security-incidents", label: "Security", icon: ShieldAlert },
+  { href: "/mentrix-home?incident=1", label: "Incident Runbook", icon: ShieldAlert },
+];
+
+const operationsItems: NavItem[] = [
+  { href: "/system-health", label: "System Health", icon: Activity },
   { href: "/integrations", label: "Integrations", icon: Plug },
-  { href: "/export", label: "Export/Share", icon: Download },
-  { href: "/output-history", label: "Output History", icon: History },
+  { href: "/scheduled-tasks", label: "Scheduled Tasks", icon: Calendar },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
+];
+
+const settingsOwnedItems: NavItem[] = [
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/permissions", label: "Permissions", icon: ShieldAlert },
+  { href: "/memory", label: "Memory System", icon: Brain },
+  { href: "/secrets", label: "Secrets", icon: KeyRound },
+  { href: "/token-controls", label: "Token Controls", icon: Coins },
+  { href: "/rules", label: "Rules", icon: Scale },
+  { href: "/audit-trail", label: "Audit Trail", icon: ScrollText },
+  { href: "/tool-comparison", label: "Architecture", icon: FileText },
+  { href: "/security-incidents", label: "Security Incidents", icon: ShieldAlert },
+  { href: "/docs", label: "Docs", icon: FileText },
+  { href: "/repo-workspace", label: "Repo Workspace", icon: HardDrive },
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+];
+
+const sections: { title: string; items: NavItem[] }[] = [
+  { title: "Mentrix", items: mentrixItems },
+  { title: "Work", items: workItems },
+  { title: "Intelligence", items: intelligenceItems },
+  { title: "Delivery", items: deliveryItemsBase },
+  { title: "Security", items: securityItems },
+  { title: "Operations", items: operationsItems },
 ];
 
 interface SidebarProps {
@@ -119,15 +127,131 @@ export default function Sidebar({
   onMobileClose,
 }: SidebarProps) {
   const location = useLocation();
+  const [agentModeOn, setAgentModeOn] = useState(() => isAgentModeEnabled());
+  const [settingsMoreOpen, setSettingsMoreOpen] = useState(() =>
+    settingsOwnedItems.some(
+      (item) => item.href !== "/" && location.pathname === item.href,
+    ),
+  );
 
-  // Close mobile menu on route change
   useEffect(() => {
     onMobileClose();
   }, [location.pathname]);
 
+  useEffect(() => {
+    const sync = () => setAgentModeOn(isAgentModeEnabled());
+    window.addEventListener("zect-feature-flags", sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener("zect-feature-flags", sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Do not treat Dashboard "/" as a reason to force-open More settings
+    if (
+      settingsOwnedItems.some(
+        (item) => item.href !== "/" && location.pathname === item.href,
+      )
+    ) {
+      setSettingsMoreOpen(true);
+    }
+  }, [location.pathname]);
+
+  const navSections = sections.map((section) =>
+    section.title === "Delivery"
+      ? {
+          ...section,
+          items: agentModeOn ? [...deliveryItemsBase, agentModeItem] : deliveryItemsBase,
+        }
+      : section,
+  );
+
+  const renderNavLink = (item: NavItem) => {
+    const Icon = item.icon;
+    const itemUrl = new URL(item.href, "http://local");
+    const pathMatch = location.pathname === itemUrl.pathname;
+    const voiceDeepLink = itemUrl.searchParams.get("voice");
+    const incidentDeepLink = itemUrl.searchParams.get("incident");
+    const search = new URLSearchParams(location.search);
+    const active = voiceDeepLink
+      ? pathMatch && search.get("voice") === voiceDeepLink
+      : incidentDeepLink
+        ? pathMatch && search.get("incident") === incidentDeepLink
+        : pathMatch &&
+          !(
+            itemUrl.pathname === "/mentrix-home" &&
+            (search.get("voice") || search.get("incident"))
+          );
+    return (
+      <li key={item.href}>
+        <Link
+          to={item.href}
+          title={collapsed ? item.label : undefined}
+          aria-label={item.label}
+          aria-current={active ? "page" : undefined}
+          className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${
+            collapsed ? "px-2 py-2.5" : "px-2.5 py-2"
+          } text-sm transition-colors ${
+            active
+              ? "bg-slate-800 text-white font-medium"
+              : "hover:bg-slate-800/60 hover:text-white"
+          }`}
+        >
+          <Icon className="h-4 w-4 shrink-0" aria-hidden />
+          {!collapsed && <span>{item.label}</span>}
+        </Link>
+      </li>
+    );
+  };
+
+  const renderSection = (title: string, items: NavItem[], isFirst: boolean) => (
+    <div key={title}>
+      {!collapsed ? (
+        <h2
+          className={`px-2 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 ${
+            isFirst ? "" : "mt-6"
+          }`}
+        >
+          {title}
+          {title === "Operations" && (
+            <FlaskConical className="inline h-3 w-3 ml-1 opacity-60" aria-hidden />
+          )}
+        </h2>
+      ) : (
+        !isFirst && <div className="my-4 border-t border-slate-700" role="separator" />
+      )}
+      <ul className="space-y-0.5">
+        {items.map((item) => renderNavLink(item))}
+        {title === "Operations" && (
+          <>
+            {!collapsed && (
+              <li>
+                <button
+                  type="button"
+                  data-testid="sidebar-labs-more"
+                  aria-expanded={settingsMoreOpen}
+                  onClick={() => setSettingsMoreOpen((o) => !o)}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-slate-400 hover:bg-slate-800/60 hover:text-white"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 transition-transform ${settingsMoreOpen ? "" : "-rotate-90"}`}
+                    aria-hidden
+                  />
+                  <span>More settings</span>
+                </button>
+              </li>
+            )}
+            {(settingsMoreOpen || collapsed) && settingsOwnedItems.map((item) => renderNavLink(item))}
+          </>
+        )}
+      </ul>
+    </div>
+  );
+
   const sidebarContent = (
     <>
-      {/* Header with collapse toggle */}
       <div className={`border-b border-slate-700 ${collapsed ? "px-2 py-3" : "px-4 py-4"}`}>
         <div className="flex items-center justify-between">
           {collapsed ? (
@@ -136,17 +260,23 @@ export default function Sidebar({
             </div>
           ) : (
             <div className="flex-1 min-w-0">
-              <p className="text-xs uppercase tracking-wider text-slate-500">Zinnia</p>
+              <p className="text-xs uppercase tracking-wider text-slate-500">ZECT</p>
               <h1 className="text-sm font-bold text-white leading-tight">
-                Engineering Delivery
+                Mentrix Delivery
                 <br />
                 Control Tower
               </h1>
+              <p className="text-[10px] text-slate-400 mt-1 leading-snug" data-testid="sidebar-spine-hint">
+                Mentrix · Work · Intelligence · Delivery · Security · Operations
+              </p>
             </div>
           )}
-          {/* Collapse toggle button - always visible on desktop */}
           <button
+            type="button"
             onClick={onToggle}
+            data-testid="sidebar-toggle"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
             className="hidden md:flex items-center justify-center h-7 w-7 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
             title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
           >
@@ -155,170 +285,52 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 py-4">
-        {!collapsed && (
-          <p className="px-2 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Navigation
-          </p>
-        )}
-        <ul className="space-y-0.5">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
-                    active
-                      ? "bg-slate-800 text-white font-medium"
-                      : "hover:bg-slate-800/60 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-
-        {!collapsed ? (
-          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Workflow Stages
-          </p>
-        ) : (
-          <div className="my-4 border-t border-slate-700" />
-        )}
-        <ul className="space-y-0.5">
-          {stageItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
-                    active
-                      ? "bg-slate-800 text-white font-medium"
-                      : "hover:bg-slate-800/60 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-
-        {!collapsed ? (
-          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Zinnia Intelligence
-          </p>
-        ) : (
-          <div className="my-4 border-t border-slate-700" />
-        )}
-        <ul className="space-y-0.5">
-          {zintelItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
-                    active
-                      ? "bg-slate-800 text-white font-medium"
-                      : "hover:bg-slate-800/60 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-
-        {!collapsed ? (
-          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Features
-          </p>
-        ) : (
-          <div className="my-4 border-t border-slate-700" />
-        )}
-        <ul className="space-y-0.5">
-          {featureItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
-                    active
-                      ? "bg-slate-800 text-white font-medium"
-                      : "hover:bg-slate-800/60 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-
-        {!collapsed ? (
-          <p className="px-2 mt-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Enterprise
-          </p>
-        ) : (
-          <div className="my-4 border-t border-slate-700" />
-        )}
-        <ul className="space-y-0.5">
-          {enterpriseItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.href;
-            return (
-              <li key={item.href}>
-                <Link
-                  to={item.href}
-                  title={collapsed ? item.label : undefined}
-                  className={`flex items-center ${collapsed ? "justify-center" : ""} gap-2.5 rounded-md ${collapsed ? "px-2 py-2.5" : "px-2.5 py-2"} text-sm transition-colors ${
-                    active
-                      ? "bg-slate-800 text-white font-medium"
-                      : "hover:bg-slate-800/60 hover:text-white"
-                  }`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+      <nav className="flex-1 overflow-y-auto px-2 py-4" aria-label="Primary">
+        {navSections.map((section, idx) => renderSection(section.title, section.items, idx === 0))}
       </nav>
 
-      {/* Footer */}
-      <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-4"} py-3`}>
+      <div className={`border-t border-slate-700 ${collapsed ? "px-2" : "px-3"} py-3 mt-auto`}>
         {!collapsed && (
-          <>
-            <p className="text-xs text-slate-500">Zinnia Eng</p>
-            <p className="text-xs text-slate-600">Internal Platform</p>
-          </>
+          <p className="mb-2 text-[10px] text-slate-600 px-1">Hey Mentrix · desktop wake</p>
         )}
+        <Link
+          to="/settings"
+          title={collapsed ? "Settings" : undefined}
+          aria-label="Settings"
+          data-testid="sidebar-user-settings"
+          className={`flex items-center ${
+            collapsed ? "justify-center" : "gap-2.5"
+          } rounded-lg px-2 py-2 text-slate-300 hover:bg-slate-800 hover:text-white transition-colors ${
+            location.pathname === "/settings" ? "bg-slate-800 text-white" : ""
+          }`}
+        >
+          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-teal-800/80 text-[11px] font-semibold text-teal-100">
+            {(typeof localStorage !== "undefined"
+              ? (localStorage.getItem("zect_username") || "U").trim().charAt(0)
+              : "U"
+            ).toUpperCase()}
+          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium text-slate-100">
+                {typeof localStorage !== "undefined"
+                  ? localStorage.getItem("zect_username") || "Account"
+                  : "Account"}
+              </p>
+              <p className="truncate text-[10px] text-slate-500">Settings · Governance · Voice</p>
+            </div>
+          )}
+          {!collapsed && <Settings className="h-3.5 w-3.5 flex-shrink-0 text-slate-500" />}
+        </Link>
         {onLogout && (
           <button
+            type="button"
             onClick={onLogout}
+            aria-label="Sign out"
             title={collapsed ? "Sign Out" : undefined}
-            className={`mt-2 flex items-center ${collapsed ? "justify-center w-full" : ""} gap-2 text-xs text-slate-500 hover:text-red-400 transition-colors`}
+            className={`mt-1 flex w-full items-center ${
+              collapsed ? "justify-center" : "gap-2 px-2"
+            } rounded-md py-1.5 text-xs text-slate-500 hover:text-red-400 transition-colors`}
           >
             <LogOut className="h-3.5 w-3.5" />
             {!collapsed && "Sign Out"}
@@ -326,14 +338,24 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Collapse Toggle (desktop only) — secondary toggle at bottom */}
       <div className="hidden md:block border-t border-slate-700 p-2">
         <button
+          type="button"
           onClick={onToggle}
+          data-testid="sidebar-toggle-footer"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
           className="w-full flex items-center justify-center gap-1.5 p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-xs"
           title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <><ChevronLeft className="h-4 w-4" /><span>Collapse</span></>}
+          {collapsed ? (
+            <ChevronRight className="h-4 w-4" />
+          ) : (
+            <>
+              <ChevronLeft className="h-4 w-4" />
+              <span>Collapse</span>
+            </>
+          )}
         </button>
       </div>
     </>
@@ -341,37 +363,41 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile hamburger button */}
       <button
+        type="button"
         onClick={onToggle}
         className="md:hidden fixed top-3 left-3 z-50 p-2.5 bg-slate-900 text-white rounded-xl shadow-lg border border-slate-700"
-        aria-label="Toggle navigation"
+        aria-label={mobileOpen ? "Close navigation" : "Open navigation"}
+        aria-expanded={mobileOpen}
+        data-testid="sidebar-mobile-toggle"
       >
         {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </button>
 
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
           onClick={onMobileClose}
+          data-testid="sidebar-mobile-backdrop"
         />
       )}
 
-      {/* Mobile sidebar (overlay) */}
       <aside
         className={`md:hidden fixed left-0 top-0 z-50 h-screen w-64 bg-slate-900 text-slate-300 flex flex-col transform transition-transform duration-200 ease-in-out ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         }`}
+        aria-hidden={!mobileOpen}
+        aria-label="Mobile navigation"
       >
         {sidebarContent}
       </aside>
 
-      {/* Desktop sidebar */}
       <aside
         className={`hidden md:flex fixed left-0 top-0 z-40 h-screen bg-slate-900 text-slate-300 flex-col transition-all duration-200 ease-in-out ${
           collapsed ? "w-16" : "w-56"
         }`}
+        data-testid="app-sidebar"
+        aria-label="Primary navigation"
       >
         {sidebarContent}
       </aside>

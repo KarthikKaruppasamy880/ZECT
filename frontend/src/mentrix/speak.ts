@@ -1,0 +1,542 @@
+/** Mentrix speech — cloned ZECT Voicebox / OpenAI stock TTS / optional browser fallback. */
+import { getMyClonedVoice, mentrixSpeakClonedDetailed, type SpeakVoiceOptions } from "@/lib/api";
+import { chunkSpeakText } from "@/lib/mentrixRealtimeFinalize";
+
+export type { SpeakVoiceOptions };
+
+let lastAudio: HTMLAudioElement | null = null;
+let awaitGeneration = 0;
+const speechCancelListeners = new Set<() => void>();
+
+/** Realtime clone `<audio>` (and similar) must stop when Present/chat TTS cancels. */
+export function registerSpeechCancelListener(fn: () => void): () => void {
+  speechCancelListeners.add(fn);
+  return () => {
+    speechCancelListeners.delete(fn);
+  };
+}
+
+export type SpeakResult = { ok: true; engine: string } | { ok: false; error: string };
+
+/** Local clone synth header ids (legacy chatterbox + zect_voicebox). */
+export function isCloneTtsEngine(engine: string | undefined | null): boolean {
+  const e = (engine || "").toLowerCase();
+  return e === "zect_voicebox" || e === "chatterbox";
+}
+
+/** Clone path unless an explicit OpenAI stock voice is selected. */
+export function usesClonePath(voiceOpts?: SpeakVoiceOptions): boolean {
+  return !(voiceOpts?.stockVoice != null && voiceOpts.stockVoice !== "");
+}
+
+/** Present / Test speak: require ZECT Voicebox — no browser/OpenAI silent swap. */
+export function requireCloneSpeech(voiceOpts?: SpeakVoiceOptions): boolean {
+  if (!usesClonePath(voiceOpts)) return false;
+  return voiceOpts?.requireClone !== false;
+}
+
+export function cancelBrowserSpeech() {
+  awaitGeneration += 1;
+  for (const fn of [...speechCancelListeners]) {
+    try {
+      fn();
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    /* ignore */
+  }
+  try {
+    lastAudio?.pause();
+    if (lastAudio) {
+      try {
+        lastAudio.removeAttribute("src");
+        lastAudio.load();
+      } catch {
+        /* ignore */
+      }
+    }
+    lastAudio = null;
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Alias used by Present All Stop — same as cancelBrowserSpeech. */
+export function cancelMentrixSpeech() {
+  cancelBrowserSpeech();
+}
+
+function waitForAudioEnded(audio: HTMLAudioElement, gen: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const done = () => {
+      cleanup();
+      if (lastAudio === audio) lastAudio = null;
+      const dur = Number(audio.duration);
+      if (Number.isNaN(dur) || dur === 0 || (Number.isFinite(dur) && dur < 0.05)) {
+        reject(new Error("audio ended before playback (empty or failed)"));
+        return;
+      }
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      if (lastAudio === audio) lastAudio = null;
+      reject(new Error("audio playback error"));
+    };
+    const onCancelCheck = () => {
+      if (gen !== awaitGeneration) {
+        cleanup();
+        if (lastAudio === audio) lastAudio = null;
+        reject(new Error("cancelled"));
+      }
+    };
+    const cleanup = () => {
+      audio.removeEventListener("ended", done);
+      audio.removeEventListener("error", fail);
+      window.clearInterval(iv);
+    };
+    audio.addEventListener("ended", done);
+    audio.addEventListener("error", fail);
+    const iv = window.setInterval(onCancelCheck, 100);
+    if (audio.ended) done();
+  });
+}
+
+function speakBrowserAwait(text: string): Promise<SpeakResult> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      resolve({ ok: false, error: "speechSynthesis unavailable" });
+      return;
+    }
+    const gen = awaitGeneration;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text.slice(0, 500));
+      u.rate = 1.05;
+      const iv = window.setInterval(() => {
+        if (gen !== awaitGeneration) {
+          window.clearInterval(iv);
+          try {
+            window.speechSynthesis.cancel();
+          } catch {
+            /* ignore */
+          }
+          resolve({ ok: false, error: "cancelled" });
+        }
+      }, 100);
+      u.onend = () => {
+        window.clearInterval(iv);
+        resolve({ ok: true, engine: "browser_speechSynthesis" });
+      };
+      u.onerror = () => {
+        window.clearInterval(iv);
+        resolve({ ok: false, error: "browser speech error" });
+      };
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      resolve({ ok: false, error: e instanceof Error ? e.message : "browser speech failed" });
+    }
+  });
+}
+
+export function speakBrowser(text: string, enabled: boolean) {
+  if (!enabled || typeof window === "undefined" || !window.speechSynthesis) return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.slice(0, 500));
+    u.rate = 1.05;
+    window.speechSynthesis.speak(u);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Prefer Mentrix /voice/speak (ZECT Voicebox clone or explicit OpenAI stock).
+ * Browser speechSynthesis only when require_clone is off (legacy / Companion).
+ */
+export async function speakMentrix(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
+  if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
+  if (!text.trim()) return { ok: false, error: "Nothing to speak" };
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
+
+  let apiError = "";
+  try {
+    const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
+    if (mustClone && !isCloneTtsEngine(engine)) {
+      return {
+        ok: false,
+        error: `Expected your clone (ZECT Voicebox), got ${engine} — start local ZECT Voicebox to narrate in your voice`,
+      };
+    }
+    if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+    if (url && typeof Audio !== "undefined") {
+      const audio = new Audio(url);
+      lastAudio = audio;
+      try {
+        await audio.play();
+        if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+        return { ok: true, engine };
+      } catch (playErr) {
+        const msg = playErr instanceof Error ? playErr.message : String(playErr);
+        if (/NotAllowedError|user interaction/i.test(msg)) {
+          return {
+            ok: false,
+            error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+          };
+        }
+        apiError = msg || "audio.play failed";
+      }
+    }
+  } catch (e) {
+    apiError = e instanceof Error ? e.message : "Speak API failed";
+  }
+
+  if (mustClone) {
+    return {
+      ok: false,
+      error: apiError || "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
+    };
+  }
+
+  // Browser TTS last resort (often silent in Electron)
+  try {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      speakBrowser(text, true);
+      if (apiError) {
+        return {
+          ok: false,
+          error: `${apiError} (fell back to browser speech — may be silent in Electron)`,
+        };
+      }
+      return { ok: true, engine: "browser_speechSynthesis" };
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const voice = await getMyClonedVoice();
+    if (!voice?.voice_id && apiError) {
+      return {
+        ok: false,
+        error: `${apiError}. Tip: clone a voice in Companion → Voice, or pick an OpenAI stock voice.`,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and ZECT Voicebox/OpenAI" };
+}
+
+/**
+ * Like speakMentrix but resolves only after playback finishes (or cancel/error).
+ * Used by Present all slides so Right Arrow advances after narration ends.
+ */
+export async function speakMentrixAwait(text: string, enabled: boolean, voiceOpts?: SpeakVoiceOptions): Promise<SpeakResult> {
+  if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
+  if (!text.trim()) return { ok: false, error: "Nothing to speak" };
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
+
+  let apiError = "";
+  try {
+    const { url, engine } = await mentrixSpeakClonedDetailed(text, voiceOpts);
+    if (mustClone && !isCloneTtsEngine(engine)) {
+      return {
+        ok: false,
+        error: `Expected your clone (ZECT Voicebox), got ${engine} — start local ZECT Voicebox to narrate in your voice`,
+      };
+    }
+    if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+    if (url && typeof Audio !== "undefined") {
+      const audio = new Audio(url);
+      lastAudio = audio;
+      try {
+        await audio.play();
+        if (gen !== awaitGeneration) {
+          cancelBrowserSpeech();
+          return { ok: false, error: "cancelled" };
+        }
+        await waitForAudioEnded(audio, gen);
+        if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+        return { ok: true, engine };
+      } catch (playErr) {
+        const msg = playErr instanceof Error ? playErr.message : String(playErr);
+        if (/NotAllowedError|user interaction/i.test(msg)) {
+          return {
+            ok: false,
+            error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+          };
+        }
+        apiError = msg || "audio.play failed";
+      }
+    }
+  } catch (e) {
+    apiError = e instanceof Error ? e.message : "Speak API failed";
+  }
+
+  if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+
+  if (mustClone) {
+    return {
+      ok: false,
+      error: apiError || "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
+    };
+  }
+
+  try {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      const result = await speakBrowserAwait(text);
+      if (apiError && result.ok) {
+        return {
+          ok: false,
+          error: `${apiError} (fell back to browser speech — may be silent in Electron)`,
+        };
+      }
+      return result;
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const voice = await getMyClonedVoice();
+    if (!voice?.voice_id && apiError) {
+      return {
+        ok: false,
+        error: `${apiError}. Tip: clone a voice in Companion → Voice, or pick an OpenAI stock voice.`,
+      };
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return { ok: false, error: apiError || "No audio output — check TTS toggle, backend, and ZECT Voicebox/OpenAI" };
+}
+
+/**
+ * Like speakMentrixAwait, but splits long text into sentence-sized chunks
+ * (chunkSpeakText — the same helper the Realtime voice chat path already
+ * uses) and prefetches the next chunk's audio while the current one plays.
+ * Cuts time-to-first-audio for long text (e.g. a full slide's speaker
+ * notes) from "however long the whole paragraph takes to synthesize" down
+ * to "however long one sentence takes." Resolves once every chunk has
+ * played, or as soon as cancelMentrixSpeech()/a later call bumps the
+ * generation counter.
+ */
+export async function speakMentrixStreamedAwait(
+  text: string,
+  enabled: boolean,
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<SpeakResult> {
+  if (!enabled) return { ok: false, error: "TTS is off — enable Speak replies / Speak status" };
+  const chunks = chunkSpeakText(text);
+  if (!chunks.length) return { ok: false, error: "Nothing to speak" };
+  if (chunks.length === 1) return speakMentrixAwait(chunks[0], enabled, voiceOpts);
+
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
+  const apiEngines = new Set<string>();
+  let usedBrowserFallback = false;
+
+  type ChunkAudio = { url: string; engine: string };
+  let lastFetchError = "";
+  const fetchChunk = (chunk: string): Promise<ChunkAudio | null> =>
+    mentrixSpeakClonedDetailed(chunk, voiceOpts).catch((e) => {
+      lastFetchError = e instanceof Error ? e.message : String(e);
+      return null;
+    });
+
+  let nextChunk: Promise<ChunkAudio | null> = fetchChunk(chunks[0]);
+  for (let i = 0; i < chunks.length; i++) {
+    if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+    const current = await nextChunk;
+    const url = current?.url ?? null;
+    let prefetched: Promise<ChunkAudio | null> | null = null;
+    if (i + 1 < chunks.length) {
+      prefetched = fetchChunk(chunks[i + 1]);
+      nextChunk = prefetched;
+    }
+    if (gen !== awaitGeneration) {
+      if (url) URL.revokeObjectURL(url);
+      // Prefetch for the next chunk already started — don't leak its blob URL.
+      prefetched?.then((c) => c?.url && URL.revokeObjectURL(c.url)).catch(() => undefined);
+      return { ok: false, error: "cancelled" };
+    }
+
+    let played = false;
+    if (url && typeof Audio !== "undefined") {
+      if (mustClone && current && !isCloneTtsEngine(current.engine)) {
+        URL.revokeObjectURL(url);
+        return {
+          ok: false,
+          error: `Expected your clone (ZECT Voicebox), got ${current.engine} — start local ZECT Voicebox`,
+        };
+      }
+      const audio = new Audio(url);
+      lastAudio = audio;
+      try {
+        await audio.play();
+        if (gen !== awaitGeneration) {
+          cancelBrowserSpeech();
+          URL.revokeObjectURL(url);
+          return { ok: false, error: "cancelled" };
+        }
+        await waitForAudioEnded(audio, gen);
+        URL.revokeObjectURL(url);
+        if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+        played = true;
+        if (current) apiEngines.add(current.engine);
+      } catch (playErr) {
+        URL.revokeObjectURL(url);
+        const msg = playErr instanceof Error ? playErr.message : String(playErr);
+        if (/NotAllowedError|user interaction/i.test(msg)) {
+          return {
+            ok: false,
+            error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+          };
+        }
+      }
+    }
+
+    if (!played) {
+      if (mustClone || (voiceOpts && lastFetchError)) {
+        return {
+          ok: false,
+          error: lastFetchError
+            ? `Selected voice failed: ${lastFetchError}`
+            : "Clone TTS failed — start local ZECT Voicebox (see docs/ZECT_VOICEBOX.md)",
+        };
+      }
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        return { ok: false, error: "No audio output for this chunk — check TTS backend/ZECT Voicebox/OpenAI" };
+      }
+      usedBrowserFallback = true;
+      const result = await speakBrowserAwait(chunks[i]);
+      if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+      if (!result.ok) return result;
+    }
+  }
+
+  const engines = [...apiEngines, ...(usedBrowserFallback ? ["browser_speechSynthesis"] : [])];
+  const engine = engines.length === 0
+    ? "browser_speechSynthesis"
+    : engines.length === 1
+      ? engines[0]
+      : `mixed(${engines.join("+")})`;
+  return { ok: true, engine };
+}
+
+export type PrefetchedSpeakChunk = { url: string; engine: string };
+
+/**
+ * Fetch TTS for all sentence chunks without stopping current playback.
+ * Used by Present to prep slide N+1 while slide N plays.
+ */
+export async function prefetchMentrixSpeakChunks(
+  text: string,
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<PrefetchedSpeakChunk[] | null> {
+  const chunks = chunkSpeakText(text);
+  if (!chunks.length) return null;
+  const mustClone = requireCloneSpeech(voiceOpts);
+  const out: PrefetchedSpeakChunk[] = [];
+  try {
+    for (const chunk of chunks) {
+      const { url, engine } = await mentrixSpeakClonedDetailed(chunk, voiceOpts);
+      if (mustClone && !isCloneTtsEngine(engine)) {
+        for (const c of out) URL.revokeObjectURL(c.url);
+        return null;
+      }
+      out.push({ url, engine });
+    }
+    return out;
+  } catch {
+    for (const c of out) URL.revokeObjectURL(c.url);
+    return null;
+  }
+}
+
+/** Play chunks from prefetchMentrixSpeakChunks (revokes blob URLs). */
+export async function playMentrixPrefetch(
+  items: PrefetchedSpeakChunk[],
+  voiceOpts?: SpeakVoiceOptions,
+): Promise<SpeakResult> {
+  if (!items.length) return { ok: false, error: "Nothing to speak" };
+  cancelBrowserSpeech();
+  const gen = awaitGeneration;
+  const mustClone = requireCloneSpeech(voiceOpts);
+  const engines = new Set<string>();
+  for (const item of items) {
+    if (gen !== awaitGeneration) {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return { ok: false, error: "cancelled" };
+    }
+    if (mustClone && !isCloneTtsEngine(item.engine)) {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return {
+        ok: false,
+        error: `Expected your clone (ZECT Voicebox), got ${item.engine} — start local ZECT Voicebox`,
+      };
+    }
+    if (typeof Audio === "undefined") {
+      for (const c of items) URL.revokeObjectURL(c.url);
+      return { ok: false, error: "Audio unavailable" };
+    }
+    const audio = new Audio(item.url);
+    lastAudio = audio;
+    try {
+      await audio.play();
+      if (gen !== awaitGeneration) {
+        cancelBrowserSpeech();
+        URL.revokeObjectURL(item.url);
+        return { ok: false, error: "cancelled" };
+      }
+      await waitForAudioEnded(audio, gen);
+      URL.revokeObjectURL(item.url);
+      if (gen !== awaitGeneration) return { ok: false, error: "cancelled" };
+      engines.add(item.engine);
+    } catch (playErr) {
+      URL.revokeObjectURL(item.url);
+      const msg = playErr instanceof Error ? playErr.message : String(playErr);
+      if (/NotAllowedError|user interaction/i.test(msg)) {
+        for (const c of items) {
+          try {
+            URL.revokeObjectURL(c.url);
+          } catch {
+            /* ignore */
+          }
+        }
+        return {
+          ok: false,
+          error: "Browser blocked audio — click the page once, then Narrate / Speak again",
+        };
+      }
+      return { ok: false, error: msg || "audio.play failed" };
+    }
+  }
+  const list = [...engines];
+  return {
+    ok: true,
+    engine: list.length === 1 ? list[0] : `mixed(${list.join("+")})`,
+  };
+}
+
+/** Present Deck: word-budget scripts from Presenter Intelligence; keep a high ceiling only. */
+export const PRESENT_SLIDE_SCRIPT_CAP = 8000;
+
+export function capPresentSlideScript(text: string, cap = PRESENT_SLIDE_SCRIPT_CAP): string {
+  const t = String(text || "").trim();
+  if (t.length <= cap) return t;
+  return `${t.slice(0, Math.max(0, cap - 1)).trim()}…`;
+}

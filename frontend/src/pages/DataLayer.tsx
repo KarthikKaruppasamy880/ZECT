@@ -25,9 +25,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
+import { apiFetch } from "@/lib/api";
 import Pagination from "@/components/Pagination";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const COLORS = ["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#06b6d4"];
 
@@ -60,7 +59,7 @@ export default function DataLayer() {
 
   const fetchDashboard = async () => {
     try {
-      const res = await fetch(`${API}/api/data-layer/dashboard`, {
+      const res = await apiFetch(`/api/data-layer/dashboard`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, days }),
@@ -74,7 +73,7 @@ export default function DataLayer() {
     try {
       const params = new URLSearchParams({ days: String(days), limit: "50" });
       if (projectId) params.set("project_id", String(projectId));
-      const res = await fetch(`${API}/api/data-layer/events?${params}`);
+      const res = await apiFetch(`/api/data-layer/events?${params}`);
       if (res.ok) setEvents(await res.json());
       else showToast("error", `Failed to load events (${res.status})`);
     } catch (err) { showToast("error", "Network error loading events"); }
@@ -84,7 +83,7 @@ export default function DataLayer() {
     try {
       const params = new URLSearchParams({ limit: "30" });
       if (projectId) params.set("project_id", String(projectId));
-      const res = await fetch(`${API}/api/data-layer/daily-reports?${params}`);
+      const res = await apiFetch(`/api/data-layer/daily-reports?${params}`);
       if (res.ok) setReports(await res.json());
       else showToast("error", `Failed to load reports (${res.status})`);
     } catch (err) { showToast("error", "Network error loading reports"); }
@@ -100,7 +99,7 @@ export default function DataLayer() {
     try {
       const params = new URLSearchParams({ days: "30" });
       if (projectId) params.set("project_id", String(projectId));
-      const res = await fetch(`${API}/api/data-layer/export/csv?${params}`);
+      const res = await apiFetch(`/api/data-layer/export/csv?${params}`);
       if (res.ok) {
         const data = await res.json();
         const csv = [data.columns.join(","), ...data.rows.map((r: any[]) => r.join(","))].join("\n");
@@ -187,15 +186,17 @@ export default function DataLayer() {
             {dashboard.daily_trends.length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Daily Event Trend</h3>
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={dashboard.daily_trends}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#64748b" }} />
-                    <YAxis tick={{ fontSize: 10, fill: "#64748b" }} />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={{ fill: "#6366f1" }} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div style={{ width: "100%", minHeight: 220 }}>
+                  <ResponsiveContainer width="100%" height={220} minHeight={220}>
+                    <LineChart data={dashboard.daily_trends} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#64748b" }} />
+                      <YAxis tick={{ fontSize: 10, fill: "#64748b" }} width={32} allowDecimals={false} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} dot={{ fill: "#6366f1" }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             )}
 

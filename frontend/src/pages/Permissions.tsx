@@ -12,9 +12,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
+import { apiFetch } from "@/lib/api";
 import Pagination from "@/components/Pagination";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 interface Rule {
   id: number;
@@ -47,17 +46,32 @@ export default function Permissions() {
   const [audits, setAudits] = useState<Audit[]>([]);
   const [pending, setPending] = useState<Audit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending">("rules");
+  const [activeTab, setActiveTab] = useState<"rules" | "check" | "audits" | "pending" | "grants" | "diagnostics">("rules");
   const [checkAction, setCheckAction] = useState("");
   const [checkResult, setCheckResult] = useState<any>(null);
   const [showAddRule, setShowAddRule] = useState(false);
   const [newRule, setNewRule] = useState({ action_pattern: "", permission_level: "require_approval", category: "general", description: "" });
   const [rulesPage, setRulesPage] = useState(1);
   const rulesPerPage = 10;
+  const [grants, setGrants] = useState<any[]>([]);
+  const [capabilities, setCapabilities] = useState<Record<string, string[]>>({});
+  const [showAddGrant, setShowAddGrant] = useState(false);
+  const [newGrant, setNewGrant] = useState({
+    capability: "pull_request:create",
+    subject_type: "user",
+    subject_id: "",
+    permission_level: "allow",
+    reason: "",
+    expires_hours: 24,
+  });
+  const [emergencyStop, setEmergencyStop] = useState(false);
+  const [estopBusy, setEstopBusy] = useState(false);
+  const [diagAction, setDiagAction] = useState("");
+  const [diagResult, setDiagResult] = useState<any>(null);
 
   const fetchRules = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/rules`);
+      const res = await apiFetch(`/api/permissions/rules`);
       if (res.ok) setRules(await res.json());
       else showToast("error", `Failed to load rules (${res.status})`);
     } catch (err) { showToast("error", "Network error loading rules"); }
@@ -65,7 +79,7 @@ export default function Permissions() {
 
   const fetchAudits = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/audits?limit=50`);
+      const res = await apiFetch(`/api/permissions/audits?limit=50`);
       if (res.ok) setAudits(await res.json());
       else showToast("error", `Failed to load audits (${res.status})`);
     } catch (err) { showToast("error", "Network error loading audits"); }
@@ -73,21 +87,45 @@ export default function Permissions() {
 
   const fetchPending = async () => {
     try {
-      const res = await fetch(`${API}/api/permissions/audits/pending`);
+      const res = await apiFetch(`/api/permissions/audits/pending`);
       if (res.ok) setPending(await res.json());
       else showToast("error", `Failed to load pending (${res.status})`);
     } catch (err) { showToast("error", "Network error loading pending"); }
   };
 
+  const fetchGrants = async () => {
+    try {
+      const [gRes, cRes] = await Promise.all([
+        apiFetch(`/api/permissions/grants?active_only=false`),
+        apiFetch(`/api/permissions/capabilities`),
+      ]);
+      if (gRes.ok) setGrants(await gRes.json());
+      if (cRes.ok) {
+        const body = await cRes.json();
+        setCapabilities(body.capabilities || {});
+      }
+    } catch (err) { showToast("error", "Network error loading grants"); }
+  };
+
+  const fetchEmergencyStop = async () => {
+    try {
+      const res = await apiFetch(`/api/permissions/emergency-stop`);
+      if (res.ok) {
+        const body = await res.json();
+        setEmergencyStop(!!body.active);
+      }
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchRules(), fetchAudits(), fetchPending()]).finally(() => setLoading(false));
+    Promise.all([fetchRules(), fetchAudits(), fetchPending(), fetchGrants(), fetchEmergencyStop()]).finally(() => setLoading(false));
   }, []);
 
   const handleCheck = async () => {
     if (!checkAction.trim()) return;
     try {
-      const res = await fetch(`${API}/api/permissions/check`, {
+      const res = await apiFetch(`/api/permissions/check`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: checkAction }),
@@ -105,7 +143,7 @@ export default function Permissions() {
   const handleAddRule = async () => {
     if (!newRule.action_pattern.trim()) return;
     try {
-      await fetch(`${API}/api/permissions/rules`, {
+      await apiFetch(`/api/permissions/rules`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newRule),
@@ -119,7 +157,7 @@ export default function Permissions() {
 
   const handleApproval = async (auditId: number, approved: boolean) => {
     try {
-      await fetch(`${API}/api/permissions/audits/${auditId}/approve`, {
+      await apiFetch(`/api/permissions/audits/${auditId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved, approved_by: "admin", reason: approved ? "Approved via dashboard" : "Rejected via dashboard" }),
@@ -132,15 +170,100 @@ export default function Permissions() {
 
   const handleDeleteRule = async (ruleId: number) => {
     try {
-      await fetch(`${API}/api/permissions/rules/${ruleId}`, { method: "DELETE" });
+      await apiFetch(`/api/permissions/rules/${ruleId}`, { method: "DELETE" });
       showToast("info", "Rule deleted");
       fetchRules();
     } catch (err) { showToast("error", "Failed to delete rule"); }
   };
 
+  const handleAddGrant = async () => {
+    if (!newGrant.capability.trim()) return;
+    const expires = new Date(Date.now() + Number(newGrant.expires_hours || 24) * 3600_000).toISOString();
+    try {
+      const res = await apiFetch(`/api/permissions/grants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          capability: newGrant.capability,
+          subject_type: newGrant.subject_type,
+          subject_id: newGrant.subject_id,
+          permission_level: newGrant.permission_level,
+          reason: newGrant.reason,
+          expires_at: expires,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast("error", err.detail || `Failed to create grant (${res.status})`);
+        return;
+      }
+      setShowAddGrant(false);
+      showToast("success", "Temporary grant created");
+      fetchGrants();
+    } catch (err) { showToast("error", "Failed to create grant"); }
+  };
+
+  const handleRevokeGrant = async (grantId: number) => {
+    try {
+      const res = await apiFetch(`/api/permissions/grants/${grantId}/revoke`, { method: "POST" });
+      if (!res.ok) {
+        showToast("error", `Revoke failed (${res.status})`);
+        return;
+      }
+      showToast("info", "Grant revoked");
+      fetchGrants();
+    } catch (err) { showToast("error", "Failed to revoke grant"); }
+  };
+
+  const toggleEmergencyStop = async () => {
+    const next = !emergencyStop;
+    if (next && !window.confirm("Engage global emergency stop? This cancels Mentrix runs and blocks new runner/webhook activity.")) {
+      return;
+    }
+    setEstopBusy(true);
+    try {
+      const res = await apiFetch(`/api/permissions/emergency-stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: next }),
+      });
+      if (!res.ok) {
+        showToast("error", `Emergency stop update failed (${res.status})`);
+        return;
+      }
+      const body = await res.json();
+      setEmergencyStop(!!body.active);
+      try {
+        await window.zectDesktop?.mentrix?.setEmergencyStop?.(!!body.active);
+      } catch {
+        /* Electron optional */
+      }
+      showToast(next ? "error" : "success", next ? "Emergency stop ENGAGED" : "Emergency stop cleared");
+    } catch {
+      showToast("error", "Failed to update emergency stop");
+    } finally {
+      setEstopBusy(false);
+    }
+  };
+
+  const handleDiagnostics = async () => {
+    if (!diagAction.trim()) return;
+    try {
+      const res = await apiFetch(`/api/permissions/diagnostics`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: diagAction }),
+      });
+      if (res.ok) setDiagResult(await res.json());
+      else showToast("error", `Diagnostics failed (${res.status})`);
+    } catch {
+      showToast("error", "Network error running diagnostics");
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-64" data-testid="permissions-page">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600" />
       </div>
     );
@@ -148,6 +271,8 @@ export default function Permissions() {
 
   const tabs = [
     { key: "rules" as const, label: "Permission Rules", icon: Shield },
+    { key: "grants" as const, label: `Grants (${grants.filter((g) => g.active).length})`, icon: Clock },
+    { key: "diagnostics" as const, label: "Diagnostics", icon: Search },
     { key: "check" as const, label: "Check Action", icon: Search },
     { key: "pending" as const, label: `Pending (${pending.length})`, icon: Clock },
     { key: "audits" as const, label: "Audit Log", icon: ShieldCheck },
@@ -173,18 +298,37 @@ export default function Permissions() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div data-testid="permissions-page">
+      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Shield className="h-6 w-6 text-red-600" /> Permissions Protocol
           </h1>
-          <p className="text-slate-500 text-sm">Allow / Require Approval / Never — security enforcement for agent actions</p>
+          <p className="text-slate-500 text-sm">
+            Capability gates before Mentrix and Scheduled Task actions — Allow / Require Approval / Never.
+          </p>
         </div>
-        <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); }} className="p-2 rounded hover:bg-slate-100">
-          <RefreshCw className="h-4 w-4 text-slate-500" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleEmergencyStop}
+            disabled={estopBusy}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60 ${
+              emergencyStop ? "bg-red-600 text-white hover:bg-red-700" : "bg-slate-800 text-white hover:bg-slate-900"
+            }`}
+          >
+            {estopBusy ? "Updating…" : emergencyStop ? "Clear Emergency Stop" : "Engage Emergency Stop"}
+          </button>
+          <button onClick={() => { fetchRules(); fetchAudits(); fetchPending(); fetchGrants(); fetchEmergencyStop(); }} className="p-2 rounded hover:bg-slate-100">
+            <RefreshCw className="h-4 w-4 text-slate-500" />
+          </button>
+        </div>
       </div>
+
+      {emergencyStop && (
+        <div className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Global emergency stop is <strong>active</strong> — new Mentrix runs, App Runner commands, and GitHub auto-review webhooks are blocked.
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 bg-slate-100 rounded-lg p-1">
@@ -262,6 +406,109 @@ export default function Permissions() {
         </div>
       )}
 
+      {/* Temporary Grants Tab */}
+      {activeTab === "grants" && (
+        <div>
+          <div className="flex justify-between items-center mb-3 gap-3 flex-wrap">
+            <p className="text-sm text-slate-500">Temporary capability grants expire automatically and can override baseline rules while active.</p>
+            <button onClick={() => setShowAddGrant(!showAddGrant)} className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">
+              <Plus className="h-3.5 w-3.5" /> Add Grant
+            </button>
+          </div>
+          {showAddGrant && (
+            <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-5 mb-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <select
+                  value={newGrant.capability}
+                  onChange={(e) => setNewGrant({ ...newGrant, capability: e.target.value })}
+                  className="px-3 py-2 border rounded-lg text-sm"
+                >
+                  {Object.keys(capabilities).length === 0 ? (
+                    <option value={newGrant.capability}>{newGrant.capability}</option>
+                  ) : (
+                    Object.keys(capabilities).map((cap) => (
+                      <option key={cap} value={cap}>{cap}</option>
+                    ))
+                  )}
+                </select>
+                <select value={newGrant.subject_type} onChange={(e) => setNewGrant({ ...newGrant, subject_type: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="user">User</option>
+                  <option value="agent">Agent</option>
+                  <option value="tool">Tool</option>
+                  <option value="workspace">Workspace</option>
+                </select>
+                <input value={newGrant.subject_id} onChange={(e) => setNewGrant({ ...newGrant, subject_id: e.target.value })} placeholder="Subject id (user id / agent key / workspace path)" className="px-3 py-2 border rounded-lg text-sm" />
+                <select value={newGrant.permission_level} onChange={(e) => setNewGrant({ ...newGrant, permission_level: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="allow">Allow</option>
+                  <option value="require_approval">Require Approval</option>
+                  <option value="never">Never</option>
+                </select>
+                <input type="number" min={1} value={newGrant.expires_hours} onChange={(e) => setNewGrant({ ...newGrant, expires_hours: Number(e.target.value) })} placeholder="Expires in hours" className="px-3 py-2 border rounded-lg text-sm" />
+                <input value={newGrant.reason} onChange={(e) => setNewGrant({ ...newGrant, reason: e.target.value })} placeholder="Reason" className="px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <button onClick={handleAddGrant} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Save Grant</button>
+            </div>
+          )}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-2">
+            {grants.length === 0 ? (
+              <p className="text-slate-400 text-sm py-8 text-center">No capability grants yet.</p>
+            ) : (
+              grants.map((g) => (
+                <div key={g.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-mono text-slate-800 truncate">{g.capability}</p>
+                    <p className="text-xs text-slate-500">
+                      {g.subject_type}:{g.subject_id || "*"} · expires {g.expires_at ? new Date(g.expires_at).toLocaleString() : "—"}
+                      {g.reason ? ` · ${g.reason}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {levelBadge(g.permission_level)}
+                    <span className={`text-xs px-2 py-0.5 rounded ${g.active ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
+                      {g.active ? "active" : g.revoked_at ? "revoked" : "expired"}
+                    </span>
+                    {g.active && (
+                      <button onClick={() => handleRevokeGrant(g.id)} className="text-xs text-red-600 hover:text-red-700">Revoke</button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Diagnostics Tab */}
+      {activeTab === "diagnostics" && (
+        <div>
+          <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+            <h3 className="text-sm font-semibold text-slate-700 mb-3">Permission Diagnostics</h3>
+            <p className="text-xs text-slate-500 mb-3">Explains baseline rules, temporary grants, covering Upgrade capabilities, and emergency-stop effect — without posting a permission audit.</p>
+            <div className="flex gap-2">
+              <input value={diagAction} onChange={(e) => setDiagAction(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleDiagnostics()}
+                placeholder="Action (e.g. companion_create_pr, merge_pr)" className="flex-1 px-3 py-2 border rounded-lg text-sm" />
+              <button onClick={handleDiagnostics} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700">Diagnose</button>
+            </div>
+          </div>
+          {diagResult && (
+            <div className="bg-slate-50 rounded-xl border border-slate-200 p-5 space-y-2 text-sm">
+              <p><span className="text-slate-500">Effective:</span> <strong>{diagResult.effective_result}</strong> ({diagResult.effective_level})</p>
+              <p><span className="text-slate-500">Reason:</span> {diagResult.reason}</p>
+              <p><span className="text-slate-500">Emergency stop:</span> {diagResult.emergency_stop ? "yes" : "no"}</p>
+              {diagResult.covering_capabilities?.length > 0 && (
+                <p><span className="text-slate-500">Capabilities:</span> <span className="font-mono text-xs">{diagResult.covering_capabilities.join(", ")}</span></p>
+              )}
+              {diagResult.matching_rules?.map((r: any) => (
+                <p key={r.id} className="text-xs text-slate-600">Rule: {r.action_pattern} → {r.permission_level}</p>
+              ))}
+              {diagResult.grant_applied && (
+                <p className="text-xs text-indigo-700">Grant applied: {diagResult.grant_applied.capability} #{diagResult.grant_applied.id}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Check Tab */}
       {activeTab === "check" && (
         <div>
@@ -290,6 +537,11 @@ export default function Permissions() {
                     <p key={r.id} className="text-xs text-slate-600">- {r.action_pattern} → {r.permission_level} ({r.description})</p>
                   ))}
                 </div>
+              )}
+              {checkResult.grant_applied && (
+                <p className="text-xs text-slate-600 mt-2">
+                  Temporary grant applied: <span className="font-mono">{checkResult.grant_applied.capability}</span> (#{checkResult.grant_applied.id})
+                </p>
               )}
             </div>
           )}

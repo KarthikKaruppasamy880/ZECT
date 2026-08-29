@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Sparkles,
   Play,
@@ -9,8 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "@/lib/api";
 
 interface DreamRun {
   id: number;
@@ -38,7 +38,7 @@ export default function DreamEngine() {
 
   const fetchRuns = async () => {
     try {
-      const res = await fetch(`${API}/api/dream/runs/${projectId}?limit=20`);
+      const res = await apiFetch(`/api/dream/runs/${projectId}?limit=20`);
       if (res.ok) setRuns(await res.json());
       else showToast("error", `Failed to load dream runs (${res.status})`);
     } catch (err) { showToast("error", "Network error loading dream runs"); }
@@ -53,7 +53,7 @@ export default function DreamEngine() {
     setRunning(true);
     setLastResult(null);
     try {
-      const res = await fetch(`${API}/api/dream/run`, {
+      const res = await apiFetch(`/api/dream/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,7 +76,7 @@ export default function DreamEngine() {
 
   const handleDecay = async () => {
     try {
-      const res = await fetch(`${API}/api/dream/decay`, {
+      const res = await apiFetch(`/api/dream/decay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, max_age_days: 30 }),
@@ -105,7 +105,12 @@ export default function DreamEngine() {
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Sparkles className="h-6 w-6 text-purple-600" /> Dream Engine
           </h1>
-          <p className="text-slate-500 text-sm">Automated pattern extraction, candidate staging, and memory decay</p>
+          <p className="text-slate-500 text-sm">
+            Run a cycle after Memory has episodes. This is not a general creative studio — it extracts patterns from ZECT memory.
+          </p>
+          <Link to="/memory" className="mt-1 inline-block text-xs text-teal-800 underline" data-testid="dream-memory-link">
+            Open Memory
+          </Link>
         </div>
         <div className="flex items-center gap-3">
           <label className="text-sm text-slate-600">Project ID:</label>
@@ -169,7 +174,9 @@ export default function DreamEngine() {
           <BarChart3 className="h-4 w-4" /> Run History
         </h3>
         {runs.length === 0 ? (
-          <p className="text-slate-400 text-sm py-8 text-center">No dream cycles have been run yet. Click "Run Dream Cycle" above to start.</p>
+          <p className="text-slate-400 text-sm py-8 text-center" data-testid="dream-empty">
+            No dream cycles yet. Run a cycle after Memory has episodes.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

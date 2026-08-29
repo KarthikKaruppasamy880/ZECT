@@ -58,7 +58,10 @@ Analyse the provided PR diff and produce a comprehensive code review. Your revie
       "file": "path/to/file.ext",
       "line": <line number or null>,
       "suggestion": "Recommended fix or improvement",
-      "code_snippet": "relevant code snippet if applicable"
+      "code_snippet": "relevant code snippet if applicable",
+      "fixed_code": "corrected code for this specific finding, or null if not safely auto-fixable",
+      "cwe_id": "CWE ID e.g. CWE-79, only for vulnerabilities findings, else null",
+      "owasp_category": "OWASP category e.g. A03:2021-Injection, only for vulnerabilities findings, else null"
     }
   ],
   "strengths": ["list of positive aspects of the code"],
@@ -67,13 +70,76 @@ Analyse the provided PR diff and produce a comprehensive code review. Your revie
 
 Review criteria:
 1. BUGS: Logic errors, off-by-one, null/undefined access, race conditions, edge cases
-2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization
+2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization — always populate cwe_id and owasp_category for these
 3. PERFORMANCE: N+1 queries, unnecessary re-renders, memory leaks, blocking operations
 4. CODE QUALITY: Dead code, duplicated logic, poor naming, missing types, unclear intent
 5. ARCHITECTURE: Tight coupling, circular dependencies, layer violations, anti-patterns
 6. BEST PRACTICES: Missing error handling, no input validation, missing tests, poor logging
 
 Be thorough but avoid false positives. Only flag real issues. Be specific with line numbers and file paths."""
+
+_FINDING_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+        "category": {
+            "type": "string",
+            "enum": ["bugs", "vulnerabilities", "performance", "code_quality", "architecture", "best_practices"],
+        },
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "file": {"type": "string"},
+        "line": {"type": ["integer", "null"]},
+        "suggestion": {"type": "string"},
+        "code_snippet": {"type": ["string", "null"]},
+        "fixed_code": {"type": ["string", "null"]},
+        "cwe_id": {"type": ["string", "null"]},
+        "owasp_category": {"type": ["string", "null"]},
+    },
+    "required": [
+        "severity", "category", "title", "description", "file", "line",
+        "suggestion", "code_snippet", "fixed_code", "cwe_id", "owasp_category",
+    ],
+    "additionalProperties": False,
+}
+
+# response_format for the review JSON shape — strict structured outputs
+# instead of plain json_object mode: OpenAI now *guarantees* every required
+# field is present with the right type/enum, eliminating the .setdefault()
+# fallbacks and JSONDecodeError path as anything but a defensive backstop.
+REVIEW_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "code_review_result",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "quality_score": {"type": "integer"},
+                "total_issues": {"type": "integer"},
+                "categories": {
+                    "type": "object",
+                    "properties": {
+                        "bugs": {"type": "integer"},
+                        "vulnerabilities": {"type": "integer"},
+                        "performance": {"type": "integer"},
+                        "code_quality": {"type": "integer"},
+                        "architecture": {"type": "integer"},
+                        "best_practices": {"type": "integer"},
+                    },
+                    "required": ["bugs", "vulnerabilities", "performance", "code_quality", "architecture", "best_practices"],
+                    "additionalProperties": False,
+                },
+                "findings": {"type": "array", "items": _FINDING_SCHEMA},
+                "strengths": {"type": "array", "items": {"type": "string"}},
+                "recommendations": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["summary", "quality_score", "total_issues", "categories", "findings", "strengths", "recommendations"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 
 def _get_client() -> OpenAI:
@@ -90,6 +156,9 @@ def review_pr_diff(
     pr_title: str,
     pr_body: str | None,
     files: list[dict],
+    user_id: int | None = None,
+    db: object = None,
+    repo_id: int | None = None,
 ) -> dict:
     """Analyse a PR diff using AI and return structured review results.
 
@@ -103,71 +172,122 @@ def review_pr_diff(
     """
     client = _get_client()
 
-    # Build the diff context
-    diff_parts: list[str] = []
-    for f in files:
-        patch = f.get("patch") or ""
-        if patch:
-            diff_parts.append(f"--- {f['filename']} ({f['status']}) +{f.get('additions', 0)}/-{f.get('deletions', 0)} ---\n{patch}")
+    from app.services.diff_line_mapper import chunk_files_for_review, clamp_finding_line
 
-    diff_text = "\n\n".join(diff_parts)
+    chunks = chunk_files_for_review(files, max_chars=12000)
+    merged_findings: list[dict] = []
+    strengths: list[str] = []
+    recommendations: list[str] = []
+    summaries: list[str] = []
+    categories: dict[str, int] = {}
+    total_tokens = 0
+    scores: list[int] = []
 
-    # Truncate if too long (keep within context window)
-    if len(diff_text) > 30000:
-        diff_text = diff_text[:30000] + "\n\n... [diff truncated for length]"
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
 
-    user_content = f"""Review this Pull Request:
+    try:
+        for idx, chunk in enumerate(chunks):
+            diff_parts: list[str] = []
+            for f in chunk:
+                patch = f.get("patch") or ""
+                if patch:
+                    diff_parts.append(
+                        f"--- {f['filename']} ({f['status']}) "
+                        f"+{f.get('additions', 0)}/-{f.get('deletions', 0)} ---\n{patch}"
+                    )
+            diff_text = "\n\n".join(diff_parts)
+
+            # Per-chunk, not per-PR — re-reviewing a PR where only some files
+            # changed since the last review should only re-hit the API for
+            # the chunks that actually changed.
+            chunk_cache_key = cache_key_for("review_pr_chunk", diff_text)
+            cached_part = get_cached(db, chunk_cache_key)
+            if cached_part is not None:
+                part = cached_part
+                tokens = 0
+            else:
+                user_content = f"""Review this Pull Request (chunk {idx + 1}/{len(chunks)}):
 
 **PR #{pr_number}: {pr_title}**
 Repository: {owner}/{repo}
 {f"Description: {pr_body}" if pr_body else ""}
 
-**Changed Files ({len(files)}):**
+**Changed Files in this chunk ({len(chunk)}):**
 {diff_text}
 
 Provide your review as valid JSON following the specified structure."""
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            max_tokens=4000,
-            temperature=0.2,
-            response_format={"type": "json_object"},
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    max_tokens=4000,
+                    temperature=0.2,
+                    response_format=REVIEW_RESPONSE_FORMAT,
+                )
+                content = resp.choices[0].message.content or "{}"
+                tokens = resp.usage.total_tokens if resp.usage else 0
+                prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
+                completion_tok = resp.usage.completion_tokens if resp.usage else 0
+                part = json.loads(content)
+                store_cached(db, chunk_cache_key, part, model="gpt-4o-mini", tokens_used=tokens)
+                log_tokens(
+                    action="code_review",
+                    feature="code_review",
+                    model="gpt-4o-mini",
+                    prompt_tokens=prompt_tok,
+                    completion_tokens=completion_tok,
+                    total_tokens=tokens,
+                    user_id=user_id,
+                )
+
+            total_tokens += tokens
+            summaries.append(part.get("summary", ""))
+            scores.append(int(part.get("quality_score", 50)))
+            strengths.extend(part.get("strengths") or [])
+            recommendations.extend(part.get("recommendations") or [])
+            for k, v in (part.get("categories") or {}).items():
+                categories[k] = categories.get(k, 0) + int(v or 0)
+            for finding in part.get("findings") or []:
+                if isinstance(finding, dict):
+                    finding["line"] = clamp_finding_line(
+                        finding.get("file") or "",
+                        finding.get("line"),
+                        files,
+                    )
+                    merged_findings.append(finding)
+
+        from app.domains.pr_review.deterministic_checks import collect_deterministic_findings
+        from app.domains.pr_review.finding_pipeline import finalize_pr_findings
+
+        det = collect_deterministic_findings(files=files, db=db)
+        merged_findings = det + merged_findings
+        merged_findings = finalize_pr_findings(
+            merged_findings,
+            files,
+            repository=f"{owner}/{repo}",
         )
 
-        content = resp.choices[0].message.content or "{}"
-        tokens = resp.usage.total_tokens if resp.usage else 0
-        prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
-        completion_tok = resp.usage.completion_tokens if resp.usage else 0
-
-        log_tokens(
-            action="code_review",
-            feature="code_review",
-            model="gpt-4o-mini",
-            prompt_tokens=prompt_tok,
-            completion_tokens=completion_tok,
-            total_tokens=tokens,
+        review = {
+            "summary": " ".join(s for s in summaries if s) or "Review completed.",
+            "quality_score": int(sum(scores) / len(scores)) if scores else 50,
+            "total_issues": len(merged_findings),
+            "categories": categories,
+            "findings": merged_findings,
+            "strengths": strengths[:20],
+            "recommendations": recommendations[:20],
+            "tokens_used": total_tokens,
+            "model": "gpt-4o-mini",
+            "pr_number": pr_number,
+            "repo": f"{owner}/{repo}",
+            "repository": f"{owner}/{repo}",
+            "chunks_reviewed": len(chunks),
+        }
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="pr", result=review, user_id=user_id, repo_id=repo_id, pr_number=pr_number,
         )
-
-        review = json.loads(content)
-
-        # Ensure required fields exist with defaults
-        review.setdefault("summary", "Review completed.")
-        review.setdefault("quality_score", 50)
-        review.setdefault("total_issues", len(review.get("findings", [])))
-        review.setdefault("categories", {})
-        review.setdefault("findings", [])
-        review.setdefault("strengths", [])
-        review.setdefault("recommendations", [])
-        review["tokens_used"] = tokens
-        review["model"] = "gpt-4o-mini"
-        review["pr_number"] = pr_number
-        review["repo"] = f"{owner}/{repo}"
-
         return review
 
     except APIError as e:
@@ -181,20 +301,31 @@ Provide your review as valid JSON following the specified structure."""
             "findings": [],
             "strengths": [],
             "recommendations": [],
-            "tokens_used": 0,
+            "tokens_used": total_tokens,
             "model": "gpt-4o-mini",
             "pr_number": pr_number,
             "repo": f"{owner}/{repo}",
         }
 
 
-def review_code_snippet(code: str, language: str = "unknown") -> dict:
+def review_code_snippet(
+    code: str, language: str = "unknown", user_id: int | None = None, db: object = None,
+) -> dict:
     """Review a standalone code snippet (not a PR diff).
 
     Args:
         code: The code to review
         language: Programming language hint
     """
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
+
+    cache_key = cache_key_for("review_snippet", language, code)
+    cached = get_cached(db, cache_key)
+    if cached is not None:
+        review = dict(cached)
+        review["review_session_id"] = _persist_review_session(db, review_type="snippet", result=review, user_id=user_id)
+        return review
+
     client = _get_client()
 
     user_content = f"""Review this {language} code snippet:
@@ -215,7 +346,7 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
             ],
             max_tokens=3000,
             temperature=0.2,
-            response_format={"type": "json_object"},
+            response_format=REVIEW_RESPONSE_FORMAT,
         )
 
         content = resp.choices[0].message.content or "{}"
@@ -230,18 +361,26 @@ Use "snippet" as the file path and provide line numbers relative to the snippet.
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
+            user_id=user_id,
         )
 
         review = json.loads(content)
         review.setdefault("summary", "Snippet review completed.")
         review.setdefault("quality_score", 50)
-        review.setdefault("total_issues", len(review.get("findings", [])))
         review.setdefault("categories", {})
         review.setdefault("findings", [])
         review.setdefault("strengths", [])
         review.setdefault("recommendations", [])
+        from app.domains.pr_review.deterministic_checks import collect_deterministic_findings
+        from app.domains.pr_review.finding_pipeline import finalize_pr_findings
+
+        det = collect_deterministic_findings(code=code, language=language, db=db, file_path="snippet")
+        review["findings"] = finalize_pr_findings(det + list(review.get("findings") or []), files=[])
+        review["total_issues"] = len(review["findings"])
         review["tokens_used"] = tokens
         review["model"] = "gpt-4o-mini"
+        store_cached(db, cache_key, review, model="gpt-4o-mini", tokens_used=tokens)
+        review["review_session_id"] = _persist_review_session(db, review_type="snippet", result=review, user_id=user_id)
 
         return review
 
@@ -290,7 +429,10 @@ Analyse the provided source files from a full repository scan and produce a comp
       "file": "path/to/file.ext",
       "line": <line number or null>,
       "suggestion": "Recommended fix or improvement",
-      "code_snippet": "relevant code snippet if applicable"
+      "code_snippet": "relevant code snippet if applicable",
+      "fixed_code": "corrected code for this specific finding, or null if not safely auto-fixable",
+      "cwe_id": "CWE ID e.g. CWE-79, only for vulnerabilities findings, else null",
+      "owasp_category": "OWASP category e.g. A03:2021-Injection, only for vulnerabilities findings, else null"
     }
   ],
   "strengths": ["list of positive aspects of the code"],
@@ -299,13 +441,104 @@ Analyse the provided source files from a full repository scan and produce a comp
 
 Review criteria:
 1. BUGS: Logic errors, off-by-one, null/undefined access, race conditions, edge cases
-2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization
+2. VULNERABILITIES: Hardcoded secrets, SQL injection, XSS, CSRF, auth gaps, insecure deserialization — always populate cwe_id and owasp_category for these
 3. PERFORMANCE: N+1 queries, unnecessary re-renders, memory leaks, blocking operations
 4. CODE QUALITY: Dead code, duplicated logic, poor naming, missing types, unclear intent
 5. ARCHITECTURE: Tight coupling, circular dependencies, layer violations, anti-patterns
 6. BEST PRACTICES: Missing error handling, no input validation, missing tests, poor logging
 
 Be thorough but avoid false positives. Only flag real issues. Be specific with line numbers and file paths."""
+
+
+def _persist_review_session(
+    db: object,
+    *,
+    review_type: str,
+    result: dict,
+    user_id: int | None = None,
+    repo_id: int | None = None,
+    pr_number: int | None = None,
+    branch_name: str | None = None,
+) -> int | None:
+    """Persist any review result (PR, snippet, or full-repo) to ReviewSession +
+    ReviewFinding — the DB-backed history ultrareview.py already built, now
+    populated by every review entry point instead of only its own /snippet.
+    Fail-safe: a persistence error must never break the review response the
+    caller already has in hand.
+    """
+    if db is None:
+        return None
+    from datetime import datetime, timezone
+    from app.models import ReviewSession, ReviewFinding
+
+    try:
+        severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        for f in result.get("findings", []):
+            sev = f.get("severity", "info")
+            if sev in severity_counts:
+                severity_counts[sev] += 1
+
+        session = ReviewSession(
+            user_id=user_id,
+            repo_id=repo_id,
+            review_type=review_type,
+            pr_number=pr_number,
+            branch_name=branch_name,
+            status="completed",
+            total_findings=result.get("total_issues", len(result.get("findings", []))),
+            critical_count=severity_counts["critical"],
+            high_count=severity_counts["high"],
+            medium_count=severity_counts["medium"],
+            low_count=severity_counts["low"],
+            info_count=severity_counts["info"],
+            overall_score=float(result.get("quality_score", 0)),
+            review_summary=result.get("summary", ""),
+            files_reviewed=result.get("files_scanned") or result.get("chunks_reviewed") or 0,
+            tokens_used=result.get("tokens_used", 0),
+            model_used=result.get("model", "gpt-4o-mini"),
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(session)
+        db.flush()
+
+        for f in result.get("findings", []):
+            from app.domains.pr_review.finding_schema import normalize_from_llm
+
+            repo_label = None
+            if result.get("owner") and result.get("repo"):
+                repo_label = f"{result.get('owner')}/{result.get('repo')}"
+            elif result.get("repository"):
+                repo_label = result.get("repository")
+            spec = normalize_from_llm(
+                f,
+                repository=repo_label,
+                commit_sha=result.get("commit_sha") or result.get("head_sha"),
+            )
+            # Stage A: persist legacy columns; fingerprint/confidence computed at read time
+            # via normalize_from_db until a dedicated migration lands.
+            db.add(
+                ReviewFinding(
+                    review_session_id=session.id,
+                    category=spec.category,
+                    severity=spec.severity,
+                    title=spec.title,
+                    description=spec.explanation,
+                    file_path=spec.file,
+                    line_start=spec.start_line,
+                    line_end=spec.end_line,
+                    code_snippet=spec.code_snippet or spec.evidence,
+                    suggestion=spec.suggested_fix,
+                    fixed_code=spec.fixed_code,
+                    cwe_id=spec.cwe_id,
+                    owasp_category=spec.owasp_category,
+                )
+            )
+        db.commit()
+        return session.id
+    except Exception as e:
+        db.rollback()
+        print(f"[ZECT REVIEW] Failed to persist review session: {e}")
+        return None
 
 
 def _collect_repo_files(gh_repo: object, path: str = "", branch: str | None = None) -> list[dict]:
@@ -381,6 +614,9 @@ def review_repo_files(
     repo: str,
     branch: str | None = None,
     file_patterns: list[str] | None = None,
+    user_id: int | None = None,
+    db: object = None,
+    repo_id: int | None = None,
 ) -> dict:
     """Scan an entire GitHub repository and run AI code review on all source files.
 
@@ -442,6 +678,17 @@ def review_repo_files(
     if len(files_text) > 60_000:
         files_text = files_text[:60_000] + "\n\n... [remaining files truncated for context limit]"
 
+    from app.adapters.llm.response_cache import cache_key_for, get_cached, store_cached
+
+    cache_key = cache_key_for("review_repo", owner, repo, scan_branch, files_text)
+    cached = get_cached(db, cache_key)
+    if cached is not None:
+        review = dict(cached)
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="full_repo", result=review, user_id=user_id, repo_id=repo_id,
+        )
+        return review
+
     client = _get_client()
 
     user_content = f"""Perform a FULL REPOSITORY CODE REVIEW:
@@ -465,7 +712,7 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
             ],
             max_tokens=4000,
             temperature=0.2,
-            response_format={"type": "json_object"},
+            response_format=REVIEW_RESPONSE_FORMAT,
         )
 
         content = resp.choices[0].message.content or "{}"
@@ -480,6 +727,7 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
             prompt_tokens=prompt_tok,
             completion_tokens=completion_tok,
             total_tokens=tokens,
+            user_id=user_id,
         )
 
         review = json.loads(content)
@@ -499,6 +747,10 @@ Focus on the most impactful issues. Check every file for security vulnerabilitie
         review["files_scanned"] = len(all_files)
         review["total_lines"] = total_lines
         review["scanned_files"] = [f["path"] for f in all_files]
+        store_cached(db, cache_key, review, model="gpt-4o-mini", tokens_used=tokens)
+        review["review_session_id"] = _persist_review_session(
+            db, review_type="full_repo", result=review, user_id=user_id, repo_id=repo_id,
+        )
 
         return review
 

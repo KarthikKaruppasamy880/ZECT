@@ -1,0 +1,4 @@
+# Place Chatterbox / Voicebox-compatible executable here.
+# Examples (Windows): chatterbox-server.exe, Voicebox.exe
+# This directory is shipped via electron-builder extraResources.
+# Do not commit large model weights to git.

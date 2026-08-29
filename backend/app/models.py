@@ -1,7 +1,7 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, JSON, ARRAY, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
-from app.database import Base
+from app.infrastructure.database import Base
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +30,24 @@ class User(Base):
     token_logs = relationship("TokenLog", back_populates="user")
     budgets = relationship("TokenBudget", back_populates="user")
     generated_outputs = relationship("GeneratedOutput", back_populates="user")
+    auth_tokens = relationship("AuthToken", back_populates="user", cascade="all, delete-orphan")
+
+
+class AuthToken(Base):
+    """Durable login/OIDC session tokens (replaces in-memory auth set)."""
+    __tablename__ = "auth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    username = Column(String, default="")
+    email = Column(String, default="")
+    auth_mode = Column(String, default="local")  # local | oidc
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="auth_tokens")
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +92,8 @@ class Project(Base):
     completion_percent = Column(Float, default=0.0)
     token_savings = Column(Float, default=0.0)
     risk_alerts = Column(Integer, default=0)
+    provenance = Column(String, default="user", index=True)  # user | test
+    test_run_id = Column(String, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -118,26 +138,6 @@ class Setting(Base):
     label = Column(String, default="")
     description = Column(String, default="")
     options = Column(String, default="")  # JSON array for select options
-
-
-class Skill(Base):
-    """Reusable skill templates for AI agents — can be global or scoped to a repo."""
-    __tablename__ = "skills"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(Text, default="")
-    category = Column(String, default="general")  # general, testing, deployment, review, architecture
-    template = Column(Text, default="")  # The actual skill content/template
-    trigger_pattern = Column(String, nullable=True)  # Regex or keyword that triggers this skill
-    tags = Column(String, default="[]")  # JSON array of tags
-    usage_count = Column(Integer, default=0)
-    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)  # null = global skill
-    scope = Column(String, default="global")  # global, repo
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    repo = relationship("Repo", backref="skills")
 
 
 class TokenBudget(Base):
@@ -254,6 +254,9 @@ class AuditLog(Base):
     ip_address = Column(String, nullable=True)
     user_agent = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # Phase 5 Stage D — optional integrity chain (nullable for backfill)
+    prev_hash = Column(String, nullable=True)
+    entry_hash = Column(String, nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -732,6 +735,27 @@ class PermissionAudit(Base):
     project = relationship("Project", backref="permission_audits")
 
 
+class CapabilityGrant(Base):
+    """Temporary capability grant (Phase 5 Stage B) — expires; overrides rules while active."""
+    __tablename__ = "capability_grants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Upgrade.md capability (e.g. pull_request:create) or raw action pattern
+    capability = Column(String, nullable=False, index=True)
+    subject_type = Column(String, nullable=False, default="user")  # user | agent | tool | workspace
+    subject_id = Column(String, nullable=False, default="")  # user id / agent key / workspace path
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    permission_level = Column(String, nullable=False, default="allow")  # allow | require_approval | never
+    reason = Column(Text, default="")
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", backref="capability_grants")
+    granter = relationship("User", foreign_keys=[granted_by])
+
+
 # ---------------------------------------------------------------------------
 # Transfer & Onboarding
 # ---------------------------------------------------------------------------
@@ -800,6 +824,16 @@ class SkillDefinition(Base):
     is_active = Column(Boolean, default=True)
     execution_count = Column(Integer, default=0)
     last_executed_at = Column(DateTime, nullable=True)
+    # Phase 10 Stage B — Upgrade skill contract fields
+    owner = Column(String, default="")
+    provenance = Column(String, default="local")  # local | imported | seed
+    approval_required = Column(Boolean, default=True)
+    timeout_seconds = Column(Integer, default=300)
+    required_capabilities = Column(JSON, default=list)
+    allowed_tools = Column(JSON, default=list)
+    input_schema = Column(JSON, default=dict)
+    output_schema = Column(JSON, default=dict)
+    test_cases = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -981,6 +1015,9 @@ class Schedule(Base):
     next_run_at = Column(DateTime, nullable=True)
     run_count = Column(Integer, default=0)
     failure_count = Column(Integer, default=0)
+    # Phase 10 Stage B — retries / max attempts (0 = unlimited until paused)
+    max_attempts = Column(Integer, default=3)
+    retry_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -988,6 +1025,23 @@ class Schedule(Base):
     project = relationship("Project", backref="schedules")
     playbook = relationship("Playbook", backref="schedules")
     runs = relationship("ScheduleRun", back_populates="schedule", cascade="all, delete-orphan")
+
+
+class FabricSurface(Base):
+    """Mentrix Multi-Surface Fabric — registered change domain."""
+    __tablename__ = "fabric_surfaces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    surface_id = Column(String, unique=True, nullable=False, index=True)
+    label = Column(String, default="")
+    project_key = Column(String, default="")
+    workspace = Column(String, default="")
+    repo_hints = Column(JSON, default=list)
+    keywords = Column(JSON, default=list)
+    active = Column(Boolean, default=False)
+    config_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class ScheduleRun(Base):
@@ -1004,8 +1058,87 @@ class ScheduleRun(Base):
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime, nullable=True)
+    idempotency_key = Column(String, nullable=True, index=True)
 
     schedule = relationship("Schedule", back_populates="runs")
+
+
+class OutboundDraft(Base):
+    """Phase 8 Stage A — draft-before-send for Slack/email (and future channels)."""
+    __tablename__ = "outbound_drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    channel = Column(String, nullable=False)  # slack | email | jira | calendar
+    status = Column(String, default="draft")  # draft | sent | cancelled
+    payload_json = Column(JSON, default=dict)
+    provider_message_id = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    sent_at = Column(DateTime, nullable=True)
+
+
+class FileOrganizePlan(Base):
+    """PA-6 durable file-organization proposals (SHA-256 moves; no delete)."""
+    __tablename__ = "file_organize_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(String, unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String, default="planned")  # planned | executed | rolled_back | cancelled
+    plan_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+
+# ---------------------------------------------------------------------------
+# Phase 9 — Security findings & incidents (ZECT-branded; adapters behind)
+# ---------------------------------------------------------------------------
+
+class SecurityFinding(Base):
+    """Normalized detection finding from any Detection Provider adapter."""
+    __tablename__ = "security_findings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fingerprint = Column(String, nullable=False, index=True)
+    source = Column(String, default="audit_trail")  # audit_trail | detection_provider
+    kind = Column(String, nullable=False, index=True)
+    severity = Column(String, default="medium")  # critical|high|medium|low|info
+    status = Column(String, default="open")  # open|drafted|ticketed|dismissed
+    title = Column(String, default="")
+    description = Column(Text, default="")
+    host = Column(String, default="")
+    user_ref = Column(String, default="")
+    rule_id = Column(String, default="")
+    raw_event_json = Column(Text, default="{}")  # immutable original payload
+    indicators_json = Column(JSON, default=dict)
+    correlation_id = Column(String, default="", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class SecurityIncident(Base):
+    """IR record linking findings → approval → Jira/Slack."""
+    __tablename__ = "security_incidents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    finding_id = Column(Integer, ForeignKey("security_findings.id"), nullable=False, index=True)
+    status = Column(String, default="draft")  # draft|pending_approval|created|notified|closed
+    summary = Column(String, default="")
+    severity = Column(String, default="medium")
+    confidence = Column(String, default="medium")
+    jira_key = Column(String, default="")
+    slack_ts = Column(String, default="")
+    approval_status = Column(String, default="pending")  # pending|approved|rejected
+    approved_by = Column(String, default="")
+    timeline_json = Column(JSON, default=list)
+    recommended_actions_json = Column(JSON, default=list)
+    correlation_id = Column(String, default="", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    finding = relationship("SecurityFinding", backref="incidents")
 
 
 # ---------------------------------------------------------------------------
@@ -1057,6 +1190,31 @@ class CodeSymbol(Base):
     indexed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     repo = relationship("Repo", backref="code_symbols")
+
+
+class CodeEmbedding(Base):
+    """Semantic chunk + embedding for retrieval-augmented Build context.
+
+    Distinct from CodeSymbol (regex symbol names, free, structural) — this is
+    real content chunks with vector embeddings for similarity search, replacing
+    the flat 4KB repo-context snapshot Build used to send on every generation.
+    """
+    __tablename__ = "code_embeddings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=False, index=True)
+    file_path = Column(String, nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    language = Column(String, default="")
+    line_start = Column(Integer, default=0)
+    line_end = Column(Integer, default=0)
+    symbol_name = Column(String, nullable=True)  # function/class name if chunk is boundary-aligned
+    content = Column(Text, nullable=False)  # the actual chunk text, injected into context at retrieval
+    embedding = Column(Text, nullable=False)  # JSON-encoded list[float]
+    embedding_model = Column(String, default="text-embedding-3-small")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    repo = relationship("Repo", backref="code_embeddings")
 
 
 # ---------------------------------------------------------------------------
@@ -1168,3 +1326,660 @@ class SessionMessage(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     persistent_session = relationship("PersistentSession", back_populates="messages")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix — Lattice / RAG / MCP / Runs
+# ---------------------------------------------------------------------------
+
+class EmbeddingChunk(Base):
+    """RAG chunk. embedding_json is a JSON list[float]; no pgvector column/extension."""
+    __tablename__ = "embedding_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    repo_id = Column(Integer, ForeignKey("repos.id"), nullable=True, index=True)
+    project_key = Column(String, default="", index=True)
+    path = Column(String, nullable=False, index=True)
+    source_type = Column(String, default="code")
+    language = Column(String, default="")
+    line_start = Column(Integer, default=1)
+    content = Column(Text, default="")
+    embedding_json = Column(Text, default="[]")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MentrixRun(Base):
+    """Mentrix orchestrator run record."""
+    __tablename__ = "mentrix_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    mode = Column(String, default="chat")  # chat, understand, deliver, review_only, ops
+    goal = Column(Text, default="")
+    status = Column(String, default="running")  # running, completed, awaiting_approval, needs_human, approved, pr_created, failed, cancelled
+    current_agent = Column(String, default="orchestrator")
+    events_json = Column(Text, default="[]")
+    result_json = Column(Text, default="{}")
+    gates_json = Column(Text, default="{}")
+    next_step = Column(String, default="")
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(String, default="")
+    pr_url = Column(String, default="")
+    created_by = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+
+class MCPServerConfig(Base):
+    """Persisted MCP / integration server configuration."""
+    __tablename__ = "mcp_server_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_id = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    enabled = Column(Boolean, default=False)
+    base_url = Column(String, default="")
+    config_json = Column(Text, default="{}")
+    last_health = Column(String, default="unknown")
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MCPToolAudit(Base):
+    """Audit log for Mentrix MCP tool calls."""
+    __tablename__ = "mcp_tool_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    server_id = Column(String, nullable=False, index=True)
+    tool_name = Column(String, nullable=False)
+    arguments_json = Column(Text, default="{}")
+    result_json = Column(Text, default="{}")
+    status = Column(String, default="success")
+    user_email = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ReviewWebhookConfig(Base):
+    """Durable GitHub webhook auto-review config (replaces in-memory dict)."""
+    __tablename__ = "review_webhook_configs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner = Column(String, nullable=False)
+    repo = Column(String, nullable=False)
+    enabled = Column(Boolean, default=False)
+    auto_review = Column(Boolean, default=True)
+    auto_comment = Column(Boolean, default=False)  # Stage D: off by default
+    webhook_secret = Column(String, default="")
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class FineTuneSample(Base):
+    """Preference samples for Phase 9 Mentrix LoRA fine-tuning."""
+    __tablename__ = "fine_tune_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_role = Column(String, default="builder")
+    prompt_context = Column(Text, default="")
+    preferred_output = Column(Text, default="")
+    rejected_output = Column(Text, default="")
+    accepted = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LatticeStructuralBlueprint(Base):
+    """Mentrix structural RepoBlueprint — deep inventory per Lattice project_key."""
+    __tablename__ = "lattice_structural_blueprints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_key = Column(String, unique=True, nullable=False, index=True)
+    workspace_path = Column(String, default="")
+    status = Column(String, default="synced")  # pending, indexing, synced, failed
+    indexed_commit_sha = Column(String, default="")
+    file_tree_json = Column(Text, default="[]")
+    functions_json = Column(Text, default="[]")
+    classes_json = Column(Text, default="[]")
+    api_endpoints_json = Column(Text, default="[]")
+    outbound_calls_json = Column(Text, default="[]")
+    dependency_graph_json = Column(Text, default="{}")
+    database_connections_json = Column(Text, default="[]")
+    config_entries_json = Column(Text, default="[]")
+    tech_stack_json = Column(Text, default="[]")
+    business_context_json = Column(Text, default="[]")
+    god_nodes_json = Column(Text, default="[]")
+    stats_json = Column(Text, default="{}")
+    error = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ContextStoreEntry(Base):
+    """Per-user, per-page context key/value store — backs /api/context/*.
+
+    Previously an in-memory dict (context_management.py), global across all
+    users and wiped on every restart. This persists it and scopes it by
+    user_id so one user's Ask/Plan/Build context can't leak into another's.
+    """
+    __tablename__ = "context_store_entries"
+    __table_args__ = (UniqueConstraint("user_id", "page", "key", name="uq_context_store_user_page_key"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    page = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False)
+    value = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class ClonedVoice(Base):
+    """A user's cloned voice profile — ZECT Chatterbox persistence.
+
+    Users may store multiple clones; Present / Realtime sessions use the row
+    with is_default=True. Sample audio is stored under backend/data/voices/;
+    external_voice_id is the optional local engine profile id used for synth.
+    voice_id is ZECT's stable id (uuid string).
+    """
+    __tablename__ = "cloned_voices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String, default="chatterbox")
+    voice_id = Column(String, nullable=False, unique=True, index=True)
+    external_voice_id = Column(String, nullable=True)
+    name = Column(String, default="")
+    sample_path = Column(String, nullable=True)
+    reference_text = Column(Text, nullable=True)
+    is_default = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LLMResponseCache(Base):
+    """Exact-match cache for repeated identical LLM calls — cost-tree lever
+    #10: re-reviewing the same unchanged code/diff/repo shouldn't re-hit the
+    API for a response that would come back identical."""
+    __tablename__ = "llm_response_caches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(String, unique=True, nullable=False, index=True)
+    response_json = Column(Text, nullable=False)
+    model = Column(String, default="")
+    tokens_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Phase 10 Stage B — typed memory records + condition watches + retention
+# ---------------------------------------------------------------------------
+
+MEMORY_TYPES = (
+    "conversation_history",
+    "project_knowledge",
+    "user_preferences",
+    "reusable_procedures",
+    "integration_metadata",
+    "security_incidents",
+)
+
+
+class TypedMemoryRecord(Base):
+    """Unified typed memory with attribution, retention, and project/identity scope."""
+    __tablename__ = "typed_memory_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    memory_type = Column(String, nullable=False, index=True)
+    title = Column(String, default="")
+    content = Column(Text, default="")
+    source = Column(String, default="")  # attribution source (user, mentrix, import, adapter)
+    attribution = Column(String, default="")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    retention_days = Column(Integer, default=90)  # 0 = keep forever
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=True, index=True)
+
+    project = relationship("Project", backref="typed_memory_records")
+    user = relationship("User", backref="typed_memory_records")
+
+
+class MemoryRetentionPolicy(Base):
+    """User-controlled default retention for typed memory."""
+    __tablename__ = "memory_retention_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    memory_type = Column(String, nullable=False, index=True)
+    retention_days = Column(Integer, default=90)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="memory_retention_policies")
+
+
+class AutomationWatch(Base):
+    """Condition-based automation watch (Phase 10 Stage B)."""
+    __tablename__ = "automation_watches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    condition_type = Column(String, default="keyword")  # keyword | file_change | finding
+    condition_config = Column(JSON, default=dict)
+    action_type = Column(String, default="mentrix")  # mentrix | schedule_trigger | notify
+    action_config = Column(JSON, default=dict)
+    is_active = Column(Boolean, default=True)
+    last_triggered_at = Column(DateTime, nullable=True)
+    trigger_count = Column(Integer, default=0)
+    max_attempts = Column(Integer, default=3)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", backref="automation_watches")
+    project = relationship("Project", backref="automation_watches")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix WorkItem (P0 consolidation) — canonical SDLC unit of work
+# ---------------------------------------------------------------------------
+
+class WorkItem(Base):
+    """Canonical Mentrix work item — ArtifactStore owns PLAN.md for this id."""
+    __tablename__ = "work_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String, default="user", index=True)  # user | jira | camunda | github | ...
+    external_id = Column(String, default="", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    repository_id = Column(Integer, nullable=True, index=True)
+    repository_ref = Column(String, default="")  # branch/tag/ref
+    base_commit_sha = Column(String, default="")
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    # SDLC: NEW→…→DONE; side: BLOCKED, FAILED_VERIFICATION, NEEDS_HUMAN_DECISION, CANCELLED
+    status = Column(String, default="NEW", index=True)
+    requirements_json = Column(Text, default="[]")
+    acceptance_json = Column(Text, default="[]")
+    context_snapshot_json = Column(Text, default="{}")
+    plan_version = Column(Integer, default=0)
+    plan_hash = Column(String, default="")
+    approved_plan_hash = Column(String, nullable=True)
+    mentrix_run_id = Column(Integer, ForeignKey("mentrix_runs.id"), nullable=True, index=True)
+    worktree_path = Column(String, default="")
+    current_commit_sha = Column(String, default="")
+    created_by = Column(String, default="")
+    is_test_fixture = Column(Boolean, default=False, index=True)
+    test_run_id = Column(String, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    events = relationship(
+        "WorkItemEvent",
+        back_populates="work_item",
+        cascade="all, delete-orphan",
+        order_by="WorkItemEvent.id",
+    )
+
+
+class WorkItemEvent(Base):
+    """Append-only audit log for WorkItem — no update/delete API."""
+    __tablename__ = "work_item_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    payload_json = Column(Text, default="{}")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    work_item = relationship("WorkItem", back_populates="events")
+
+
+# ---------------------------------------------------------------------------
+# Mentrix PersonalAction — actionable personal work (Email/Calendar/Slack/…)
+# ---------------------------------------------------------------------------
+
+class PersonalAction(Base):
+    """Canonical personal-ops action item — Mentrix Companion only (not WorkItem/SDLC)."""
+    __tablename__ = "personal_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    # email | calendar | slack | jira | github | work_item | filesystem | other
+    source = Column(String, nullable=False, default="other", index=True)
+    connector_id = Column(String, default="", index=True)
+    # message | event | mention | issue | pr | ci | file | task | …
+    type = Column(String, nullable=False, default="task", index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    due = Column(DateTime, nullable=True, index=True)
+    priority = Column(String, default="normal", index=True)  # low | normal | high | urgent
+    status = Column(String, default="open", index=True)  # open | in_progress | done | dismissed
+    target = Column(String, default="")  # URL, issue key, path, channel, …
+    provenance_json = Column(Text, default="{}")  # source ids / connector / raw refs
+    suggested_actions_json = Column(Text, default="[]")
+    permission_requirement = Column(String, default="require_approval")
+    external_id = Column(String, default="", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# ZECT Learning — curated catalog + LearningProject (Mentrix Learning Advisor)
+# ---------------------------------------------------------------------------
+
+class LearningSource(Base):
+    __tablename__ = "learning_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_type = Column(String, default="catalog", index=True)
+    name = Column(String, nullable=False)
+    repository_url = Column(String, default="")
+    license = Column(String, default="")
+    attribution = Column(Text, default="")
+    refresh_policy = Column(String, default="manual")
+    enabled = Column(Boolean, default=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LearningResource(Base):
+    __tablename__ = "learning_resources"
+    __table_args__ = (
+        UniqueConstraint("learning_source_id", "source_url", name="uq_learning_resource_source_url"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    learning_source_id = Column(Integer, ForeignKey("learning_sources.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    source_url = Column(String, default="")
+    language = Column(String, default="", index=True)
+    technologies_json = Column(Text, default="[]")
+    project_type = Column(String, default="")
+    difficulty = Column(String, default="intermediate", index=True)
+    prerequisites_json = Column(Text, default="[]")
+    skills_json = Column(Text, default="[]")
+    summary = Column(Text, default="")
+    attribution = Column(Text, default="")
+    content_policy = Column(String, default="external_link_only")
+    external_license_status = Column(String, default="link_only")
+    indexed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LearningProject(Base):
+    __tablename__ = "learning_projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    resource_id = Column(Integer, ForeignKey("learning_resources.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    mode = Column(String, default="GUIDED", index=True)  # GUIDED|PAIR|DEMO|AUTONOMOUS
+    status = Column(String, default="active", index=True)
+    goals_json = Column(Text, default="[]")
+    milestones_json = Column(Text, default="[]")
+    skills_json = Column(Text, default="[]")
+    repository_id = Column(Integer, nullable=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=True, index=True)
+    progress_json = Column(Text, default="{}")
+    evidence_json = Column(Text, default="[]")
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Mentrix Automation Loops — thin persistent definitions/runs (not ForgeLoop)
+# ---------------------------------------------------------------------------
+
+class LoopDefinition(Base):
+    """Persisted loop definition — budgets/policy/checkpoint per user scope."""
+
+    __tablename__ = "mentrix_loop_definitions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    org_id = Column(String, default="", index=True)
+    autonomy_level = Column(String, default="L0", index=True)
+    status = Column(String, default="idle", index=True)
+    target = Column(String, default="personal_action")
+    budget_json = Column(Text, default="{}")
+    policy_json = Column(Text, default="{}")
+    trigger_json = Column(Text, default="{}")
+    checkpoint_json = Column(Text, default="{}")
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class LoopRun(Base):
+    """One iteration of a Mentrix Automation Loop — evidence + checkpoint."""
+
+    __tablename__ = "mentrix_loop_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    loop_definition_id = Column(
+        Integer, ForeignKey("mentrix_loop_definitions.id"), nullable=False, index=True
+    )
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    autonomy_level = Column(String, default="L0")
+    status = Column(String, default="running", index=True)
+    trigger_kind = Column(String, default="manual")
+    checkpoint_json = Column(Text, default="{}")
+    evidence_json = Column(Text, default="[]")
+    result_json = Column(Text, default="{}")
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime, nullable=True)
+
+
+class LongRunningAgentRun(Base):
+    """Durable Mentrix engineering run — survives HTTP/LLM/backend restarts."""
+
+    __tablename__ = "mentrix_long_running_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String, unique=True, nullable=False, index=True)
+    work_item_id = Column(Integer, ForeignKey("work_items.id"), nullable=False, index=True)
+    loop_run_id = Column(Integer, ForeignKey("mentrix_loop_runs.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    repository_id = Column(Integer, nullable=True, index=True)
+    worktree_path = Column(String, default="")
+    base_commit_sha = Column(String, default="")
+    current_commit_sha = Column(String, default="")
+    current_operation_id = Column(String, default="")
+    status = Column(String, default="RUNNING", index=True)
+    worker_id = Column(String, default="")
+    lease_acquired_at = Column(DateTime, nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
+    state_json = Column(Text, default="{}")
+    budget_json = Column(Text, default="{}")
+    telemetry_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+# ---------------------------------------------------------------------------
+# Document Intelligence — parsed document artifacts (reuse Knowledge/ContextEngine)
+# ---------------------------------------------------------------------------
+
+
+class DocumentContentVersion(Base):
+    """Parsed content identity by SHA-256. PROJECT_SHARED may reuse; USER_PRIVATE is per-owner."""
+
+    __tablename__ = "document_content_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "project_id",
+            "owner_user_id",
+            "content_sha256",
+            name="uq_doc_content_version_identity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    owner_user_id = Column(Integer, nullable=True, index=True)  # USER_PRIVATE owner; 0 sentinel for PROJECT_SHARED
+    parser_name = Column(String, default="")
+    parser_version = Column(String, default="1")
+    mime_type = Column(String, default="")
+    page_count = Column(Integer, default=0)
+    markdown_path = Column(String, default="")
+    json_path = Column(String, default="")
+    original_path = Column(String, default="")
+    partial_capabilities = Column(JSON, default=list)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DocumentArtifact(Base):
+    """User/project-visible document artifact bound to a content version."""
+
+    __tablename__ = "document_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, default="")
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("document_content_versions.id"), nullable=True, index=True)
+    sensitivity = Column(String, default="INTERNAL")
+    status = Column(String, default="UPLOADED", index=True)
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    knowledge_entry_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True)
+    source_map_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    bytes_size = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class DocumentChunk(Base):
+    """Chunk with full provenance — stale/replaced versions never enter ContextPack."""
+
+    __tablename__ = "document_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_artifact_id = Column(Integer, ForeignKey("document_artifacts.id"), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("document_content_versions.id"), nullable=False, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    page = Column(Integer, nullable=True)
+    slide = Column(Integer, nullable=True)
+    sheet = Column(String, default="")
+    heading_path = Column(String, default="")
+    source_offset = Column(Integer, default=0)
+    token_count = Column(Integer, default=0)
+    chunk_hash = Column(String(64), default="")
+    text = Column(Text, default="")
+    sensitivity = Column(String, default="INTERNAL")
+    freshness = Column(String, default="current", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Web Intelligence — external content artifacts (Connector Gateway; UNTRUSTED_EXTERNAL_CONTEXT)
+# ---------------------------------------------------------------------------
+
+
+class ExternalContentVersion(Base):
+    """Fetched content identity by SHA-256. PROJECT_SHARED may reuse; USER_PRIVATE is per-owner."""
+
+    __tablename__ = "external_content_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "scope",
+            "project_id",
+            "owner_user_id",
+            "content_sha256",
+            name="uq_ext_content_version_identity",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    owner_user_id = Column(Integer, nullable=True, index=True)  # 0 sentinel for PROJECT_SHARED
+    source_url = Column(String, default="")
+    connector_id = Column(String, default="web")
+    adapter = Column(String, default="url")  # url | rss | github | browser
+    mime_type = Column(String, default="")
+    title = Column(String, default="")
+    author = Column(String, default="")
+    markdown_path = Column(String, default="")
+    json_path = Column(String, default="")
+    partial_capabilities = Column(JSON, default=list)
+    fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ExternalContentArtifact(Base):
+    """User/project-visible external content artifact bound to a content version."""
+
+    __tablename__ = "external_content_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    scope = Column(String, default="USER_PRIVATE", index=True)
+    source_url = Column(String, nullable=False)
+    title = Column(String, default="")
+    connector_id = Column(String, default="web")
+    adapter = Column(String, default="url")
+    content_sha256 = Column(String(64), nullable=False, default="", index=True)
+    content_version_id = Column(Integer, ForeignKey("external_content_versions.id"), nullable=True, index=True)
+    sensitivity = Column(String, default="INTERNAL")
+    status = Column(String, default="FETCHING", index=True)
+    is_current = Column(Boolean, default=True, index=True)
+    superseded_by_id = Column(Integer, nullable=True)
+    knowledge_entry_id = Column(Integer, ForeignKey("knowledge_entries.id"), nullable=True)
+    source_map_json = Column(Text, default="[]")
+    error_message = Column(Text, default="")
+    confirmed_browser = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class ExternalContentChunk(Base):
+    """Chunk with full provenance — stale/replaced versions never enter ContextPack."""
+
+    __tablename__ = "external_content_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    external_artifact_id = Column(Integer, ForeignKey("external_content_artifacts.id"), nullable=False, index=True)
+    content_version_id = Column(Integer, ForeignKey("external_content_versions.id"), nullable=False, index=True)
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    chunk_index = Column(Integer, default=0)
+    heading_path = Column(String, default="")
+    source_offset = Column(Integer, default=0)
+    token_count = Column(Integer, default=0)
+    chunk_hash = Column(String(64), default="")
+    text = Column(Text, default="")
+    sensitivity = Column(String, default="INTERNAL")
+    freshness = Column(String, default="current", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

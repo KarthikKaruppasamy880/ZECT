@@ -1,9 +1,14 @@
-import { useState } from "react";
-import { deployChecklist, deployRunbook } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { deployChecklist, deployRunbook, deployTriggerWorkflow, approvePermissionAudit } from "@/lib/api";
 import CodeOutput from "@/components/CodeOutput";
-import { Rocket, Play, Loader2, CheckSquare, FileText, AlertCircle } from "lucide-react";
+import PhaseErrorBanner from "@/components/PhaseErrorBanner";
+import { Rocket, Play, Loader2, CheckSquare, FileText, AlertCircle, Zap, ShieldAlert } from "lucide-react";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { deployPrefillFromActive } from "@/lib/deployPrefill";
 
 export default function DeployPhase() {
+  const { activeRepo, activeBranch } = useActiveProject();
+  const prefill = deployPrefillFromActive(activeRepo, activeBranch);
   const [projectName, setProjectName] = useState("");
   const [techStack, setTechStack] = useState("");
   const [environment, setEnvironment] = useState("production");
@@ -14,6 +19,59 @@ export default function DeployPhase() {
   const [checklistResult, setChecklistResult] = useState<any>(null);
   const [runbookResult, setRunbookResult] = useState<any>(null);
   const [error, setError] = useState("");
+
+  // Trigger Deployment — actually fires a GitHub Actions run, gated by the
+  // deploy_.* permission rule (require_approval by default). Does not write ECS JSON.
+  const [triggerOwner, setTriggerOwner] = useState(prefill.owner);
+  const [triggerRepo, setTriggerRepo] = useState(prefill.repo);
+  const [triggerWorkflowFile, setTriggerWorkflowFile] = useState("deploy.yml");
+  const [triggerRef, setTriggerRef] = useState(prefill.ref);
+  const [triggerConfirmArmed, setTriggerConfirmArmed] = useState(false);
+  const [triggerLoading, setTriggerLoading] = useState(false);
+  const [triggerStatus, setTriggerStatus] = useState<{ status: string; audit_id: number | null; message: string } | null>(null);
+  const [triggerError, setTriggerError] = useState("");
+
+  useEffect(() => {
+    if (prefill.owner) setTriggerOwner((prev) => prev || prefill.owner);
+    if (prefill.repo) setTriggerRepo((prev) => prev || prefill.repo);
+    if (prefill.ref) setTriggerRef((prev) => prev || prefill.ref);
+  }, [prefill.owner, prefill.repo, prefill.ref]);
+
+  const runTrigger = async (auditId?: number) => {
+    setTriggerLoading(true);
+    setTriggerError("");
+    try {
+      const res = await deployTriggerWorkflow(triggerOwner, triggerRepo, triggerWorkflowFile, triggerRef, environment, undefined, auditId);
+      setTriggerStatus(res);
+    } catch (e: any) {
+      setTriggerError(e.message || "Failed to trigger deployment");
+    } finally {
+      setTriggerLoading(false);
+      setTriggerConfirmArmed(false);
+    }
+  };
+
+  const handleTriggerClick = () => {
+    if (!triggerOwner.trim() || !triggerRepo.trim() || !triggerWorkflowFile.trim()) return;
+    if (!triggerConfirmArmed) {
+      setTriggerConfirmArmed(true);
+      return;
+    }
+    runTrigger();
+  };
+
+  const handleApproveAndRetry = async () => {
+    if (!triggerStatus?.audit_id) return;
+    setTriggerLoading(true);
+    setTriggerError("");
+    try {
+      await approvePermissionAudit(triggerStatus.audit_id, true, "Approved from Deploy Phase UI");
+      await runTrigger(triggerStatus.audit_id);
+    } catch (e: any) {
+      setTriggerError(e.message || "Approval failed — you may need admin/lead permissions");
+      setTriggerLoading(false);
+    }
+  };
 
   const handleGenerate = async () => {
     if (!projectName.trim()) return;
@@ -125,9 +183,92 @@ export default function DeployPhase() {
         </button>
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>
-      )}
+      <PhaseErrorBanner error={error} density="plain" />
+
+      {/* Trigger Deployment — real GitHub Actions dispatch, not advice text */}
+      <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <Zap className="h-5 w-5 text-amber-600" />
+          <h3 className="font-semibold text-slate-900">Trigger Deployment</h3>
+          <span className="text-xs text-slate-500">
+            Two-click workflow_dispatch on existing deploy.yml — does not write ECS task defs
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            type="text"
+            value={triggerOwner}
+            onChange={(e) => { setTriggerOwner(e.target.value); setTriggerConfirmArmed(false); }}
+            placeholder="GitHub owner/org"
+            data-testid="deploy-trigger-owner"
+            className="p-2 border border-slate-300 rounded-lg text-sm"
+          />
+          <input
+            type="text"
+            value={triggerRepo}
+            onChange={(e) => { setTriggerRepo(e.target.value); setTriggerConfirmArmed(false); }}
+            placeholder="Repo name"
+            data-testid="deploy-trigger-repo"
+            className="p-2 border border-slate-300 rounded-lg text-sm"
+          />
+          <input
+            type="text"
+            value={triggerWorkflowFile}
+            onChange={(e) => { setTriggerWorkflowFile(e.target.value); setTriggerConfirmArmed(false); }}
+            placeholder="Workflow file (deploy.yml)"
+            className="p-2 border border-slate-300 rounded-lg text-sm"
+          />
+          <input
+            type="text"
+            value={triggerRef}
+            onChange={(e) => { setTriggerRef(e.target.value); setTriggerConfirmArmed(false); }}
+            placeholder="Branch/ref"
+            data-testid="deploy-trigger-ref"
+            className="p-2 border border-slate-300 rounded-lg text-sm"
+          />
+        </div>
+
+        <button
+          onClick={handleTriggerClick}
+          disabled={triggerLoading || !triggerOwner.trim() || !triggerRepo.trim() || !triggerWorkflowFile.trim()}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-medium transition text-white disabled:bg-slate-300 ${
+            triggerConfirmArmed ? "bg-red-600 hover:bg-red-700" : "bg-amber-600 hover:bg-amber-700"
+          }`}
+        >
+          {triggerLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {triggerLoading
+            ? "Triggering..."
+            : triggerConfirmArmed
+              ? `Confirm: run ${triggerWorkflowFile} on ${triggerRef} for real`
+              : "Trigger Deployment"}
+        </button>
+
+        {triggerError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">{triggerError}</div>
+        )}
+
+        {triggerStatus?.status === "pending_approval" && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+            <div className="flex items-center gap-2 text-amber-800 text-sm">
+              <ShieldAlert className="h-4 w-4" />
+              {triggerStatus.message}
+            </div>
+            <button
+              onClick={handleApproveAndRetry}
+              disabled={triggerLoading}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium"
+            >
+              Approve &amp; run now
+            </button>
+          </div>
+        )}
+
+        {triggerStatus?.status === "dispatched" && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-green-700 text-sm">
+            {triggerStatus.message}
+          </div>
+        )}
+      </div>
 
       {/* Checklist Result */}
       {tab === "checklist" && checklistResult && (

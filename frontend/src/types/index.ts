@@ -19,6 +19,8 @@ export interface Project {
   completion_percent: number;
   token_savings: number;
   risk_alerts: number;
+  provenance?: string;
+  test_run_id?: string;
   created_at: string;
   updated_at: string;
   repos: Repo[];
@@ -168,10 +170,20 @@ export interface DocGenResult {
 }
 
 // LLM Types
+export interface LlmContextUsed {
+  knowledge?: boolean;
+  lattice_hits?: number;
+  lattice_indexed?: boolean;
+  blueprint?: boolean;
+  repo_id?: number | null;
+  project_id?: number | null;
+}
+
 export interface AskResponse {
   answer: string;
   model: string;
   tokens_used: number;
+  context_used?: LlmContextUsed | null;
 }
 
 export interface PlanResponse {
@@ -179,6 +191,7 @@ export interface PlanResponse {
   phases: string[];
   model: string;
   tokens_used: number;
+  context_used?: LlmContextUsed | null;
 }
 
 export interface EnhanceBlueprintResponse {
@@ -190,6 +203,7 @@ export interface EnhanceBlueprintResponse {
 export interface LLMKeyStatus {
   configured: boolean;
   model: string;
+  mentrix_local?: boolean;
 }
 
 // Token Dashboard
@@ -224,6 +238,7 @@ export interface TokenDashboard {
 
 // Code Review
 export interface ReviewFinding {
+  id?: number;
   severity: string;
   category: string;
   title: string;
@@ -246,6 +261,8 @@ export interface ReviewResponse {
   model: string;
   pr_number?: number;
   repo?: string;
+  /** ReviewSession id — required for approve → post / fix-run (Phase 4 Stage D) */
+  review_session_id?: number | null;
 }
 
 export type Stage = "ask" | "plan" | "build" | "review" | "deploy";

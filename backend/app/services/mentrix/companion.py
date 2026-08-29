@@ -1,0 +1,3596 @@
+"""Mentrix Companion — streaming agentic turns with permission-gated tools."""
+
+from __future__ import annotations
+
+import contextvars
+import json
+import os
+import re
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+from pathlib import Path
+from typing import Any, Generator, Iterator
+from urllib.parse import quote_plus
+from urllib.request import urlopen
+
+from sqlalchemy.orm import Session
+
+from app.adapters.llm.openai_compat import (
+    get_openai_compat_client,
+    mentrix_llm_chat_model,
+    openai_compat_available,
+)
+from app.models import Lesson, MentrixRun, SkillDefinition, TypedMemoryRecord
+from app.services.lattice.indexer import get_graph, query_graph
+from app.services.mentrix.permission_broker import (
+    ALWAYS_CONFIRM_TOOLS,
+    check_tool_permission,
+    log_mentrix_tool,
+)
+
+_LLM_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_LLM_TIMEOUT", "6"))
+_RESEARCH_TIMEOUT_S = float(os.getenv("MENTRIX_COMPANION_RESEARCH_TIMEOUT", "2.5"))
+_MAX_TOOLS = 5
+_companion_model_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mentrix_companion_model", default=None
+)
+
+def _system_prompt(preferred_name: str = "") -> str:
+    address = f" Address the user as {preferred_name}." if preferred_name else ""
+    return (
+        "You are Mentrix, ZECT company agent. Reply in 1-3 short sentences."
+        + address
+        + " Never claim you sent messages or controlled the desktop without confirmation."
+        + " Never delete files. Prefer writing allowlisted Desktop/Documents notes over Notepad typing."
+        + " To sort Desktop/Documents/Downloads use file_organize_plan (File Organize UI) — never computer_click and never delete."
+        + " computer_type is for short keystrokes only (max ~500 chars); long text must use desktop_write_note."
+        + " If type fails with foreground_not_allowlisted, tell the user to focus Notepad/Notepad++ — do not invent that typing succeeded."
+        + " For Zoom: open Zoom or a join URL only — Mentrix cannot schedule Zoom meetings (no Zoom schedule API)."
+        + " For email compose: use email_send draft + Allow (SMTP), not Outlook typing."
+        + " For Zoom presentations: open the .pptx path and Zoom; user shares the PowerPoint window."
+        + " Desktop actions require Electron + Computer Mode on."
+        + " You orchestrate: never claim you edited source files or Present decks."
+        + " Hand off to Developer Workspace, Work Items, and ZECT Present with project/repo identity."
+        + " Never invent unused Lattice, Knowledge, or Memory context."
+    )
+
+# In-memory resume store for Allow overlay (turn_id → state)
+_TURN_STORE: dict[str, dict[str, Any]] = {}
+# Last desktop note draft for continue/finish (avoid re-LLM inventing text)
+_LAST_NOTE_DRAFT: dict[str, Any] = {}
+_TYPE_MAX_CHARS = 500
+
+NAV_MAP = {
+    "lattice": "/lattice",
+    "blueprint": "/blueprint",
+    "delivery": "/mentrix",
+    "sandbox": "/sandbox",
+    "companion": "/mentrix-home",
+    "home": "/mentrix-home",
+    "control tower": "/mentrix-home",
+    "desktop app": "/mentrix-home",
+    "mentrix home": "/mentrix-home",
+    "integrations": "/integrations",
+    "permissions": "/permissions",
+    "dashboard": "/",
+    "docs": "/docs",
+    "architecture": "/tool-comparison",
+    "architecture guide": "/tool-comparison",
+    "ask": "/ask",
+    "plan": "/plan",
+    "build": "/build",
+    "review": "/review",
+    "deploy": "/deploy",
+    "code review": "/code-review",
+    "code-review": "/code-review",
+    "git": "/git-ops",
+    "ci": "/ci-monitor",
+    "skills": "/skills",
+    "skills engine": "/skills-engine",
+    "dream engine": "/dream-engine",
+    "rules": "/rules",
+    "secrets": "/secrets",
+    "conversations": "/conversations",
+    "agent": "/agent-mode",
+    "repo": "/repo-workspace",
+    "knowledge": "/knowledge-base",
+    "playbooks": "/playbooks",
+    "audit": "/audit-trail",
+    "workspace": "/workspace",
+    "developer": "/workspace",
+    "developer workspace": "/workspace",
+    "work items": "/work-items",
+    "work-items": "/work-items",
+    "present": "/present",
+    "presentation": "/present",
+    "fabric": "/fabric",
+    "projects": "/projects",
+    "processes": "/work-items",
+}
+
+
+def os_desktop_phrase(message: str) -> bool:
+    m = (message or "").lower()
+    if "desktop app" in m or "control tower" in m or "dashboard" in m:
+        return False
+    return bool(
+        re.search(
+            r"\b(open|go to|show|enable|take me to)\b.{0,32}\b(desktop|computer mode|os desktop|my desktop)\b",
+            m,
+        )
+        or re.search(r"\b(open desktop|go to desktop|enable computer|computer mode on)\b", m)
+    )
+
+
+def build_agent_context(
+    db: Session,
+    *,
+    skill_id: int | None = None,
+    project_id: int | None = None,
+    agent_context: str = "",
+    query: str = "",
+) -> str:
+    """Compose skill + Knowledge + typed memory + Dream lessons for Mentrix turns.
+
+    Progressive skills: always inject name/short description; full template body
+    only when the user query matches manifest triggers (or no triggers declared).
+    Prefer Knowledge/Memory snippets (token-capped) so callers can avoid dumping
+    large repo slices. Silent empty string when nothing is configured.
+    """
+    bits: list[str] = []
+    raw = (agent_context or "").strip()
+    if raw:
+        bits.append(raw[:4000])
+    try:
+        if skill_id is not None:
+            skill = db.query(SkillDefinition).filter(SkillDefinition.id == int(skill_id)).first()
+            if skill:
+                manifest = skill.manifest if isinstance(skill.manifest, dict) else {}
+                template = (manifest.get("template") or "").strip()
+                desc = (skill.description or "").strip()
+                triggers = manifest.get("triggers") or manifest.get("trigger_keywords") or []
+                if not isinstance(triggers, list):
+                    triggers = []
+                query_l = (query or raw or "").lower()
+                triggered = (not triggers) or any(
+                    str(t).lower() in query_l for t in triggers if str(t).strip()
+                )
+                if triggered:
+                    body = (template or desc).strip()
+                    bits.append(
+                        f"Active skill ({skill.name}): {body[:1200]}"
+                        if body
+                        else f"Active skill: {skill.name}"
+                    )
+                else:
+                    # Progressive: manifest tip only until trigger matches
+                    tip = desc[:200] if desc else "full body loads when you mention its triggers"
+                    bits.append(f"Skill available ({skill.name}): {tip}")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.domains.repository.knowledge_base import retrieve_knowledge_for_context
+
+        kb_block, _meta = retrieve_knowledge_for_context(
+            db,
+            query=query or raw[:200],
+            project_id=project_id,
+            max_tokens=600,
+            limit=4,
+        )
+        if kb_block:
+            bits.append(kb_block)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if project_id is not None:
+            typed = (
+                db.query(TypedMemoryRecord)
+                .filter(
+                    TypedMemoryRecord.project_id == int(project_id),
+                    TypedMemoryRecord.memory_type.in_(
+                        ("project_knowledge", "reusable_procedures")
+                    ),
+                )
+                .order_by(TypedMemoryRecord.created_at.desc())
+                .limit(4)
+                .all()
+            )
+            lines = []
+            for row in typed:
+                title = (row.title or row.memory_type or "memory").strip()
+                content = (row.content or "").strip()
+                if content:
+                    lines.append(f"- {title}: {content[:280]}")
+            if lines:
+                bits.append("Typed memory:\n" + "\n".join(lines))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if project_id is not None:
+            lessons = (
+                db.query(Lesson)
+                .filter(Lesson.project_id == int(project_id), Lesson.status == "staged")
+                .order_by(Lesson.created_at.desc())
+                .limit(3)
+                .all()
+            )
+            claims = [str(L.claim or "").strip()[:220] for L in lessons if (L.claim or "").strip()]
+            if claims:
+                bits.append("Learned patterns (Dream):\n" + "\n".join(f"- {c}" for c in claims))
+    except Exception:  # noqa: BLE001
+        pass
+    return "\n\n".join(bits).strip()[:4000]
+
+
+def _ensure_llm_ready() -> bool:
+    """True when Mentrix Local LLM gateway or cloud OpenAI key is available."""
+    if openai_compat_available():
+        return True
+    try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parents[3] / ".env"
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+    except Exception:  # noqa: BLE001
+        pass
+    return openai_compat_available()
+
+
+def _ensure_openai_env() -> str:
+    """Return cloud OPENAI_API_KEY (Realtime / legacy callers). Empty if unset."""
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        from dotenv import load_dotenv
+
+        env_path = Path(__file__).resolve().parents[3] / ".env"
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+    except Exception:  # noqa: BLE001
+        pass
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+def _resolve_companion_model() -> str:
+    override = (_companion_model_ctx.get() or "").strip()
+    if override:
+        return override
+    return mentrix_llm_chat_model()
+
+
+def _gates_mermaid(gates: dict | None, run_id: int | None = None) -> str:
+    g = gates or {}
+    title = f"Delivery #{run_id}" if run_id else "Mentrix Delivery"
+    lines = ["flowchart LR", f"  startNode([{title}])"]
+    keys = list(g.keys())[:8] or ["incomplete_ok", "lint_ok", "sandbox_ready", "review_ok", "approve", "create_pr"]
+    prev = "startNode"
+    for i, k in enumerate(keys):
+        nid = f"g{i}"
+        val = g.get(k)
+        label = f"{k}:{'ok' if val else 'pending'}" if val is not None else k
+        lines.append(f"  {nid}[{label}]")
+        lines.append(f"  {prev} --> {nid}")
+        prev = nid
+    return "\n".join(lines)
+
+
+def _fast_tool_reply(tool_results: list[dict], board_items: list[dict], navigations: list[str]) -> str | None:
+    if not tool_results and not board_items and not navigations:
+        return None
+    parts: list[str] = []
+    for tr in tool_results:
+        if tr.get("denied"):
+            parts.append(f"Blocked: {tr['tool']}")
+            continue
+        name = tr.get("tool")
+        result = tr.get("result") or {}
+        if name == "delivery_status":
+            runs = result.get("runs") or []
+            if not runs:
+                parts.append("No Mentrix Delivery runs yet.")
+            else:
+                r0 = runs[0]
+                parts.append(
+                    f"Latest Delivery #{r0.get('id')}: {r0.get('status')} ({r0.get('mode')}). "
+                    f"Next: {r0.get('next_step') or 'review gates'}."
+                )
+        elif name == "navigate":
+            parts.append(f"Opening {result.get('label') or result.get('navigate')}.")
+        elif name == "go_back":
+            parts.append("Going back.")
+        elif name == "research_news":
+            parts.append((result.get("summary") or f"Research on {result.get('topic')}")[:400])
+        elif name == "start_delivery":
+            parts.append(f"Mentrix Delivery run #{result.get('run_id')} started." if result.get("run_id") else "Delivery queued.")
+        elif name in ("content_brief", "ads_copy", "report_draft", "docs_draft", "diagnose_fix", "connector_architecture"):
+            parts.append(f"Artifact ready: {(result.get('board') or {}).get('title') or name}.")
+        elif name == "capability_refuse":
+            parts.append((result.get("spoken_summary") or result.get("note") or "That capability is not wired.")[:400])
+        elif name == "coding_engine_status":
+            parts.append((result.get("spoken_summary") or "Coding engine status posted.")[:400])
+        elif name == "coding_agent_start":
+            parts.append((result.get("spoken_summary") or "Mentrix Coding Agent started.")[:400])
+        elif name == "coding_agent_status":
+            parts.append((result.get("spoken_summary") or "Mentrix Coding Agent status.")[:400])
+        elif name == "desktop_write_note":
+            parts.append(
+                (result.get("spoken_summary") or result.get("note") or f"Wrote note to {result.get('path') or 'Desktop/Documents'}.")[:400]
+            )
+        elif name == "computer_open_app":
+            parts.append(f"Opening {result.get('app') or 'allowlisted app'} (Allow if prompted).")
+        elif name == "computer_type":
+            if result.get("ok") is False:
+                parts.append(
+                    (result.get("hint") or result.get("error") or "Typing failed — focus an allowlisted editor.")[:400]
+                )
+            else:
+                parts.append("Short type queued for the focused allowlisted app.")
+        elif name == "note_add":
+            parts.append("Note saved to Mentrix Notes.")
+        elif name == "note_list":
+            parts.append(f"{len(result.get('notes') or [])} Mentrix notes.")
+        elif name == "weather_report":
+            parts.append((result.get("spoken_summary") or "Weather ready.")[:400])
+        elif name == "slack_digest":
+            parts.append((result.get("spoken_summary") or result.get("note") or "Slack digest ready.")[:400])
+        elif name == "email_digest":
+            parts.append((result.get("spoken_summary") or result.get("note") or "Email digest ready.")[:400])
+        elif name == "email_send":
+            parts.append((result.get("spoken_summary") or "Email draft ready — Allow to send.")[:400])
+        elif name == "lattice_query":
+            hits = result.get("hits") or []
+            parts.append(f"Lattice: {len(hits)} hit(s)." if hits else (result.get("error") or "No hits."))
+        elif name in ("companion_intelligence", "companion_scope", "companion_handoff", "work_item_open_or_create", "process_ticket_handoff", "companion_multi_repo_status"):
+            parts.append((result.get("spoken_summary") or result.get("error") or name)[:400])
+        elif result.get("blocked_external"):
+            parts.append((result.get("spoken_summary") or "BLOCKED_EXTERNAL — connector not configured.")[:400])
+    if board_items and not parts:
+        parts.append(f"Posted {board_items[0].get('title') or 'artifact'}.")
+    if navigations and not any(p.startswith("Opening") or p.startswith("Going") for p in parts):
+        parts.append(f"Navigating to {navigations[0]}.")
+    return " ".join(parts)[:1200] if parts else None
+
+
+def _llm_plan_tools(message: str) -> list[dict[str, Any]]:
+    """Ask LLM for up to N tool calls as JSON; empty on failure."""
+    if not _ensure_llm_ready():
+        return []
+
+    def _call() -> list[dict[str, Any]]:
+        client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
+        tool_names = sorted(
+            {
+                "navigate",
+                "go_back",
+                "delivery_status",
+                "research_news",
+                "weather_report",
+                "content_brief",
+                "report_draft",
+                "docs_search",
+                "slack_digest",
+                "slack_send",
+                "email_digest",
+                "email_send",
+                "note_add",
+                "note_list",
+                "lattice_query",
+                "start_delivery",
+                "diagnose_fix",
+                "connector_architecture",
+                "calendar_upcoming",
+                "meeting_brief",
+                "daily_brief",
+                "file_organize_plan",
+                "file_organize_approve",
+                "desktop_mkdir",
+                "desktop_list_dir",
+                "desktop_move_path",
+                "media_generate",
+                "media_list",
+                "media_edit",
+                "jira_get_issue",
+                "jira_search_incidents",
+                "datadog_query_logs",
+                "jira_comment_pr",
+                "computer_open_app",
+                "desktop_write_note",
+                "capability_refuse",
+                "coding_engine_status",
+                "coding_agent_status",
+                "coding_agent_start",
+                "malware_status",
+                "malware_scan_path",
+                "fabric_classify",
+                "fabric_run",
+                "process_status",
+                "process_deploy",
+                "process_start",
+                "process_incidents",
+                "process_open_cockpit",
+                "mentrix_developer_ask",
+                "mentrix_developer_plan",
+                "mentrix_developer_approve_plan",
+                "mentrix_developer_agent",
+                "companion_intelligence",
+                "companion_scope",
+                "companion_handoff",
+                "work_item_open_or_create",
+                "process_ticket_handoff",
+                "companion_multi_repo_status",
+            }
+        )
+        prompt = (
+            "You are Mentrix planner. Return ONLY a JSON array of tools to run, max 5. "
+            f"Allowed names: {tool_names}. "
+            'Each item: {"name":"...","args":{}}. '
+            "Prefer desktop_write_note over computer_type for long text. "
+            "Use capability_refuse for Zoom schedule. Use email_send for compose email (not Outlook type). "
+            "For sorting Desktop/Documents/Downloads use file_organize_plan (never delete, never computer_click). "
+            "For navigate use args.path like /lattice. Empty array if just chatting.\n"
+            f"User: {message[:800]}"
+        )
+        resp = client.chat.completions.create(
+            model=_resolve_companion_model(),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.1,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        m = re.search(r"\[.*\]", text, re.S)
+        if not m:
+            return []
+        data = json.loads(m.group(0))
+        out = []
+        for item in data[:_MAX_TOOLS]:
+            if isinstance(item, dict) and item.get("name"):
+                out.append({"name": str(item["name"]), "args": item.get("args") or {}})
+        return out
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_call).result(timeout=_LLM_TIMEOUT_S + 0.5)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _llm_answer(question: str, context: str = "", preferred_name: str = "") -> str:
+    if not _ensure_llm_ready():
+        greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
+        return (
+            f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
+            "or say Open Lattice."
+            + (f"\n\n{context[:900]}" if context else "")
+        )
+
+    def _call() -> str:
+        client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
+        messages = [
+            {
+                "role": "system",
+                "content": _system_prompt(preferred_name),
+            }
+        ]
+        if context:
+            messages.append({"role": "user", "content": f"Tool results:\n{context[:3500]}"})
+        messages.append({"role": "user", "content": question})
+        resp = client.chat.completions.create(
+            model=_resolve_companion_model(),
+            messages=messages,
+            max_tokens=280,
+            temperature=0.3,
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_call).result(timeout=_LLM_TIMEOUT_S + 0.5)
+    except FuturesTimeout:
+        return "Mentrix — quick path (model timed out):\n" + (context[:900] if context else question[:300])
+    except Exception as exc:  # noqa: BLE001
+        return (
+            "I'm Mentrix — ready for status, research, briefs, notes, and Delivery."
+            + (f"\n\n{context[:700]}" if context else f"\n\nYou asked: {question[:200]}")
+            + f"\n\n({type(exc).__name__})"
+        )
+
+
+def _llm_answer_stream(question: str, context: str = "", preferred_name: str = "") -> Generator[str, None, None]:
+    """Same behavior/fallbacks as _llm_answer, but yields text deltas as the
+    model actually generates them instead of computing the full reply first —
+    the "token" SSE events this feeds reflect real progress instead of a
+    fake post-hoc chunking of an already-complete string."""
+    if not _ensure_llm_ready():
+        greet = f"{preferred_name}, I'm Mentrix" if preferred_name else "I'm Mentrix"
+        yield (
+            f"{greet} — ready. Ask for Delivery status, research, a brief, notes, "
+            "or say Open Lattice."
+            + (f"\n\n{context[:900]}" if context else "")
+        )
+        return
+
+    client = get_openai_compat_client(timeout=_LLM_TIMEOUT_S)
+    messages = [
+        {
+            "role": "system",
+            "content": _system_prompt(preferred_name),
+        }
+    ]
+    if context:
+        messages.append({"role": "user", "content": f"Tool results:\n{context[:3500]}"})
+    messages.append({"role": "user", "content": question})
+
+    start = time.time()
+    got_any = False
+    try:
+        stream = client.chat.completions.create(
+            model=_resolve_companion_model(),
+            messages=messages,
+            max_tokens=280,
+            temperature=0.3,
+            stream=True,
+        )
+        for event in stream:
+            if time.time() - start > _LLM_TIMEOUT_S + 0.5:
+                if not got_any:
+                    yield "Mentrix — quick path (model timed out):\n" + (context[:900] if context else question[:300])
+                return
+            delta = event.choices[0].delta.content if event.choices else None
+            if delta:
+                got_any = True
+                yield delta
+    except Exception as exc:  # noqa: BLE001
+        if not got_any:
+            yield (
+                "I'm Mentrix — ready for status, research, briefs, notes, and Delivery."
+                + (f"\n\n{context[:700]}" if context else f"\n\nYou asked: {question[:200]}")
+                + f"\n\n({type(exc).__name__})"
+            )
+
+def _parse_intents(message: str) -> list[dict[str, Any]]:
+    m = message.lower().strip()
+    tools: list[dict[str, Any]] = []
+
+    if re.search(r"\bgo back\b", m):
+        tools.append({"name": "go_back", "args": {}})
+
+    # OS desktop / Computer Mode — never map to app Dashboard ("/").
+    # "desktop app" / "control tower" are Mentrix HUD aliases (handled via NAV_MAP).
+    os_desktop = os_desktop_phrase(message)
+    if os_desktop:
+        if "screenshot" in m:
+            tools.append({"name": "desktop_screenshot", "args": {}})
+        else:
+            tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
+
+    # Longer NAV keys first so "desktop app" wins over accidental short matches.
+    envelope_surfaces = {
+        "/workspace": "workspace",
+        "/present": "present",
+        "/work-items": "work_items",
+        "/projects": "projects",
+        "/fabric": "fabric",
+    }
+    nav_keys = sorted(NAV_MAP.keys(), key=len, reverse=True)
+    for key in nav_keys:
+        path = NAV_MAP[key]
+        if key == "dashboard" and re.search(r"\bdesktop\b", m) and "dashboard" not in m:
+            continue
+        if os_desktop and path == "/":
+            continue
+        if key in m and any(w in m for w in ("open", "go to", "show", "navigate", "take me")):
+            surface = envelope_surfaces.get(path)
+            if surface:
+                tools.append({"name": "companion_handoff", "args": {"surface": surface}})
+            else:
+                tools.append({"name": "navigate", "args": {"path": path, "label": key}})
+            break
+    if "open lattice" in m or "lattice graph" in m or "open graphify" in m or "graphify lattice" in m:
+        tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
+    if re.search(r"\b(open|show|go to)\b.*\b(lattice docs|documentation graph|wiki graph|docs graph)\b", m):
+        tools.append({"name": "navigate", "args": {"path": "/lattice?layer=docs", "label": "lattice docs"}})
+    if re.search(r"\b(open|go to|show|navigate|take me)\b.*\b(delivery|mentrix delivery)\b", m) or "open delivery" in m:
+        tools.append({"name": "navigate", "args": {"path": "/mentrix", "label": "delivery"}})
+
+    if any(w in m for w in ("status", "gates", "what's running", "whats running", "last run", "delivery status")):
+        tools.append({"name": "delivery_status", "args": {}})
+
+    if re.search(r"\b(research|news|latest on)\b", m) and "weather" not in m:
+        topic = re.sub(r".*?(news|research|latest on)\s*", "", m, count=1).strip() or message
+        tools.append({"name": "research_news", "args": {"topic": topic[:120]}})
+
+    if any(w in m for w in ("weather", "forecast", "temperature", "how's the weather", "how is the weather")):
+        loc = message
+        for prefix in (
+            "what's the weather in",
+            "whats the weather in",
+            "weather in",
+            "weather for",
+            "forecast for",
+            "how's the weather in",
+            "how is the weather in",
+            "what's the weather",
+            "whats the weather",
+        ):
+            if prefix in m:
+                loc = message[m.index(prefix) + len(prefix) :].strip(" ?.")
+                break
+        tools.append({"name": "weather_report", "args": {"location": (loc or "Austin")[:120]}})
+
+    if any(w in m for w in ("brief", "ad copy", "campaign", "content idea")):
+        tools.append({"name": "content_brief", "args": {"topic": message[:200]}})
+
+    if any(w in m for w in ("report", "metrics summary", "weekly update")):
+        tools.append({"name": "report_draft", "args": {"topic": message[:200]}})
+
+    if any(w in m for w in ("confluence", "internal doc", "search docs")):
+        tools.append({"name": "docs_search", "args": {"query": message[:160]}})
+
+    if re.search(r"\b(open|launch|start)\b.*\b(slack app|slack desktop)\b", m) or re.search(
+        r"\blaunch slack\b", m
+    ):
+        tools.append({"name": "computer_open_app", "args": {"app": "Slack.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(outlook)\b", m) or "open outlook" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "outlook.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(teams|ms teams|microsoft teams)\b", m) or "open teams" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "ms-teams.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\b(browser|chrome)\b", m) or "open browser" in m:
+        tools.append({"name": "computer_open_app", "args": {"app": "chrome.exe"}})
+    elif re.search(r"\b(open|launch|start)\b.*\bedge\b", m):
+        tools.append({"name": "computer_open_app", "args": {"app": "msedge.exe"}})
+
+    if any(
+        p in m
+        for p in (
+            "connector architecture",
+            "show connectors",
+            "show connector architecture",
+            "mentrix architecture",
+            "how do connectors work",
+            "architecture diagram",
+            "flowchart of connectors",
+        )
+    ):
+        tools.append({"name": "connector_architecture", "args": {}})
+        tools.append({"name": "navigate", "args": {"path": "/tool-comparison", "label": "architecture"}})
+        tools.append({"name": "navigate", "args": {"path": "/lattice", "label": "lattice"}})
+
+    if "slack" in m and any(w in m for w in ("digest", "summarize", "unread", "channel", "what's on", "whats on")):
+        tools.append({"name": "slack_digest", "args": {}})
+    elif "slack" in m and any(w in m for w in ("send", "post", "message")):
+        tools.append({"name": "slack_send", "args": {"text": message[:500]}})
+    elif m.strip() in ("slack digest", "slack summary") or "slack digest" in m:
+        tools.append({"name": "slack_digest", "args": {}})
+
+    if any(
+        p in m
+        for p in (
+            "email digest",
+            "check email",
+            "check my email",
+            "check mail",
+            "read email",
+            "my inbox",
+            "inbox",
+            "gmail",
+        )
+    ) or re.search(r"\b(e-?mail|inbox|gmail)\b", m) or ("email" in m and "digest" in m):
+        tools.append({"name": "email_digest", "args": {}})
+    if "send email" in m or "email send" in m or re.search(
+        r"\b(write|compose|draft)\b.{0,40}\b(e-?mail|mail)\b", m
+    ) or re.search(r"\b(e-?mail|mail)\b.{0,40}\b(write|compose|draft|send)\b", m):
+        tools.append(
+            {
+                "name": "email_send",
+                "args": {"subject": "Mentrix draft", "body": message[:800]},
+            }
+        )
+
+    if any(
+        p in m
+        for p in (
+            "calendar",
+            "what's on my calendar",
+            "whats on my calendar",
+            "upcoming meetings",
+            "my meetings",
+            "schedule today",
+        )
+    ):
+        tools.append({"name": "calendar_upcoming", "args": {}})
+    if any(p in m for p in ("meeting brief", "pre-meeting", "brief me for", "meeting prep")):
+        tools.append({"name": "meeting_brief", "args": {}})
+    if "follow-up" in m or "follow up" in m or "meeting followup" in m:
+        tools.append({"name": "meeting_followup_draft", "args": {"channel": "email"}})
+
+    if any(
+        p in m
+        for p in (
+            "daily brief",
+            "morning brief",
+            "personal brief",
+            "what's on my plate",
+            "whats on my plate",
+            "personal actions",
+        )
+    ):
+        tools.append({"name": "daily_brief", "args": {}})
+
+    # Desktop mkdir / organize (allowlisted; never delete)
+    mkdir_m = re.search(
+        r"\b(?:create|make)\s+(?:a\s+)?(?:new\s+)?(?:folder|directory)\b(?:\s+(?:called|named|at|on))?\s*[\"']?([^\"'\n]+)?",
+        m,
+        re.I,
+    )
+    if mkdir_m or re.search(r"\bmkdir\b", m):
+        import os as _os
+
+        name_hint = (mkdir_m.group(1) if mkdir_m else "").strip() or "Mentrix"
+        name_hint = re.sub(r"[\\/:*?\"<>|]+", "_", name_hint)[:80] or "Mentrix"
+        desk = _os.path.join(_os.path.expanduser("~"), "Desktop", name_hint)
+        tools.append({"name": "desktop_mkdir", "args": {"path": desk}})
+    if any(
+        p in m
+        for p in (
+            "organize desktop",
+            "organize my files",
+            "organize downloads",
+            "organize documents",
+            "file organize",
+            "sort desktop",
+            "sort my desktop",
+            "sort documents",
+            "sort my documents",
+            "sort downloads",
+            "tidy desktop",
+            "clean up my desktop",
+        )
+    ) or re.search(r"\b(sort|organize|tidy)\b.{0,32}\b(desktop|documents|downloads)\b", m):
+        import os as _os
+
+        home = _os.path.expanduser("~")
+        src = _os.path.join(home, "Desktop")
+        if "download" in m:
+            src = _os.path.join(home, "Downloads")
+        elif "document" in m:
+            src = _os.path.join(home, "Documents")
+        dest = _os.path.join(home, "Desktop", "MentrixOrganized")
+        tools.append(
+            {
+                "name": "file_organize_plan",
+                "args": {"source_dir": src, "dest_dir": dest, "patterns": ["*"]},
+            }
+        )
+
+    # Zoom: open/join only — refuse schedule/book/create meeting
+    if re.search(r"\b(schedule|book|create|set up|setup)\b.{0,40}\bzoom\b", m) or re.search(
+        r"\bzoom\b.{0,40}\b(schedule|book|create)\b.{0,20}\bmeeting\b", m
+    ):
+        tools.append({"name": "capability_refuse", "args": {"topic": "zoom_schedule"}})
+    elif re.search(r"\b(open|launch|start)\b.{0,20}\bzoom\b", m) or m.strip() in ("open zoom", "launch zoom"):
+        tools.append({"name": "computer_open_app", "args": {"app": "Zoom.exe"}})
+
+    if any(
+        p in m
+        for p in (
+            "coding engine",
+            "is the coding engine",
+            "forge loop ready",
+            "coding agent ready",
+            "is mentrix delivery built",
+            "mentrix coding agent",
+        )
+    ):
+        tools.append({"name": "coding_engine_status", "args": {}})
+
+    if any(k in m for k in ("malware", "virus", "security agent", "scan file", "quarantine")):
+        tools.append({"name": "malware_status", "args": {}})
+    if "malware" in m or "virus" in m or "scan file" in m:
+        import re as _re
+
+        pm = _re.search(r'["\']([^"\']+)["\']', message)
+        tools.append(
+            {
+                "name": "malware_scan_path",
+                "args": {"path": pm.group(1) if pm else "", "quarantine": "quarantine" in m},
+            }
+        )
+
+    if any(k in m for k in ("fabric", "multi-surface", "classify surfaces", "surface refuse")):
+        tools.append({"name": "fabric_classify", "args": {"text": message[:800]}})
+    if any(k in m for k in ("run fabric", "fabric run", "multi-surface run")):
+        tools.append({"name": "fabric_run", "args": {"text": message[:800]}})
+    if re.search(
+        r"\b(how is this (project|repo|codebase) (structured|organized)|same[- ]named (file|symbol))\b",
+        m,
+    ) or any(
+        k in m
+        for k in (
+            "architecture of this project",
+            "project architecture",
+            "architecture of this codebase",
+            "architecture of this repo",
+        )
+    ):
+        tools.append({"name": "companion_intelligence", "args": {"q": message[:400]}})
+    if re.search(r"\b(create|open|start)\b.{0,48}\bwork items?\b", m) or "create a work item" in m:
+        title_m = re.search(r"titled\s+[\"']?([^\"'\n]+?)[\"']?(?:\s+then\b|$)", message, re.I)
+        tools.append(
+            {
+                "name": "work_item_open_or_create",
+                "args": {"title": (title_m.group(1).strip() if title_m else message[:180])},
+            }
+        )
+    if any(
+        k in m
+        for k in (
+            "open developer",
+            "open workspace",
+            "open coding workspace",
+            "developer workspace",
+            "open the developer",
+        )
+    ):
+        tools.append({"name": "companion_handoff", "args": {"surface": "workspace"}})
+    if re.search(r"\b(create|make|generate|build)\b.{0,48}\b(presentation|deck|slides)\b", m) or (
+        "presentation from this project" in m
+    ):
+        tools.append({"name": "companion_handoff", "args": {"surface": "present_create", "goal": message[:200], "prompt": message[:500]}})
+    elif any(k in m for k in ("open present", "go to present", "open zect present")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "present"}})
+    if any(
+        k in m
+        for k in (
+            "create a jira",
+            "open jira ticket",
+            "create a ticket",
+            "open processes",
+            "process ticket",
+        )
+    ):
+        issue_m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", message)
+        tools.append({"name": "process_ticket_handoff", "args": {"issue_key": issue_m.group(1) if issue_m else ""}})
+    if any(k in m for k in ("multi-repo status", "affected repos", "sibling failure", "which repos")):
+        tools.append({"name": "companion_multi_repo_status", "args": {}})
+    if any(k in m for k in ("open work items", "go to work items")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "work_items"}})
+    if any(k in m for k in ("open projects", "go to projects")):
+        tools.append({"name": "companion_handoff", "args": {"surface": "projects"}})
+
+    if any(k in m for k in ("mentrix ask", "developer ask", "ask this work item")):
+        tools.append({"name": "mentrix_developer_ask", "args": {"question": message[:800]}})
+    if any(k in m for k in ("mentrix plan", "developer plan", "write a plan for this work")):
+        tools.append({"name": "mentrix_developer_plan", "args": {"goal": message[:800]}})
+    if any(k in m for k in ("approve plan", "approve the plan")):
+        tools.append({"name": "mentrix_developer_approve_plan", "args": {}})
+    if any(k in m for k in ("start developer agent", "mentrix developer agent", "run work item agent")):
+        tools.append({"name": "mentrix_developer_agent", "args": {"goal": message[:800]}})
+    if any(k in m for k in ("camunda", "process engine", "process incidents", "bpmn deploy", "mentrix process")):
+        tools.append({"name": "process_status", "args": {}})
+    if "process incident" in m or "list incidents" in m:
+        tools.append({"name": "process_incidents", "args": {}})
+    if "open cockpit" in m or "process cockpit" in m:
+        tools.append({"name": "process_open_cockpit", "args": {}})
+
+    if any(
+        p in m
+        for p in (
+            "start coding agent",
+            "open coding agent",
+            "code this in the repo",
+            "fix this in the workspace",
+            "build this in the workspace",
+            "mentrix coding agent:",
+        )
+    ) or re.search(r"\b(code|implement|refactor)\b.{0,40}\b(repo|workspace|project)\b", m):
+        # Prefer dedicated coding agent over Delivery for workspace edits
+        if "delivery" not in m and "pr" not in m:
+            tools.append({"name": "coding_agent_start", "args": {"goal": message[:800]}})
+
+    # BrowserRuntime intents (allowlisted hosts via MENTRIX_BROWSER_ALLOWLIST)
+    url_m = re.search(r"https?://[^\s]+", message)
+    if url_m and any(w in m for w in ("open", "browse", "navigate", "go to", "visit", "load")):
+        tools.append({"name": "browser_navigate", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    elif re.search(r"\b(browse|open url|open website|open page)\b", m) and url_m:
+        tools.append({"name": "browser_navigate", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    if url_m and any(w in m for w in ("snapshot", "screenshot page", "page text", "read page", "scrape")):
+        tools.append({"name": "browser_snapshot", "args": {"url": url_m.group(0).rstrip(".,)")}})
+    elif re.search(r"\b(browser snapshot|snapshot (the )?page|page snapshot)\b", m):
+        tools.append({"name": "browser_snapshot", "args": {"url": url_m.group(0).rstrip(".,)") if url_m else ""}})
+    fill_m = re.search(r"\bfill\b.{0,40}\b(input|field|form|selector)\b", m)
+    if fill_m or ("browser fill" in m) or re.search(r"\bfill\b.+\bwith\b", m):
+        sel_m = re.search(r"(#[\w-]+|\.[\w-]+|input\[name=['\"][^'\"]+['\"]\])", message)
+        val_m = re.search(r"\bwith\b\s+[\"']?([^\"'\n]+)[\"']?", m)
+        tools.append(
+            {
+                "name": "browser_fill",
+                "args": {
+                    "selector": sel_m.group(1) if sel_m else "input",
+                    "value": (val_m.group(1).strip() if val_m else "")[:500],
+                    "url": url_m.group(0).rstrip(".,)") if url_m else "",
+                },
+            }
+        )
+
+    # Jira incident / issue tools
+    issue_key_m = re.search(r"\b([A-Z][A-Z0-9]+-\d+)\b", message)
+    if issue_key_m and any(
+        w in m for w in ("jira", "ticket", "incident", "issue", "load", "fetch", "get")
+    ):
+        tools.append({"name": "jira_get_issue", "args": {"issue_key": issue_key_m.group(1)}})
+    if any(w in m for w in ("search incidents", "list incidents", "open incidents", "jira incidents")):
+        tools.append({"name": "jira_search_incidents", "args": {}})
+    if "datadog" in m or ("logs" in m and any(w in m for w in ("query", "search", "incident", "error"))):
+        q = re.sub(r".*?(datadog|logs|errors?)\s*", "", m, count=1).strip() or "status:error"
+        tools.append({"name": "datadog_query_logs", "args": {"query": q[:200]}})
+    if "comment" in m and ("pr" in m or "pull request" in m) and issue_key_m:
+        pr_m = re.search(r"https?://[^\s]+", message)
+        tools.append(
+            {
+                "name": "jira_comment_pr",
+                "args": {
+                    "issue_key": issue_key_m.group(1),
+                    "pr_url": pr_m.group(0) if pr_m else "",
+                },
+            }
+        )
+    if any(w in m for w in ("avatar", "generate image", "my photo", "thumbnail", "image board")):
+        if "list" in m or "show board" in m:
+            tools.append({"name": "media_list", "args": {}})
+        else:
+            tools.append({"name": "media_generate", "args": {"prompt": message[:800]}})
+
+    if re.search(r"\b(edit image|edit thumbnail|edit media)\b", m):
+        num_m = re.search(r"#?\b(\d{1,4})\b", m)
+        tools.append(
+            {
+                "name": "media_edit",
+                "args": {
+                    "number": int(num_m.group(1)) if num_m else 1,
+                    "prompt": message[:800],
+                },
+            }
+        )
+
+    if re.search(r"\b(note|notes)\b", m) and any(w in m for w in ("list", "show", "my")):
+        tools.append({"name": "note_list", "args": {}})
+    if re.search(r"\b(add note|save note|remember|note that)\b", m):
+        tools.append({"name": "note_add", "args": {"text": message[:800]}})
+
+    # Prefer writing an allowlisted Desktop/Documents file over Notepad for docs/notes.
+    write_note_intent = bool(
+        re.search(
+            r"\b(write|create|save)\b.{0,40}\b(note|notes|doc|docs|document|markdown|txt)\b",
+            m,
+        )
+        or (
+            re.search(r"\b(on (my )?desktop|to (my )?desktop|in documents)\b", m)
+            and re.search(r"\b(write|create|save|note)\b", m)
+        )
+        or re.search(
+            r"\b(write|type|put|paste|finish|continue|complete)\b.{0,60}\b(notepad\+*|notepad|npp|editor)\b",
+            m,
+        )
+        or re.search(
+            r"\b(notepad\+*|notepad|npp)\b.{0,40}\b(write|type|details|architecture|connector)\b",
+            m,
+        )
+    )
+    finish_draft = bool(
+        re.search(r"\b(finish|continue|complete|rest of|keep going|finish it)\b", m)
+        and (_LAST_NOTE_DRAFT.get("content") or write_note_intent)
+    )
+    if finish_draft and _LAST_NOTE_DRAFT.get("content"):
+        prev = str(_LAST_NOTE_DRAFT.get("content") or "")
+        extra = message.strip()
+        # Prefer re-writing the prior full draft rather than inventing a new body
+        content = prev if len(prev) >= len(extra) else f"{prev}\n\n{extra}"[:50_000]
+        folder = str(_LAST_NOTE_DRAFT.get("folder") or "Desktop")
+        filename = str(_LAST_NOTE_DRAFT.get("filename") or "mentrix-note.md")
+        tools.append(
+            {
+                "name": "desktop_write_note",
+                "args": {"content": content, "folder": folder, "filename": filename},
+            }
+        )
+        app = str(_LAST_NOTE_DRAFT.get("app") or "notepad++.exe")
+        tools.append(
+            {
+                "name": "computer_open_app",
+                "args": {
+                    "app": app,
+                    "path": str(_LAST_NOTE_DRAFT.get("path") or ""),
+                },
+            }
+        )
+    elif write_note_intent:
+        folder = "Documents" if "document" in m else "Desktop"
+        # Prefer body after a colon / "that" / quoted text; else full message
+        body = message
+        for sep in (":", " — ", " - ", "that "):
+            if sep in message:
+                cand = message.split(sep, 1)[-1].strip()
+                if len(cand) > 20:
+                    body = cand
+                    break
+        q = re.search(r"[\"'](.{40,})[\"']", message, re.S)
+        if q:
+            body = q.group(1).strip()
+        want_npp = bool(re.search(r"notepad\+\+|npp\b", m))
+        app = "notepad++.exe" if want_npp else ("notepad.exe" if "notepad" in m else "notepad++.exe")
+        filename = "mentrix-connector-architecture.md" if "architecture" in m or "connector" in m else "mentrix-note.md"
+        tools.append(
+            {
+                "name": "desktop_write_note",
+                "args": {
+                    "content": body[:50_000],
+                    "folder": folder,
+                    "filename": filename,
+                },
+            }
+        )
+        tools.append({"name": "computer_open_app", "args": {"app": app}})
+
+    if "lattice" in m and any(w in m for w in ("query", "search", "symbol", "find", "wiki", "doc", "markdown")):
+        tools.append({"name": "lattice_query", "args": {"q": message[:120], "project_key": ""}})
+
+    if any(w in m for w in ("start deliver", "engage delivery", "run upgrade", "start upgrade", "start mentrix")):
+        tools.append({"name": "start_delivery", "args": {"goal": message[:400], "mode": "deliver"}})
+
+    if re.search(
+        r"\b(open (my )?(deck|pptx|powerpoint|presentation)|present on zoom|narrate my slides|open zoom)\b",
+        m,
+    ):
+        path_m = re.search(
+            r"([A-Za-z]:\\[^\s\"']+\.(?:pptx|ppt|pdf)|/(?:Users|home)/[^\s\"']+\.(?:pptx|ppt|pdf))",
+            message,
+            re.I,
+        )
+        if path_m:
+            tools.append({"name": "desktop_open_presentation", "args": {"path": path_m.group(1)}})
+        if "zoom" in m or "present on zoom" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "Zoom.exe"}})
+        if any(w in m for w in ("powerpoint", "pptx", "deck", "presentation")) and not path_m:
+            tools.append({"name": "computer_open_app", "args": {"app": "POWERPNT.EXE"}})
+
+    if (
+        "computer mode" in m
+        or "open notepad" in m
+        or "notepad++" in m
+        or re.search(r"\bopen npp\b", m)
+        or "screenshot" in m
+        or "ui inspect" in m
+    ):
+        if "screenshot" in m:
+            tools.append({"name": "desktop_screenshot", "args": {}})
+        elif "inspect" in m:
+            tools.append({"name": "computer_ui_inspect", "args": {}})
+        elif "scroll" in m:
+            tools.append({"name": "computer_scroll", "args": {"direction": "down"}})
+        elif "click" in m:
+            # Inspect only — never enqueue blind coordinate clicks from planner intents
+            tools.append({"name": "computer_ui_inspect", "args": {}})
+        elif "type" in m and not write_note_intent:
+            text = message[:_TYPE_MAX_CHARS]
+            if len(message) > _TYPE_MAX_CHARS:
+                tools.append(
+                    {
+                        "name": "desktop_write_note",
+                        "args": {
+                            "content": message[:50_000],
+                            "folder": "Desktop",
+                            "filename": "mentrix-note.md",
+                        },
+                    }
+                )
+            else:
+                tools.append({"name": "computer_type", "args": {"text": text}})
+        elif "notepad++" in m or re.search(r"\bopen npp\b", m) or "open notepad++" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "notepad++.exe"}})
+        elif "open notepad" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "notepad.exe"}})
+        elif "open explorer" in m or "file explorer" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
+        elif "computer mode" in m:
+            tools.append({"name": "computer_open_app", "args": {"app": "explorer.exe"}})
+
+    if any(w in m for w in ("open sandbox", "go to sandbox", "show sandbox")):
+        tools.append({"name": "navigate", "args": {"path": "/sandbox", "label": "sandbox"}})
+    if any(w in m for w in ("open ask", "go to ask")):
+        tools.append({"name": "navigate", "args": {"path": "/ask", "label": "ask"}})
+    if any(w in m for w in ("open plan", "go to plan")):
+        tools.append({"name": "navigate", "args": {"path": "/plan", "label": "plan"}})
+    if any(w in m for w in ("open docs", "go to docs")):
+        tools.append({"name": "navigate", "args": {"path": "/docs", "label": "docs"}})
+    if any(w in m for w in ("open integrations", "go to integrations")):
+        tools.append({"name": "navigate", "args": {"path": "/integrations", "label": "integrations"}})
+
+    if any(w in m for w in ("diagnose", "fix this", "why is this failing")):
+        tools.append({"name": "diagnose_fix", "args": {"issue": message[:400]}})
+
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for t in tools:
+        name = str(t.get("name") or "")
+        key = name
+        if name == "navigate":
+            key = f"navigate:{(t.get('args') or {}).get('path') or '/'}"
+        if key not in seen:
+            seen.add(key)
+            out.append(t)
+    # Specific user actions beat generic keyword digest tools when the cap is hit.
+    priority = {
+        "desktop_write_note": 0,
+        "capability_refuse": 1,
+        "computer_open_app": 2,
+        "process_ticket_handoff": 3,
+        "work_item_open_or_create": 4,
+        "companion_handoff": 5,
+        "companion_intelligence": 6,
+        "coding_agent_start": 7,
+        "desktop_screenshot": 8,
+    }
+    out.sort(key=lambda t: (priority.get(str(t.get("name") or ""), 50), str(t.get("name") or "")))
+    return out[:_MAX_TOOLS]
+
+
+def _exec_tool(
+    db: Session,
+    name: str,
+    args: dict,
+    project_key: str = "",
+    created_by: str = "",
+    user_id: int | None = None,
+    project_id: int | None = None,
+    correlation_id: str = "",
+) -> dict[str, Any]:
+    if name == "navigate":
+        return {"ok": True, "navigate": args.get("path") or "/", "label": args.get("label")}
+    if name in (
+        "companion_scope",
+        "companion_handoff",
+        "companion_intelligence",
+        "work_item_open_or_create",
+        "process_ticket_handoff",
+        "companion_multi_repo_status",
+    ):
+        from app.services.mentrix.companion_scope import (
+            build_companion_scope,
+            handoff_url,
+            intelligence_pack,
+            open_or_create_work_item,
+            process_ticket_handoff,
+            progress_snapshot,
+        )
+
+        requested_ids = args.get("repository_ids")
+        if not isinstance(requested_ids, list):
+            requested_ids = None
+        envelope = build_companion_scope(
+            db,
+            project_id=args.get("project_id") or project_id,
+            repository_ids=requested_ids,
+            work_item_id=args.get("work_item_id"),
+            workspace_id=str(args.get("project_key") or project_key or ""),
+            active_root_id=args.get("repository_id") if args.get("repository_id") else None,
+            created_by=created_by,
+        )
+        if name == "companion_scope":
+            return {
+                "ok": True,
+                "scope": envelope,
+                "spoken_summary": (
+                    f"Active project {envelope.get('project_name') or 'none'}; "
+                    f"{len(envelope.get('repo_ids') or [])} authorized root(s)."
+                ),
+            }
+        if name == "companion_handoff":
+            surface = str(args.get("surface") or "workspace")
+            extra = {}
+            if args.get("goal"):
+                extra["goal"] = str(args.get("goal"))[:200]
+            if args.get("audience"):
+                extra["audience"] = str(args.get("audience"))[:80]
+            if surface in {"present", "present_create"}:
+                extra["prompt"] = str(args.get("prompt") or extra.get("goal") or "")[:500]
+                if args.get("template"):
+                    extra["template"] = str(args.get("template"))[:80]
+                if args.get("sensitivity"):
+                    extra["sensitivity"] = str(args.get("sensitivity"))[:40]
+            nav = handoff_url(surface, envelope, extra=extra or None)
+            labels = {
+                "workspace": "Developer Workspace — Companion does not edit code.",
+                "present": "ZECT Present.",
+                "present_create": "ZECT Present create — Companion does not edit decks.",
+                "work_items": "Work Items.",
+                "projects": "Projects.",
+                "fabric": "Mentrix Fabric.",
+                "processes": "Work Items / process tickets.",
+            }
+            return {
+                "ok": True,
+                "navigate": nav,
+                "surface": surface,
+                "envelope": {
+                    "project_id": envelope.get("project_id"),
+                    "workspace_id": envelope.get("workspace_id"),
+                    "work_item_id": envelope.get("work_item_id"),
+                    "repo_ids": envelope.get("repo_ids"),
+                    "commit_shas": envelope.get("commit_shas"),
+                    "plan_ref": envelope.get("plan_ref"),
+                    "evidence_ref": envelope.get("evidence_ref"),
+                },
+                "spoken_summary": f"Opening {labels.get(surface) or surface}",
+                "progress": progress_snapshot(stage=f"handoff:{surface}", envelope=envelope),
+            }
+        if name == "companion_intelligence":
+            pack = intelligence_pack(db, envelope, str(args.get("q") or args.get("question") or ""))
+            return pack
+        if name == "work_item_open_or_create":
+            return open_or_create_work_item(
+                db,
+                envelope,
+                title=str(args.get("title") or args.get("goal") or "Companion work item"),
+                description=str(args.get("description") or ""),
+                source=str(args.get("source") or "companion"),
+                external_id=str(args.get("external_id") or args.get("issue_key") or ""),
+                created_by=created_by,
+            )
+        if name == "process_ticket_handoff":
+            return process_ticket_handoff(
+                envelope,
+                issue_key=str(args.get("issue_key") or ""),
+                db=db,
+                created_by=created_by,
+            )
+        # companion_multi_repo_status
+        wid = envelope.get("work_item_id") or args.get("work_item_id")
+        if not wid:
+            return {
+                "ok": True,
+                "spoken_summary": (
+                    f"{len(envelope.get('repo_ids') or [])} authorized root(s) in scope. "
+                    "Create or open a WorkItem to run multi-repo AGENT."
+                ),
+                "scope": envelope,
+                "sibling": {"aggregate": "PENDING", "ready": False, "per_repo": envelope.get("roots") or []},
+            }
+        from app.services.work_items.artifact_store import ArtifactStore
+        from app.services.work_items.multi_repo_agent import read_multi_repo_status
+        from app.services.mentrix.companion_scope import aggregate_sibling_status
+
+        wi_status = ""
+        try:
+            from app.models import WorkItem as _WI
+
+            row = db.query(_WI).filter(_WI.id == int(wid)).first()
+            wi_status = str(getattr(row, "status", "") or "")
+        except Exception:  # noqa: BLE001
+            wi_status = ""
+        store = ArtifactStore(int(wid))
+        raw = read_multi_repo_status(store, work_item_id=int(wid), wi_status=wi_status)
+        per = []
+        for r in raw.get("affected_repos") or []:
+            per.append(
+                {
+                    "repository_id": r.get("repository_id"),
+                    "label": r.get("label") or "",
+                    "status": r.get("status") or "pending",
+                    "evidence": r.get("evidence") or r.get("error") or "",
+                }
+            )
+        sibling = aggregate_sibling_status(per)
+        spoken = f"Multi-repo aggregate {sibling['aggregate']}."
+        if sibling.get("blocked"):
+            spoken += " Sibling failure is not hidden — aggregate stays BLOCKED until repair."
+        return {
+            "ok": True,
+            "spoken_summary": spoken,
+            "multi_repo": raw,
+            "sibling": sibling,
+            "progress": progress_snapshot(
+                stage="multi_repo",
+                envelope=envelope,
+                blocker="sibling_failure" if sibling.get("blocked") else "",
+                per_repo=per,
+            ),
+        }
+    if name in ("browser_navigate", "browser_snapshot", "browser_fill"):
+        from app.services.browser.allowlist import host_allowed
+        from app.services.browser.runtime import get_browser_runtime
+
+        url = (args.get("url") or "").strip()
+        if name == "browser_navigate":
+            if not url:
+                return {"ok": False, "error": "url required"}
+            ok_host, reason = host_allowed(url)
+            if not ok_host:
+                return {"ok": False, "error": "host_not_allowlisted", "detail": reason}
+        elif url:
+            ok_host, reason = host_allowed(url)
+            if not ok_host:
+                return {"ok": False, "error": "host_not_allowlisted", "detail": reason}
+
+        rt = get_browser_runtime()
+        if name == "browser_navigate":
+            out = rt.navigate(url)
+        elif name == "browser_snapshot":
+            out = rt.snapshot(**({"url": url} if url else {}))
+        else:
+            selector = args.get("selector") or ""
+            value = args.get("value", "")
+            if url:
+                rt.navigate(url)
+            out = rt.fill(selector, str(value))
+        return {"ok": out.get("status") in ("ok", "ready", "success"), "browser": out, "via": "BrowserRuntime"}
+    if name == "go_back":
+        return {"ok": True, "navigate": "__back__"}
+    if name == "delivery_status":
+        runs = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(5).all()
+        items = [
+            {
+                "id": r.id,
+                "status": r.status,
+                "mode": r.mode,
+                "goal": (r.goal or "")[:120],
+                "gates": json.loads(r.gates_json or "{}"),
+                "next_step": r.next_step or "",
+            }
+            for r in runs
+        ]
+        board = None
+        if items:
+            board = {
+                "type": "mermaid",
+                "title": f"Gates — run #{items[0]['id']}",
+                "body": _gates_mermaid(items[0].get("gates") or {}, items[0]["id"]),
+            }
+        return {"ok": True, "runs": items, "board": board}
+    if name == "lattice_query":
+        key = args.get("project_key") or project_key
+        if not key:
+            from app.services.lattice.indexer import _GRAPH_CACHE  # type: ignore
+
+            gkeys = list(_GRAPH_CACHE.keys())[:1]
+            key = gkeys[0] if gkeys else ""
+        if not key:
+            return {"ok": False, "error": "No Lattice project_key — ingest a workspace first"}
+        q = args.get("q") or ""
+        doc_mode = any(w in q.lower() for w in ("wiki", "doc", "markdown", "note"))
+        kinds = ["doc", "folder", "vault"] if doc_mode else None
+        hits = query_graph(key, q, limit=15, kinds=kinds)
+        if not hits and doc_mode:
+            hits = query_graph(key, q, limit=15)
+        g = get_graph(key)
+        from app.services.lattice.markdown_graph import doc_backlinks as lattice_doc_backlinks
+
+        bl_rows: list[list[str]] = []
+        if hits and hits[0].get("kind") in ("doc", "folder", "vault"):
+            bl = lattice_doc_backlinks(key, hits[0].get("path") or hits[0].get("name") or q, limit=8)
+            for item in bl.get("backlinks") or []:
+                src = item.get("source") or {}
+                bl_rows.append([src.get("name") or "", src.get("kind") or "", src.get("path") or ""])
+        summary = {
+            "files": g.files_indexed if g else 0,
+            "symbols": g.symbols if g else 0,
+            "docs": getattr(g, "doc_files_indexed", 0) if g else 0,
+            "wikilinks": getattr(g, "wikilinks_resolved", 0) if g else 0,
+        }
+        boards: list[dict] = [
+            {
+                "type": "table",
+                "title": "Lattice hits",
+                "data": {
+                    "columns": ["name", "kind", "path"],
+                    "rows": [
+                        [h.get("name") or "", h.get("kind") or "", h.get("path") or ""]
+                        for h in (hits[:12] if isinstance(hits, list) else [])
+                    ],
+                },
+            }
+        ]
+        if bl_rows:
+            boards.append(
+                {
+                    "type": "table",
+                    "title": "Doc backlinks",
+                    "data": {"columns": ["name", "kind", "path"], "rows": bl_rows},
+                }
+            )
+        spoken = f"Found {len(hits)} Lattice matches"
+        if summary.get("docs"):
+            spoken += f", including {summary['docs']} documentation nodes."
+        tagged_hits = hits[:15]
+        try:
+            from app.services.mentrix.companion_scope import build_companion_scope, tag_hits_with_identity
+
+            env = build_companion_scope(
+                db,
+                project_id=project_id,
+                workspace_id=str(key or project_key or ""),
+            )
+            tagged_hits = tag_hits_with_identity(list(hits[:15]), env.get("roots") or [])
+        except Exception:  # noqa: BLE001
+            tagged_hits = hits[:15]
+        return {
+            "ok": True,
+            "project_key": key,
+            "hits": tagged_hits,
+            "summary": summary,
+            "board": boards[0],
+            "board_extra": boards[1] if len(boards) > 1 else None,
+            "spoken_summary": spoken,
+            "ux_label": "Lattice",
+        }
+    if name == "research_news":
+        topic = args.get("topic") or "technology"
+        citations: list[dict[str, str]] = []
+        abstract = ""
+
+        def _fetch() -> tuple[str, list[dict[str, str]]]:
+            url = f"https://api.duckduckgo.com/?q={quote_plus(topic)}&format=json&no_html=1"
+            with urlopen(url, timeout=_RESEARCH_TIMEOUT_S) as resp:  # noqa: S310
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            cites: list[dict[str, str]] = []
+            for item in (data.get("RelatedTopics") or [])[:6]:
+                if isinstance(item, dict) and item.get("Text"):
+                    cites.append({"title": item.get("Text", "")[:160], "url": item.get("FirstURL") or ""})
+            return (data.get("AbstractText") or ""), cites
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                abstract, citations = pool.submit(_fetch).result(timeout=_RESEARCH_TIMEOUT_S + 0.4)
+        except Exception as exc:  # noqa: BLE001
+            abstract = f"Quick Mentrix research on '{topic}' (live lookup skipped: {type(exc).__name__})."
+        return {
+            "ok": True,
+            "topic": topic,
+            "summary": abstract or f"Research notes on {topic}",
+            "citations": citations,
+            "board": {
+                "type": "markdown",
+                "title": f"Research — {topic[:60]}",
+                "body": (abstract or f"Research notes on {topic}")
+                + (
+                    "\n\n## Sources\n" + "\n".join(f"- {c.get('title')}" for c in citations[:6])
+                    if citations
+                    else ""
+                ),
+            },
+        }
+    if name == "content_brief":
+        topic = args.get("topic") or "campaign"
+        md = (
+            f"# Mentrix content brief\n\n**Topic:** {topic}\n\n"
+            "## Audience\n- Primary\n- Secondary\n\n## Key message\nValue proposition.\n\n"
+            "## Ad angles\n1. Problem → solution\n2. Social proof\n3. Urgency\n"
+        )
+        return {"ok": True, "board": {"type": "markdown", "title": "Content brief", "body": md}}
+    if name == "ads_copy":
+        topic = args.get("topic") or "offer"
+        md = f"# Ad copy\n\n1. **Direct:** {topic[:80]}\n2. **Story:** Mentrix saves hours.\n3. **Proof:** Outcomes in one sprint.\n"
+        return {"ok": True, "board": {"type": "markdown", "title": "Ad copy", "body": md}}
+    if name == "report_draft":
+        topic = args.get("topic") or "weekly"
+        md = f"# Mentrix report — {topic}\n\n## Highlights\n- Delivery reviewed\n\n## Risks\n- Open gates\n\n## Next\n- Confirm sends\n"
+        return {"ok": True, "board": {"type": "markdown", "title": "Report draft", "body": md}}
+    if name == "docs_search":
+        q = args.get("query") or ""
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            result = execute_tool(db, server_id="confluence", tool_name="search", arguments={"query": q})
+            return {"ok": True, "source": "confluence", "result": result}
+        except Exception:
+            return {"ok": True, "source": "local", "result": {"note": "Confluence unavailable", "query": q}}
+    if name == "docs_draft":
+        return {
+            "ok": True,
+            "board": {
+                "type": "markdown",
+                "title": "Internal doc draft",
+                "body": f"# Draft\n\n{args.get('body') or args.get('query') or 'Outline.'}\n",
+            },
+        }
+    if name == "jira_get_issue":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            key = (args.get("issue_key") or "").strip().upper()
+            if not key:
+                return {"ok": False, "error": "issue_key required"}
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="get_issue",
+                arguments={"issue_key": key},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if out.get("status") in ("not_configured", "disabled") or result.get("status") in (
+                "not_configured",
+                "disabled",
+            ):
+                return {
+                    "ok": False,
+                    "blocked_external": True,
+                    "error": "BLOCKED_EXTERNAL",
+                    "spoken_summary": "Jira is not configured — BLOCKED_EXTERNAL, not a fake ticket.",
+                    "detail": result.get("message") or "set MCP_JIRA_URL, JIRA_EMAIL (or JIRA_USERNAME), JIRA_API_TOKEN",
+                    "result": result,
+                }
+            fields = result.get("fields") or {}
+            summary = fields.get("summary") or ""
+            status = (fields.get("status") or {}).get("name") or ""
+            itype = (fields.get("issuetype") or {}).get("name") or ""
+            desc = fields.get("description")
+            desc_text = ""
+            if isinstance(desc, str):
+                desc_text = desc[:2000]
+            elif isinstance(desc, dict):
+                # flatten ADF lightly
+                def _walk(n: Any) -> str:
+                    if isinstance(n, dict):
+                        if n.get("type") == "text":
+                            return str(n.get("text") or "")
+                        return "".join(_walk(c) for c in (n.get("content") or []))
+                    if isinstance(n, list):
+                        return "".join(_walk(c) for c in n)
+                    return ""
+
+                desc_text = _walk(desc)[:2000]
+            spoken = f"Jira {key}: {summary}. Status {status or 'unknown'}."
+            md = (
+                f"# {key} — {summary}\n\n"
+                f"**Type:** {itype}  \n**Status:** {status}\n\n"
+                f"## Description\n\n{desc_text or '_No description_'}\n"
+            )
+            return {
+                "ok": True,
+                "issue_key": key,
+                "summary": summary,
+                "status": status,
+                "issuetype": itype,
+                "description": desc_text,
+                "result": result,
+                "spoken_summary": spoken,
+                "board": {"type": "markdown", "title": f"Jira {key}", "body": md},
+                "delivery_goal": f"Fix incident {key}: {summary}\n\n{desc_text[:1500]}",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "jira_search_incidents":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            jql = (
+                args.get("jql")
+                or os.getenv("JIRA_INCIDENT_JQL")
+                or 'issuetype = Incident ORDER BY updated DESC'
+            )
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="search_issues",
+                arguments={"jql": jql, "max_results": int(args.get("max_results") or 20)},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled"):
+                return {
+                    "ok": False,
+                    "error": result.get("message") or "Jira not configured",
+                    "result": result,
+                }
+            issues = result.get("issues") or result.get("values") or []
+            rows = []
+            for iss in issues[:20]:
+                f = iss.get("fields") or {}
+                rows.append(
+                    [
+                        iss.get("key") or "",
+                        f.get("summary") or "",
+                        (f.get("status") or {}).get("name") or "",
+                    ]
+                )
+            return {
+                "ok": True,
+                "jql": jql,
+                "count": len(rows),
+                "spoken_summary": f"Found {len(rows)} Jira incident(s).",
+                "board": {
+                    "type": "table",
+                    "title": "Jira incidents",
+                    "data": {"columns": ["key", "summary", "status"], "rows": rows},
+                },
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "datadog_query_logs":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            query = args.get("query") or "status:error"
+            out = execute_tool(
+                db,
+                server_id="datadog",
+                tool_name="query_logs",
+                arguments={"query": query},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled"):
+                return {
+                    "ok": False,
+                    "error": result.get("message") or "Datadog not configured",
+                    "result": result,
+                }
+            data = result.get("data") or []
+            rows = []
+            for ev in data[:15]:
+                attrs = (ev.get("attributes") or {}) if isinstance(ev, dict) else {}
+                rows.append(
+                    [
+                        str(attrs.get("timestamp") or attrs.get("service") or "")[:40],
+                        str(attrs.get("message") or attrs.get("status") or ev)[:120],
+                    ]
+                )
+            return {
+                "ok": True,
+                "query": query,
+                "spoken_summary": f"Datadog returned {len(rows)} log event(s) for '{query[:60]}'.",
+                "board": {
+                    "type": "table",
+                    "title": f"Datadog — {query[:40]}",
+                    "data": {"columns": ["meta", "message"], "rows": rows},
+                },
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "jira_comment_pr":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            key = (args.get("issue_key") or "").strip().upper()
+            pr_url = (args.get("pr_url") or "").strip()
+            if not key or not pr_url:
+                return {"ok": False, "error": "issue_key and pr_url required"}
+            body = args.get("body") or f"Mentrix Delivery PR: {pr_url}"
+            out = execute_tool(
+                db,
+                server_id="jira",
+                tool_name="add_comment",
+                arguments={"issue_key": key, "body": body},
+                user_email=created_by,
+            )
+            result = out.get("result") or out
+            if result.get("status") in ("not_configured", "disabled") or out.get("status") == "error":
+                return {
+                    "ok": False,
+                    "error": result.get("message") or result.get("error") or "Jira comment failed",
+                    "result": result,
+                }
+            return {
+                "ok": True,
+                "issue_key": key,
+                "pr_url": pr_url,
+                "spoken_summary": f"Commented PR link on {key}.",
+                "result": result,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+    if name == "weather_report":
+        from app.services.mentrix.weather import weather_report as _weather
+
+        wr = _weather(str(args.get("location") or args.get("place") or "Austin"))
+        if not wr.get("ok") and wr.get("fallback_research"):
+            # Caller / agent may follow with research_news; still return honest failure
+            return wr
+        return wr
+    if name == "slack_digest":
+        try:
+            from app.services.mcp.hub import execute_tool
+
+            hist = execute_tool(
+                db,
+                server_id="slack",
+                tool_name="channel_history",
+                arguments={
+                    "channel": args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "engineering"),
+                    "limit": 10,
+                },
+            )
+            if hist.get("status") == "not_configured" or hist.get("dry_run"):
+                return {
+                    "ok": True,
+                    "digest": {"messages": []},
+                    "spoken_summary": "Slack is not configured. Set SLACK_BOT_TOKEN in backend/.env.",
+                    "note": "Set SLACK_BOT_TOKEN in backend/.env",
+                }
+            messages = hist.get("messages") or []
+            channel = hist.get("channel") or "default"
+            if not messages:
+                spoken = f"No recent Slack messages in #{channel}."
+            else:
+                bits = [m.get("text") or "" for m in messages[:5] if m.get("text")]
+                spoken = f"Recent Slack in #{channel}: " + "; ".join(bits)[:500]
+            rows = [[m.get("user") or "", m.get("text") or ""] for m in messages[:10]]
+            return {
+                "ok": True,
+                "digest": hist,
+                "spoken_summary": spoken,
+                "note": f"{len(messages)} message(s) in #{channel}",
+                "board": {
+                    "type": "table",
+                    "title": f"Slack — #{channel}",
+                    "data": {"columns": ["user", "text"], "rows": rows},
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": True,
+                "digest": {"messages": []},
+                "spoken_summary": f"Slack digest unavailable: {type(exc).__name__}. Set SLACK_BOT_TOKEN if needed.",
+                "note": str(exc)[:200],
+            }
+    if name == "slack_send":
+        try:
+            from app.services.mcp.hub import execute_tool
+            from app.services.mentrix.outbound_drafts import (
+                create_outbound_draft,
+                get_draft,
+                mark_sent,
+                public_payload,
+                serialize_draft,
+                verify_approval,
+            )
+            from app.services.mentrix.providers import get_slack_provider
+
+            channel = args.get("channel") or os.getenv("SLACK_DEFAULT_CHANNEL", "general")
+            text = args.get("text") or ""
+            draft_id = args.get("draft_id")
+            if draft_id:
+                draft = get_draft(db, int(draft_id))
+                if not draft or draft.channel != "slack":
+                    return {"ok": False, "error": "draft_not_found", "spoken_summary": "Slack draft not found."}
+                ok_appr, reason = verify_approval(
+                    draft, expected_hash=args.get("preview_hash")
+                )
+                if not ok_appr:
+                    return {
+                        "ok": False,
+                        "error": reason,
+                        "spoken_summary": f"Cannot send Slack draft: {reason}.",
+                        "draft": serialize_draft(draft),
+                    }
+                if draft.status == "sent":
+                    return {
+                        "ok": True,
+                        "already_sent": True,
+                        "provider_message_id": draft.provider_message_id,
+                        "spoken_summary": "Already sent — not duplicating.",
+                        "draft": serialize_draft(draft),
+                    }
+                payload = public_payload(draft)
+                sent = execute_tool(
+                    db,
+                    server_id="slack",
+                    tool_name="send_message",
+                    arguments={
+                        "channel": str(payload.get("channel") or channel).lstrip("#"),
+                        "text": payload.get("text") or text,
+                    },
+                )
+                mark_sent(db, draft, str(sent.get("ts") or sent.get("id") or ""))
+                return {
+                    "ok": True,
+                    "sent": sent,
+                    "verification": {"kind": "provider_id", "id": draft.provider_message_id or sent.get("ts")},
+                    "draft": serialize_draft(draft),
+                    "spoken_summary": "Slack message sent.",
+                }
+            drafted = get_slack_provider().draft_message(channel=str(channel), text=text)
+            if not drafted.get("ok"):
+                return drafted
+            draft = create_outbound_draft(
+                db,
+                channel="slack",
+                payload={"channel": drafted["channel"], "text": drafted["text"]},
+                user_id=user_id,
+                citations=drafted.get("citations") or [],
+                correlation_id=correlation_id or "",
+            )
+            ser = serialize_draft(draft)
+            return {
+                "ok": True,
+                "draft": ser,
+                "needs_send_approval": True,
+                "preview_hash": ser.get("preview_hash"),
+                "expires_at": ser.get("expires_at"),
+                "spoken_summary": f"Slack draft #{draft.id} ready for {channel}. Approve send to deliver.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Slack draft #{draft.id}",
+                    "body": f"**Channel:** #{channel}\n**Hash:** `{ser.get('preview_hash', '')[:16]}…`\n\n{text[:2000]}",
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": True,
+                "queued": True,
+                "note": f"Slack send: {exc}",
+                "spoken_summary": f"Could not send Slack message: {type(exc).__name__}.",
+            }
+    if name == "email_digest":
+        from app.services.mentrix.providers import get_email_provider
+
+        return get_email_provider().digest(limit=8)
+    if name == "email_send":
+        try:
+            from app.services.mcp.hub import execute_tool
+            from app.services.mentrix.outbound_drafts import (
+                create_outbound_draft,
+                get_draft,
+                mark_sent,
+                public_payload,
+                serialize_draft,
+                verify_approval,
+            )
+            from app.services.mentrix.providers import get_email_provider
+
+            draft_id = args.get("draft_id")
+            if draft_id:
+                draft = get_draft(db, int(draft_id))
+                if not draft or draft.channel != "email":
+                    return {"ok": False, "error": "draft_not_found", "spoken_summary": "Email draft not found."}
+                ok_appr, reason = verify_approval(draft, expected_hash=args.get("preview_hash"))
+                if not ok_appr:
+                    return {
+                        "ok": False,
+                        "error": reason,
+                        "spoken_summary": f"Cannot send email draft: {reason}.",
+                        "draft": serialize_draft(draft),
+                    }
+                if draft.status == "sent":
+                    return {
+                        "ok": True,
+                        "already_sent": True,
+                        "provider_message_id": draft.provider_message_id,
+                        "spoken_summary": "Already sent — not duplicating.",
+                        "draft": serialize_draft(draft),
+                    }
+                payload = public_payload(draft)
+                sent = execute_tool(
+                    db,
+                    server_id="email",
+                    tool_name="send_email",
+                    arguments={
+                        "to": payload.get("to") or "",
+                        "subject": payload.get("subject") or "Mentrix",
+                        "body": payload.get("body") or "",
+                    },
+                )
+                mark_sent(db, draft, str(sent.get("id") or ""))
+                return {
+                    "ok": True,
+                    "sent": sent,
+                    "verification": {"kind": "provider_id", "id": draft.provider_message_id or sent.get("id")},
+                    "draft": serialize_draft(draft),
+                    "spoken_summary": "Email sent.",
+                }
+            drafted = get_email_provider().draft_reply(
+                to=str(args.get("to") or ""),
+                subject=str(args.get("subject") or "Mentrix"),
+                body=str(args.get("body") or ""),
+                dictation=str(args.get("dictation") or ""),
+            )
+            if not drafted.get("ok"):
+                return drafted
+            draft = create_outbound_draft(
+                db,
+                channel="email",
+                payload={
+                    "to": drafted.get("to") or "",
+                    "subject": drafted.get("subject") or "Mentrix",
+                    "body": drafted.get("body") or "",
+                },
+                user_id=user_id,
+                citations=drafted.get("citations") or [],
+                dictation=str(args.get("dictation") or ""),
+                correlation_id=correlation_id or "",
+            )
+            ser = serialize_draft(draft)
+            return {
+                "ok": True,
+                "draft": ser,
+                "needs_send_approval": True,
+                "preview_hash": ser.get("preview_hash"),
+                "expires_at": ser.get("expires_at"),
+                "spoken_summary": f"Email draft #{draft.id} ready. Approve send to deliver.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Email draft #{draft.id}",
+                    "body": (
+                        f"**To:** {drafted.get('to') or '(unset)'}\n"
+                        f"**Subject:** {drafted.get('subject') or 'Mentrix'}\n"
+                        f"**Hash:** `{ser.get('preview_hash', '')[:16]}…`\n\n"
+                        f"{(drafted.get('body') or '')[:2000]}"
+                    ),
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": True,
+                "queued": True,
+                "note": f"Email send: {exc}",
+                "spoken_summary": f"Email send failed: {type(exc).__name__}.",
+            }
+    if name == "calendar_upcoming":
+        from app.services.mentrix.providers import get_calendar_provider
+
+        items = get_calendar_provider().upcoming(limit=int(args.get("limit") or 10))
+        rows = [
+            {"id": i.id, "title": i.title, "when": i.when, "body": i.body, "source": i.source}
+            for i in items
+        ]
+        md = "\n".join(f"- **{r['title']}** — {r['when'] or 'TBD'}" for r in rows) or "_No events_"
+        return {
+            "ok": True,
+            "meetings": rows,
+            "spoken_summary": f"{len(rows)} upcoming meeting(s)." if rows else "No upcoming meetings.",
+            "board": {"type": "markdown", "title": "Calendar", "body": f"# Upcoming\n\n{md}"},
+        }
+    if name == "meeting_brief":
+        from app.services.mentrix.meeting_assistant import build_meeting_brief
+
+        return build_meeting_brief(db, user_id=user_id)
+    if name == "meeting_followup_draft":
+        from app.services.mentrix.meeting_assistant import (
+            build_meeting_brief,
+            draft_followups_from_brief,
+        )
+
+        brief = build_meeting_brief(db, user_id=user_id)
+        return draft_followups_from_brief(
+            db,
+            brief,
+            channel=str(args.get("channel") or "email"),
+            to=str(args.get("to") or ""),
+            user_id=user_id,
+        )
+    if name == "image_avatar":
+        from app.services.mentrix.media_board import generate_media
+
+        entry = generate_media(args.get("prompt") or "Mentrix companion avatar", created_by=created_by)
+        return {
+            "ok": True,
+            "media": entry,
+            "board": {
+                "type": "image",
+                "title": f"Mentrix image #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
+            },
+        }
+    if name == "media_generate":
+        from app.services.mentrix.media_board import generate_media
+
+        entry = generate_media(args.get("prompt") or "Mentrix image", created_by=created_by)
+        return {
+            "ok": True,
+            "media": entry,
+            "board": {
+                "type": "image",
+                "title": f"Mentrix image #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
+            },
+        }
+    if name == "media_edit":
+        from app.services.mentrix.media_board import edit_media
+
+        num = int(args.get("number") or 1)
+        entry = edit_media(num, args.get("prompt") or "edit", created_by=created_by)
+        return {
+            "ok": True,
+            "media": entry,
+            "board": {
+                "type": "image",
+                "title": f"Mentrix edit #{entry['number']:03d}",
+                "body": entry.get("prompt") or "",
+                "data": entry,
+            },
+        }
+    if name == "media_list":
+        from app.services.mentrix.media_board import list_media
+
+        items = list_media()
+        return {
+            "ok": True,
+            "media": items,
+            "board": {
+                "type": "record",
+                "title": "Mentrix Image board",
+                "body": f"{len(items)} images",
+                "data": {
+                    "records": [
+                        {
+                            "id": f"#{it.get('number'):03d}",
+                            "text": it.get("prompt") or "",
+                            "tags": ["media", f"n{it.get('number')}"],
+                            "createdAt": it.get("createdAt"),
+                        }
+                        for it in items
+                    ]
+                },
+            },
+        }
+    if name == "note_list":
+        from app.services.mentrix.notes import list_notes
+
+        notes = list_notes()
+        return {
+            "ok": True,
+            "notes": notes,
+            "board": {
+                "type": "record",
+                "title": "Mentrix Notes",
+                "data": {"records": notes},
+            },
+        }
+    if name == "note_add":
+        from app.services.mentrix.notes import add_note
+
+        note = add_note(str(args.get("text") or ""), tags=args.get("tags") or ["mentrix"])
+        return {
+            "ok": True,
+            "note": note,
+            "board": {"type": "note", "title": "Note saved", "body": note.get("text") or "", "data": note},
+        }
+    if name == "start_delivery":
+        # Same path as POST /api/mentrix/runs — background worker + coding-engine slice
+        import threading
+
+        from app.services.forge_loop.orchestrator import MODE_PIPELINE
+        from app.workers.mentrix_worker import run_mentrix_in_background
+
+        goal = (args.get("goal") or "Mentrix Delivery").strip()
+        mode = args.get("mode") or "upgrade"
+        if mode not in MODE_PIPELINE:
+            mode = "upgrade" if "upgrade" in MODE_PIPELINE else "chat"
+        pk = project_key or args.get("project_key") or ""
+        workspace = args.get("workspace") or ""
+        run = MentrixRun(
+            project_id=project_id,
+            mode=mode,
+            goal=goal,
+            status="running",
+            current_agent="orchestrator",
+            events_json="[]",
+            gates_json="{}",
+            result_json=json.dumps(
+                {
+                    "context": {
+                        "project_key": pk,
+                        "workspace": workspace,
+                        "source": "companion",
+                        "correlation_id": correlation_id or "",
+                    }
+                }
+            ),
+            next_step="",
+            created_by=created_by or "mentrix-companion",
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        threading.Thread(
+            target=run_mentrix_in_background,
+            kwargs={
+                "run_id": run.id,
+                "goal": goal,
+                "mode": mode,
+                "project_key": pk,
+                "project_id": project_id,
+                "created_by": created_by or "mentrix-companion",
+                "workspace": workspace,
+                "source_lang": args.get("source_lang") or "",
+                "target_lang": args.get("target_lang") or "",
+                "repo_id": args.get("repo_id"),
+            },
+            daemon=True,
+            name=f"mentrix-companion-run-{run.id}",
+        ).start()
+        gates = json.loads(run.gates_json or "{}")
+        return {
+            "ok": True,
+            "run_id": run.id,
+            "status": run.status,
+            "navigate": "/mentrix",
+            "via": "coding_engine_bridge",
+            "board": {
+                "type": "mermaid",
+                "title": f"Delivery workflow #{run.id}",
+                "body": _gates_mermaid(gates, run.id),
+            },
+            "board_progress": {
+                "type": "progress",
+                "title": f"Run #{run.id}",
+                "data": {"status": run.status, "next_step": run.next_step or "", "percent": 10},
+            },
+        }
+    if name in ("approve_delivery", "create_pr"):
+        # Previously a pure stub — saying "approve and ship it" in chat/voice did
+        # nothing real, just told the user to go do it in the UI. Now calls the
+        # same approve/create-pr route functions the UI calls, directly.
+        from fastapi import HTTPException
+
+        from app.infrastructure.auth.deps import CurrentUser
+        from app.domains.agent_run.mentrix import ApproveRequest, CreatePRRequest, approve_run, create_pr_for_run
+
+        run_id = args.get("run_id")
+        if run_id:
+            run = db.query(MentrixRun).filter(MentrixRun.id == int(run_id)).first()
+        else:
+            q = db.query(MentrixRun)
+            if created_by:
+                q = q.filter(MentrixRun.created_by == created_by)
+            run = q.order_by(MentrixRun.id.desc()).first()
+        if not run:
+            return {"ok": False, "error": "No Mentrix Delivery run found — start one first (start_delivery)"}
+
+        stand_in_user = CurrentUser(
+            user_id=user_id,
+            username=created_by or "mentrix-companion",
+            email=created_by or "",
+            auth_mode="internal",
+            token="",
+        )
+        try:
+            if name == "approve_delivery":
+                out = approve_run(
+                    run.id,
+                    ApproveRequest(
+                        acknowledge_issues=bool(args.get("acknowledge_issues")),
+                        acknowledge_reason=str(args.get("acknowledge_reason") or ""),
+                    ),
+                    db=db,
+                    user=stand_in_user,
+                )
+            else:
+                out = create_pr_for_run(
+                    run.id,
+                    CreatePRRequest(
+                        title=str(args.get("title") or ""),
+                        body=str(args.get("body") or ""),
+                        repo_path=str(args.get("repo_path") or ""),
+                        base_branch=str(args.get("base_branch") or "main"),
+                        dry_run=args.get("dry_run"),
+                    ),
+                    db=db,
+                    user=stand_in_user,
+                )
+        except HTTPException as exc:
+            return {"ok": False, "error": str(exc.detail), "run_id": run.id}
+        return {
+            "ok": True,
+            "run_id": run.id,
+            "action": name,
+            "status": out.get("status"),
+            "pr_url": out.get("pr_url"),
+            "board": {
+                "type": "mermaid",
+                "title": f"Delivery workflow #{run.id}",
+                "body": _gates_mermaid(out.get("gates"), run.id),
+            },
+        }
+    if name == "desktop_screenshot":
+        return {"ok": True, "desktop": "screenshot", "note": "Electron Computer Mode after confirm"}
+    if name == "desktop_read":
+        path = str(args.get("path") or "")
+        blocked = (".env", "id_rsa", "credentials", "password", "secrets", ".aws", ".ssh")
+        if any(b in path.lower() for b in blocked):
+            return {"ok": False, "error": "path_blocked_default_deny", "path": path}
+        return {"ok": True, "path": path, "desktop": "desktop_read"}
+    if name in ("desktop_delete", "delete_file"):
+        from app.services.mentrix.no_delete_policy import refuse_delete
+
+        return refuse_delete(intent=name)
+    if name == "desktop_write_note":
+        content = str(args.get("content") or "")
+        if not content.strip():
+            return {"ok": False, "error": "empty_content"}
+        folder_name = str(args.get("folder") or "Desktop").strip() or "Desktop"
+        if folder_name.lower() not in ("desktop", "documents"):
+            folder_name = "Desktop"
+        home = Path.home()
+        base = home / ("Desktop" if folder_name.lower() == "desktop" else "Documents")
+        raw_name = str(args.get("filename") or "mentrix-note.md").strip() or "mentrix-note.md"
+        safe = Path(raw_name).name
+        if not safe.lower().endswith((".md", ".txt")):
+            safe = f"{safe}.md"
+        target = (base / safe).resolve()
+        try:
+            target.relative_to(base.resolve())
+        except ValueError:
+            return {"ok": False, "error": "path_outside_allowlist"}
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+            target.write_text(content[:50_000], encoding="utf-8")
+            _LAST_NOTE_DRAFT.clear()
+            _LAST_NOTE_DRAFT.update(
+                {
+                    "content": content[:50_000],
+                    "path": str(target),
+                    "filename": safe,
+                    "folder": folder_name,
+                    "app": "notepad++.exe",
+                }
+            )
+            return {
+                "ok": True,
+                "desktop": "desktop_write_note",
+                "path": str(target),
+                "bytes": len(content.encode("utf-8")),
+                "note": "Wrote allowlisted note file (prefer over Notepad typing)",
+                "spoken_summary": f"Wrote full note to {target.name} under {folder_name}. Opening the editor next if Allow is confirmed.",
+                "electron_action": "write_note",
+                "electron_args": {"path": str(target), "content": content[:50_000]},
+                "board": {
+                    "type": "markdown",
+                    "title": f"Note draft — {safe}",
+                    "body": content[:4000] + ("…" if len(content) > 4000 else ""),
+                },
+            }
+        except OSError as exc:
+            _LAST_NOTE_DRAFT.clear()
+            _LAST_NOTE_DRAFT.update(
+                {
+                    "content": content[:50_000],
+                    "path": str(target),
+                    "filename": safe,
+                    "folder": folder_name,
+                    "app": "notepad++.exe",
+                }
+            )
+            return {
+                "ok": True,
+                "desktop": "desktop_write_note",
+                "queued": True,
+                "path": str(target),
+                "error_local": str(exc)[:200],
+                "note": "Confirm Allow — Electron will write under Desktop/Documents",
+                "spoken_summary": "Note write queued for Electron Allow.",
+                "electron_action": "write_note",
+                "electron_args": {
+                    "folder": folder_name,
+                    "filename": safe,
+                    "content": content[:50_000],
+                },
+            }
+    if name == "computer_open_app":
+        app = args.get("app") or "notepad.exe"
+        path = str(args.get("path") or "").strip()
+        app_l = str(app).lower()
+        if not path and _LAST_NOTE_DRAFT.get("path") and any(
+            x in app_l for x in ("notepad", "npp", "code")
+        ):
+            path = str(_LAST_NOTE_DRAFT.get("path") or "")
+        out: dict[str, Any] = {"ok": True, "app": app, "desktop": "open_app"}
+        if path:
+            out["path"] = path
+            out["electron_args"] = {"app": app, "path": path}
+            _LAST_NOTE_DRAFT["app"] = str(app)
+            _LAST_NOTE_DRAFT["path"] = path
+        return out
+    if name == "desktop_open_presentation":
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "missing_path"}
+        return {
+            "ok": True,
+            "path": path,
+            "desktop": "open_presentation",
+            "note": "Open presentation; user shares PowerPoint in Zoom",
+        }
+    if name == "computer_click":
+        # PA-5: refuse blind hardcoded clicks unless explicitly allow_unverified
+        if args.get("allow_unverified") not in (True, "1", "true", 1):
+            x, y = args.get("x"), args.get("y")
+            if x is not None and y is not None and not args.get("selector") and not args.get("target"):
+                return {
+                    "ok": False,
+                    "error": "unverified_coordinate_click",
+                    "note": "Run computer_ui_inspect first or pass allow_unverified=true only as fallback",
+                    "args": args,
+                }
+        return {"ok": True, "desktop": name, "args": args, "fallback": "coordinate"}
+    if name == "computer_type":
+        text = str(args.get("text") or "")
+        if len(text) > _TYPE_MAX_CHARS:
+            # Paragraphs belong in a Desktop note — SendKeys is short keystrokes only.
+            return _exec_tool(
+                db,
+                "desktop_write_note",
+                {
+                    "content": text[:50_000],
+                    "folder": str(args.get("folder") or "Desktop"),
+                    "filename": str(args.get("filename") or "mentrix-note.md"),
+                },
+                project_key=project_key,
+                created_by=created_by,
+                user_id=user_id,
+                project_id=project_id,
+                correlation_id=correlation_id,
+            )
+        return {"ok": True, "desktop": name, "args": {"text": text, "app": args.get("app")}}
+    if name in ("computer_scroll", "computer_ui_inspect"):
+        return {"ok": True, "desktop": name, "args": args}
+    if name == "capability_refuse":
+        topic = str(args.get("topic") or "").strip().lower()
+        if topic == "zoom_schedule":
+            msg = (
+                "I can open Zoom or a zoom.us join link, but Mentrix cannot schedule Zoom meetings "
+                "(no Zoom Meeting API yet). Open Zoom and create the meeting there, or paste a join URL. "
+                "I can draft a calendar invite (Outlook/M365 or IMAP calendar) with the Zoom link once you have one."
+            )
+            return {
+                "ok": True,
+                "refused": True,
+                "topic": topic,
+                "spoken_summary": msg,
+                "note": msg,
+                "suggested_next": [
+                    "Open Zoom and create the meeting",
+                    "Paste a zoom.us join URL for me to open",
+                    "Ask me to draft a calendar invite with the join link",
+                ],
+                "board": {
+                    "type": "markdown",
+                    "title": "Zoom scheduling — open/join only",
+                    "body": (
+                        msg
+                        + "\n\n**Available now:** open Zoom, open join URL, draft calendar invite with link.\n"
+                        + "**Deferred:** Zoom Meeting API create / auto-join / auto screen-share."
+                    ),
+                },
+            }
+        if topic == "open_any_app":
+            msg = (
+                "Computer Mode only opens allowlisted apps "
+                "(Notepad, Notepad++, Zoom, Outlook, …) — not arbitrary installed programs."
+            )
+            return {"ok": True, "refused": True, "topic": topic, "spoken_summary": msg, "note": msg}
+        msg = f"That capability ({topic or 'unknown'}) is not available in Mentrix yet."
+        return {"ok": True, "refused": True, "topic": topic, "spoken_summary": msg, "note": msg}
+    if name == "coding_engine_status":
+        engine = (os.getenv("ZECT_CODING_ENGINE") or "mentrix_native").strip().lower()
+        from app.adapters.coding_runtime import coding_engine_health
+
+        health = coding_engine_health()
+        md = (
+            "# Mentrix coding readiness\n\n"
+            "| Layer | Status |\n|---|---|\n"
+            "| **Mentrix Delivery FSM** | Working — upgrade / bugfix / deliver → gates → approve/PR |\n"
+            "| **ForgeLoop orchestrator** | Working (in-process ship path) |\n"
+            "| **Mentrix Coding Agent** | "
+            + (
+                "Native tool loop (read/search/edit/run) — use Workspace or `coding_agent_start`\n"
+                if engine in ("mentrix_native", "native")
+                else f"`{engine}` "
+                + (
+                    "(CI placeholders only — set `ZECT_CODING_ENGINE=mentrix_native` for real agent)\n"
+                    if engine == "mock"
+                    else "(remote Agent Server when configured)\n"
+                )
+            )
+            + f"| **Health** | provider=`{health.get('provider')}` ready=`{health.get('ready')}` |\n"
+            + "| **Companion “build an app”** | `coding_agent_start` → `/workspace?session=…` |\n\n"
+            "Open Developer Workspace for the Mentrix Coding Agent panel.\n"
+        )
+        spoken = (
+            "Mentrix Delivery and ForgeLoop are built. "
+            + (
+                "Mentrix Coding Agent native mode is active — real repo edits via tools."
+                if engine in ("mentrix_native", "native")
+                else "Coding engine is not in native mode — set Mentrix Coding Agent for real edits."
+            )
+        )
+        detail = {"engine": engine, "health": health}
+        return {
+            "ok": True,
+            "spoken_summary": spoken,
+            "board": {"type": "markdown", "title": "Mentrix Coding Agent", "body": md},
+            **detail,
+        }
+
+    if name == "malware_status":
+        from app.adapters.detection_malware import malware_engine_status
+
+        st = malware_engine_status()
+        ready = bool(st.get("ready"))
+        spoken = (
+            "ZECT Security Agent malware engine is ready."
+            if ready
+            else "ZECT Security Agent malware engine is degraded — start services/zect-security-scan."
+        )
+        return {
+            "ok": True,
+            "spoken_summary": spoken,
+            "board": {
+                "type": "markdown",
+                "title": "ZECT Security Agent",
+                "body": f"```json\n{json.dumps(st, indent=2)[:2000]}\n```",
+            },
+            **st,
+        }
+
+    if name == "malware_scan_path":
+        from app.adapters.detection_malware import quarantine_file, scan_file
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+        raw_path = str(args.get("path") or "").strip()
+        if not raw_path:
+            return {
+                "ok": False,
+                "error": "path_required",
+                "spoken_summary": "Provide a file path for ZECT Security Agent to scan.",
+            }
+        try:
+            target = path_under_allowed_roots(raw_path)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"path_not_allowlisted:{exc}", "spoken_summary": "That path is not allowlisted."}
+        result = scan_file(target)
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                **result,
+                "spoken_summary": "ZECT Security Agent could not scan — engine unavailable or path invalid.",
+            }
+        if result.get("infected"):
+            q = None
+            if args.get("quarantine"):
+                q = quarantine_file(target, workspace=args.get("workspace"))
+            return {
+                "ok": True,
+                "infected": True,
+                "spoken_summary": f"Threat detected by ZECT Security Agent: {result.get('signature') or 'malware'}.",
+                "quarantine": q,
+                **result,
+            }
+        return {
+            "ok": True,
+            "infected": False,
+            "spoken_summary": "ZECT Security Agent reports the file is clean.",
+            **result,
+        }
+
+    if name == "fabric_classify":
+        from app.domains.fabric.router import classify_text
+        from app.infrastructure.database import SessionLocal
+
+        text = str(args.get("text") or args.get("goal") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text_required", "spoken_summary": "Provide text to classify for Mentrix Fabric."}
+        db = SessionLocal()
+        try:
+            out = classify_text(db, text, require_active=bool(args.get("require_active", True)))
+        finally:
+            db.close()
+        refuse = bool(out.get("refuse"))
+        spoken = (
+            f"Mentrix Fabric refuse: {', '.join(out.get('checklist') or [])}"
+            if refuse
+            else f"Mentrix Fabric surfaces: {', '.join(out.get('surfaces_required') or [])}"
+        )
+        return {"ok": True, "spoken_summary": spoken, **out}
+
+    if name == "mentrix_developer_ask":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        q = str(args.get("question") or args.get("text") or "").strip()
+        if not q:
+            return {"ok": False, "error": "question_required", "spoken_summary": "Provide a question for Mentrix Developer Ask."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).ask(
+                question=q,
+                work_item_id=args.get("work_item_id"),
+                project_id=args.get("project_id"),
+                repository_id=args.get("repository_id"),
+                repository_ref=str(args.get("repository_ref") or ""),
+                base_commit_sha=str(args.get("base_commit_sha") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": (out.get("answer") or "")[:400],
+            **out,
+        }
+
+    if name == "mentrix_developer_plan":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        goal = str(args.get("goal") or args.get("text") or "").strip()
+        if not goal:
+            return {"ok": False, "error": "goal_required", "spoken_summary": "Provide a goal for Mentrix Developer Plan."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).plan(
+                goal=goal,
+                work_item_id=args.get("work_item_id"),
+                project_id=args.get("project_id"),
+                repository_id=args.get("repository_id"),
+                repository_ref=str(args.get("repository_ref") or ""),
+                base_commit_sha=str(args.get("base_commit_sha") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": f"Plan written for work item {out.get('work_item_id')} (hash {str(out.get('plan_hash') or '')[:12]}).",
+            **out,
+        }
+
+    if name == "mentrix_developer_approve_plan":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        wid = args.get("work_item_id")
+        if not wid:
+            return {"ok": False, "error": "work_item_id_required", "spoken_summary": "Provide work_item_id to approve plan."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).approve_plan(work_item_id=int(wid))
+        finally:
+            db.close()
+        return {"ok": True, "spoken_summary": f"Plan approved for work item {wid}.", **out}
+
+    if name == "mentrix_developer_agent":
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items.developer_service import MentrixDeveloperService
+
+        wid = args.get("work_item_id")
+        if not wid:
+            return {"ok": False, "error": "work_item_id_required", "spoken_summary": "Provide work_item_id to start agent."}
+        db = SessionLocal()
+        try:
+            out = MentrixDeveloperService(db).start_agent(
+                work_item_id=int(wid),
+                goal=str(args.get("goal") or ""),
+                workspace=str(args.get("workspace") or ""),
+            )
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "spoken_summary": f"Mentrix Developer Agent wrote {len(out.get('files_written') or [])} file(s).",
+            **out,
+        }
+
+    if name == "fabric_run":
+        from app.domains.fabric.router import classify_text
+        from app.infrastructure.database import SessionLocal
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+        from urllib.parse import quote
+
+        text = str(args.get("text") or args.get("goal") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text_required", "spoken_summary": "Provide a goal for Mentrix Fabric run."}
+        db = SessionLocal()
+        try:
+            classified = classify_text(db, text, require_active=bool(args.get("require_active", True)))
+            if classified.get("refuse"):
+                return {
+                    "ok": False,
+                    "error": "fabric_refuse",
+                    "spoken_summary": "Mentrix Fabric refused — " + "; ".join(classified.get("checklist") or []),
+                    **classified,
+                }
+            # Reuse HTTP run path logic via import of surfaces
+            from app.models import FabricSurface
+
+            rt = get_mentrix_native_runtime()
+            default_ws = (
+                str(args.get("workspace") or "").strip()
+                or (os.getenv("MENTRIX_WORKSPACE") or "").strip()
+                or (os.getenv("ZECT_WORKSPACE_ROOT") or "").strip()
+            )
+            sessions = []
+            for sid in classified["surfaces_required"]:
+                surf = db.query(FabricSurface).filter(FabricSurface.surface_id == sid).first()
+                ws = (surf.workspace if surf and surf.workspace else default_ws).strip()
+                if not ws:
+                    return {"ok": False, "error": "workspace_required", "spoken_summary": f"Set workspace for surface {sid}."}
+                goal = f"[Mentrix Fabric surface={sid}] {text}"
+                run_id = rt.start_run(goal, workspace=ws, auto_approve_edits=bool(args.get("auto_approve_edits", True)))
+                nav = f"/workspace?session={quote(run_id)}"
+                sessions.append({"surface_id": sid, "session_id": run_id, "navigate": nav})
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": f"Fabric run failed: {exc}"}
+        finally:
+            db.close()
+        return {
+            "ok": True,
+            "sessions": sessions,
+            "navigate": sessions[0]["navigate"] if sessions else "/fabric",
+            "spoken_summary": f"Started {len(sessions)} Mentrix Coding Agent session(s) via Fabric.",
+        }
+
+    if name == "process_status":
+        from app.adapters.camunda_client import process_engine_status
+
+        st = process_engine_status()
+        spoken = (
+            "Mentrix Process engine is ready."
+            if st.get("ready")
+            else "Mentrix Process is degraded — set ZECT_CAMUNDA_BASE_URL."
+        )
+        return {"ok": True, "spoken_summary": spoken, **st}
+
+    if name == "process_incidents":
+        from app.adapters.camunda_client import list_incidents
+
+        out = list_incidents(max_results=int(args.get("max_results") or 50))
+        n = len(out.get("items") or [])
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": f"Mentrix Process reports {n} incident(s)." if out.get("ok") else "Could not list process incidents.",
+            **out,
+        }
+
+    if name == "process_deploy":
+        from app.adapters.camunda_client import deploy_bpmn
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+        path = str(args.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "path_required", "spoken_summary": "Provide a BPMN path to deploy."}
+        try:
+            target = str(path_under_allowed_roots(path))
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": "Path not allowlisted."}
+        out = deploy_bpmn(file_path=target)
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": "Deployed via Mentrix Process." if out.get("ok") else f"Deploy failed: {out.get('error')}",
+            **out,
+        }
+
+    if name == "process_start":
+        from app.adapters.camunda_client import start_process
+
+        key = str(args.get("process_key") or args.get("key") or "").strip()
+        if not key:
+            return {"ok": False, "error": "process_key_required", "spoken_summary": "Provide a process key."}
+        out = start_process(key, args.get("variables") if isinstance(args.get("variables"), dict) else None)
+        return {
+            "ok": bool(out.get("ok")),
+            "spoken_summary": "Process started." if out.get("ok") else f"Start failed: {out.get('error')}",
+            **out,
+        }
+
+    if name == "process_open_cockpit":
+        import os as _os
+
+        url = (_os.getenv("ZECT_CAMUNDA_COCKPIT_URL") or "").strip()
+        if not url:
+            return {"ok": False, "error": "cockpit_url_unset", "spoken_summary": "Set ZECT_CAMUNDA_COCKPIT_URL."}
+        return {
+            "ok": True,
+            "url": url,
+            "spoken_summary": "Opening Mentrix Process Cockpit.",
+            "tools_followup": [{"name": "browser_navigate", "args": {"url": url}}],
+            "navigate_external": url,
+        }
+
+    if name == "coding_agent_status":
+        from app.adapters.coding_runtime import coding_engine_health, get_mentrix_native_runtime
+
+        health = coding_engine_health()
+        sid = str(args.get("session_id") or "").strip()
+        detail: dict = {"health": health}
+        if sid:
+            try:
+                detail["session"] = get_mentrix_native_runtime().get_run(sid)
+            except KeyError:
+                detail["session"] = {"error": "session_not_found"}
+        return {
+            "ok": True,
+            "spoken_summary": f"Mentrix Coding Agent provider {health.get('provider')} ready={health.get('ready')}",
+            "board": {
+                "type": "markdown",
+                "title": "Mentrix Coding Agent",
+                "body": f"```json\n{json.dumps(detail, indent=2, default=str)[:3500]}\n```",
+            },
+            **detail,
+        }
+
+    if name == "coding_agent_start":
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+        from urllib.parse import quote
+
+        goal = str(args.get("goal") or "").strip() or "Improve the workspace"
+        ws = (
+            str(args.get("workspace") or "").strip()
+            or (os.getenv("MENTRIX_WORKSPACE") or "").strip()
+            or (os.getenv("ZECT_WORKSPACE_ROOT") or "").strip()
+        )
+        if not ws:
+            from app.services.mentrix.companion_scope import build_companion_scope, handoff_url
+
+            env = build_companion_scope(
+                db,
+                project_id=args.get("project_id") or project_id,
+                work_item_id=args.get("work_item_id"),
+                workspace_id=str(args.get("project_key") or project_key or ""),
+            )
+            nav = handoff_url("workspace", env, extra={"goal": goal[:200]})
+            return {
+                "ok": True,
+                "handoff_only": True,
+                "navigate": nav,
+                "spoken_summary": (
+                    "Opening Developer Workspace — Companion does not edit code. "
+                    "Mentrix Coding Agent runs there."
+                ),
+                "envelope": {
+                    "project_id": env.get("project_id"),
+                    "workspace_id": env.get("workspace_id"),
+                    "work_item_id": env.get("work_item_id"),
+                    "repo_ids": env.get("repo_ids"),
+                },
+            }
+        rt = get_mentrix_native_runtime()
+        try:
+            sid = rt.start_run(
+                goal,
+                workspace=ws,
+                auto_approve_edits=bool(args.get("auto_approve_edits", True)),
+                model=args.get("model"),
+                project_id=args.get("project_id"),
+                skill_id=args.get("skill_id"),
+                project_key=args.get("project_key"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc), "spoken_summary": f"Could not start Mentrix Coding Agent: {exc}"}
+        nav = f"/workspace?session={quote(sid)}&goal={quote(goal[:200])}"
+        return {
+            "ok": True,
+            "session_id": sid,
+            "workspace": ws,
+            "navigate": nav,
+            "spoken_summary": "Starting Mentrix Coding Agent — opening Developer Workspace.",
+            "board": {
+                "type": "markdown",
+                "title": "Mentrix Coding Agent",
+                "body": f"Session `{sid}`\n\nGoal: {goal[:500]}\n\nOpen [Developer Workspace]({nav}).",
+            },
+        }
+
+    if name == "file_organize_plan":
+        from app.domains.personal_agent import file_organize as fo
+        from app.infrastructure.allowed_paths import path_under_allowed_roots
+        from pathlib import Path as P
+
+        try:
+            src = P(path_under_allowed_roots(str(args.get("source_dir") or "")))
+            dest = P(path_under_allowed_roots(str(args.get("dest_dir") or "")))
+        except Exception as exc:
+            return {"ok": False, "error": f"path_not_allowlisted:{exc}"}
+        patterns = args.get("patterns") or ["*"]
+        if isinstance(patterns, str):
+            patterns = [p.strip() for p in patterns.split(",") if p.strip()]
+        moves = []
+        for p in sorted(src.iterdir()) if src.is_dir() else []:
+            if not p.is_file():
+                continue
+            from fnmatch import fnmatch
+
+            if not any(fnmatch(p.name, pat) for pat in patterns):
+                continue
+            target = dest / p.name
+            moves.append(
+                {
+                    "from": str(p),
+                    "to": str(target),
+                    "sha256": fo._sha256(p),
+                    "bytes": p.stat().st_size,
+                    "collision": "skip" if target.exists() else "ok",
+                }
+            )
+        import uuid as _uuid
+
+        plan_id = _uuid.uuid4().hex[:12]
+        plan = {
+            "plan_id": plan_id,
+            "source_dir": str(src),
+            "dest_dir": str(dest),
+            "dry_run": True,
+            "moves": moves,
+            "status": "planned",
+            "rollback": [],
+            "durable": True,
+            "policy": {"delete": "never"},
+        }
+        fo._persist(db, plan, user_id=user_id)
+        return {
+            "ok": True,
+            "plan": plan,
+            "navigate": "/file-organize",
+            "spoken_summary": f"File organize plan {plan_id} with {len(moves)} move(s). Approve in File Organize.",
+            "board": {
+                "type": "markdown",
+                "title": f"File plan {plan_id}",
+                "body": f"**{len(moves)} moves** (SHA-256 dry-run). Never deletes.\n\nOpen /file-organize to approve.",
+            },
+        }
+    if name == "file_organize_approve":
+        from app.domains.personal_agent import file_organize as fo
+
+        plan_id = str(args.get("plan_id") or "").strip()
+        if not plan_id:
+            return {
+                "ok": False,
+                "error": "plan_id_required",
+                "spoken_summary": "Need a file organize plan_id to approve.",
+                "navigate": "/file-organize",
+            }
+        plan = fo._load(db, plan_id)
+        if not plan:
+            return {"ok": False, "error": "plan_not_found", "spoken_summary": f"Plan {plan_id} not found."}
+        # Execute moves server-side (allowlisted paths) — never delete
+        try:
+            from pathlib import Path as P
+            import shutil
+
+            executed = []
+            rollback = []
+            for mv in plan.get("moves") or []:
+                if mv.get("collision") == "skip":
+                    continue
+                src = P(mv["from"])
+                dest = P(mv["to"])
+                if not src.is_file():
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if dest.exists():
+                    continue
+                shutil.move(str(src), str(dest))
+                executed.append({"from": str(src), "to": str(dest)})
+                rollback.append({"from": str(dest), "to": str(src)})
+            plan["status"] = "executed"
+            plan["executed"] = executed
+            plan["rollback"] = rollback
+            plan["dry_run"] = False
+            fo._persist(db, plan, user_id=user_id)
+            return {
+                "ok": True,
+                "plan_id": plan_id,
+                "moved": len(executed),
+                "spoken_summary": f"Organized {len(executed)} file(s). Never deletes.",
+                "board": {
+                    "type": "markdown",
+                    "title": f"Organized {plan_id}",
+                    "body": f"Moved **{len(executed)}** file(s). Rollback entries stored on the plan.",
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)[:300], "spoken_summary": f"Organize failed: {exc}"}
+
+    if name == "desktop_mkdir":
+        folder = str(args.get("path") or args.get("dir") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "path_required", "spoken_summary": "Need a folder path under Desktop/Documents/Downloads."}
+        return {
+            "ok": True,
+            "desktop": "mkdir",
+            "args": {"path": folder},
+            "spoken_summary": f"Creating folder {folder} requires Electron + Computer Mode ON.",
+        }
+    if name == "desktop_list_dir":
+        folder = str(args.get("path") or args.get("dir") or "").strip()
+        if not folder:
+            return {"ok": False, "error": "path_required"}
+        return {
+            "ok": True,
+            "desktop": "list_dir",
+            "args": {"path": folder},
+            "spoken_summary": f"Listing folder: {folder}",
+        }
+    if name == "desktop_move_path":
+        src = str(args.get("src") or args.get("from") or "").strip()
+        dest = str(args.get("dest") or args.get("to") or "").strip()
+        if not src or not dest:
+            return {"ok": False, "error": "src_and_dest_required"}
+        return {
+            "ok": True,
+            "desktop": "move_path",
+            "args": {"src": src, "dest": dest},
+            "spoken_summary": f"Moved on Desktop: {src} to {dest}",
+        }
+    if name == "daily_brief":
+        from app.domains.personal_agent.personal_actions import assemble_daily_brief
+
+        brief = assemble_daily_brief(db, user_id=user_id)
+        n = len(brief.get("actions") or [])
+        md_lines = [
+            "# Mentrix Daily Brief",
+            "",
+            f"**{n}** open PersonalActions · upserted={brief.get('upserted')}",
+            "",
+            "## Suggested verbs",
+            ", ".join(brief.get("suggested_verbs") or []),
+            "",
+            "## Top actions",
+        ]
+        for a in (brief.get("actions") or [])[:12]:
+            verbs = ", ".join(a.get("suggested_actions") or [])
+            md_lines.append(f"- **{a.get('title')}** ({a.get('source')}) — {verbs}")
+        body = "\n".join(md_lines)
+        return {
+            "ok": True,
+            "brief": brief,
+            "spoken_summary": f"Daily brief ready with {n} personal actions.",
+            "board": {"type": "markdown", "title": "Daily Brief", "body": body},
+        }
+
+    if name == "diagnose_fix":
+        issue = args.get("issue") or ""
+        runs = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(3).all()
+        run_bits = ", ".join(f"#{r.id}:{r.status}" for r in runs) or "none"
+        md = (
+            f"# Diagnose & fix\n\n**Issue:** {issue}\n\n**Recent Delivery:** {run_bits}\n\n"
+            "1. Gather Lattice + logs\n2. Propose fix\n3. Confirm → Delivery\n4. Verify gates\n"
+        )
+        mermaid = (
+            "flowchart TD\n"
+            "  gather[Gather context] --> plan[Board plan]\n"
+            "  plan --> confirm[User Allow]\n"
+            "  confirm --> deliver[Mentrix Delivery]\n"
+            "  deliver --> verify[Verify gates]\n"
+        )
+        return {
+            "ok": True,
+            "board": {"type": "markdown", "title": "Diagnose & fix", "body": md},
+            "board_extra": {"type": "mermaid", "title": "Fix workflow", "body": mermaid},
+        }
+    if name == "connector_architecture":
+        mermaid = (
+            "flowchart TB\n"
+            "  subgraph input [User_input]\n"
+            "    Chat[Typed_chat]\n"
+            "    Voice[Realtime_voice]\n"
+            "  end\n"
+            "  subgraph core [Mentrix_core]\n"
+            "    Orch[MentrixOrchestrator]\n"
+            "    Perm[permission_broker]\n"
+            "    Exec[_exec_tool]\n"
+            "  end\n"
+            "  subgraph providers [Connectors]\n"
+            "    Email[Email_IMAP_SMTP]\n"
+            "    Slack[Slack_API]\n"
+            "    Notes[local_notes]\n"
+            "    Cal[Calendar_ICS]\n"
+            "  end\n"
+            "  subgraph desktop [Desktop_Computer_Mode]\n"
+            "    Desk[desktop_payload]\n"
+            "    Bridge[desktopBridge]\n"
+            "    Electron[allowlisted_apps]\n"
+            "  end\n"
+            "  Chat --> Orch\n"
+            "  Voice --> Orch\n"
+            "  Orch --> Perm\n"
+            "  Perm -->|Allow| Exec\n"
+            "  Exec --> Email\n"
+            "  Exec --> Slack\n"
+            "  Exec --> Notes\n"
+            "  Exec --> Cal\n"
+            "  Exec --> Desk\n"
+            "  Desk --> Bridge\n"
+            "  Bridge --> Electron\n"
+        )
+        md = (
+            "# Mentrix connector architecture\n\n"
+            "Typed and spoken commands share **MentrixOrchestrator** + permission broker.\n\n"
+            "| Connector | How |\n|---|---|\n"
+            "| **Email** | IMAP digest (`MENTRIX_IMAP_*`); draft/send needs Allow (SMTP) — not Outlook UI typing |\n"
+            "| **Slack** | `SLACK_BOT_TOKEN`; digest + draft/send; desktop `Slack.exe` |\n"
+            "| **Notes** | Local Mentrix notes + `desktop_write_note` (prefer over Notepad type) |\n"
+            "| **Calendar** | ICS/demo provider; meeting brief |\n"
+            "| **Desktop** | Computer Mode + allowlisted apps (Notepad, Notepad++, Zoom, Outlook, …); never delete |\n\n"
+            "## Deferred (honest)\n\n"
+            "- Notion live API\n"
+            "- Zoom **schedule** meeting API / auto-join / auto screen-share\n"
+            "- Open **any** installed desktop app (hard allowlist only)\n"
+        )
+        return {
+            "ok": True,
+            "spoken_summary": "Posted Mentrix connector architecture flowchart to Artifacts.",
+            "board": {"type": "markdown", "title": "Connector architecture", "body": md},
+            "board_extra": {
+                "type": "mermaid",
+                "title": "Connector flowchart",
+                "body": mermaid,
+            },
+        }
+    return {"ok": False, "error": f"Unknown tool {name}"}
+
+
+def _merge_intents(message: str) -> list[dict[str, Any]]:
+    det = _parse_intents(message)
+    planned = det or _llm_plan_tools(message)[:_MAX_TOOLS]
+    names = {str(t.get("name") or "") for t in planned}
+    if "file_organize_plan" in names:
+        planned = [t for t in planned if str(t.get("name") or "") != "computer_click"]
+    return planned
+
+
+def _auto_log_exchange(user_message: str, reply: str, *, pending: bool = False) -> None:
+    """Personal-assistant behavior: log every completed exchange to Mentrix
+    Notes automatically, not just when the user says a trigger phrase like
+    "remember" or "note that" (note_add's fast-intent match). Skips
+    incomplete turns (still awaiting a tool confirmation, no real reply
+    yet). Never allowed to break the actual conversation turn."""
+    if pending or not (user_message or "").strip() or not (reply or "").strip():
+        return
+    try:
+        from app.services.mentrix.notes import add_note
+
+        add_note(f"You: {user_message.strip()}\nMentrix: {reply.strip()}", tags=["mentrix", "auto-log"])
+    except Exception:
+        pass
+
+
+def iter_companion_events(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+    turn_id: str | None = None,
+    resume_pending: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
+    model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
+) -> Generator[dict[str, Any], None, dict[str, Any]]:
+    """Yield SSE-shaped events; return final turn summary."""
+    token = _companion_model_ctx.set((model or "").strip() or None)
+    try:
+        result = yield from _iter_companion_events_inner(
+            db,
+            message,
+            project_key=project_key,
+            project_id=project_id,
+            user_id=user_id,
+            created_by=created_by,
+            confirmed_tools=confirmed_tools,
+            history=history,
+            turn_id=turn_id,
+            resume_pending=resume_pending,
+            agent_context=agent_context,
+            skill_id=skill_id,
+            repository_ids=repository_ids,
+            work_item_id=work_item_id,
+            workspace_id=workspace_id,
+        )
+        return result
+    finally:
+        _companion_model_ctx.reset(token)
+
+
+def _iter_companion_events_inner(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+    turn_id: str | None = None,
+    resume_pending: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
+) -> Generator[dict[str, Any], None, dict[str, Any]]:
+    """Yield SSE-shaped events; return final turn summary."""
+    t0 = time.time()
+    tid = turn_id or str(uuid.uuid4())
+    confirmed = set(confirmed_tools or [])
+    yield {"event": "thinking", "turn_id": tid, "data": {"message": "Mentrix thinking…"}}
+
+    from app.services.mentrix.companion_scope import bind_tool_args, build_companion_scope, provenance_rows
+
+    envelope = build_companion_scope(
+        db,
+        project_id=project_id,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id or project_key,
+        created_by=created_by,
+    )
+    yield {
+        "event": "scope",
+        "turn_id": tid,
+        "data": {
+            "project_id": envelope.get("project_id"),
+            "project_name": envelope.get("project_name"),
+            "workspace_id": envelope.get("workspace_id"),
+            "work_item_id": envelope.get("work_item_id"),
+            "repo_ids": envelope.get("repo_ids"),
+            "roots": envelope.get("roots"),
+            "semantic_cross_repo_references": envelope.get("semantic_cross_repo_references"),
+            "skipped_unauthorized_repo_ids": envelope.get("skipped_unauthorized_repo_ids"),
+        },
+    }
+
+    intents = resume_pending or _merge_intents(message)
+    from app.services.mentrix.preferred_name import resolve_preferred_name
+
+    preferred = resolve_preferred_name(db, user_id=user_id, email=created_by)
+    packed_ctx = build_agent_context(
+        db,
+        skill_id=skill_id,
+        project_id=project_id,
+        agent_context=agent_context,
+        query=message,
+    )
+    tool_results: list[dict] = []
+    pending: list[dict] = []
+    board_items: list[dict] = []
+    navigations: list[str] = []
+    run_id: int | None = None
+
+    from app.services.mentrix.orchestrator import MentrixOrchestrator, pa1_orchestrator_enabled
+
+    orch = MentrixOrchestrator() if pa1_orchestrator_enabled() else None
+    last_provenance: list[dict[str, Any]] = []
+    last_progress: dict[str, Any] | None = None
+
+    for intent in intents[:_MAX_TOOLS]:
+        name = intent["name"]
+        args = bind_tool_args(name, intent.get("args") or {}, envelope)
+        yield {"event": "tool_start", "turn_id": tid, "data": {"tool": name, "args": {k: v for k, v in args.items() if "password" not in k.lower() and "token" not in k.lower()}}}
+        if args.get("repo_authorization") == "denied":
+            result = {
+                "ok": False,
+                "error": "unauthorized_repository",
+                "spoken_summary": "That repository is not in the authorized project — skipped.",
+                "skipped_unauthorized_repo_ids": args.get("skipped_unauthorized_repo_ids") or [],
+            }
+            tool_results.append({"tool": name, "denied": True, "result": result})
+            yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "unauthorized_repository"}}
+            continue
+
+        if orch is not None:
+            outcome = orch.execute_tool(
+                db,
+                name,
+                args,
+                user_id=user_id,
+                project_id=project_id,
+                project_key=project_key,
+                created_by=created_by,
+                user_confirmed=name in confirmed,
+                correlation_id=tid,
+                exec_tool=_exec_tool,
+            )
+            perm = outcome.permission
+            if outcome.status == "denied" or outcome.status == "blocked":
+                tool_results.append({"tool": name, "denied": True, "permission": perm, "result": outcome.result})
+                yield {
+                    "event": "tool_end",
+                    "turn_id": tid,
+                    "data": {
+                        "tool": name,
+                        "ok": False,
+                        "error": (outcome.result or {}).get("error") or "denied",
+                    },
+                }
+                continue
+            if outcome.status == "pending_confirm":
+                pending.append(outcome.pending or {"tool": name, "args": args})
+                yield {
+                    "event": "pending_confirm",
+                    "turn_id": tid,
+                    "data": {
+                        "tool": name,
+                        "args": args,
+                        "reason": f"Allow Mentrix to run {name}?",
+                        "correlation_id": tid,
+                    },
+                }
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
+                continue
+            result = outcome.result
+            tool_results.append({"tool": name, "result": result, "permission": perm})
+        else:
+            # Legacy path (MENTRIX_PA1_ORCHESTRATOR=0)
+            perm = check_tool_permission(
+                db,
+                name,
+                user_id=user_id,
+                project_id=project_id,
+                user_confirmed=name in confirmed,
+            )
+            if perm["result"] == "denied":
+                tool_results.append({"tool": name, "denied": True, "permission": perm})
+                log_mentrix_tool(db, name, args=args, result="denied", user_id=user_id)
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "denied"}}
+                continue
+            if perm.get("needs_confirm") or (perm["result"] == "pending_approval" and name not in confirmed):
+                pending.append(
+                    {
+                        "tool": name,
+                        "args": args,
+                        "audit_id": perm.get("audit_id"),
+                        "reason": f"Mentrix needs your permission to run `{name}`",
+                        "always_ask": name in ALWAYS_CONFIRM_TOOLS,
+                    }
+                )
+                yield {
+                    "event": "pending_confirm",
+                    "turn_id": tid,
+                    "data": {"tool": name, "args": args, "reason": f"Allow Mentrix to run {name}?"},
+                }
+                yield {"event": "tool_end", "turn_id": tid, "data": {"tool": name, "ok": False, "error": "pending_confirm"}}
+                continue
+
+            result = _exec_tool(
+                db,
+                name,
+                args,
+                project_key=project_key,
+                created_by=created_by,
+                user_id=user_id,
+                project_id=project_id,
+                correlation_id=tid,
+            )
+            tool_results.append({"tool": name, "result": result, "permission": perm})
+            log_mentrix_tool(db, name, args=args, result="ok" if result.get("ok") else "error", user_id=user_id)
+
+        if result.get("work_item_id"):
+            envelope["work_item_id"] = result["work_item_id"]
+            wi = (result.get("work_item") or {}) if isinstance(result.get("work_item"), dict) else {}
+            if wi.get("title"):
+                envelope["work_item_title"] = wi.get("title")
+        if result.get("provenance"):
+            last_provenance = list(result.get("provenance") or [])
+        if result.get("progress"):
+            last_progress = result["progress"]
+            yield {"event": "progress", "turn_id": tid, "data": last_progress}
+        if result.get("board"):
+            board_items.append(result["board"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board"]}
+        if result.get("board_extra"):
+            board_items.append(result["board_extra"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board_extra"]}
+        if result.get("board_progress"):
+            board_items.append(result["board_progress"])
+            yield {"event": "artifact", "turn_id": tid, "data": result["board_progress"]}
+        nav = result.get("navigate")
+        if nav and not result.get("blocked_external"):
+            navigations.append(nav)
+            yield {"event": "navigate", "turn_id": tid, "data": {"path": nav}}
+        if result.get("run_id"):
+            run_id = int(result["run_id"])
+        yield {
+            "event": "tool_end",
+            "turn_id": tid,
+            "data": {"tool": name, "ok": bool(result.get("ok")), "error": result.get("error")},
+        }
+
+    context_bits = []
+    if packed_ctx:
+        context_bits.append(packed_ctx)
+    for tr in tool_results:
+        if tr.get("denied"):
+            context_bits.append(f"DENIED {tr['tool']}")
+        else:
+            context_bits.append(json.dumps({tr["tool"]: tr.get("result")}, default=str)[:800])
+    if pending:
+        context_bits.append("Pending: " + ", ".join(p["tool"] for p in pending))
+
+    reply_streamed = False
+
+    if pending and not tool_results:
+        reply = (
+            "I can help, but I need your permission for: "
+            + ", ".join(p["tool"] for p in pending)
+            + ". Allow to continue."
+        )
+    elif any(tr.get("denied") for tr in tool_results) and not any(not tr.get("denied") for tr in tool_results):
+        if any((tr.get("result") or {}).get("error") == "unauthorized_repository" for tr in tool_results):
+            reply = "That repository is not in the authorized project — skipped."
+        else:
+            reply = "Org policy blocked that action."
+    else:
+        # Spoken clarification when OS-desktop intent opened Explorer (not Dashboard).
+        if any(
+            tr.get("tool") == "computer_open_app" and not tr.get("denied")
+            for tr in tool_results
+        ) and os_desktop_phrase(message):
+            reply = (
+                "Computer Mode desktop action is ready — confirm Allow if prompted. "
+                "That is your OS desktop, not the ZECT Dashboard."
+            )
+        else:
+            fast = _fast_tool_reply(tool_results, board_items, navigations)
+            if fast:
+                reply = fast
+            else:
+                # Real generation, streamed token-by-token as the model
+                # produces it — this is the only branch with something
+                # genuinely incremental to stream; every other branch below
+                # already knows its full text before any "token" event fires.
+                reply = ""
+                for delta in _llm_answer_stream(message, "\n".join(context_bits), preferred_name=preferred):
+                    reply += delta
+                    yield {"event": "token", "turn_id": tid, "data": {"text": delta}}
+                reply_streamed = True
+
+    if not reply_streamed:
+        # Fixed/already-known text (pending/denied/desktop-clarification/fast-tool
+        # replies) — pace the reveal instead of dumping it in ~4 chunks with
+        # zero delay, which just flashed the whole reply onto the screen at once.
+        chunk = max(24, len(reply) // 4 or 24)
+        for i in range(0, len(reply), chunk):
+            yield {"event": "token", "turn_id": tid, "data": {"text": reply[i : i + chunk]}}
+            time.sleep(0.02)
+
+    if any((tr.get("result") or {}).get("blocked_external") for tr in tool_results):
+        navigations = []
+
+    used_tool_names = [str(tr.get("tool") or "") for tr in tool_results if not tr.get("denied")]
+    lattice_hits: list[dict[str, Any]] = []
+    knowledge_hits: list[dict[str, Any]] = []
+    memory_hits: list[dict[str, Any]] = []
+    for tr in tool_results:
+        res = tr.get("result") or {}
+        if tr.get("tool") in ("lattice_query", "companion_intelligence"):
+            lattice_hits.extend(list(res.get("lattice_hits") or res.get("hits") or []))
+            knowledge_hits.extend(list(res.get("knowledge_hits") or []))
+            memory_hits.extend(list(res.get("memory_hits") or []))
+    if not last_provenance:
+        last_provenance = provenance_rows(
+            envelope=envelope,
+            lattice_hits=lattice_hits,
+            knowledge_hits=knowledge_hits,
+            memory_hits=memory_hits,
+            used_tools=used_tool_names,
+        )
+
+    summary = {
+        "reply": reply,
+        "avatar_state": "needs_permission" if pending else ("speaking" if reply else "idle"),
+        "tools": tool_results,
+        "pending_confirmations": pending,
+        "board": board_items,
+        "navigate": navigations[0] if navigations else None,
+        "latency_mode": "fast_tools" if tool_results and not pending else ("pending" if pending else "llm"),
+        "turn_id": tid,
+        "run_id": run_id,
+        "latency_ms": int((time.time() - t0) * 1000),
+        "history_tail": (history or [])[-6:]
+        + [{"role": "user", "content": message}, {"role": "assistant", "content": reply}],
+        "scope": envelope,
+        "provenance": last_provenance,
+        "progress": last_progress,
+        "companion_edits_code": False,
+        "companion_edits_present": False,
+    }
+
+    if pending:
+        _TURN_STORE[tid] = {
+            "message": message,
+            "project_key": project_key,
+            "project_id": project_id,
+            "user_id": user_id,
+            "created_by": created_by,
+            "pending": pending,
+            "history": history or [],
+            "repository_ids": envelope.get("repo_ids") or [],
+            "work_item_id": envelope.get("work_item_id"),
+            "workspace_id": envelope.get("workspace_id") or "",
+        }
+
+    _auto_log_exchange(message, reply, pending=bool(pending))
+
+    yield {
+        "event": "done",
+        "turn_id": tid,
+        "data": {
+            "reply": reply,
+            "run_id": run_id,
+            "latency_ms": summary["latency_ms"],
+            "pending_confirmations": pending,
+            "navigate": summary["navigate"],
+            "board": board_items,
+            "avatar_state": summary["avatar_state"],
+            "latency_mode": summary["latency_mode"],
+            "scope": {
+                "project_id": envelope.get("project_id"),
+                "project_name": envelope.get("project_name"),
+                "workspace_id": envelope.get("workspace_id"),
+                "work_item_id": envelope.get("work_item_id"),
+                "work_item_title": envelope.get("work_item_title"),
+                "repo_ids": envelope.get("repo_ids"),
+                "roots": envelope.get("roots"),
+                "semantic_cross_repo_references": envelope.get("semantic_cross_repo_references"),
+                "handoffs": envelope.get("handoffs"),
+            },
+            "provenance": last_provenance,
+            "progress": last_progress,
+            "companion_edits_code": False,
+        },
+    }
+    return summary
+
+
+def run_companion_turn_v2(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
+    model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
+) -> dict[str, Any]:
+    """Non-streaming turn that executes once and returns full payload."""
+    events: list[dict] = []
+    gen = iter_companion_events(
+        db,
+        message,
+        project_key=project_key,
+        project_id=project_id,
+        user_id=user_id,
+        created_by=created_by,
+        confirmed_tools=confirmed_tools,
+        history=history,
+        agent_context=agent_context,
+        skill_id=skill_id,
+        model=model,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id,
+    )
+    final: dict[str, Any] | None = None
+    try:
+        while True:
+            events.append(next(gen))
+    except StopIteration as stop:
+        final = stop.value if isinstance(stop.value, dict) else None
+    if final:
+        return final
+    done = next((e for e in reversed(events) if e.get("event") == "done"), None)
+    if not done:
+        return {"reply": "Mentrix ready.", "tools": [], "pending_confirmations": [], "board": []}
+    d = done.get("data") or {}
+    tools = []
+    for e in events:
+        if e.get("event") == "tool_end":
+            td = e.get("data") or {}
+            tools.append(
+                {
+                    "tool": td.get("tool"),
+                    "denied": td.get("error") == "denied",
+                    "result": {"ok": td.get("ok"), "error": td.get("error")},
+                }
+            )
+    return {
+        "reply": d.get("reply"),
+        "avatar_state": d.get("avatar_state"),
+        "tools": tools,
+        "pending_confirmations": d.get("pending_confirmations") or [],
+        "board": d.get("board") or [],
+        "navigate": d.get("navigate"),
+        "latency_mode": d.get("latency_mode"),
+        "turn_id": done.get("turn_id"),
+        "run_id": d.get("run_id"),
+        "latency_ms": d.get("latency_ms"),
+        "scope": d.get("scope"),
+        "provenance": d.get("provenance") or [],
+        "progress": d.get("progress"),
+        "companion_edits_code": False,
+        "history_tail": (history or [])[-6:]
+        + [{"role": "user", "content": message}, {"role": "assistant", "content": d.get("reply") or ""}],
+    }
+
+
+# Public alias used by router
+def run_companion_turn(
+    db: Session,
+    message: str,
+    *,
+    project_key: str = "",
+    project_id: int | None = None,
+    user_id: int | None = None,
+    created_by: str = "",
+    confirmed_tools: list[str] | None = None,
+    history: list[dict] | None = None,
+    agent_context: str = "",
+    skill_id: int | None = None,
+    model: str | None = None,
+    repository_ids: list[int] | None = None,
+    work_item_id: int | None = None,
+    workspace_id: str = "",
+) -> dict[str, Any]:
+    return run_companion_turn_v2(
+        db,
+        message,
+        project_key=project_key,
+        project_id=project_id,
+        user_id=user_id,
+        created_by=created_by,
+        confirmed_tools=confirmed_tools,
+        history=history,
+        agent_context=agent_context,
+        skill_id=skill_id,
+        model=model,
+        repository_ids=repository_ids,
+        work_item_id=work_item_id,
+        workspace_id=workspace_id,
+    )
+
+
+def resume_companion_turn(
+    db: Session,
+    turn_id: str,
+    confirmed_tools: list[str],
+    *,
+    created_by: str = "",
+) -> Iterator[dict[str, Any]]:
+    state = _TURN_STORE.pop(turn_id, None)
+    if not state:
+        yield {"event": "error", "turn_id": turn_id, "data": {"error": "turn_expired"}}
+        return
+    pending_intents = [{"name": p["tool"], "args": p.get("args") or {}} for p in state.get("pending") or []]
+    yield from iter_companion_events(
+        db,
+        state["message"],
+        project_key=state.get("project_key") or "",
+        project_id=state.get("project_id"),
+        user_id=state.get("user_id"),
+        created_by=created_by or "",
+        confirmed_tools=confirmed_tools,
+        history=state.get("history"),
+        turn_id=turn_id,
+        resume_pending=pending_intents,
+        repository_ids=state.get("repository_ids"),
+        work_item_id=state.get("work_item_id"),
+        workspace_id=state.get("workspace_id") or "",
+    )
+
+
+def sse_pack(event: dict[str, Any]) -> str:
+    name = event.get("event") or "message"
+    payload = json.dumps(event, default=str)
+    return f"event: {name}\ndata: {payload}\n\n"

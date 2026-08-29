@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Wrench,
   Plus,
@@ -8,11 +9,16 @@ import {
   RefreshCw,
   Zap,
   Clock,
+  Wand2,
+  Loader2,
+  Tag,
+  FolderKanban,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
+import { apiFetch } from "@/lib/api";
+import CodeOutput from "@/components/CodeOutput";
 import Pagination from "@/components/Pagination";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
 
 interface Skill {
   id: number;
@@ -22,6 +28,8 @@ interface Skill {
   category: string;
   trigger_pattern: string;
   manifest: Record<string, any>;
+  template: string;
+  tags: string[];
   is_seed: boolean;
   is_active: boolean;
   execution_count: number;
@@ -29,7 +37,11 @@ interface Skill {
   created_at: string;
 }
 
+const ACTIVE_SKILL_KEY = "mentrix_active_skill_id";
+
 export default function SkillsEngine() {
+  const navigate = useNavigate();
+  const { activeProjectId, activeProject } = useActiveProject();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [categories, setCategories] = useState<any[]>([]);
@@ -39,20 +51,48 @@ export default function SkillsEngine() {
   const [matchResults, setMatchResults] = useState<any>(null);
   const [execLogs, setExecLogs] = useState<any[]>([]);
   const [filterCategory, setFilterCategory] = useState("");
+  const [scopeToActiveProject, setScopeToActiveProject] = useState(true);
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [skillsPage, setSkillsPage] = useState(1);
   const skillsPerPage = 10;
 
   // New skill form
   const [newSkill, setNewSkill] = useState({
-    name: "", description: "", category: "general", trigger_pattern: "", version: "1.0.0",
+    name: "", description: "", category: "general", trigger_pattern: "", version: "1.0.0", template: "", tags: "",
   });
+
+  // Auto-Detect (merged in from the standalone Skill Library)
+  const [showDetect, setShowDetect] = useState(false);
+  const [detectCode, setDetectCode] = useState("");
+  const [detectLoading, setDetectLoading] = useState(false);
+  const [detectResult, setDetectResult] = useState<any>(null);
+
+  const useSkillForNewProject = (s: Skill) => {
+    try {
+      localStorage.setItem(ACTIVE_SKILL_KEY, String(s.id));
+    } catch {
+      /* ignore */
+    }
+    const scaffold = s.manifest?.scaffold || {};
+    const params = new URLSearchParams();
+    params.set("skill_id", String(s.id));
+    params.set("name", String(scaffold.default_name || s.name.replace(/^zinnia-/, "").replace(/-/g, " ")));
+    params.set(
+      "description",
+      String(scaffold.default_description || s.description || `Scaffolded from skill ${s.name}`),
+    );
+    showToast("success", `Active skill set: ${s.name}`);
+    navigate(`/projects/new?${params.toString()}`);
+  };
 
   const fetchSkills = async () => {
     try {
       const params = new URLSearchParams();
       if (filterCategory) params.set("category", filterCategory);
-      const res = await fetch(`${API}/api/skills-engine/skills?${params}`);
+      if (scopeToActiveProject && activeProjectId != null) {
+        params.set("project_id", String(activeProjectId));
+      }
+      const res = await apiFetch(`/api/skills-engine/skills?${params}`);
       if (res.ok) setSkills(await res.json());
       else showToast("error", `Failed to load skills (${res.status})`);
     } catch (err) { showToast("error", "Network error loading skills"); }
@@ -60,7 +100,7 @@ export default function SkillsEngine() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/stats`);
+      const res = await apiFetch(`/api/skills-engine/stats`);
       if (res.ok) setStats(await res.json());
       else showToast("error", `Failed to load stats (${res.status})`);
     } catch (err) { showToast("error", "Network error loading stats"); }
@@ -68,7 +108,7 @@ export default function SkillsEngine() {
 
   const fetchCategories = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/categories`);
+      const res = await apiFetch(`/api/skills-engine/categories`);
       if (res.ok) setCategories(await res.json());
       else showToast("error", `Failed to load categories (${res.status})`);
     } catch (err) { showToast("error", "Network error loading categories"); }
@@ -76,7 +116,7 @@ export default function SkillsEngine() {
 
   const fetchLogs = async () => {
     try {
-      const res = await fetch(`${API}/api/skills-engine/executions?limit=50`);
+      const res = await apiFetch(`/api/skills-engine/executions?limit=50`);
       if (res.ok) setExecLogs(await res.json());
       else showToast("error", `Failed to load logs (${res.status})`);
     } catch (err) { showToast("error", "Network error loading logs"); }
@@ -86,12 +126,12 @@ export default function SkillsEngine() {
     setLoading(true);
     Promise.all([fetchSkills(), fetchStats(), fetchCategories(), fetchLogs()])
       .finally(() => setLoading(false));
-  }, [filterCategory]);
+  }, [filterCategory, scopeToActiveProject, activeProjectId]);
 
   const handleMatch = async () => {
     if (!matchIntent.trim()) return;
     try {
-      const res = await fetch(`${API}/api/skills-engine/match`, {
+      const res = await apiFetch(`/api/skills-engine/match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent: matchIntent }),
@@ -104,13 +144,17 @@ export default function SkillsEngine() {
   const handleCreateSkill = async () => {
     if (!newSkill.name.trim()) return;
     try {
-      const res = await fetch(`${API}/api/skills-engine/skills`, {
+      const res = await apiFetch(`/api/skills-engine/skills`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSkill),
+        body: JSON.stringify({
+          ...newSkill,
+          tags: newSkill.tags.split(",").map((t) => t.trim()).filter(Boolean),
+          ...(scopeToActiveProject && activeProjectId != null ? { project_id: activeProjectId } : {}),
+        }),
       });
       if (res.ok) {
-        setNewSkill({ name: "", description: "", category: "general", trigger_pattern: "", version: "1.0.0" });
+        setNewSkill({ name: "", description: "", category: "general", trigger_pattern: "", version: "1.0.0", template: "", tags: "" });
         setActiveTab("registry");
         fetchSkills();
         fetchStats();
@@ -122,9 +166,25 @@ export default function SkillsEngine() {
     } catch (err) { showToast("error", "Network error creating skill"); }
   };
 
+  const handleDetect = async () => {
+    if (!detectCode.trim()) return;
+    setDetectLoading(true);
+    setDetectResult(null);
+    try {
+      const res = await apiFetch(`/api/skills-engine/detect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: detectCode }),
+      });
+      if (res.ok) setDetectResult(await res.json());
+      else showToast("error", `Detect failed (${res.status})`);
+    } catch (err) { showToast("error", "Network error during detect"); }
+    finally { setDetectLoading(false); }
+  };
+
   const handleDeactivate = async (skillId: number) => {
     try {
-      await fetch(`${API}/api/skills-engine/skills/${skillId}`, { method: "DELETE" });
+      await apiFetch(`/api/skills-engine/skills/${skillId}`, { method: "DELETE" });
       showToast("info", "Skill deactivated");
       fetchSkills();
       fetchStats();
@@ -133,8 +193,10 @@ export default function SkillsEngine() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" />
+      <div className="zect-page flex flex-col items-center justify-center h-64 gap-3" role="status" aria-live="polite" data-testid="skills-engine-page">
+        <h1 className="text-2xl font-bold text-slate-900">Skills Engine</h1>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600" aria-hidden />
+        <span className="sr-only">Loading skills</span>
       </div>
     );
   }
@@ -147,13 +209,27 @@ export default function SkillsEngine() {
   ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="zect-page" data-testid="skills-engine-page">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Wrench className="h-6 w-6 text-emerald-600" /> Skills Engine
           </h1>
-          <p className="text-slate-500 text-sm">Skill registry, trigger-based matching, and execution tracking</p>
+          <p className="text-slate-500 text-sm">
+            Reusable procedures and templates — speed Mentrix and scaffold new projects. Saves tokens by
+            reusing approved prompts instead of re-explaining stack conventions every run.
+            {" "}See docs/SKILLS_OPERATOR.md.
+          </p>
+          <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-600" data-testid="skills-project-scope">
+            <input
+              type="checkbox"
+              checked={scopeToActiveProject}
+              onChange={(e) => setScopeToActiveProject(e.target.checked)}
+            />
+            Scope to active project
+            {activeProject ? ` (${activeProject.name})` : " (select a project in the header)"}
+            — shows global seeds + project packs
+          </label>
         </div>
         <button onClick={() => { fetchSkills(); fetchStats(); fetchCategories(); fetchLogs(); }} className="p-2 rounded hover:bg-slate-100">
           <RefreshCw className="h-4 w-4 text-slate-500" />
@@ -217,8 +293,29 @@ export default function SkillsEngine() {
                         <span className="text-xs text-amber-600 font-mono">{s.trigger_pattern}</span>
                       </div>
                     )}
+                    {s.tags?.length > 0 && (
+                      <div className="flex gap-1 mt-1.5 flex-wrap">
+                        {s.tags.map((tag) => (
+                          <span key={tag} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] flex items-center gap-0.5">
+                            <Tag className="h-2.5 w-2.5" />{tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 ml-3">
+                    <button
+                      type="button"
+                      data-testid="skill-use-new-project"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useSkillForNewProject(s);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                      title="Use skill → New Project"
+                    >
+                      <FolderKanban className="h-3.5 w-3.5" /> New Project
+                    </button>
                     <span className="text-xs text-slate-400">{s.execution_count} runs</span>
                     <button onClick={(e) => { e.stopPropagation(); handleDeactivate(s.id); }} className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600" title="Deactivate">
                       <XCircle className="h-4 w-4" />
@@ -227,8 +324,13 @@ export default function SkillsEngine() {
                 </div>
 
                 {/* Expanded manifest */}
-                {selectedSkill?.id === s.id && s.manifest && (
+                {selectedSkill?.id === s.id && (s.manifest || s.template) && (
                   <div className="mt-3 pt-3 border-t border-slate-100">
+                    {s.template && (
+                      <div className="mb-3">
+                        <CodeOutput code={s.template} language="text" title="Template" maxHeight="160px" />
+                      </div>
+                    )}
                     <p className="text-xs font-semibold text-slate-600 mb-2">Manifest</p>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                       {s.manifest.inputs && (
@@ -338,32 +440,97 @@ export default function SkillsEngine() {
 
       {/* Create Tab */}
       {activeTab === "create" && (
-        <div className="bg-white rounded-xl border border-emerald-200 p-5">
-          <h3 className="text-sm font-semibold text-emerald-700 mb-4">Create New Skill</h3>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <input value={newSkill.name} onChange={(e) => setNewSkill({ ...newSkill, name: e.target.value })} placeholder="Skill name (e.g., zinnia-test-runner)" className="px-3 py-2 border rounded-lg text-sm" />
-              <input value={newSkill.version} onChange={(e) => setNewSkill({ ...newSkill, version: e.target.value })} placeholder="Version" className="px-3 py-2 border rounded-lg text-sm" />
-            </div>
-            <textarea value={newSkill.description} onChange={(e) => setNewSkill({ ...newSkill, description: e.target.value })} placeholder="Description" className="w-full px-3 py-2 border rounded-lg text-sm h-20" />
-            <div className="grid grid-cols-2 gap-3">
-              <select value={newSkill.category} onChange={(e) => setNewSkill({ ...newSkill, category: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
-                <option value="general">General</option>
-                <option value="quality">Quality</option>
-                <option value="debugging">Debugging</option>
-                <option value="deployment">Deployment</option>
-                <option value="git">Git</option>
-                <option value="memory">Memory</option>
-                <option value="meta">Meta</option>
-                <option value="architecture">Architecture</option>
-                <option value="migration">Migration</option>
-                <option value="testing">Testing</option>
-              </select>
-              <input value={newSkill.trigger_pattern} onChange={(e) => setNewSkill({ ...newSkill, trigger_pattern: e.target.value })} placeholder="Trigger patterns (pipe-separated)" className="px-3 py-2 border rounded-lg text-sm" />
-            </div>
-            <button onClick={handleCreateSkill} disabled={!newSkill.name.trim()} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
-              Register Skill
+        <div className="space-y-4">
+          {/* Auto-Detect (merged in from the standalone Skill Library) */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <button
+              onClick={() => setShowDetect(!showDetect)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-purple-100 text-purple-700 hover:bg-purple-200 rounded-lg text-sm font-medium transition"
+            >
+              <Wand2 className="h-4 w-4" /> Auto-Detect from code
             </button>
+            {showDetect && (
+              <div className="mt-3 space-y-3">
+                <p className="text-sm text-slate-600">Paste code to detect reusable patterns and auto-suggest skills to register.</p>
+                <textarea
+                  value={detectCode}
+                  onChange={(e) => setDetectCode(e.target.value)}
+                  placeholder="Paste code here to detect patterns..."
+                  className="w-full h-32 p-3 border border-slate-200 rounded-lg text-sm font-mono"
+                />
+                <button
+                  onClick={handleDetect}
+                  disabled={detectLoading || !detectCode.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white rounded-lg text-sm font-medium"
+                >
+                  {detectLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Detect Patterns
+                </button>
+                {detectResult && (
+                  <div className="space-y-2 mt-3">
+                    {detectResult.suggested_skills?.map((s: any, i: number) => (
+                      <div key={i} className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-sm">{s.name}</span>
+                          <button
+                            onClick={() => {
+                              setNewSkill({
+                                ...newSkill,
+                                name: s.name,
+                                description: s.description || "",
+                                template: s.template || "",
+                                category: s.category || "general",
+                              });
+                              setShowDetect(false);
+                            }}
+                            className="text-xs px-2 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200"
+                          >
+                            Use this
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-600 mt-1">{s.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-emerald-200 p-5">
+            <h3 className="text-sm font-semibold text-emerald-700 mb-4">Create New Skill</h3>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <input value={newSkill.name} onChange={(e) => setNewSkill({ ...newSkill, name: e.target.value })} placeholder="Skill name (e.g., zinnia-test-runner)" className="px-3 py-2 border rounded-lg text-sm" />
+                <input value={newSkill.version} onChange={(e) => setNewSkill({ ...newSkill, version: e.target.value })} placeholder="Version" className="px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <textarea value={newSkill.description} onChange={(e) => setNewSkill({ ...newSkill, description: e.target.value })} placeholder="Description" className="w-full px-3 py-2 border rounded-lg text-sm h-20" />
+              <div className="grid grid-cols-2 gap-3">
+                <select value={newSkill.category} onChange={(e) => setNewSkill({ ...newSkill, category: e.target.value })} className="px-3 py-2 border rounded-lg text-sm">
+                  <option value="general">General</option>
+                  <option value="quality">Quality</option>
+                  <option value="debugging">Debugging</option>
+                  <option value="deployment">Deployment</option>
+                  <option value="git">Git</option>
+                  <option value="memory">Memory</option>
+                  <option value="meta">Meta</option>
+                  <option value="architecture">Architecture</option>
+                  <option value="migration">Migration</option>
+                  <option value="testing">Testing</option>
+                </select>
+                <input value={newSkill.trigger_pattern} onChange={(e) => setNewSkill({ ...newSkill, trigger_pattern: e.target.value })} placeholder="Trigger patterns (pipe-separated)" className="px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <textarea
+                value={newSkill.template}
+                onChange={(e) => setNewSkill({ ...newSkill, template: e.target.value })}
+                placeholder="Skill template / reusable prompt content (optional) — what Mentrix injects when this skill is Active"
+                className="w-full h-28 p-3 border border-slate-300 rounded-lg text-sm font-mono"
+              />
+              <input value={newSkill.tags} onChange={(e) => setNewSkill({ ...newSkill, tags: e.target.value })} placeholder="Tags (comma separated)" className="w-full px-3 py-2 border rounded-lg text-sm" />
+              <button onClick={handleCreateSkill} disabled={!newSkill.name.trim()} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                Register Skill
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -37,6 +37,16 @@ ZECT connects to the GitHub API to show real repository data, pull request diffs
 
 ## Getting Started
 
+On Windows, prefer the stack controller (tracks only processes it started; never kills an unowned port):
+
+```powershell
+./zect.ps1 up --profile desktop
+./zect.ps1 status
+./zect.ps1 down
+```
+
+See [`docs/LOCAL_STACK.md`](docs/LOCAL_STACK.md). Local API is `:8020` and Vite is `:5173`. CI / packaged Electron API remains `:8000`.
+
 ### Prerequisites
 
 - Python 3.12+ with Poetry
@@ -251,7 +261,7 @@ Backend:            All endpoints tested and passing
 | [Architecture & Usage Guide](docs/ARCHITECTURE_USAGE_GUIDE.md) | Technical architecture and usage patterns |
 | [AI-Agnostic Usage Guide](docs/AI_AGNOSTIC_USAGE.md) | How to use ZECT with any AI coding tool |
 | [Features Reference](docs/FEATURES_REFERENCE.md) | Granular reference for every feature, endpoint, and data type |
-| [Environment Setup Guide](docs/ENV_SETUP_GUIDE.md) | Step-by-step .env configuration with exact commands |
+| [Local stack controller](docs/LOCAL_STACK.md) | `zect.ps1` up/down/status for backend, Vite, Electron |
 | [ZECT Usage Guide](docs/ZECT_USAGE_GUIDE.md) | Screen-by-screen feature usage guide |
 | [ZEF for ZECT Guide](docs/ZEF_FOR_ZECT_GUIDE.md) | How ZEF supports ZECT development |
 | [Repo Analysis Integration](docs/ZECT-repo-analysis-integration.md) | Repo analysis integration notes |

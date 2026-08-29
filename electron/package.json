@@ -1,20 +1,23 @@
 {
   "name": "zect-desktop",
-  "version": "2.0.0",
-  "description": "ZECT Engineering Control Tower — Desktop Application",
+  "version": "3.0.0",
+  "description": "ZECT Mentrix Control Tower — Desktop Application",
   "main": "main.js",
-  "author": "Zinnia Engineering",
+  "author": "ZECT Engineering",
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "start": "NODE_ENV=development electron .",
-    "start:prod": "electron .",
-    "build:win": "electron-builder --win",
+    "start": "electron .",
+    "start:dev": "electron .",
+    "start:prod": "cross-env ZECT_USE_DIST=1 electron .",
+    "chatterbox:fetch": "powershell -NoProfile -File resources/chatterbox/scripts/fetch-chatterbox.ps1",
+    "build:win": "python ../backend/packaging/bundle_sidecar.py && electron-builder --win",
     "build:mac": "electron-builder --mac",
     "build:linux": "electron-builder --linux",
     "build:all": "electron-builder --win --mac --linux"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.0"
   },
@@ -27,20 +30,58 @@
     "files": [
       "main.js",
       "preload.js",
+      "computer.js",
+      "chatterbox.js",
+      "service-lifecycle.js",
+      "wake.js",
+      "win-wake.js",
+      "dictation.js",
+      "voice-filter.js",
+      "shortcuts.js",
       "icons/**/*",
-      "../frontend/dist/**/*"
+      {
+        "from": "../frontend/dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "resources/chatterbox",
+        "to": "chatterbox",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "icons/icon.ico"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "icons/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "icons/icon.png",
       "category": "Development"
     },

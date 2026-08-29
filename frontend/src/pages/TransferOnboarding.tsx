@@ -10,8 +10,7 @@ import {
   BookOpen,
 } from "lucide-react";
 import { showToast } from "@/components/Toast";
-
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { apiFetch } from "@/lib/api";
 
 export default function TransferOnboarding() {
   const [activeTab, setActiveTab] = useState<"onboarding" | "export" | "import" | "history">("onboarding");
@@ -29,7 +28,7 @@ export default function TransferOnboarding() {
 
   const fetchQuestions = async () => {
     try {
-      const res = await fetch(`${API}/api/transfer/onboarding/questions`);
+      const res = await apiFetch(`/api/transfer/onboarding/questions`);
       if (res.ok) {
         const data = await res.json();
         setQuestions(data.questions || []);
@@ -40,7 +39,7 @@ export default function TransferOnboarding() {
 
   const fetchOnboardingStatus = async () => {
     try {
-      const res = await fetch(`${API}/api/transfer/onboarding/status/${userId}`);
+      const res = await apiFetch(`/api/transfer/onboarding/status/${userId}`);
       if (res.ok) setOnboardingStatus(await res.json());
       else showToast("error", `Failed to load onboarding status (${res.status})`);
     } catch (err) { showToast("error", "Network error loading status"); }
@@ -48,7 +47,7 @@ export default function TransferOnboarding() {
 
   const fetchBundles = async () => {
     try {
-      const res = await fetch(`${API}/api/transfer/bundles?limit=20`);
+      const res = await apiFetch(`/api/transfer/bundles?limit=20`);
       if (res.ok) setBundles(await res.json());
       else showToast("error", `Failed to load bundles (${res.status})`);
     } catch (err) { showToast("error", "Network error loading bundles"); }
@@ -63,7 +62,7 @@ export default function TransferOnboarding() {
   const handleAnswer = async (key: string, value: any) => {
     setAnswers({ ...answers, [key]: value });
     try {
-      await fetch(`${API}/api/transfer/onboarding/answer`, {
+      await apiFetch(`/api/transfer/onboarding/answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, project_id: projectId, question_key: key, answer: value }),
@@ -74,7 +73,7 @@ export default function TransferOnboarding() {
 
   const handleCompleteOnboarding = async () => {
     try {
-      const res = await fetch(`${API}/api/transfer/onboarding/complete`, {
+      const res = await apiFetch(`/api/transfer/onboarding/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, project_id: projectId }),
@@ -90,7 +89,7 @@ export default function TransferOnboarding() {
 
   const handleExport = async (bundleType: string) => {
     try {
-      const res = await fetch(`${API}/api/transfer/export`, {
+      const res = await apiFetch(`/api/transfer/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, user_id: userId, bundle_type: bundleType, include_preferences: true }),
@@ -111,7 +110,7 @@ export default function TransferOnboarding() {
     if (!importData.trim()) return;
     try {
       const bundleData = JSON.parse(importData);
-      const res = await fetch(`${API}/api/transfer/import`, {
+      const res = await apiFetch(`/api/transfer/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_project_id: projectId, user_id: userId, bundle_data: bundleData, merge_strategy: "skip_duplicates" }),

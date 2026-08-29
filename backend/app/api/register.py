@@ -1,0 +1,183 @@
+"""Register all domain routers on the FastAPI app.
+
+Domain modules own business logic and route handlers; this package is the
+public HTTP surface entrypoint required by the Phase 1 target layout.
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+
+from app.domains.project import projects, analytics, export_share, token_controls, generated_outputs, settings
+from app.domains.permissions import auth, permissions, secrets_manager
+from app.domains.pr_review import github, code_review
+from app.domains.agent_run import (
+    llm,
+    build_phase,
+    review_phase,
+    deploy_phase,
+    model_selection,
+    orchestration,
+    context_management,
+    ultrareview,
+    agent_mode,
+)
+from app.domains.agent_run import mentrix as mentrix_router
+from app.domains.audit import audit_trail
+from app.domains.integration import (
+    jira_integration,
+    slack_integration,
+    confluence_integration,
+    datadog_integration,
+    email_integration,
+    mcp,
+    ci_monitor,
+    ci_remediation,
+)
+from app.domains.workspace import (
+    app_runner,
+    autofix,
+    rules_engine,
+    sandbox,
+    diff_viewer,
+    coding_engine,
+    coding_agent,
+    workspace_search,
+    pty_router,
+)
+from app.domains.repository import (
+    repo_analysis,
+    file_explorer,
+    git_ops,
+    code_index,
+    knowledge_base,
+    document_intelligence,
+    web_intelligence,
+    repo_clone,
+    repo_browser,
+    build_intel,
+    file_watcher,
+)
+from app.domains.repository import lattice as lattice_router
+from app.domains.personal_agent import (
+    memory,
+    dream_engine,
+    data_layer,
+    data_flywheel,
+    transfer,
+    skills_engine,
+    conversations,
+    playbooks,
+    scheduler,
+    session_insights,
+    persistent_sessions,
+    user_sessions,
+    file_organize,
+    automation_watches,
+    calendar_api,
+    personal_actions,
+    presentation_api,
+    sheets_api,
+    learning,
+    learning_studio,
+    automation_loops_api,
+    long_running_api,
+)
+from app.domains.voice import realtime, voice_clone
+from app.domains.security_incident import router as security_incident_router
+from app.domains.fabric import router as fabric_router
+from app.domains.process import router as process_router
+from app.domains.work_items.router import developer_router as mentrix_developer_router
+from app.domains.work_items.router import router as work_items_router
+from app.routers import system_health as system_health_router
+
+
+def register_routers(app: FastAPI) -> None:
+    app.include_router(projects.router)
+    app.include_router(github.router)
+    app.include_router(settings.router)
+    app.include_router(analytics.router)
+    app.include_router(repo_analysis.router)
+    app.include_router(auth.router)
+    app.include_router(llm.router)
+    app.include_router(code_review.router)
+    app.include_router(code_review.code_review_alias)
+    app.include_router(build_phase.router)
+    app.include_router(review_phase.router)
+    app.include_router(deploy_phase.router)
+    app.include_router(token_controls.router)
+    app.include_router(model_selection.router)
+    app.include_router(orchestration.router)
+    app.include_router(context_management.router)
+
+    app.include_router(audit_trail.router)
+    app.include_router(ultrareview.router)
+    app.include_router(jira_integration.router)
+    app.include_router(slack_integration.router)
+    app.include_router(rules_engine.router)
+    app.include_router(export_share.router)
+    app.include_router(user_sessions.router)
+    app.include_router(generated_outputs.router)
+    app.include_router(mcp.router)
+    app.include_router(app_runner.router)
+    app.include_router(pty_router.router)
+    app.include_router(workspace_search.router)
+    app.include_router(file_explorer.router)
+    app.include_router(git_ops.router)
+    app.include_router(ci_monitor.router)
+    app.include_router(autofix.router)
+
+    app.include_router(memory.router)
+    app.include_router(dream_engine.router)
+    app.include_router(data_layer.router)
+    app.include_router(data_flywheel.router)
+    app.include_router(permissions.router)
+    app.include_router(transfer.router)
+    app.include_router(skills_engine.router)
+
+    app.include_router(conversations.router)
+    app.include_router(knowledge_base.router)
+    app.include_router(document_intelligence.router)
+    app.include_router(web_intelligence.router)
+    app.include_router(playbooks.router)
+    app.include_router(scheduler.router)
+    app.include_router(automation_watches.router)
+    app.include_router(file_organize.router)
+    app.include_router(calendar_api.router)
+    app.include_router(personal_actions.router)
+    app.include_router(presentation_api.router)
+    app.include_router(sheets_api.router)
+    app.include_router(learning.router)
+    app.include_router(learning_studio.router)
+    app.include_router(automation_loops_api.router)
+    app.include_router(long_running_api.router)
+    app.include_router(secrets_manager.router)
+    app.include_router(code_index.router)
+    app.include_router(session_insights.router)
+
+    app.include_router(repo_clone.router)
+    app.include_router(repo_browser.router)
+    app.include_router(build_intel.router)
+
+    app.include_router(agent_mode.router)
+    app.include_router(persistent_sessions.router)
+    app.include_router(ci_remediation.router)
+    app.include_router(sandbox.router)
+    app.include_router(realtime.router)
+    app.include_router(file_watcher.router)
+    app.include_router(diff_viewer.router)
+    app.include_router(coding_engine.router)
+    app.include_router(coding_agent.router)
+
+    app.include_router(lattice_router.router)
+    app.include_router(mentrix_router.router)
+    app.include_router(voice_clone.router)
+    app.include_router(security_incident_router)
+    app.include_router(fabric_router)
+    app.include_router(process_router)
+    app.include_router(work_items_router)
+    app.include_router(mentrix_developer_router)
+    app.include_router(system_health_router.router)
+    app.include_router(confluence_integration.router)
+    app.include_router(datadog_integration.router)
+    app.include_router(email_integration.router)

@@ -1,0 +1,1779 @@
+/**
+ * Companion Present Deck — ZECT Present generate + open PPTX/Zoom (Electron) + narrate (Voicebox).
+ * Electron: parse notes → F5 → speak await → Right Arrow.
+ * Browser: upload .pptx → parse via API → narrate each slide (no PowerPoint automation).
+ */
+import { Link } from "react-router-dom";
+import PresentEditor from "@/components/PresentEditor";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Presentation, Mic, MonitorPlay, Sparkles, Square, Upload } from "lucide-react";
+import {
+  mentrixCompanionIntegrations,
+  mentrixPresentGenerate,
+  mentrixPresentGenerationJob,
+  mentrixPresentEngineStatus,
+  mentrixPresentEngineTemplates,
+  mentrixParsePptx,
+  mentrixPresentationAudiences,
+  mentrixPresentationAssetUpload,
+  mentrixPresentationTemplates,
+  mentrixAnalyzeDeck,
+  mentrixPreparePromptDeck,
+  listMyClonedVoices,
+  mentrixVoiceEngineStatus,
+  mentrixPresentationNarrateSlides,
+  type ClonedVoiceInfo,
+  type VoiceEngineStatus,
+} from "@/lib/api";
+import { cancelMentrixSpeech, isCloneTtsEngine, speakMentrix, speakMentrixStreamedAwait, prefetchMentrixSpeakChunks, playMentrixPrefetch, type SpeakVoiceOptions, type PrefetchedSpeakChunk } from "@/mentrix/speak";
+import { pickLocalFile } from "@/lib/pickLocalFile";
+import { isGenerateTemplateReady, mergePresentTemplateLists, type PresentTemplateCard } from "@/lib/presentTemplates";
+import { preferredPresentVoiceChoice } from "@/lib/presentVoiceChoice";
+
+const STORAGE_KEY = "zect_mentrix_present_deck_path";
+const NOTES_KEY = "zect_mentrix_present_deck_notes";
+const PROMPT_KEY = "zect_mentrix_present_deck_prompt";
+const JOIN_KEY = "zect_mentrix_zoom_join_url";
+const VOICE_CHOICE_KEY = "zect_mentrix_present_deck_voice";
+const TEMPLATE_KEY = "mentrix_present_template";
+const N_SLIDES_KEY = "mentrix_present_n_slides";
+const CUSTOM_TEMPLATE_KEY = "mentrix_present_custom_template";
+const CUSTOM_TEMPLATE_OPTION = "__custom__";
+const LANGUAGE_KEY = "mentrix_present_language";
+
+const DECK_LANGUAGES = [
+  { id: "English", label: "English" },
+  { id: "Spanish", label: "Spanish" },
+  { id: "French", label: "French" },
+  { id: "German", label: "German" },
+  { id: "Portuguese", label: "Portuguese" },
+  { id: "Japanese", label: "Japanese" },
+  { id: "Chinese", label: "Chinese" },
+  { id: "Korean", label: "Korean" },
+  { id: "Hindi", label: "Hindi" },
+  { id: "Arabic", label: "Arabic" },
+];
+
+const AUDIENCE_KEY = "zect_mentrix_present_audience";
+const SENS_KEY = "zect_mentrix_present_sensitivity";
+
+const BUILTIN_TEMPLATES: PresentTemplateCard[] = [
+  { id: "general", name: "General" },
+  { id: "modern", name: "Modern" },
+  { id: "standard", name: "Standard" },
+  { id: "swift", name: "Swift" },
+  { id: "zinnia-executive-v1", name: "Zinnia — Executive brief" },
+  { id: "zinnia-delivery-v1", name: "Zinnia — Delivery status" },
+  { id: "zinnia-risk-v1", name: "Zinnia — Risk & next actions" },
+];
+
+const ZINNIA_PROMPT_PRESETS: Record<string, string> = {
+  "zinnia-executive-v1":
+    "Zinnia executive brief: title slide, status snapshot, decisions needed, owners, next 7 days.",
+  "zinnia-exec":
+    "Zinnia executive brief: title slide, status snapshot, decisions needed, owners, next 7 days.",
+  "zinnia-delivery-v1":
+    "Zinnia delivery status: workstream health, milestones, blockers, dependencies, ask for leadership.",
+  "zinnia-delivery":
+    "Zinnia delivery status: workstream health, milestones, blockers, dependencies, ask for leadership.",
+  "zinnia-risk-v1":
+    "Zinnia risk review: top risks, mitigations, owners, timeline impact, recommended actions.",
+  "zinnia-risk":
+    "Zinnia risk review: top risks, mitigations, owners, timeline impact, recommended actions.",
+};
+
+type ProviderLifecycle =
+  | "STARTING"
+  | "READY"
+  | "TEMPLATE_NOT_READY"
+  | "PROVIDER_UNAVAILABLE"
+  | "GENERATION_FAILED";
+
+function migrateTemplateId(id: string): string {
+  if (id === "zinnia-exec" || id === "zinnia-executive") return "zinnia-executive-v1";
+  if (id === "zinnia-delivery") return "zinnia-delivery-v1";
+  if (id === "zinnia-risk") return "zinnia-risk-v1";
+  return id;
+}
+
+const STOCK_VOICES: { id: string; label: string }[] = [
+  { id: "alloy", label: "OpenAI — Alloy (neutral)" },
+  { id: "echo", label: "OpenAI — Echo (male)" },
+  { id: "fable", label: "OpenAI — Fable (male, British)" },
+  { id: "onyx", label: "OpenAI — Onyx (male, deep)" },
+  { id: "nova", label: "OpenAI — Nova (female)" },
+  { id: "shimmer", label: "OpenAI — Shimmer (female)" },
+];
+
+type Props = {
+  variant?: "dark" | "light";
+  /** Prefill ZECT template id (e.g. zinnia-executive-v1) when mounted from product Present. */
+  initialTemplateId?: string;
+  /** companion = narrate/open only; create = Generate presentation. */
+  mode?: "companion" | "create";
+  initialPath?: string;
+  initialPrompt?: string;
+  toneHint?: string;
+  onGenerated?: (path: string) => void;
+};
+
+type SlideParsed = { index: number; notes?: string; text?: string; visuals?: string[] };
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function friendlyDesktopError(code: string): string {
+  const c = String(code || "");
+  if (c === "unsupported_presentation_type") {
+    return "Need a .pptx/.ppt/.pdf path — strip quotes when pasting from Explorer.";
+  }
+  if (c === "pptx_required_for_present_all") {
+    return "Present all slides requires a .pptx file.";
+  }
+  if (c === "path_outside_allowlist") {
+    return "Path must be under Desktop, Documents, or Downloads (OneDrive OK).";
+  }
+  if (c === "not_found") return "File not found at that path.";
+  if (c === "zoom_not_found") {
+    return "Zoom.exe not found — set ZOOM_DESKTOP_PATH or a Zoom join URL.";
+  }
+  if (c === "invalid_zoom_join_url") return "Join URL must be https://*.zoom.us/…";
+  if (c === "computer_mode_off") return "Turn on Computer Mode in Electron first.";
+  return c;
+}
+
+export default function PresentDeckPanel({
+  variant = "dark",
+  initialTemplateId,
+  mode = "companion",
+  initialPath,
+  initialPrompt,
+  toneHint,
+  onGenerated,
+}: Props) {
+  const [path, setPath] = useState("");
+  const [notes, setNotes] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [joinUrl, setJoinUrl] = useState("");
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [presenting, setPresenting] = useState(false);
+  const [engineReady, setEngineReady] = useState(false);
+  const [templates, setTemplates] = useState<PresentTemplateCard[]>(BUILTIN_TEMPLATES);
+  const [language, setLanguage] = useState(() => {
+    try {
+      return localStorage.getItem(LANGUAGE_KEY) || "English";
+    } catch {
+      return "English";
+    }
+  });
+  const [attachDocs, setAttachDocs] = useState<string[]>([]);
+  const [attachAssetIds, setAttachAssetIds] = useState<string[]>([]);
+  const [attachLabels, setAttachLabels] = useState<string[]>([]);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const [templateChoice, setTemplateChoice] = useState(
+    () => migrateTemplateId(initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general"),
+  );
+  const [customTemplateId, setCustomTemplateId] = useState("");
+  const [nSlides, setNSlides] = useState(6);
+  const [myVoices, setMyVoices] = useState<ClonedVoiceInfo[]>([]);
+  const [voiceChoice, setVoiceChoice] = useState("");
+  const [pptxFile, setPptxFile] = useState<File | null>(null);
+  const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus | null>(null);
+  const [shareApproved, setShareApproved] = useState(false);
+  const [audienceId, setAudienceId] = useState("general");
+  const [audiences, setAudiences] = useState<Array<{ id: string; label: string; slide_count_hint?: number }>>([]);
+  const [sensitivityHint, setSensitivityHint] = useState("");
+  const [claimsPreview, setClaimsPreview] = useState<
+    Array<{ id: string; claim: string; verification_status: string; present_as_fact?: boolean }>
+  >([]);
+  const [analysisNote, setAnalysisNote] = useState("");
+  const [flowBApproved, setFlowBApproved] = useState(false);
+  const abortRef = useRef(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const userLockedVoiceRef = useRef(false);
+  const isDesktop = typeof window !== "undefined" && !!window.zectDesktop?.isDesktopApp;
+  const dark = variant === "dark";
+  const isCreate = mode === "create";
+  const defaultVoice = myVoices.find((v) => v.is_default) || myVoices[0] || null;
+  const [lastTemplateSent, setLastTemplateSent] = useState("");
+  const [lifecycle, setLifecycle] = useState<ProviderLifecycle>("STARTING");
+  const [generationProgress, setGenerationProgress] = useState("");
+  const [plannerDegraded, setPlannerDegraded] = useState(false);
+  const [qualitySummary, setQualitySummary] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [outlineReady, setOutlineReady] = useState(false);
+  const [outline, setOutline] = useState("");
+  const [draftWithoutModel, setDraftWithoutModel] = useState(false);
+  const [generationMode, setGenerationMode] = useState<"smart" | "standard">("standard");
+  const [autoSlides, setAutoSlides] = useState(false);
+  const usingStock = voiceChoice.startsWith("stock:");
+  const usingNone = voiceChoice === "none";
+  const cloneNarrateBlocked = !usingStock && !usingNone && engineStatus !== null && !engineStatus.online;
+
+  useEffect(() => {
+    try {
+      setPath(initialPath || localStorage.getItem(STORAGE_KEY) || "");
+      setNotes(localStorage.getItem(NOTES_KEY) || "");
+      setPrompt(initialPrompt || localStorage.getItem(PROMPT_KEY) || "");
+      setJoinUrl(localStorage.getItem(JOIN_KEY) || "");
+      setVoiceChoice(localStorage.getItem(VOICE_CHOICE_KEY) || "");
+      setAudienceId(localStorage.getItem(AUDIENCE_KEY) || "general");
+      setSensitivityHint(localStorage.getItem(SENS_KEY) || "");
+      const savedTemplate = migrateTemplateId(
+        initialTemplateId || localStorage.getItem(TEMPLATE_KEY) || "general",
+      );
+      setTemplateChoice(savedTemplate);
+      if (initialTemplateId) {
+        try {
+          localStorage.setItem(TEMPLATE_KEY, migrateTemplateId(initialTemplateId));
+        } catch {
+          /* ignore */
+        }
+      }
+      setCustomTemplateId(localStorage.getItem(CUSTOM_TEMPLATE_KEY) || "");
+      const savedSlides = Number(localStorage.getItem(N_SLIDES_KEY) || "6");
+      setNSlides(Number.isFinite(savedSlides) ? Math.max(1, Math.min(20, savedSlides)) : 6);
+    } catch {
+      /* ignore */
+    }
+    let statusCancelled = false;
+    const loadEngineStatus = async () => {
+      for (let attempt = 0; attempt < 4 && !statusCancelled; attempt++) {
+        try {
+          const s = await mentrixPresentEngineStatus();
+          if (statusCancelled) return;
+          setEngineReady(!!s.configured && !!s.reachable);
+          const life = String(s.lifecycle || "") as ProviderLifecycle;
+          if (s.provider === "zect_native" && (life === "READY" || life === "TEMPLATE_NOT_READY")) {
+            setEngineReady(true);
+          }
+          if (
+            life === "READY" ||
+            life === "TEMPLATE_NOT_READY" ||
+            life === "PROVIDER_UNAVAILABLE" ||
+            life === "STARTING" ||
+            life === "GENERATION_FAILED"
+          ) {
+            setLifecycle(life);
+          } else {
+            setLifecycle(s.configured && s.reachable ? "READY" : "PROVIDER_UNAVAILABLE");
+          }
+          if (s.configured && s.reachable) return;
+        } catch {
+          if (attempt === 3 && !statusCancelled) {
+            setEngineReady(false);
+            setLifecycle("PROVIDER_UNAVAILABLE");
+          }
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+    };
+    void loadEngineStatus();
+    mentrixCompanionIntegrations()
+      .then((s) => {
+        // Prefer status endpoint for ready; integrations is backup if status fails earlier
+        if (s.present_engine_reachable != null) {
+          setEngineReady((prev) => prev || (!!s.present_engine_configured && !!s.present_engine_reachable));
+        } else if (s.presenton_reachable != null) {
+          setEngineReady((prev) => prev || (!!s.presenton_configured && !!s.presenton_reachable));
+        } else if (s.present_engine != null) {
+          setEngineReady((prev) => prev || !!s.present_engine);
+        } else if (s.presenton != null) {
+          setEngineReady((prev) => prev || !!s.presenton);
+        }
+      })
+      .catch(() => {});
+    mentrixPresentEngineTemplates()
+      .then((res) => {
+        if (res.reachable === false) {
+          setLifecycle((prev) => (prev === "STARTING" ? "PROVIDER_UNAVAILABLE" : prev));
+        }
+        const remote = Array.isArray(res.templates) && res.templates.length ? res.templates : [];
+        setTemplates((prev) => mergePresentTemplateLists(BUILTIN_TEMPLATES, remote, [], prev));
+        setTemplateChoice((prev) => {
+          const list = mergePresentTemplateLists(BUILTIN_TEMPLATES, remote, [], []);
+          const migrated = migrateTemplateId(prev);
+          if (migrated === CUSTOM_TEMPLATE_OPTION) return migrated;
+          if (list.some((t) => t.id === migrated)) return migrated;
+          if (/^(zinnia-|org-|user-)/.test(migrated)) return migrated;
+          return list[0]?.id || "general";
+        });
+      })
+      .catch(() => setTemplates(BUILTIN_TEMPLATES));
+    mentrixPresentationTemplates()
+      .then((r) => {
+        const extra = [...(r.zinnia || []), ...(r.organization || []), ...(r.my_templates || [])];
+        setTemplates((prev) => mergePresentTemplateLists(BUILTIN_TEMPLATES, [], extra, prev));
+      })
+      .catch(() => {});
+    listMyClonedVoices()
+      .then((v) => setMyVoices(Array.isArray(v) ? v : []))
+      .catch(() => setMyVoices([]));
+    mentrixPresentationAudiences()
+      .then((res) => setAudiences(Array.isArray(res.audiences) ? res.audiences : []))
+      .catch(() =>
+        setAudiences([
+          { id: "general", label: "General" },
+          { id: "executive", label: "Executive" },
+          { id: "technical", label: "Technical" },
+        ]),
+      );
+    return () => {
+      statusCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const ready = templates.filter((t) => isGenerateTemplateReady(t, { engineReady }));
+    if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
+      if (engineReady) return;
+      const fallback = ready[0]?.id || "zinnia-executive-v1";
+      setTemplateChoice(fallback);
+      try {
+        localStorage.setItem(TEMPLATE_KEY, fallback);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    if (ready.some((t) => t.id === templateChoice)) return;
+    const fallback = ready[0]?.id;
+    if (!fallback) return;
+    setTemplateChoice(fallback);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, fallback);
+    } catch {
+      /* ignore */
+    }
+  }, [templates, engineReady, templateChoice]);
+
+  const readyTemplates = useMemo(
+    () => templates.filter((t) => isGenerateTemplateReady(t, { engineReady })),
+    [templates, engineReady],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      mentrixVoiceEngineStatus()
+        .then((s) => {
+          if (!cancelled) setEngineStatus(s);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setEngineStatus({
+              online: false,
+              base_url: "http://localhost:17493",
+              default_voice: null,
+              hint: "Could not reach ZECT API for engine status.",
+            });
+          }
+        });
+    };
+    load();
+    const iv = window.setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(iv);
+    };
+  }, []);
+
+  const persistVoiceChoice = (value: string, opts?: { userChoice?: boolean }) => {
+    if (opts?.userChoice && (value.startsWith("stock:") || value === "none")) {
+      userLockedVoiceRef.current = true;
+    }
+    setVoiceChoice(value);
+    try {
+      localStorage.setItem(VOICE_CHOICE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    const cloneId = myVoices.find((v) => v.is_default)?.voice_id || myVoices[0]?.voice_id;
+    const next = preferredPresentVoiceChoice(voiceChoice, cloneId, userLockedVoiceRef.current);
+    if (next !== voiceChoice) persistVoiceChoice(next);
+  }, [myVoices, voiceChoice]);
+
+  const voiceOptsFromChoice = (choice: string): SpeakVoiceOptions => {
+    if (choice.startsWith("clone:")) {
+      return { voiceId: choice.slice("clone:".length), requireClone: true };
+    }
+    if (choice.startsWith("stock:")) {
+      return { stockVoice: choice.slice("stock:".length), requireClone: false };
+    }
+    if (choice === "none") {
+      return { requireClone: false, stockVoice: "" };
+    }
+    return { requireClone: true };
+  };
+
+  const formatSpeakStatus = (
+    result: { ok: true; engine: string } | { ok: false; error: string },
+    fallbackOk: string,
+  ) => {
+    if (!result.ok) return result.error;
+    if (usingStock) {
+      return result.engine.startsWith("openai_stock:")
+        ? `Narrating with OpenAI stock voice (${result.engine.replace("openai_stock:", "")}).`
+        : `Narrating via ${result.engine}.`;
+    }
+    if (!isCloneTtsEngine(result.engine)) {
+      return `Expected clone TTS (ZECT Voicebox), got ${result.engine} — start local ZECT Voicebox.`;
+    }
+    return fallbackOk;
+  };
+
+  const persistPath = (value: string) => {
+    setPath(value);
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistNotes = (value: string) => {
+    setNotes(value);
+    try {
+      localStorage.setItem(NOTES_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistPrompt = (value: string) => {
+    setPrompt(value);
+    setOutlineReady(false);
+    try {
+      localStorage.setItem(PROMPT_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistCustomTemplate = (value: string) => {
+    setCustomTemplateId(value);
+    try {
+      localStorage.setItem(CUSTOM_TEMPLATE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const persistNSlides = (value: number) => {
+    const n = Math.max(1, Math.min(20, Math.round(value) || 6));
+    setNSlides(n);
+    try {
+      localStorage.setItem(N_SLIDES_KEY, String(n));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const resolveTemplateId = () => {
+    if (templateChoice === CUSTOM_TEMPLATE_OPTION) {
+      return customTemplateId.trim() || "general";
+    }
+    // Send UI gallery id (zinnia-*/org-*/user-*) to API for honest resolve + zinnia_verified.
+    return (templateChoice || "general").trim() || "general";
+  };
+
+  const persistTemplateChoice = (value: string) => {
+    setTemplateChoice(value);
+    try {
+      localStorage.setItem(TEMPLATE_KEY, value);
+    } catch {
+      /* ignore */
+    }
+    const preset = ZINNIA_PROMPT_PRESETS[value];
+    if (preset) {
+      persistPrompt(preset);
+    }
+  };
+
+  const persistJoin = (value: string) => {
+    setJoinUrl(value);
+    try {
+      localStorage.setItem(JOIN_KEY, value);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const ensureComputerMode = async () => {
+    const mentrix = window.zectDesktop?.mentrix;
+    if (!mentrix?.setComputerMode) return false;
+    await mentrix.setComputerMode(true);
+    return true;
+  };
+
+  const runComputer = async (action: string, args: Record<string, unknown>) => {
+    if (!isDesktop) {
+      setStatus("Electron desktop app required to open PowerPoint / Zoom.");
+      return { ok: false as const, error: "not_desktop_app" };
+    }
+    await ensureComputerMode();
+    const computer = window.zectDesktop?.mentrix?.computer;
+    if (!computer) {
+      setStatus("Electron desktop app required to open PowerPoint / Zoom.");
+      return { ok: false as const, error: "not_desktop_app" };
+    }
+    const res = (await computer(action, args)) as {
+      ok?: boolean;
+      error?: string;
+      hint?: string;
+      note?: string;
+      slides?: SlideParsed[];
+      count?: number;
+    };
+    if (res?.ok === false) {
+      const msg = friendlyDesktopError(String(res.error || "desktop_failed"));
+      setStatus(res.hint ? `${msg} (${res.hint})` : msg);
+      return { ok: false as const, error: String(res.error || "desktop_failed") };
+    }
+    return {
+      ok: true as const,
+      note: res.note,
+      slides: res.slides,
+      count: res.count,
+    };
+  };
+
+  const generateDeck = async (opts?: { fastBasic?: boolean }) => {
+    setBusy(true);
+    setStatus("");
+    setGenerationProgress("Understanding request");
+    setPlannerDegraded(false);
+    try {
+      if (!engineReady) {
+        setLifecycle("PROVIDER_UNAVAILABLE");
+        setStatus("Presentation engine unavailable — generation disabled until the engine is configured and reachable.");
+        return;
+      }
+      if (opts?.fastBasic && !draftWithoutModel) {
+        setAdvancedOpen(true);
+        setStatus("Check Draft without model to skip the planner (Fast-Basic is never silent).");
+        return;
+      }
+      const content = [prompt.trim(), toneHint?.trim() ? `Tone: ${toneHint.trim()}` : ""]
+        .filter(Boolean)
+        .join("\n\n");
+      if (!content) {
+        setStatus("Enter a deck prompt (topic + key points).");
+        return;
+      }
+      const template = resolveTemplateId();
+      if (templateChoice === CUSTOM_TEMPLATE_OPTION && !customTemplateId.trim()) {
+        setStatus("Enter a custom template id from your uploaded master, or pick a built-in template.");
+        return;
+      }
+      // Flow B: classify → audience → claims → user approval gate before generate
+      const requestedSlideCount = Math.max(1, Math.min(20, Number(nSlides) || 6));
+      const prep = await mentrixPreparePromptDeck({
+        prompt: content,
+        audience_id: audienceId,
+        sensitivity_hint: sensitivityHint || undefined,
+        documents: attachDocs.length ? attachDocs : undefined,
+        n_slides: requestedSlideCount,
+      });
+      setClaimsPreview(prep.claims || []);
+      setAnalysisNote(
+        `Sensitivity ${prep.sensitivity?.sensitivity || "?"} · ${prep.claims?.length || 0} claims · outline ready`,
+      );
+      if (!prep.ok) {
+        setStatus(prep.reason || "Blocked by sensitivity / model route — review classification before generating.");
+        return;
+      }
+      const unverified = (prep.claims || []).filter((c) => c.present_as_fact === false);
+      if (prep.requires_user_approval && !flowBApproved) {
+        setStatus(
+          `Review ${prep.claims?.length || 0} claims (${unverified.length} not presentable as fact), then check “Approve generation” and click Generate again.`,
+        );
+        return;
+      }
+      let adapted = prep.adapted_prompt || content;
+      if (unverified.length) {
+        adapted +=
+          "\n\nIMPORTANT: Do not present the following as verified facts:\n" +
+          unverified.map((c) => `- ${c.claim}`).join("\n");
+      }
+      const audienceSlideSuggestion = prep.audience_slide_suggestion ?? prep.n_slides_hint;
+      if (!outlineReady && generationMode === "smart") {
+        setOutline(adapted);
+        setOutlineReady(true);
+        setStatus(
+          audienceSlideSuggestion && audienceSlideSuggestion !== requestedSlideCount
+            ? `Confirm adapted prompt (${requestedSlideCount} slides selected; audience suggests ~${audienceSlideSuggestion}), then Generate.`
+            : "Confirm adapted prompt and slide count, then Generate.",
+        );
+        return;
+      }
+      if (!outlineReady) {
+        setOutline(adapted);
+        setOutlineReady(true);
+      }
+      adapted = outline.trim() || adapted;
+      const generationRunId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `gen-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      setGenerationProgress("Queued");
+      const terminalStages = new Set(["COMPLETE", "NEEDS_REVIEW", "FAILED"]);
+      const pollTimer = window.setInterval(() => {
+        void mentrixPresentGenerationJob(generationRunId)
+          .then((row) => {
+            const job = row.job || {};
+            const label = String(job.progress_label || job.stage || "").trim();
+            if (label) setGenerationProgress(label);
+            const stage = String(job.stage || "");
+            if (terminalStages.has(stage)) window.clearInterval(pollTimer);
+          })
+          .catch(() => {
+            /* job row appears once native generate starts */
+          });
+      }, 800);
+      let out: Awaited<ReturnType<typeof mentrixPresentGenerate>> | undefined;
+      try {
+        out = await mentrixPresentGenerate({
+          content: adapted,
+          n_slides: requestedSlideCount,
+          template,
+          ui_template_choice: templateChoice === CUSTOM_TEMPLATE_OPTION ? CUSTOM_TEMPLATE_OPTION : template,
+          custom_id: customTemplateId.trim() || undefined,
+          filename: "mentrix-deck.pptx",
+          fast_basic: Boolean(opts?.fastBasic),
+          language,
+          documents: attachDocs.length ? attachDocs : undefined,
+          asset_ids: attachAssetIds.length ? attachAssetIds : undefined,
+          run_id: generationRunId,
+        });
+      } finally {
+        window.clearInterval(pollTimer);
+      }
+      setFlowBApproved(false);
+      const sent = out?.template_sent || template;
+      setLastTemplateSent(sent);
+      if (out?.lifecycle === "READY" || out?.lifecycle === "GENERATION_FAILED" || out?.lifecycle === "TEMPLATE_NOT_READY") {
+        setLifecycle(out.lifecycle);
+      }
+      if (out?.path) {
+        persistPath(out.path);
+        setGenerationProgress("Ready for review");
+        onGenerated?.(out.path);
+        const qualityBits = [
+          out.provider,
+          out.planner_mode,
+          out.final_quality_status ? `quality=${out.final_quality_status}` : "",
+          out.repair_attempts != null ? `repair=${out.repair_attempts}` : "",
+          out.generation_blocked ? "needs_review" : "",
+        ].filter(Boolean);
+        setQualitySummary(qualityBits.join(" · "));
+        const degraded = Boolean(out.degraded || out.planner_mode === "HEURISTIC_FALLBACK");
+        setPlannerDegraded(degraded);
+        const qualityNote = out.generation_blocked || out.export_blocked
+          ? ` Quality gate: ${(out.hard_findings || []).join(", ") || out.final_quality_status || "review required"} — open Review before export.`
+          : "";
+        const zinniaNote =
+          templateChoice.startsWith("zinnia-") && out.zinnia_verified === false
+            ? ` Zinnia NOT verified (wire template=${sent}; map zinnia-executive-v1 in the ZECT registry).`
+            : out.zinnia_verified
+              ? ` zinnia_verified=true (registry mapping, wire template=${sent}).`
+              : ` Template applied: ${sent}.`;
+        const degradedNote = degraded
+          ? ` DEGRADED Fast-Basic (planner_mode=${out.planner_mode || "HEURISTIC_FALLBACK"}; ${out.fallback_reason || "llm unavailable"}). Retry for Model Gateway quality, or keep this draft.`
+          : "";
+        setStatus(
+          `Deck saved to ${out.path} (audience: ${audienceId}, template_sent: ${sent}, ${requestedSlideCount} slides).${qualityNote}${zinniaNote}${degradedNote} Review claims, then Open → Zoom → share approve → Narrate.`,
+        );
+      } else {
+        setLifecycle("GENERATION_FAILED");
+        setStatus("Generation returned no path — engine unavailable or generation failed.");
+      }
+    } catch (e) {
+      const detail = (e as Error & { detail?: Record<string, unknown> })?.detail;
+      if (detail && typeof detail === "object") {
+        const sent = String(detail.template_sent || "");
+        if (sent) setLastTemplateSent(sent);
+        const life = String(detail.lifecycle || "");
+        if (life === "TEMPLATE_NOT_READY" || life === "GENERATION_FAILED" || life === "PROVIDER_UNAVAILABLE") {
+          setLifecycle(life);
+        } else if (detail.blocked_external) {
+          setLifecycle("PROVIDER_UNAVAILABLE");
+        } else {
+          setLifecycle("GENERATION_FAILED");
+        }
+        const blocked = detail.blocked_external ? " [BLOCKED_EXTERNAL]" : "";
+        const zinnia =
+          detail.zinnia_verified === false && String(detail.ui_template_choice || "").startsWith("zinnia-")
+            ? ` zinnia_verified=false template_sent=${sent || "none"}.`
+            : "";
+        const plannerMode = String(detail.planner_mode || "");
+        const degradedHint =
+          plannerMode === "HEURISTIC_FALLBACK" || String(detail.error || "") === "llm_planner_required"
+            ? " Model Gateway planner unavailable — use Retry or Fast-Basic."
+            : "";
+        setStatus(`${e instanceof Error ? e.message : "Generate deck failed"}${blocked}${zinnia}${degradedHint}`);
+      } else {
+        setLifecycle("GENERATION_FAILED");
+        setStatus(e instanceof Error ? e.message : "Generate deck failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const analyzeExisting = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      let slides: SlideParsed[] = [];
+      if (pptxFile) {
+        const parsed = await mentrixParsePptx(pptxFile);
+        slides = parsed.slides || [];
+      }
+      const out = await mentrixAnalyzeDeck({
+        slides,
+        notes_blob: notes,
+        audience_id: audienceId,
+        sensitivity_hint: sensitivityHint || undefined,
+      });
+      setClaimsPreview(out.claims || []);
+      setAnalysisNote(
+        `Flow A · ${out.sensitivity?.sensitivity || "?"} · claims=${out.claims?.length || 0} · rehearse=${!!out.rehearse_ready}`,
+      );
+      if (out.ok && out.improved_notes?.length && !notes.trim()) {
+        const joined = out.improved_notes.map((n) => n.notes).join("\n\n---\n\n");
+        persistNotes(joined.slice(0, 8000));
+      }
+      setStatus(
+        out.ok
+          ? `Deck analyzed for ${out.audience?.label || audienceId}. Review claims before presenting.`
+          : out.reason || "Analysis blocked",
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Analyze failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openPresentation = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const target = path.trim().replace(/^["']+|["']+$/g, "");
+      if (!target) {
+        setStatus("Enter a .pptx path under Desktop, Documents, or Downloads (OneDrive OK).");
+        return;
+      }
+      persistPath(target);
+      const res = await runComputer("open_presentation", { path: target });
+      if (res.ok) {
+        setStatus("Opened presentation in PowerPoint. Join your meeting, share PowerPoint, then Narrate.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openZoom = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      const url = joinUrl.trim();
+      const res = await runComputer("open_zoom", url ? { join_url: url } : {});
+      if (res.ok) {
+        setStatus(
+          res.note ||
+            "Opened Zoom. Join your meeting, share PowerPoint, then Narrate. (Mentrix does not auto-share.)",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const narrateNotes = async () => {
+    setBusy(true);
+    setStatus("");
+    try {
+      if (usingNone) {
+        setStatus("No narration selected.");
+        return;
+      }
+      if (cloneNarrateBlocked) {
+        setStatus(
+          `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to narrate in your voice.`,
+        );
+        return;
+      }
+      if (!defaultVoice && !usingStock && !usingNone) {
+        setStatus("No cloned voice saved — open Voice tab → clone a sample, or pick an OpenAI stock voice.");
+      }
+      const text =
+        notes.trim() ||
+        "Mentrix Present Deck. Paste talking points, then Narrate again with your default ZECT Voicebox voice.";
+      const result = await speakMentrix(text.slice(0, 2000), true, voiceOptsFromChoice(voiceChoice));
+      setStatus(
+        formatSpeakStatus(
+          result,
+          defaultVoice
+            ? `Narrating with saved voice “${defaultVoice.name}”.`
+            : "Narrating talking points with your clone.",
+        ),
+      );
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Narrate failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stopPresentAll = () => {
+    abortRef.current = true;
+    cancelMentrixSpeech();
+    setStatus("Stopped presenting.");
+    setPresenting(false);
+    setBusy(false);
+  };
+
+  const narrateSlideList = async (slides: SlideParsed[], modeLabel: string) => {
+    const n = slides.length;
+    const scripts: string[] = slides.map((slide, idx) => {
+      const raw = (slide.notes || slide.text || "").trim() || `Slide ${idx + 1} of ${n}.`;
+      return raw;
+    });
+    try {
+      const intel = await mentrixPresentationNarrateSlides(
+        slides as unknown as Array<Record<string, unknown>>,
+        notes.trim().slice(0, 180),
+      );
+      if (intel.ok && intel.slides?.length) {
+        for (const row of intel.slides) {
+          if (typeof row.script === "string" && row.script.trim()) {
+            scripts[row.index] = row.script.trim();
+          }
+        }
+      }
+    } catch {
+      /* grounded fallback already in scripts from notes/text */
+    }
+    const scriptFor = (idx: number) => scripts[idx] || `Slide ${idx + 1} of ${n}.`;
+    const opts = voiceOptsFromChoice(voiceChoice);
+    // Warm Voicebox + prefetch slide 0 before first play (cuts cold-start lag).
+    setStatus(`${modeLabel}: warming voice engine…`);
+    try {
+      await mentrixVoiceEngineStatus({ forceRefresh: true });
+    } catch {
+      /* best-effort */
+    }
+    let pendingPrefetch: Promise<PrefetchedSpeakChunk[] | null> | null =
+      n > 0 ? prefetchMentrixSpeakChunks(scriptFor(0), opts) : null;
+
+    for (let i = 0; i < slides.length; i++) {
+      if (abortRef.current) {
+        setStatus("Stopped presenting.");
+        return;
+      }
+      const script = scriptFor(i);
+      setStatus(`${modeLabel}: slide ${i + 1} / ${n}`);
+
+      // Kick off slide N+1 synthesis while current slide audio plays
+      const upcoming =
+        i + 1 < n && !abortRef.current
+          ? prefetchMentrixSpeakChunks(scriptFor(i + 1), opts)
+          : null;
+
+      let spoken;
+      if (pendingPrefetch) {
+        const chunks = await pendingPrefetch;
+        pendingPrefetch = null;
+        spoken =
+          chunks && chunks.length
+            ? await playMentrixPrefetch(chunks, opts)
+            : await speakMentrixStreamedAwait(script, true, opts);
+      } else {
+        spoken = await speakMentrixStreamedAwait(script, true, opts);
+      }
+      pendingPrefetch = upcoming;
+
+      if (abortRef.current) {
+        setStatus("Stopped presenting.");
+        return;
+      }
+      if (!spoken.ok && spoken.error !== "cancelled") {
+        setStatus(`Slide ${i + 1}: ${spoken.error}`);
+        return;
+      }
+      if (i < slides.length - 1 && isDesktop) {
+        const right = await runComputer("powerpoint_key", { key: "right" });
+        if (!right.ok || abortRef.current) {
+          if (abortRef.current) setStatus("Stopped presenting.");
+          return;
+        }
+        await sleep(400);
+      } else if (i < slides.length - 1) {
+        await sleep(350);
+      }
+    }
+    setStatus(
+      `Finished presenting ${slides.length} slides${
+        isDesktop ? "" : " (audio only — advance slides manually in PowerPoint)"
+      }.`,
+    );
+  };
+
+  const presentAllSlides = async (opts?: { requireZoomShare?: boolean }) => {
+    abortRef.current = false;
+    setPresenting(true);
+    setBusy(true);
+    setStatus("");
+
+    try {
+      if (opts?.requireZoomShare && isDesktop && !shareApproved) {
+        setStatus(
+          "Approve screen-share first — Mentrix will narrate only after you confirm you will share PowerPoint in Zoom yourself.",
+        );
+        return;
+      }
+      if (usingNone) {
+        setStatus("No narration selected — present the deck without audio.");
+        return;
+      }
+      if (cloneNarrateBlocked) {
+        setStatus(
+          `ZECT Voicebox offline at ${engineStatus?.base_url || "local engine"} — start local engine to Present in your voice.`,
+        );
+        return;
+      }
+      if (!defaultVoice && !usingStock && !usingNone) {
+        setStatus("Clone a voice first (Voice tab) or pick an OpenAI stock voice — Present uses your saved clone.");
+      }
+
+      // Browser / no Computer Mode: upload .pptx → API parse → narrate
+      if (!isDesktop) {
+        if (!pptxFile) {
+          setStatus("In browser: choose a .pptx file below, then click Present again. (Electron unlocks PowerPoint F5 + auto-advance.)");
+          return;
+        }
+        setStatus("Parsing PPTX…");
+        const parsed = await mentrixParsePptx(pptxFile);
+        const slides = parsed.slides || [];
+        if (!slides.length) {
+          setStatus("No slides found in that .pptx.");
+          return;
+        }
+        await narrateSlideList(slides, "Narrating");
+        return;
+      }
+
+      const target = path.trim().replace(/^["']+|["']+$/g, "");
+      if (!target && !pptxFile) {
+        setStatus("Enter a .pptx path or upload a .pptx file.");
+        return;
+      }
+
+      let slides: SlideParsed[] = [];
+      if (pptxFile && (!target || !/\.pptx$/i.test(target))) {
+        const parsed = await mentrixParsePptx(pptxFile);
+        slides = parsed.slides || [];
+      } else {
+        if (!/\.pptx$/i.test(target)) {
+          setStatus("Present all slides requires a .pptx file.");
+          return;
+        }
+        persistPath(target);
+        const parsed = await runComputer("parse_presentation_slides", { path: target });
+        if (!parsed.ok) return;
+        slides = parsed.slides || [];
+        const opened = await runComputer("open_presentation", { path: target });
+        if (!opened.ok || abortRef.current) return;
+        setStatus(`Starting slideshow (F5)… ${slides.length} slides`);
+        await sleep(2000);
+        if (abortRef.current) return;
+        const f5 = await runComputer("powerpoint_key", { key: "f5" });
+        if (!f5.ok || abortRef.current) return;
+        await sleep(400);
+      }
+
+      if (!slides.length) {
+        setStatus("No slides found in that .pptx.");
+        return;
+      }
+      await narrateSlideList(slides, "Presenting");
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Present all failed");
+    } finally {
+      setPresenting(false);
+      setBusy(false);
+    }
+  };
+
+  const voiceStatusText = (() => {
+    if (!defaultVoice) return "No cloned voice saved — clone in Voice tab or pick a stock voice below.";
+    if (defaultVoice.sample_missing) {
+      return `Voice “${defaultVoice.name}” is in DB but sample file is missing — clone again.`;
+    }
+    if (defaultVoice.has_sample && !defaultVoice.engine_ready) {
+      return `Voice “${defaultVoice.name}” saved (sample OK). ZECT Voicebox will provision on first speak.`;
+    }
+    return `Voice saved: “${defaultVoice.name}”${defaultVoice.engine_ready ? " (engine ready)" : ""}.`;
+  })();
+
+  const engineBannerText = (() => {
+    if (!engineStatus) return "Checking ZECT Voicebox…";
+    if (engineStatus.online) {
+      return `ZECT Voicebox online (${engineStatus.base_url}). Present can narrate with your clone.`;
+    }
+    return `ZECT Voicebox offline (${engineStatus.base_url || "http://127.0.0.1:17493"}). Start Voicebox: services/zect-voicebox/scripts/up.ps1 — sample in ZECT ≠ engine online.`;
+  })();
+
+  return (
+    <div
+      data-testid="present-deck-panel"
+      className={
+        dark
+          ? "rounded-xl border border-teal-800/50 bg-slate-950/70 p-3 space-y-2"
+          : "rounded-xl border border-slate-200 bg-white p-3 space-y-2"
+      }
+    >
+      <div className="flex items-center gap-2">
+        <Presentation className={`h-4 w-4 ${dark ? "text-teal-400" : "text-teal-700"}`} />
+        <p
+          className={`text-[10px] uppercase tracking-[0.2em] ${
+            dark ? "text-teal-400" : "text-teal-700"
+          }`}
+        >
+          Present Deck — PPTX + Zoom
+        </p>
+        <span
+          data-testid={variant === "light" ? undefined : "present-lifecycle-state"}
+          className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+            lifecycle === "READY"
+              ? "border-emerald-600 text-emerald-700"
+              : lifecycle === "TEMPLATE_NOT_READY"
+                ? "border-amber-500 text-amber-800"
+                : "border-slate-400 text-slate-600"
+          }`}
+        >
+          {lifecycle === "PROVIDER_UNAVAILABLE" ? "BLOCKED_EXTERNAL" : lifecycle}
+        </span>
+      </div>
+      <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+        {isCreate
+          ? "Prompt + template, then Generate presentation. Voice and Zoom live on Rehearse after a draft exists."
+          : isDesktop
+            ? "Electron: Present locally uses PowerPoint F5 + narrate. Present in Zoom still needs the share checkbox. Clone needs Voicebox; stock Echo works without it."
+            : "Browser: upload a .pptx to narrate every slide with your clone. For PowerPoint auto-advance, use the Electron desktop app."}
+      </p>
+      {!isCreate ? (
+        <>
+      <p
+        data-testid="present-deck-voice-status"
+        className={`text-[11px] rounded border px-2 py-1 ${
+          defaultVoice?.has_sample
+            ? dark
+              ? "border-teal-800 text-teal-200 bg-teal-950/40"
+              : "border-teal-200 text-teal-800 bg-teal-50"
+            : dark
+              ? "border-amber-800 text-amber-200 bg-amber-950/40"
+              : "border-amber-200 text-amber-900 bg-amber-50"
+        }`}
+      >
+        {voiceStatusText}
+      </p>
+      <p
+        data-testid="present-deck-engine-status"
+        className={`text-[11px] rounded border px-2 py-1 ${
+          engineStatus?.online
+            ? dark
+              ? "border-emerald-800 text-emerald-200 bg-emerald-950/40"
+              : "border-emerald-200 text-emerald-800 bg-emerald-50"
+            : dark
+              ? "border-amber-800 text-amber-200 bg-amber-950/40"
+              : "border-amber-200 text-amber-900 bg-amber-50"
+        }`}
+        title={engineStatus?.hint || undefined}
+      >
+        {engineBannerText}
+      </p>
+        </>
+      ) : null}
+      {!isCreate ? (
+        <Link
+          to="/present/create"
+          className={`inline-flex text-xs underline ${dark ? "text-teal-300" : "text-teal-800"}`}
+          data-testid="present-deck-handoff-create"
+        >
+          Create with AI in Present
+        </Link>
+      ) : null}
+      {isCreate && lifecycle === "PROVIDER_UNAVAILABLE" ? (
+        <p
+          className={`text-[11px] rounded border px-2 py-1.5 ${
+            dark ? "border-amber-800 text-amber-200 bg-amber-950/40" : "border-amber-200 text-amber-900 bg-amber-50"
+          }`}
+          data-testid="present-create-blocked-external"
+        >
+          BLOCKED_EXTERNAL — presentation engine is not reachable. Check backend configuration and retry.
+        </p>
+      ) : null}
+      {isCreate ? (
+      <>
+      <p className={`text-sm font-semibold ${dark ? "text-slate-100" : "text-slate-900"}`} data-testid="present-generate-heading">
+        Generate presentation
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="radio"
+            name="present-gen-mode"
+            data-testid="present-generate-mode-standard"
+            checked={generationMode === "standard"}
+            onChange={() => setGenerationMode("standard")}
+          />
+          Standard
+        </label>
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="radio"
+            name="present-gen-mode"
+            data-testid="present-generate-mode-smart"
+            checked={generationMode === "smart"}
+            onChange={() => {
+              setGenerationMode("smart");
+              setOutlineReady(false);
+            }}
+          />
+          Smart (confirm outline)
+        </label>
+        <label className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          <input
+            type="checkbox"
+            data-testid="present-generate-auto-slides"
+            checked={autoSlides}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setAutoSlides(on);
+              if (on) persistNSlides(8);
+            }}
+          />
+          Auto slides
+        </label>
+      </div>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        What should this presentation cover?
+        <textarea
+          data-testid="present-deck-prompt"
+          value={prompt}
+          onChange={(e) => persistPrompt(e.target.value)}
+          rows={6}
+          placeholder="Q2 ZOAS delivery brief: status, risks, next actions…"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+          }
+        />
+      </label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Template
+          <select
+            data-testid="present-deck-template"
+            value={templateChoice}
+            onChange={(e) => persistTemplateChoice(e.target.value)}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {readyTemplates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+            {engineReady ? <option value={CUSTOM_TEMPLATE_OPTION}>Custom template id…</option> : null}
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Slides (1–20)
+          <input
+            data-testid="present-deck-n-slides"
+            type="number"
+            min={1}
+            max={20}
+            value={nSlides}
+            onChange={(e) => persistNSlides(Number(e.target.value))}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Language
+          <select
+            data-testid="present-deck-language"
+            value={language}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLanguage(v);
+              try {
+                localStorage.setItem(LANGUAGE_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {DECK_LANGUAGES.map((lang) => (
+              <option key={lang.id} value={lang.id}>
+                {lang.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Attach source files
+          <input
+            ref={attachInputRef}
+            data-testid="present-deck-attach"
+            type="file"
+            multiple
+            accept=".txt,.md,.csv,.json,image/png,image/jpeg,image/gif,image/webp"
+            className="mt-1 block w-full text-[11px]"
+            onChange={async (e) => {
+              const files = Array.from(e.target.files || []);
+              e.target.value = "";
+              for (const file of files) {
+                const lower = file.name.toLowerCase();
+                const isImage = /\.(png|jpe?g|gif|webp)$/.test(lower);
+                if (isImage) {
+                  try {
+                    const out = await mentrixPresentationAssetUpload(file);
+                    if (out.asset_id) {
+                      const assetId = out.asset_id;
+                      setAttachAssetIds((prev) => [...prev, assetId]);
+                      setAttachLabels((prev) => [...prev, file.name]);
+                    } else {
+                      setStatus(out.error || "Image rejected");
+                    }
+                  } catch (err) {
+                    setStatus(err instanceof Error ? err.message : "Image upload failed");
+                  }
+                  continue;
+                }
+                try {
+                  const text = (await file.text()).slice(0, 20_000);
+                  setAttachDocs((prev) => [...prev, `# ${file.name}\n${text}`]);
+                  setAttachLabels((prev) => [...prev, file.name]);
+                } catch {
+                  setStatus(`Could not read ${file.name}`);
+                }
+              }
+            }}
+          />
+          {attachLabels.length ? (
+            <p className={`mt-1 text-[10px] ${dark ? "text-slate-400" : "text-slate-500"}`} data-testid="present-deck-attach-names">
+              {attachLabels.join(" · ")}
+            </p>
+          ) : (
+            <p className={`mt-1 text-[10px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
+              Text files become source material. Images upload as assets.
+            </p>
+          )}
+        </label>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Audience
+          <select
+            data-testid="present-deck-audience"
+            value={audienceId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setAudienceId(v);
+              try {
+                localStorage.setItem(AUDIENCE_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            {(audiences.length
+              ? audiences
+              : [
+                  { id: "general", label: "General" },
+                  { id: "executive", label: "Executive" },
+                  { id: "manager", label: "Manager" },
+                  { id: "technical", label: "Technical" },
+                ]
+            ).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Sensitivity hint
+          <select
+            data-testid="present-deck-sensitivity"
+            value={sensitivityHint}
+            onChange={(e) => {
+              const v = e.target.value;
+              setSensitivityHint(v);
+              try {
+                localStorage.setItem(SENS_KEY, v);
+              } catch {
+                /* ignore */
+              }
+            }}
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          >
+            <option value="">Auto-detect</option>
+            <option value="PUBLIC">PUBLIC</option>
+            <option value="INTERNAL">INTERNAL</option>
+            <option value="CONFIDENTIAL">CONFIDENTIAL</option>
+            <option value="RESTRICTED">RESTRICTED</option>
+          </select>
+        </label>
+      </div>
+      {analysisNote && (
+        <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`} data-testid="present-deck-analysis-note">
+          {analysisNote}
+        </p>
+      )}
+      {claimsPreview.length > 0 && (
+        <div
+          className={`max-h-28 overflow-auto rounded border px-2 py-1 text-[10px] ${
+            dark ? "border-slate-700 text-slate-300" : "border-slate-200 text-slate-700"
+          }`}
+          data-testid="present-deck-claims"
+        >
+          {claimsPreview.slice(0, 8).map((c) => (
+            <div key={c.id}>
+              [{c.verification_status}] {c.claim.slice(0, 120)}
+              {c.present_as_fact ? "" : " — not as fact"}
+            </div>
+          ))}
+        </div>
+      )}
+      <label
+        className={`inline-flex items-center gap-1.5 text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}
+        data-testid="present-deck-flow-b-approve"
+      >
+        <input
+          type="checkbox"
+          checked={flowBApproved}
+          onChange={(e) => setFlowBApproved(e.target.checked)}
+          className="rounded border-slate-500"
+        />
+        Approve generation (Flow B — review claims first)
+      </label>
+      {engineReady && templateChoice === CUSTOM_TEMPLATE_OPTION && (
+        <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+          Custom template id (uploaded master)
+          <input
+            data-testid="present-deck-custom-template"
+            value={customTemplateId}
+            onChange={(e) => persistCustomTemplate(e.target.value)}
+            placeholder="e.g. zinnia-brand-master"
+            className={
+              dark
+                ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+                : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+            }
+          />
+        </label>
+      )}
+      {outlineReady ? (
+        <div className="rounded-lg border border-teal-200 bg-teal-50/50 p-2 space-y-1" data-testid="present-deck-confirm">
+          <p className="text-[11px] font-medium text-teal-900">Confirm outline</p>
+          <textarea
+            data-testid="present-deck-adapted-prompt"
+            value={outline}
+            onChange={(e) => setOutline(e.target.value)}
+            rows={4}
+            className={
+              dark
+                ? "w-full rounded border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                : "w-full rounded border border-slate-300 px-2 py-1 text-xs"
+            }
+          />
+          <p className="text-[10px] text-slate-500">Target: {nSlides} slides · selected template {templateChoice}</p>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        data-testid="present-deck-generate"
+        disabled={busy || !engineReady}
+        onClick={() => void generateDeck()}
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-violet-700 px-2.5 py-1.5 text-xs text-violet-200 hover:bg-violet-950 disabled:opacity-40"
+            : "inline-flex items-center gap-1.5 rounded-lg bg-teal-800 px-3 py-2 text-xs text-white hover:bg-teal-900 disabled:opacity-40"
+        }
+        title={
+          engineReady
+            ? "Generate a reviewable draft (Quality). Inspector and critic always run."
+            : "BLOCKED_EXTERNAL — presentation engine not ready. Generate stays disabled until READY."
+        }
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+        Generate presentation
+      </button>
+      <details
+        className="inline-block ml-2 align-middle"
+        data-testid="present-advanced-generate"
+        open={advancedOpen}
+        onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className={`cursor-pointer text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+          Advanced
+        </summary>
+      <label className={`mt-1 flex items-center gap-1.5 text-[11px] ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        <input
+          type="checkbox"
+          data-testid="present-draft-without-model"
+          checked={draftWithoutModel}
+          onChange={(e) => setDraftWithoutModel(e.target.checked)}
+        />
+        Draft without model
+      </label>
+      <button
+        type="button"
+        data-testid="present-deck-generate-fast-basic"
+        disabled={busy || !engineReady}
+        onClick={() => void generateDeck({ fastBasic: true })}
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 mt-1"
+            : "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 mt-1"
+        }
+        title="Fast reduces planning latency only — layout inspector still runs"
+      >
+        Fast
+      </button>
+      </details>
+      {plannerDegraded ? (
+        <p className={`text-[11px] mt-1 ${dark ? "text-amber-300" : "text-amber-800"}`} data-testid="present-planner-degraded">
+          Degraded mode: heuristic Fast-Basic draft. Retry Generate for Model Gateway quality.
+        </p>
+      ) : null}
+      {plannerDegraded ? (
+        <button
+          type="button"
+          data-testid="present-deck-generate-retry"
+          disabled={busy || !engineReady}
+          onClick={() => void generateDeck()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600 px-2.5 py-1.5 text-xs text-amber-200 hover:bg-amber-950 disabled:opacity-40 ml-2 mt-1"
+          title="Retry Model Gateway planner"
+        >
+          Retry Model Gateway
+        </button>
+      ) : null}
+      {generationProgress ? (
+        <p className={`text-[11px] ${dark ? "text-teal-300" : "text-teal-800"}`} data-testid="present-generation-progress">
+          {generationProgress}
+        </p>
+      ) : null}
+      {qualitySummary ? (
+        <p className={`text-[11px] ${dark ? "text-slate-300" : "text-slate-700"}`} data-testid="present-quality-status">
+          {qualitySummary}
+        </p>
+      ) : null}
+      {lastTemplateSent && (
+        <p className={`text-[10px] mt-1 ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-deck-template-sent">
+          Last template applied: {lastTemplateSent}
+        </p>
+      )}
+      <button
+        type="button"
+        data-testid="present-deck-analyze"
+        disabled={busy || !path}
+        onClick={() => void analyzeExisting()}
+        className={
+          dark
+            ? "inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40 ml-2"
+            : "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-40 ml-2"
+        }
+        title="Review quality of the generated draft"
+      >
+        Review quality
+      </button>
+      </>
+      ) : null}
+      <p className={`text-[11px] ${dark ? "text-slate-500" : "text-slate-500"}`}>
+        Pick template + slides, then Generate. Open presentation / Open Zoom need Electron. Clone narrate needs
+        ZECT Voicebox online (or pick an OpenAI stock voice).
+      </p>
+      {!isCreate ? (
+      <>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Presentation path (.pptx){isDesktop ? "" : " — optional in browser; prefer upload below"}
+        <input
+          data-testid="present-deck-path"
+          value={path}
+          onChange={(e) => persistPath(e.target.value)}
+          placeholder="C:\\Users\\you\\Documents\\deck.pptx"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        />
+        {isDesktop ? (
+          <button
+            type="button"
+            className="mt-1 rounded border border-teal-700 px-2 py-1 text-[11px]"
+            data-testid="present-deck-browse"
+            onClick={() => {
+              void pickLocalFile({
+                title: "Select PowerPoint (.pptx)",
+                filters: [{ name: "PowerPoint", extensions: ["pptx", "ppt"] }],
+              }).then((picked) => {
+                if (picked?.path) persistPath(picked.path);
+              });
+            }}
+          >
+            Browse
+          </button>
+        ) : null}
+      </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Upload .pptx (required for Present in browser)
+        <input
+          ref={fileInputRef}
+          data-testid="present-deck-file"
+          type="file"
+          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-teal-800 file:px-2 file:py-1 file:text-teal-50"
+          onChange={(e) => {
+            const f = e.target.files?.[0] || null;
+            setPptxFile(f);
+            if (f) setStatus(`Ready: ${f.name}`);
+          }}
+        />
+      </label>
+      {pptxFile && (
+        <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`}>
+          Selected: {pptxFile.name}
+        </p>
+      )}
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Zoom join URL (optional)
+        <input
+          data-testid="present-deck-zoom-join"
+          value={joinUrl}
+          onChange={(e) => persistJoin(e.target.value)}
+          placeholder="https://zoom.us/j/…"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        />
+      </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Manual script (separate from your .pptx — typed here, not read from the file)
+        <textarea
+          data-testid="present-deck-notes"
+          value={notes}
+          onChange={(e) => persistNotes(e.target.value)}
+          rows={3}
+          placeholder="Key points to narrate with your cloned voice — this text is NOT pulled from the PPTX above…"
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        />
+      </label>
+      <label className={`block text-xs ${dark ? "text-slate-300" : "text-slate-700"}`}>
+        Narration voice
+        <select
+          data-testid="present-deck-voice-select"
+          value={voiceChoice}
+          onChange={(e) => persistVoiceChoice(e.target.value, { userChoice: true })}
+          className={
+            dark
+              ? "mt-1 w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+              : "mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+          }
+        >
+          <option value="">
+            {defaultVoice ? `My default — ${defaultVoice.name}` : "My default cloned voice (none saved)"}
+          </option>
+          {myVoices.map((v) => (
+            <option key={v.voice_id} value={`clone:${v.voice_id}`}>
+              My voice — {v.name}
+              {v.is_default ? " (default)" : ""}
+              {!v.has_sample ? " — sample missing" : ""}
+            </option>
+          ))}
+          <option value="none">No narration</option>
+          {STOCK_VOICES.map((v) => (
+            <option key={v.id} value={`stock:${v.id}`}>
+              {v.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className={`text-[10px] ${dark ? "text-slate-500" : "text-slate-500"}`} data-testid="present-slide-cap-hint">
+        Present uses your clone and caps each slide script (~500 chars). Next-slide audio prefetches while the
+        current slide plays. Warm Voicebox (`models_ready: true`) before demos.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          data-testid="present-deck-open-pptx"
+          disabled={busy || !isDesktop}
+          onClick={() => void openPresentation()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-teal-700 px-2.5 py-1.5 text-xs text-teal-200 hover:bg-teal-950 disabled:opacity-40"
+          title={isDesktop ? "Open in PowerPoint" : "Electron only"}
+        >
+          <MonitorPlay className="h-3.5 w-3.5" />
+          Open presentation
+        </button>
+        <button
+          type="button"
+          data-testid="present-deck-open-zoom"
+          disabled={busy || !isDesktop}
+          onClick={() => void openZoom()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-40"
+          title={isDesktop ? "Open Zoom" : "Electron only"}
+        >
+          Open Zoom
+        </button>
+        {isDesktop && (
+          <label
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs cursor-pointer ${
+              shareApproved
+                ? "border-amber-500 bg-amber-900/30 text-amber-100"
+                : "border-slate-600 text-slate-300"
+            }`}
+            data-testid="present-deck-share-approve"
+          >
+            <input
+              type="checkbox"
+              checked={shareApproved}
+              onChange={(e) => setShareApproved(e.target.checked)}
+              className="rounded border-slate-500"
+            />
+            I will share PowerPoint in Zoom (Mentrix does not auto-share)
+          </label>
+        )}
+        <button
+          type="button"
+          data-testid="present-deck-narrate"
+          disabled={busy || cloneNarrateBlocked}
+          onClick={() => void narrateNotes()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-2.5 py-1.5 text-xs text-white hover:bg-teal-600 disabled:opacity-40"
+          title={
+            cloneNarrateBlocked
+              ? "Start local ZECT Voicebox to narrate with your clone (or pick a stock voice)"
+              : "Speaks the Manual script text above — does not read your .pptx file"
+          }
+        >
+          <Mic className="h-3.5 w-3.5" />
+          Narrate manual script (not the PPTX)
+        </button>
+        <button
+          type="button"
+          data-testid="present-deck-present-all"
+          disabled={busy || cloneNarrateBlocked}
+          onClick={() => void presentAllSlides({ requireZoomShare: false })}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500 bg-amber-900/40 px-2.5 py-1.5 text-xs text-amber-50 hover:bg-amber-900 disabled:opacity-40"
+          title={
+            cloneNarrateBlocked
+              ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice). Stock Echo works without Voicebox."
+              : isDesktop
+                ? "Present locally: opens PowerPoint, F5, narrates, advances with Right Arrow. Zoom share is not required."
+                : "Upload a .pptx then narrate every slide with your clone (advance slides yourself in PowerPoint)"
+          }
+        >
+          <Presentation className="h-3.5 w-3.5" />
+          Present locally
+        </button>
+        <button
+          type="button"
+          data-testid="present-deck-present-zoom"
+          disabled={busy || cloneNarrateBlocked || (isDesktop && !shareApproved)}
+          onClick={() => void presentAllSlides({ requireZoomShare: true })}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-500 px-2.5 py-1.5 text-xs text-slate-100 hover:bg-slate-800 disabled:opacity-40"
+          title={
+            isDesktop && !shareApproved
+              ? "Check “I will share PowerPoint in Zoom” first"
+              : cloneNarrateBlocked
+                ? "Start local ZECT Voicebox to Present with your clone (or pick a stock voice). Stock Echo works without Voicebox."
+                : "Present in Zoom after you share PowerPoint yourself (Mentrix does not auto-share)"
+          }
+        >
+          Present in Zoom
+        </button>
+        {!pptxFile && !isDesktop && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Choose PPTX
+          </button>
+        )}
+        {presenting && (
+          <button
+            type="button"
+            data-testid="present-deck-stop"
+            onClick={stopPresentAll}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-700 px-2.5 py-1.5 text-xs text-red-200 hover:bg-red-950"
+          >
+            <Square className="h-3.5 w-3.5" />
+            Stop presenting
+          </button>
+        )}
+      </div>
+      {path && /\.pptx$/i.test(path) ? (
+        <>
+          <p className={`text-[11px] ${dark ? "text-slate-400" : "text-slate-600"}`} data-testid="present-editor-role-hint">
+            Review slides here; Generate lives on Create with AI; Voicebox narrates Rehearse.
+          </p>
+          <PresentEditor pptxPath={path} />
+        </>
+      ) : null}
+      </>
+      ) : null}
+      {status && (
+        <p
+          data-testid="present-deck-status"
+          className={`text-[11px] ${dark ? "text-amber-300/90" : "text-amber-800"}`}
+        >
+          {status}
+        </p>
+      )}
+    </div>
+  );
+}

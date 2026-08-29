@@ -41,6 +41,18 @@ export default function KnowledgeBase() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!showCreate && editId == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowCreate(false);
+        setEditId(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showCreate, editId]);
+
   const handleCreate = async () => {
     try {
       await createKnowledgeEntry({
@@ -96,44 +108,51 @@ export default function KnowledgeBase() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="zect-page max-w-6xl mx-auto space-y-6" data-testid="knowledge-base-page">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-indigo-600" /> Knowledge Base
           </h1>
-          <p className="text-sm text-slate-500 mt-1">{total} entries — persistent tips, instructions, project notes</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {total} entries — conventions and prompt snippets Mentrix injects automatically (token-capped)
+            so you paste less and answer faster.
+          </p>
         </div>
         <button
+          type="button"
           onClick={() => { setShowCreate(true); setEditId(null); setForm({ title: "", content: "", category: "general", tags: "" }); }}
-          className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
+          className="zect-btn zect-btn-primary text-sm"
         >
           <Plus className="h-4 w-4" /> New Entry
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert" data-testid="knowledge-error">{error}</div>
       )}
 
       {/* Search & Filter */}
-      <div className="flex gap-3">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+      <div className="flex flex-wrap gap-3">
+        <div className="flex-1 min-w-[12rem] relative">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden />
           <input
             type="text"
             placeholder="Search knowledge..."
+            aria-label="Search knowledge"
+            data-testid="knowledge-search"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm"
+            className="zect-input w-full pl-10"
           />
         </div>
         <div className="relative">
-          <Filter className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Filter className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden />
           <select
             value={filterCat}
+            aria-label="Filter knowledge by category"
             onChange={e => setFilterCat(e.target.value)}
-            className="pl-10 pr-8 py-2 border border-slate-300 rounded-lg text-sm appearance-none bg-white"
+            className="zect-select pl-10 pr-8 appearance-none"
           >
             <option value="">All Categories</option>
             {CATEGORIES.map(c => (
@@ -167,7 +186,12 @@ export default function KnowledgeBase() {
         <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-slate-900">{editId ? "Edit Entry" : "New Knowledge Entry"}</h3>
-            <button onClick={() => { setShowCreate(false); setEditId(null); }} className="text-slate-400 hover:text-slate-600">
+            <button
+              type="button"
+              aria-label="Close knowledge editor"
+              onClick={() => { setShowCreate(false); setEditId(null); }}
+              className="text-slate-400 hover:text-slate-600"
+            >
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -215,14 +239,15 @@ export default function KnowledgeBase() {
 
       {/* Entries List */}
       {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+        <div className="flex justify-center py-12" role="status" aria-live="polite" data-testid="knowledge-loading">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" aria-hidden />
+          <span className="sr-only">Loading knowledge</span>
         </div>
       ) : entries.length === 0 ? (
-        <div className="text-center py-12 text-slate-500">
+        <div className="zect-empty text-center py-12" data-testid="knowledge-empty">
           <BookOpen className="h-12 w-12 mx-auto mb-3 text-slate-300" />
-          <p className="text-lg font-medium">No knowledge entries yet</p>
-          <p className="text-sm mt-1">Create your first entry to start building your knowledge base</p>
+          <p className="text-lg font-medium">Create first entry — not auto-filled from git</p>
+          <p className="text-sm mt-1">Knowledge stays empty until you write it. Lattice ingest does not populate this list.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -249,11 +274,11 @@ export default function KnowledgeBase() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 ml-3">
-                  <button onClick={() => startEdit(entry)} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded">
-                    <Edit3 className="h-4 w-4" />
+                  <button type="button" aria-label={`Edit ${entry.title}`} onClick={() => startEdit(entry)} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded">
+                    <Edit3 className="h-4 w-4" aria-hidden />
                   </button>
-                  <button onClick={() => handleDelete(entry.id)} className="p-1.5 text-slate-400 hover:text-red-600 rounded">
-                    <Trash2 className="h-4 w-4" />
+                  <button type="button" aria-label={`Delete ${entry.title}`} onClick={() => handleDelete(entry.id)} className="p-1.5 text-slate-400 hover:text-red-600 rounded">
+                    <Trash2 className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
               </div>

@@ -1,0 +1,29 @@
+# ZECT Voicebox — Mentrix Chatterbox clone TTS (native, single service).
+# Host: http://127.0.0.1:17493  (CHATTERBOX_BASE_URL)
+#
+#   powershell -File services/zect-voicebox/scripts/up.ps1
+#   docker compose -f docker-compose.zect-voicebox.yml up -d --build
+
+services:
+  zect-voicebox:
+    build:
+      context: ./services/zect-voicebox
+    container_name: zect-voicebox
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:17493:17493"
+    environment:
+      - ZECT_VOICEBOX_PORT=17493
+      - ZECT_VOICEBOX_BACKEND=native
+      - ZECT_VOICEBOX_DATA_DIR=/data
+      - ZECT_VOICEBOX_MODEL_DIR=/models
+      - ZECT_VOICEBOX_SYNTH=${ZECT_VOICEBOX_SYNTH:-chatterbox}
+      - ZECT_VOICEBOX_ALLOW_STUB=${ZECT_VOICEBOX_ALLOW_STUB:-0}
+      - HF_HOME=/models/huggingface
+    volumes:
+      - zect-voicebox-data:/data
+      - zect-voicebox-models:/models
+
+volumes:
+  zect-voicebox-data:
+  zect-voicebox-models:

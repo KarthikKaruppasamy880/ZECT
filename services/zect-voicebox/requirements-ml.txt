@@ -1,0 +1,10 @@
+# Optional ML for real zero-shot clone (large download into HF cache).
+# Install AFTER CPU/GPU torch — do not list torch here (avoids CUDA wheel pull in Docker).
+#
+# Docker (recommended on Windows):
+#   docker compose -f docker-compose.zect-voicebox.yml up -d --build
+#
+# Python 3.11/3.12 venv (3.14 + Windows often fails building spacy-pkuseg):
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-ml.txt
+chatterbox-tts>=0.1.0

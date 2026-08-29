@@ -1,0 +1,173 @@
+# Mentrix Companion — Company Personal Agent (HUD)
+
+Mentrix Companion is the ZECT personal operator: weather, Slack, email, research, content/ads, reporting, internal docs, notes, Mentrix Image board, desktop Computer Mode, and Mentrix Delivery — with permission-gated tools and a streaming HUD.
+
+## Harness vs Loop
+
+| Concept | Meaning in ZECT |
+|---------|-----------------|
+| **Harness** | Single-run safety: permission broker, Allow overlay, org policy, Realtime mint (`client_secrets`), tool schemas, Delivery gates on `/mentrix`. |
+| **Loop** | Stay-alive personal agent: Layout-level session + floating dock, wake continuity across routes, Skills/Dream context injection, sessionStorage chat tail. |
+
+ForgeLoop Delivery remains the upgrade **harness**. Mentrix HUD + dock is the always-on **loop**.
+
+## Surfaces
+
+| Route | Role |
+|-------|------|
+| `/mentrix-home` | Full Mentrix HUD (orb, Connect Voice, Mic picker, Display, Computer Mode, Artifacts, Live Log) |
+| *(all authenticated routes)* | Persistent Mentrix dock (orb + Connect Voice + mini chat) — survives navigation; hidden when HUD is open |
+| `/mentrix` | Mentrix Delivery (ForgeLoop gates → Approve → PR) |
+| `/skills` | Labs — Skill Library (Mentrix **reads** selected skill into turn context) |
+| `/dream-engine` | Labs — Dream Engine (Mentrix **consumes** staged lessons; does not run the dream cycle) |
+
+Desktop wake (`Hey Mentrix` / `Ctrl+Shift+Space`) expands the **persistent dock** and starts Connect Voice (Realtime) without hard-reloading the SPA.
+
+### Orchestration (production)
+
+Companion is the company operator HUD/dock — **not** a second IDE, coding-agent runtime, Present editor, or WorkItem engine.
+
+Canonical flow:
+
+`User → Companion → active Project / authorized roots → PI/Lattice/Knowledge (tagged) → WorkItem → ASK/PLAN → Developer/Coding Agent → Present → Voice → Process/ticket`
+
+Handoff envelope (query params + tool args): `project_id`, `workspace_id`, `work_item_id`, `repo_ids`, commit SHAs, plan/evidence refs.
+
+| Phrase | Tool | Canonical surface |
+|--------|------|-------------------|
+| Architecture of this project | `companion_intelligence` | Provenance chips (unused sources stay `not_used`) |
+| Create/open work item | `work_item_open_or_create` | `/work-items` or `/workspace?…` |
+| Open Developer Workspace | `companion_handoff` | `/workspace` |
+| Create a presentation from this project | `companion_handoff` | `/present/create` (ZECT Present, not Presenton UI) |
+| Create a Jira ticket | `process_ticket_handoff` | If Jira/Camunda ready: WorkItem with source identity + `/work-items?envelope`. If unset: `BLOCKED_EXTERNAL` and **no auto-navigate** |
+| Start coding agent | `coding_agent_start` | Always-ask; without workspace, hand off to Developer (Companion does not edit files) |
+
+`GET /api/mentrix/companion/scope` feeds the HUD/dock identity strip. Semantic cross-repo references are **not implemented**.
+
+## Navigate intents
+
+| Phrase | Behavior |
+|--------|----------|
+| Dashboard / app home | SPA navigate to `/` — dock + voice stay up |
+| Mentrix / control tower / desktop app | `/mentrix-home` |
+| Go to desktop / OS desktop / computer mode | Computer tools (`computer_open_app` / screenshot) — **not** Dashboard `/` |
+| Lattice / Sandbox / Delivery / … | Existing `NAV_MAP` routes; dock survives |
+
+## Voice (Connect Voice)
+
+1. **Preflight:** On `/mentrix-home` load, Mentrix probes `POST /api/mentrix/companion/realtime/session` and shows **Realtime ready** (green) or **Realtime unavailable — {reason}** (amber) with **Retry Realtime**.
+2. **Mint API (GA):** Backend calls OpenAI `POST /v1/realtime/client_secrets` (not the retired `/v1/realtime/sessions`). Default model: `gpt-realtime` (`MENTRIX_REALTIME_MODEL`).
+3. **Primary UX:** Pick your **headset mic**, click **Connect Voice**, speak naturally. Mentrix replies with Realtime audio. **Turn off “Speak replies (TTS)” is automatic while Connect Voice is live** — browser TTS must not overlap Realtime audio.
+4. **If Realtime fails:** Use typed Quick asks or **Retry Realtime**. Fix `OPENAI_API_KEY` and restart backend — OpenAI chat key ≠ automatic Realtime if mint is broken.
+
+### Quota / billing
+
+If Live Log shows `You exceeded your current quota`:
+
+1. Add billing / credits at [platform.openai.com/settings/organization/billing](https://platform.openai.com/settings/organization/billing)
+2. Confirm `OPENAI_API_KEY` in `backend/.env` belongs to that org
+3. Restart backend and click **Retry Realtime**
+
+HUD status will show: **OpenAI quota exceeded — add billing at platform.openai.com, then Retry Realtime**
+
+**Mic picker:** Lists `audioinput` devices; choice persists in `localStorage` (`mentrix_mic_device_id`). Prefer a headset over the laptop array mic.
+
+**Stability:** Connect Voice waits until the mic is open before unlocking the button (prevents double-start races). Capture uses AudioWorklet (ScriptProcessor fallback). Each connect remints a fresh ephemeral key. Electron reloads the page if the renderer crashes (blank window). DevTools opens only when `ZECT_DEVTOOLS=1`.
+
+Realtime tools include personal ops: `weather_report`, `slack_digest`, `slack_send`, `email_digest`, `email_send`, plus ZECT Delivery / Lattice / notes / media / computer.
+
+## Integrations (OpenAI ≠ Slack ≠ Jira)
+
+| Env | Purpose |
+|-----|---------|
+| `OPENAI_API_KEY` | Mentrix LLM + Realtime voice |
+| `MENTRIX_REALTIME=1` | Enable Realtime mint |
+| `MENTRIX_REALTIME_MODEL=gpt-realtime` | Realtime model |
+| `SLACK_BOT_TOKEN` | Slack digest / send |
+| `SLACK_DEFAULT_CHANNEL` | Default channel (e.g. `#engineering`) |
+| `MCP_JIRA_URL` or `JIRA_BASE_URL` | Jira base URL |
+| `JIRA_EMAIL` + `JIRA_API_TOKEN` | Jira auth |
+
+There is **no minibot runner** inside ZECT. If another app (minibot / App Runner) already has Slack/Jira tokens, **copy them into `backend/.env`** (never commit). Mentrix HUD shows non-secret chips via `GET /api/mentrix/companion/integrations` (OpenAI / Slack / Jira ready or not).
+
+## Personal ops
+
+| Tool | Backend | Notes |
+|------|---------|--------|
+| `weather_report` | Open-Meteo (no key) | City → temp / conditions / short forecast; Artifacts markdown |
+| `slack_digest` | `SLACK_BOT_TOKEN` | Recent messages from `SLACK_DEFAULT_CHANNEL` |
+| `slack_send` | Slack API | **Always-ask** Allow overlay |
+| `email_digest` | `MENTRIX_IMAP_*` | Read-only subjects; setup message if unset |
+| `email_send` | SMTP | **Always-ask**; needs `SMTP_HOST` |
+
+Mentrix research uses DuckDuckGo-style lookup — **not Exa**. Never invent Slack/email contents when tools report unconfigured.
+
+## Skills + Dream context (Labs → Mentrix)
+
+- Active skill id: `localStorage.mentrix_active_skill_id` (HUD/dock picker; optional None).
+- On each typed turn and Connect Voice start: `GET /api/mentrix/companion/agent-context?skill_id=&project_id=` packs **Active skill** text + up to 3 staged Dream lesson claims (`Learned patterns (Dream)`).
+- Empty/unconfigured → silent no-op (no error toast).
+- Dream cycle itself still runs only from Labs `/dream-engine`; Mentrix does not invent lessons.
+
+## Streaming API
+
+- `GET /api/mentrix/companion/scope` — Project / authorized roots / WorkItem envelope
+- `GET /api/mentrix/companion/stream?message=...` — SSE: `thinking`, `scope`, `tool_start`, `progress`, `tool_end`, `artifact`, `token`, `navigate`, `pending_confirm`, `done`, `error` (optional `project_id`, `repository_ids`, `work_item_id`, `workspace_id`, `agent_context`, `skill_id`)
+- `GET /api/mentrix/companion/agent-context` — Skills + staged Dream text for injection
+- `POST /api/mentrix/companion/stream/resume` — continue after Allow
+- `POST /api/mentrix/companion/turn` — non-stream fallback (Playwright)
+
+## ZECT workflows
+
+Voice/text can navigate core routes (Delivery, Lattice, Sandbox, Ask, Plan, Docs, Integrations, Build, …) and run tools: `delivery_status`, `start_delivery`, `lattice_query`, `research_news`, notes, diagnose (Mermaid), media board, desktop actions.
+
+## Mentrix Image board
+
+Numbered generations/edits under `backend/data/mentrix_media/` (gitignored). Tools: `media_generate`, `media_edit`, `media_list` (confirm-gated). Artifacts show images via `/api/mentrix/companion/media/{n}`.
+
+## Computer Mode
+
+Off by default. Requires **ZECT Electron app** (not browser tab alone). Enable the **Computer Mode** checkbox on the HUD before Allow on desktop tools.
+
+**Allowlisted Windows apps:** `explorer.exe`, `chrome.exe`, `msedge.exe`, `Slack.exe`, `notepad.exe`, `code.exe`, `calc.exe`.
+
+| Voice phrase | Action |
+|--------------|--------|
+| Go to desktop / OS desktop | Opens File Explorer (`explorer.exe`) after Allow |
+| Open browser / Open Chrome | `chrome.exe` |
+| Open Edge | `msedge.exe` |
+| Open Slack app | `Slack.exe` (desktop app — not Slack API digest) |
+| Slack digest | API tool — needs `SLACK_BOT_TOKEN` |
+
+Voice Allow on `computer_open_app` runs Electron IPC after confirm (typed and Realtime paths). Idle auto-off. Always-ask for high-risk actions.
+
+## Security
+
+- Every tool → Mentrix permission broker.
+- Sensitive tools **always ask** via Allow? overlay (Enter / Esc) — including Slack/email send.
+- Org policy export/import on HUD.
+- Audits: permission audits + `mentrix_tool_*`.
+- Never commit API keys; use `backend/.env` only.
+
+## Desktop smoke (Realtime voice)
+
+1. `OPENAI_API_KEY` + `MENTRIX_REALTIME_MODEL=gpt-realtime` in `backend/.env`; kill stale port 8000; restart backend + Electron.
+2. HUD shows **Realtime ready** (not unavailable / openai_404).
+3. Select headset in **Mic**, click **Connect Voice** → Live Log `Connect Voice — OpenAI Realtime`.
+4. Say “Hi” / weather question — spoken reply, no Send corrected.
+5. Optional: set `SLACK_BOT_TOKEN` / Jira env for digests; chips show Slack/Jira ready.
+
+## Post-merge restart
+
+After merging Mentrix PRs into `develop`, restart all services from repo root:
+
+```powershell
+cd C:\Users\karuppk\Downloads\ZECT
+.\RESTART_MENTRIX.ps1
+```
+
+Or start fresh without stopping first: `.\RUN_MENTRIX.ps1`
+
+## Artifacts
+
+Host types: `markdown`, `mermaid`, `table`, `chart`, `note`, `image`, `progress`, `record`.

@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { getProjects } from "@/lib/api";
+import { getProjectFixtureAudit, getProjects, deleteProject } from "@/lib/api";
 import type { Project } from "@/types";
 import { STAGES } from "@/types";
+import RepoOnboardingPanel from "@/components/RepoOnboardingPanel";
+import { useActiveProject } from "@/contexts/ActiveProjectContext";
+import { isZoasKeepProject, projectsToDeleteKeepingZoas } from "@/lib/keepZoasProjects";
 import {
   Plus,
   Layers,
   GitBranch,
+  Trash2,
 } from "lucide-react";
 
 function stageBadge(stage: string) {
@@ -39,44 +43,136 @@ function statusBadge(status: string) {
 }
 
 export default function Projects() {
+  const { activeProjectId } = useActiveProject();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [candidateCount, setCandidateCount] = useState(0);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const refresh = () => {
+    setLoading(true);
     getProjects()
       .then(setProjects)
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    refresh();
+    getProjectFixtureAudit()
+      .then((a) => setCandidateCount((a.name_candidates || []).length))
+      .catch(() => setCandidateCount(0));
   }, []);
 
-  const filtered = filter
-    ? projects.filter((p) => p.status === filter)
-    : projects;
+  const filtered = projects.filter((p) => {
+    if (filter && p.status !== filter) return false;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      const hay = `${p.name} ${p.team || ""} ${p.description || ""}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const onDeleteOne = async (p: Project, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isZoasKeepProject(p) && activeProjectId === p.id) {
+      window.alert("The active zoas project cannot be deleted.");
+      return;
+    }
+    if (!window.confirm(`Delete project “${p.name}”? This cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      await deleteProject(p.id);
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onKeepZoas = async () => {
+    const doomed = projectsToDeleteKeepingZoas(projects, activeProjectId);
+    if (!doomed.length) {
+      window.alert("Nothing to delete — only zoas keep-list projects remain.");
+      return;
+    }
+    const typed = window.prompt(
+      `Delete ${doomed.length} non-zoas project(s)? Type DELETE to confirm. Never deletes zoas / zinnia/zoas / ZOAS Eval.`,
+    );
+    if (typed !== "DELETE") return;
+    setBusy(true);
+    try {
+      for (const p of doomed) {
+        await deleteProject(p.id);
+      }
+      refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-800" />
+      <div className="zect-page flex flex-col items-center justify-center h-64 gap-3" role="status" data-testid="projects-page">
+        <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-slate-800" aria-hidden />
+        <span className="sr-only">Loading projects</span>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="zect-page" data-testid="projects-page">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
-          <p className="text-slate-500 text-sm">Manage your engineering projects</p>
+          <p className="text-slate-500 text-sm">Authorized projects you can access. Test fixtures are hidden by provenance.</p>
         </div>
-        <Link
-          to="/projects/new"
-          className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-        >
-          <Plus className="h-4 w-4" /> New Project
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-testid="projects-keep-zoas"
+            disabled={busy}
+            onClick={() => void onKeepZoas()}
+            className="flex items-center gap-2 border border-rose-200 text-rose-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-rose-50 disabled:opacity-40"
+          >
+            <Trash2 className="h-4 w-4" /> Keep zoas (delete others)
+          </button>
+          <Link
+            to="/projects/new"
+            className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" /> New Project
+          </Link>
+        </div>
       </div>
 
-      <div className="flex gap-2 mb-6">
+      {candidateCount > 0 && (
+        <div
+          className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          data-testid="projects-hygiene-banner"
+        >
+          {candidateCount} name-candidate project{candidateCount === 1 ? "" : "s"} still have user
+          provenance. They are hidden from this list when empty/test-named, but cleanup only deletes
+          provenance=test rows after tag-by-id. Review GET /api/projects/fixtures/audit.
+        </div>
+      )}
+
+      <div className="mb-6">
+        <RepoOnboardingPanel />
+      </div>
+
+      <div className="flex gap-2 mb-6 flex-wrap items-center">
+        <input
+          data-testid="projects-search"
+          aria-label="Search projects"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search projects"
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs min-w-[12rem]"
+        />
         {["", "active", "completed", "on-hold"].map((f) => (
           <button
             key={f}
@@ -97,6 +193,8 @@ export default function Projects() {
           <Link
             key={p.id}
             to={`/projects/${p.id}`}
+            data-testid={`project-card-${p.id}`}
+            data-project-name={p.name}
             className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow"
           >
             <div className="flex items-start justify-between mb-2">
@@ -104,6 +202,15 @@ export default function Projects() {
               <div className="flex gap-1.5 shrink-0 ml-2">
                 {statusBadge(p.status)}
                 {stageBadge(p.current_stage)}
+                <button
+                  type="button"
+                  data-testid={`project-delete-${p.id}`}
+                  className="rounded border border-rose-200 px-1.5 py-0.5 text-[10px] text-rose-800 hover:bg-rose-50"
+                  disabled={busy}
+                  onClick={(e) => void onDeleteOne(p, e)}
+                >
+                  Delete
+                </button>
               </div>
             </div>
             <p className="text-xs text-slate-500 mb-4 line-clamp-2">{p.description}</p>

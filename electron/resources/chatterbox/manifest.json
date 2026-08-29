@@ -1,0 +1,13 @@
+{
+  "name": "zect-chatterbox-sidecar",
+  "version": "1.0.0",
+  "description": "Bundled Chatterbox/Voicebox-compatible TTS sidecar for ZECT Electron",
+  "baseUrl": "http://127.0.0.1:17493",
+  "healthPath": "/profiles",
+  "binaries": {
+    "win32": ["chatterbox-server.exe", "Voicebox.exe", "chatterbox.exe"],
+    "darwin": ["chatterbox-server", "Voicebox", "Chatterbox"],
+    "linux": ["chatterbox-server", "chatterbox"]
+  },
+  "notes": "Place a compatible engine binary under bin/. ZECT does not redistribute third-party ML weights in git — use scripts/fetch-chatterbox.ps1 or drop your licensed build here before electron-builder."
+}

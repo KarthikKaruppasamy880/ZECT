@@ -1,4 +1,5 @@
 import os
+import threading
 from github import Github, GithubException
 from app.schemas import (
     GitHubRepoInfo, GitHubPR, GitHubPRFile,
@@ -6,16 +7,19 @@ from app.schemas import (
 )
 
 _gh: Github | None = None
+_gh_token: str | None = None
+_gh_lock = threading.Lock()
 
 
 def get_github() -> Github:
-    global _gh
+    """Build a GitHub client from the current GITHUB_TOKEN (refresh if token changes)."""
+    global _gh, _gh_token
     token = os.getenv("GITHUB_TOKEN", "")
-    if _gh is None and token:
-        _gh = Github(token)
-    elif _gh is None:
-        _gh = Github()  # unauthenticated (60 req/hr)
-    return _gh
+    with _gh_lock:
+        if _gh is None or token != (_gh_token or ""):
+            _gh = Github(token) if token else Github()
+            _gh_token = token
+        return _gh
 
 
 def list_org_repos(org: str, limit: int = 30) -> list[GitHubRepoInfo]:
@@ -167,6 +171,237 @@ def create_pull_request(owner: str, repo: str, title: str, body: str, head: str,
     }
 
 
+def create_issue(owner: str, repo: str, title: str, body: str = "") -> dict:
+    """Create a GitHub issue."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    issue = repo_obj.create_issue(title=title, body=body or "")
+    return {
+        "number": issue.number,
+        "html_url": issue.html_url,
+        "title": issue.title,
+        "state": issue.state,
+    }
+
+
+def list_issues(owner: str, repo: str, state: str = "open", limit: int = 20) -> list[dict]:
+    """List GitHub issues (excludes pull requests, which the API also returns as issues)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    issues = repo_obj.get_issues(state=state)
+    result = []
+    for issue in issues[:limit]:
+        if issue.pull_request:
+            continue
+        result.append({
+            "number": issue.number,
+            "title": issue.title,
+            "state": issue.state,
+            "html_url": issue.html_url,
+            "author": issue.user.login if issue.user else "unknown",
+            "created_at": issue.created_at.isoformat() if issue.created_at else "",
+        })
+    return result
+
+
+def get_file(owner: str, repo: str, path: str, ref: str | None = None) -> dict:
+    """Fetch a file's decoded text content at an optional ref (branch/sha/tag)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    kwargs = {"ref": ref} if ref else {}
+    content_file = repo_obj.get_contents(path, **kwargs)
+    if isinstance(content_file, list):
+        raise ValueError(f"'{path}' is a directory, not a file")
+    return {
+        "path": content_file.path,
+        "sha": content_file.sha,
+        "size": content_file.size,
+        "content": content_file.decoded_content.decode("utf-8", errors="replace"),
+        "html_url": content_file.html_url,
+    }
+
+
+def get_diff(owner: str, repo: str, base: str, head: str) -> dict:
+    """Compare two refs (branches/shas/tags) and return the per-file diff."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    comparison = repo_obj.compare(base, head)
+    return {
+        "base": base,
+        "head": head,
+        "ahead_by": comparison.ahead_by,
+        "behind_by": comparison.behind_by,
+        "total_commits": comparison.total_commits,
+        "files": [
+            {
+                "filename": f.filename,
+                "status": f.status,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "patch": f.patch,
+            }
+            for f in (comparison.files or [])
+        ],
+    }
+
+
+def list_branches(owner: str, repo: str, limit: int = 50) -> list[dict]:
+    """List branches on a repo."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    branches = repo_obj.get_branches()
+    return [
+        {"name": b.name, "sha": b.commit.sha, "protected": b.protected}
+        for b in branches[:limit]
+    ]
+
+
+def create_branch(owner: str, repo: str, branch: str, from_ref: str | None = None) -> dict:
+    """Create a new branch pointing at from_ref's current commit (defaults to the repo's default branch)."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    source_ref = from_ref or repo_obj.default_branch
+    source_sha = repo_obj.get_branch(source_ref).commit.sha
+    ref = repo_obj.create_git_ref(ref=f"refs/heads/{branch}", sha=source_sha)
+    return {"ref": ref.ref, "sha": ref.object.sha, "branch": branch, "from_ref": source_ref}
+
+
+def search_code(owner: str, repo: str, query: str, limit: int = 20) -> list[dict]:
+    """Search code within a single repo via GitHub's code search API."""
+    gh = get_github()
+    results = gh.search_code(query=f"{query} repo:{owner}/{repo}")
+    out = []
+    for item in results[:limit]:
+        out.append({
+            "path": item.path,
+            "name": item.name,
+            "sha": item.sha,
+            "html_url": item.html_url,
+            "repository": item.repository.full_name if item.repository else f"{owner}/{repo}",
+        })
+    return out
+
+
+def _sast_name_patterns() -> list[str]:
+    import fnmatch
+    import os
+
+    raw = os.getenv("MENTRIX_SAST_CHECK_NAMES", "Semgrep*,semgrep*,*semgrep*")
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def sast_required() -> bool:
+    import os
+
+    return os.getenv("MENTRIX_SAST_REQUIRED", "").lower() in ("1", "true", "yes")
+
+
+def list_check_runs(owner: str, repo: str, ref: str) -> list[dict]:
+    """List GitHub Check Runs for a commit SHA or branch ref."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    runs = repo_obj.get_commit(ref).get_check_runs()
+    out: list[dict] = []
+    for c in runs:
+        out.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "status": c.status,
+                "conclusion": c.conclusion,
+                "html_url": getattr(c, "html_url", None),
+                "app": getattr(getattr(c, "app", None), "slug", None)
+                or getattr(getattr(c, "app", None), "name", None),
+            }
+        )
+    return out
+
+
+def sast_checks_ok(owner: str, repo: str, ref: str) -> dict:
+    """Evaluate Semgrep / SAST check runs (scanSuccessful ≈ conclusion success)."""
+    import fnmatch
+
+    patterns = _sast_name_patterns()
+    try:
+        checks = list_check_runs(owner, repo, ref)
+    except Exception as e:
+        return {
+            "ok": False,
+            "required": sast_required(),
+            "matched": [],
+            "error": str(e)[:300],
+            "note": "Failed to list GitHub check runs",
+        }
+
+    matched = []
+    for c in checks:
+        name = c.get("name") or ""
+        app = str(c.get("app") or "")
+        if any(fnmatch.fnmatch(name, p) or fnmatch.fnmatch(app, p) for p in patterns):
+            matched.append(c)
+        elif "semgrep" in name.lower() or "semgrep" in app.lower():
+            matched.append(c)
+
+    if not matched:
+        return {
+            "ok": False if sast_required() else True,
+            "required": sast_required(),
+            "matched": [],
+            "note": "No Semgrep/SAST check runs found for this ref",
+        }
+
+    # Prefer completed success (Semgrep Cloud scanSuccessful)
+    successes = [c for c in matched if c.get("conclusion") == "success"]
+    pending = [c for c in matched if c.get("status") != "completed"]
+    failures = [
+        c
+        for c in matched
+        if c.get("status") == "completed" and c.get("conclusion") not in ("success", "neutral", "skipped")
+    ]
+    ok = bool(successes) and not failures and not pending
+    if pending and not failures:
+        ok = False
+    return {
+        "ok": ok,
+        "required": sast_required(),
+        "matched": matched,
+        "pending": len(pending) > 0,
+        "note": "Semgrep check success" if ok else "SAST not green yet",
+    }
+
+
+def create_check_run(
+    owner: str,
+    repo: str,
+    name: str,
+    head_sha: str,
+    conclusion: str,
+    title: str,
+    summary: str,
+    details_url: str | None = None,
+) -> dict:
+    """Create a GitHub Check Run for Mentrix / ZECT review status."""
+    gh = get_github()
+    repo_obj = gh.get_repo(f"{owner}/{repo}")
+    output = {"title": title, "summary": summary}
+    kwargs: dict = {
+        "name": name,
+        "head_sha": head_sha,
+        "status": "completed",
+        "conclusion": conclusion,
+        "output": output,
+    }
+    if details_url:
+        kwargs["details_url"] = details_url
+    check = repo_obj.create_check_run(**kwargs)
+    return {
+        "id": check.id,
+        "name": check.name,
+        "conclusion": check.conclusion,
+        "html_url": getattr(check, "html_url", None),
+    }
+
+
 def post_pr_review_comment(owner: str, repo: str, pr_number: int, body: str, commit_sha: str | None = None, path: str | None = None, line: int | None = None) -> dict:
     """Post a review comment on a PR (inline or general)."""
     gh = get_github()
@@ -235,3 +470,22 @@ def list_workflow_runs(owner: str, repo_name: str, limit: int = 10) -> list[GitH
         return result
     except GithubException:
         return []
+
+
+def trigger_workflow_dispatch(
+    owner: str, repo_name: str, workflow_file: str, ref: str = "main", inputs: dict | None = None
+) -> dict:
+    """Fire a real workflow_dispatch run — the actual CI/CD trigger; nothing
+    else in this module does more than read Actions status."""
+    gh = get_github()
+    repo = gh.get_repo(f"{owner}/{repo_name}")
+    workflow = repo.get_workflow(workflow_file)
+    ok = workflow.create_dispatch(ref, inputs or {})
+    if not ok:
+        raise GithubException(502, f"workflow_dispatch rejected for {workflow_file}@{ref}", None)
+    return {
+        "dispatched": True,
+        "workflow": workflow_file,
+        "ref": ref,
+        "message": f"Dispatched {workflow_file} on {ref}",
+    }

@@ -14,6 +14,7 @@
 | Executive overview for management | `ZECT-ONE-SHEET.md` |
 | Full technical white paper | `ZECT-WHITE-PAPER.md` |
 | Demo/presentation content | `ZECT-DEMO-PPT-CONTENT.md` |
+| Mentrix Multi-Surface Fabric | `MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` |
 | How to use every screen | `ZECT_USER_MANUAL.md` |
 | Gap analysis (all gaps closed) | `ZECT-GAP-ANALYSIS.md` |
 | How to deploy to AWS | `AWS_DEPLOYMENT_GUIDE.md` |
@@ -33,6 +34,7 @@
 | **Tech Details** | `docs/ZECT-TECH-DETAILS-ONE-PAGE.md` | Complete tech stack, all gaps fixed, data integrity, deployment, usefulness to Zinnia |
 | **One-Sheet** | `docs/ZECT-ONE-SHEET.md` | Single-page executive summary — at-a-glance metrics, differentiators, roadmap |
 | **Demo PPT Content** | `docs/ZECT-DEMO-PPT-CONTENT.md` | Slide-by-slide content for live demo presentations with speaker notes |
+| **Mentrix Multi-Surface Fabric** | `docs/MSTF_MULTI_SURFACE_TRANSACTION_FABRIC.md` | Classify/refuse/Coding Agent handoff spine; NGC/CDS/Tango surfaces; UI `/fabric` |
 | **Gap Analysis v3.0** | `docs/ZECT-GAP-ANALYSIS.md` | Feature-by-feature comparison with industry tools — all gaps CLOSED (except 2.7 Integrations) |
 | **Feature Roadmap** | `docs/ZECT_FEATURE_ROADMAP_AND_GAP_ANALYSIS.md` | Earlier roadmap with phase-by-phase feature plan |
 | **Vision & Integrations** | `docs/ZECT_VISION_AND_INTEGRATIONS.md` | Long-term vision and integration strategy |

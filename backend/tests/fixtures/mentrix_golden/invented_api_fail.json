@@ -1,0 +1,14 @@
+{
+  "id": "invented_api_fail",
+  "language": "python",
+  "files_expected": ["svc.py"],
+  "files_written": ["svc.py"],
+  "generated_code": "class Client:\n    def run(self):\n        return self.getUserByEmail('a@b.c')\n",
+  "blueprint_prompt": "Use findByEmail from reference",
+  "design_contract": {
+    "required_files": ["svc.py"],
+    "required_mentions": ["Mentrix"],
+    "acceptance_criteria": ["Use findByEmail"]
+  },
+  "scout": {"graph_hits": [{"name": "findByEmail", "path": "user.py"}]}
+}

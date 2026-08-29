@@ -9,8 +9,10 @@ frontend/dist/
 
 # Environment
 .env
+.env.local
 backend/.env
 frontend/.env
+frontend/.env.local
 
 # Database
 *.db
@@ -19,12 +21,58 @@ frontend/.env
 # Python
 .venv/
 *.egg-info/
+backend/.wheels/
 
 # IDE
 .vscode/
 .idea/
 .DS_Store
 
+# Cursor MCP local secrets / wired credentials, local plan scratch files
+.cursor/mcp.env
+.cursor/mcp.json
+.cursor/plans/
+
+# Local-only tool output / recordings / diagnostics
+.playwright-mcp/
+artifacts/
+backend/get-pip.py
+backend/data/lattice/
+backend/data/voices/*
+!backend/data/voices/.gitkeep
+scripts/*.ps1
+
 # Misc
 *.pem
 *.log
+
+# Mentrix Companion local notes/records / media board
+backend/data/mentrix_notes/
+backend/data/mentrix_media/
+backend/data/coding_missions/
+
+# Playwright
+frontend/e2e/.auth/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
+# Local Present assets / template worktrees (never commit user images or org masters)
+.zect/stack/
+.zect/plans/
+.zect/present-assets/
+.zect/present-templates/
+.zect/live-endurance/
+.zect/work/
+test-results/
+electron/resources/backend/python-runtime/
+electron/resources/backend/src/
+electron/resources/backend/zect-api.exe
+electron/dist-electron/
+
+# Upstream Voicebox checkout (cloned by services/zect-voicebox/scripts)
+third_party/
+
+# ZECT Voicebox local data
+services/zect-voicebox/data/*
+!services/zect-voicebox/data/.gitkeep

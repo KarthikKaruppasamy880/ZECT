@@ -8,9 +8,12 @@ import {
   cloneRepo, pullRepo, deleteRepoClone,
   getRepoBranches, checkoutRepoBranch, getClonedRepos,
   getRepoTree, getRepoFile, searchRepoFiles,
+  getProjects, getProject, addProjectRepo, latticeIngest,
 } from "@/lib/api";
-import { getProjects } from "@/lib/api";
 import { showToast } from "@/components/Toast";
+import { deriveProjectKey } from "@/lib/workspaceContext";
+import { latticeStatus } from "@/lib/api";
+import { Link } from "react-router-dom";
 
 interface TreeNode {
   name: string;
@@ -51,6 +54,10 @@ interface ClonedRepo {
   total_lines: number;
 }
 
+function repoProjectKey(r: { owner: string; repo_name: string }) {
+  return deriveProjectKey(r.owner, r.repo_name);
+}
+
 export default function RepoWorkspace() {
   // --- Tab state ---
   const [activeTab, setActiveTab] = useState<"clone" | "browse" | "search">("clone");
@@ -65,6 +72,7 @@ export default function RepoWorkspace() {
   const [cloneShallow, setCloneShallow] = useState(true);
   const [cloning, setCloning] = useState(false);
   const [pulling, setPulling] = useState<number | null>(null);
+  const [latticeStale, setLatticeStale] = useState<{ path: string; key: string } | null>(null);
   const [loadingCloned, setLoadingCloned] = useState(true);
 
   // --- Browse tab ---
@@ -83,6 +91,25 @@ export default function RepoWorkspace() {
   const [searchPattern, setSearchPattern] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [indexStatus, setIndexStatus] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    if (clonedRepos.length === 0) return;
+    void (async () => {
+      const next: Record<number, boolean> = {};
+      await Promise.all(
+        clonedRepos.map(async (r) => {
+          try {
+            const st = await latticeStatus(repoProjectKey(r));
+            next[r.repo_id] = st.indexed;
+          } catch {
+            next[r.repo_id] = false;
+          }
+        }),
+      );
+      setIndexStatus(next);
+    })();
+  }, [clonedRepos]);
 
   // --- Load projects + cloned repos ---
   const loadData = useCallback(async () => {
@@ -112,38 +139,58 @@ export default function RepoWorkspace() {
       return;
     }
     setCloning(true);
+    const owner = cloneOwner.trim();
+    const name = cloneRepoName.trim();
+    const projectKey = repoProjectKey({ owner, repo_name: name });
     try {
-      // First create the repo in the project if needed
-      const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const addRes = await fetch(`${API}/api/projects/${selectedProjectId}/repos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          owner: cloneOwner.trim(),
-          repo_name: cloneRepoName.trim(),
-          default_branch: cloneBranch || "main",
-        }),
-      });
-      let repo;
-      if (addRes.ok) {
-        repo = await addRes.json();
-      } else {
-        // Repo may already exist, try to find it
-        const listRes = await fetch(`${API}/api/projects/${selectedProjectId}`);
-        if (listRes.ok) {
-          const proj = await listRes.json();
-          repo = proj.repos?.find(
-            (r: any) => r.owner === cloneOwner.trim() && r.repo_name === cloneRepoName.trim()
-          );
-        }
-      }
+      let proj = await getProject(selectedProjectId);
+      let repo = proj.repos?.find(
+        (r: any) => r.owner === owner && r.repo_name === name,
+      );
       if (!repo) {
+        proj = await addProjectRepo(selectedProjectId, {
+          owner,
+          repo_name: name,
+          default_branch: cloneBranch || "main",
+        });
+        repo = proj.repos?.find(
+          (r: any) => r.owner === owner && r.repo_name === name,
+        );
+      }
+      if (!repo?.id) {
         showToast("error", "Could not create/find repo");
         return;
       }
 
       const result = await cloneRepo(repo.id, cloneBranch || undefined, cloneShallow);
-      showToast("success", `Cloned ${cloneOwner}/${cloneRepoName}: ${result.stats?.total_files || 0} files`);
+      const localPath = result.local_path || result.path || "";
+      showToast(
+        "success",
+        `Cloned ${owner}/${name}: ${result.stats?.total_files || 0} files`,
+      );
+
+      if (localPath) {
+        try {
+          await latticeIngest(localPath, projectKey, true);
+          localStorage.setItem(
+            "zect_mentrix_workspace",
+            JSON.stringify({
+              path: localPath,
+              workspace: localPath,
+              project_key: projectKey,
+              projectKey,
+            }),
+          );
+          localStorage.setItem("zect_lattice_key", projectKey);
+          showToast("success", `Lattice indexed as project key "${projectKey}"`);
+        } catch (ingestErr: any) {
+          showToast(
+            "error",
+            `Clone OK; Lattice ingest failed: ${ingestErr?.message || "unknown"}`,
+          );
+        }
+      }
+
       setCloneOwner("");
       setCloneRepoName("");
       setCloneBranch("");
@@ -161,6 +208,33 @@ export default function RepoWorkspace() {
     try {
       const result = await pullRepo(repoId);
       showToast("success", `Pulled latest: ${result.stats?.total_files || 0} files`);
+      const repo = clonedRepos.find((r) => r.repo_id === repoId);
+      const localPath = result.local_path || repo?.local_path || "";
+      if (localPath) {
+        const owner = repo?.owner || "";
+        const name = repo?.repo_name || "";
+        const projectKey = repoProjectKey({ owner, repo_name: name });
+        setLatticeStale({ path: localPath, key: projectKey });
+        try {
+          await latticeIngest(localPath, projectKey, true);
+          localStorage.setItem(
+            "zect_mentrix_workspace",
+            JSON.stringify({
+              path: localPath,
+              workspace: localPath,
+              project_key: projectKey,
+              projectKey,
+            }),
+          );
+          localStorage.setItem("zect_lattice_key", projectKey);
+          showToast("success", `Lattice re-indexed as "${projectKey}"`);
+        } catch (ingestErr: any) {
+          showToast(
+            "error",
+            `Pull OK; Lattice is STALE — re-index on Lattice. ${ingestErr?.message || "unknown"}`,
+          );
+        }
+      }
       await loadData();
     } catch (e: any) {
       showToast("error", e.message || "Pull failed");
@@ -432,6 +506,14 @@ export default function RepoWorkspace() {
                 <RefreshCw size={16} className={loadingCloned ? "animate-spin" : ""} />
               </button>
             </div>
+            {latticeStale ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="repo-lattice-stale">
+                Lattice is <strong>STALE</strong> after pull ({latticeStale.key}).{" "}
+                <Link to={`/lattice?stale=1`} className="font-semibold underline" data-testid="repo-lattice-reindex">
+                  Re-index repository
+                </Link>
+              </div>
+            ) : null}
             {clonedRepos.length === 0 ? (
               <div className="text-center py-8 text-slate-400">
                 <HardDrive size={32} className="mx-auto mb-2 opacity-50" />
@@ -446,8 +528,21 @@ export default function RepoWorkspace() {
                         <GitBranch size={18} className="text-green-600" />
                       </div>
                       <div>
-                        <div className="font-medium text-slate-900">{r.owner}/{r.repo_name}</div>
-                        <div className="text-xs text-slate-500 flex items-center gap-3">
+                        <div className="font-medium text-slate-900 flex items-center gap-2">
+                          {r.owner}/{r.repo_name}
+                          <span
+                            data-testid={`repo-lattice-chip-${r.repo_id}`}
+                            className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              indexStatus[r.repo_id]
+                                ? "bg-teal-50 text-teal-700 border border-teal-200"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {indexStatus[r.repo_id] ? "Lattice indexed" : "Not indexed"}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
+                          <span className="font-mono text-teal-600">{repoProjectKey(r)}</span>
                           <span className="flex items-center gap-1"><GitBranch size={10} />{r.clone_branch}</span>
                           <span className="flex items-center gap-1"><FileCode size={10} />{r.total_files} files</span>
                           <span className="flex items-center gap-1"><HardDrive size={10} />{r.disk_usage_mb} MB</span>
@@ -458,6 +553,18 @@ export default function RepoWorkspace() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      <Link
+                        to="/lattice"
+                        className="px-3 py-1.5 text-xs font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50"
+                      >
+                        Lattice
+                      </Link>
+                      <Link
+                        to="/blueprint"
+                        className="px-3 py-1.5 text-xs font-medium text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-50"
+                      >
+                        Blueprint
+                      </Link>
                       <button
                         onClick={() => { setBrowseRepoId(r.repo_id); loadTree(r.repo_id); setActiveTab("browse"); }}
                         className="px-3 py-1.5 text-xs font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50"
@@ -473,6 +580,7 @@ export default function RepoWorkspace() {
                       <button
                         onClick={() => handlePull(r.repo_id)}
                         disabled={pulling === r.repo_id}
+                        data-testid={`repo-pull-${r.repo_id}`}
                         className="px-3 py-1.5 text-xs font-medium text-green-600 border border-green-200 rounded-lg hover:bg-green-50 disabled:opacity-50"
                       >
                         {pulling === r.repo_id ? <Loader2 size={12} className="inline animate-spin mr-1" /> : <RefreshCw size={12} className="inline mr-1" />}

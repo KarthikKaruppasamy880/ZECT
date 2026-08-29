@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus } from "@/lib/api";
+import { getSettings, updateSetting, configureApiKey, getApiKeyStatus, getTokenUsage, configureLLMKey, getLLMStatus, mentrixPreferredName, mentrixSetPreferredName } from "@/lib/api";
 import type { Setting, ApiKeyStatus, TokenUsage, LLMKeyStatus } from "@/types";
 import { Link } from "react-router-dom";
+import CloneVoicePanel from "@/components/CloneVoicePanel";
 import {
   Settings as SettingsIcon,
   ToggleLeft,
@@ -16,10 +17,17 @@ import {
   KeyRound,
   ArrowRight,
 } from "lucide-react";
+import {
+  agentModeEnvLocked as isAgentModeEnvLocked,
+  isAgentModeEnabled,
+  setAgentModeEnabled,
+} from "@/lib/featureFlags";
 
 export default function Settings() {
   const [settings, setSettings] = useState<Setting[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agentModeEnabled, setAgentModeEnabledState] = useState(() => isAgentModeEnabled());
+  const agentModeLocked = isAgentModeEnvLocked();
 
   // API Key Modal
   const [showApiModal, setShowApiModal] = useState(false);
@@ -39,6 +47,8 @@ export default function Settings() {
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
+  const [preferredName, setPreferredName] = useState("");
+  const [preferredSaving, setPreferredSaving] = useState(false);
 
   useEffect(() => {
     getSettings()
@@ -49,6 +59,9 @@ export default function Settings() {
       .catch(() => {});
     getLLMStatus()
       .then(setLlmStatus)
+      .catch(() => {});
+    mentrixPreferredName()
+      .then((r) => setPreferredName(r.preferred_name || ""))
       .catch(() => {});
   }, []);
 
@@ -130,6 +143,45 @@ export default function Settings() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
         <p className="text-slate-500 text-sm">Configure ZECT behavior and integrations</p>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-5" data-testid="settings-governance">
+        <h2 className="text-sm font-semibold text-slate-900 mb-1">Governance &amp; memory</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Permissions, memory, secrets, and related surfaces live here (not Labs).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { href: "/permissions", label: "Permissions" },
+            { href: "/memory", label: "Memory" },
+            { href: "/secrets", label: "Secrets" },
+            { href: "/token-controls", label: "Token Controls" },
+            { href: "/security-incidents", label: "Security Agent" },
+            { href: "/transfer", label: "Transfer" },
+            { href: "/conversations", label: "Conversations" },
+            { href: "/mentrix-notes", label: "Notes" },
+          ].map((l) => (
+            <Link
+              key={l.href}
+              to={l.href}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {l.label}
+              <ArrowRight className="h-3 w-3 text-slate-400" />
+            </Link>
+          ))}
+        </div>
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <p className="text-xs font-medium text-slate-700 mb-1">Security scan engine</p>
+          <p className="text-xs text-slate-500 mb-2">
+            ZECT Security Agent malware scan — start{" "}
+            <code className="text-[10px] bg-slate-100 px-1 rounded">services/zect-security-scan</code>. Status on
+            Security Agent page.
+          </p>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <span>Scan on write (server env <code className="bg-slate-100 px-1 rounded">ZECT_MALWARE_SCAN_WRITES</code>)</span>
+          </label>
+        </div>
       </div>
 
       {/* API Key Cards */}
@@ -248,6 +300,143 @@ export default function Settings() {
             Manage Secrets <ArrowRight size={12} />
           </Link>
         </div>
+      </div>
+
+      {/* Preferred name — Companion address */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6" data-testid="settings-preferred-name">
+        <h3 className="text-sm font-semibold text-slate-900 mb-1">Preferred name</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          Mentrix Companion uses this when addressing you (defaults from your email local-part).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            data-testid="preferred-name-input"
+            className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm w-56"
+            value={preferredName}
+            onChange={(e) => setPreferredName(e.target.value)}
+            placeholder="e.g. Karthik"
+          />
+          <button
+            type="button"
+            data-testid="preferred-name-save"
+            disabled={preferredSaving}
+            onClick={async () => {
+              setPreferredSaving(true);
+              try {
+                const out = await mentrixSetPreferredName(preferredName.trim());
+                setPreferredName(out.preferred_name || preferredName.trim());
+              } catch {
+                /* ignore */
+              } finally {
+                setPreferredSaving(false);
+              }
+            }}
+            className="px-3 py-1.5 bg-slate-800 text-white rounded-lg text-xs font-medium hover:bg-slate-900 disabled:opacity-50"
+          >
+            {preferredSaving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+
+      {/* Voice clone — ZECT Voicebox (native local TTS) */}
+      <div
+        id="voice"
+        className="bg-white rounded-xl border border-slate-200 p-5 mb-6 scroll-mt-20"
+        data-testid="settings-voice-section"
+      >
+        <h3 className="text-sm font-semibold text-slate-900 mb-1">Voice (ZECT Voicebox)</h3>
+        <p className="text-xs text-slate-500 mb-3">
+          Record and save your clone here. Mentrix Companion Speak replies and Present narration use this
+          default voice. Engine is ZECT-owned Voicebox on{" "}
+          <code className="text-[11px]">127.0.0.1:17493</code> (not a third-party UI).
+        </p>
+        <CloneVoicePanel defaultExpanded />
+      </div>
+
+      {/* Telemetry consent — Phase 11 */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6" data-testid="telemetry-consent">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Product telemetry consent</h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Off by default. Enabling stores <code>telemetry_consent=true</code>. No external
+              telemetry is sent until a collector is configured.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Toggle telemetry consent"
+            onClick={async () => {
+              const current = settings.find((s) => s.key === "telemetry_consent");
+              const next = current?.value === "true" ? "false" : "true";
+              const updated = await updateSetting("telemetry_consent", next);
+              setSettings((prev) => {
+                const exists = prev.some((x) => x.key === updated.key);
+                return exists
+                  ? prev.map((x) => (x.key === updated.key ? updated : x))
+                  : [...prev, updated];
+              });
+            }}
+            className="shrink-0 ml-4"
+          >
+            {settings.find((s) => s.key === "telemetry_consent")?.value === "true" ? (
+              <ToggleRight className="h-7 w-7 text-indigo-600" />
+            ) : (
+              <ToggleLeft className="h-7 w-7 text-slate-300" />
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Advanced — power-user surfaces */}
+      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6" data-testid="settings-advanced">
+        <div className="flex items-center gap-2 mb-5">
+          <SettingsIcon className="h-5 w-5 text-slate-400" />
+          <h2 className="text-sm font-semibold text-slate-700">Advanced</h2>
+        </div>
+        <div className="flex items-center justify-between py-2 border-t border-slate-100 mt-3 pt-3">
+          <div>
+            <p className="text-sm font-medium text-slate-900">Agent Mode (legacy orchestrator)</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Deprecated power-user facade over Mentrix Delivery. Prefer Agent Workspace for plan
+              confirm, gates, approve, and PR. Enable only if you still need the older multi-stage
+              /api/agent runner. Scheduled for removal after Mentrix cancel/files/App Runner parity
+              lands.
+              {agentModeLocked && (
+                <span className="block mt-1 text-amber-700">
+                  Locked by VITE_ENABLE_AGENT_MODE in the environment.
+                </span>
+              )}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="settings-agent-mode-toggle"
+            disabled={agentModeLocked}
+            onClick={() => {
+              const next = !agentModeEnabled;
+              setAgentModeEnabled(next);
+              setAgentModeEnabledState(next);
+            }}
+            className="shrink-0 ml-4 disabled:opacity-40"
+            aria-label="Toggle Agent Mode"
+          >
+            {agentModeEnabled ? (
+              <ToggleRight className="h-7 w-7 text-indigo-600" />
+            ) : (
+              <ToggleLeft className="h-7 w-7 text-slate-300" />
+            )}
+          </button>
+        </div>
+        {agentModeEnabled && (
+          <p className="text-xs text-slate-500 mt-2">
+            Open{" "}
+            <Link to="/agent-mode" className="text-teal-700 underline font-medium">
+              Agent Mode
+            </Link>{" "}
+            from Deliver or the Agent Workspace rail.
+          </p>
+        )}
       </div>
 
       {/* Feature Toggles */}

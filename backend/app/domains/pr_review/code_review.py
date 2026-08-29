@@ -1,0 +1,730 @@
+"""Code Review API endpoints for ZECT.
+
+Provides AI-powered code review for PRs, code snippets, and full repositories,
+identifying bugs, vulnerabilities, performance issues, and more.
+Includes auto-fix loop, GitHub webhook auto-trigger, and Rules Engine integration.
+"""
+
+import hashlib
+import hmac
+import json
+import re
+import logging
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, Request, Depends
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from app import github_service
+from app.review_service import review_pr_diff, review_code_snippet, review_repo_files
+from app.infrastructure.database import SessionLocal, get_db
+from app.models import ReviewWebhookConfig, Rule
+from app.infrastructure.auth.deps import CurrentUser, get_current_user
+from app.infrastructure.budget import enforce_token_budget
+
+# Import for inline PR review
+try:
+    from app.github_service import post_pr_review_comment, get_pr_review_comments
+except ImportError:
+    post_pr_review_comment = None
+    get_pr_review_comments = None
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/review", tags=["code-review"])
+# Alias used by frontend mentrixSastStatus (/api/code-review/...)
+code_review_alias = APIRouter(prefix="/api/code-review", tags=["code-review"])
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@router.get("/sast-status")
+@code_review_alias.get("/sast-status")
+def get_sast_status(
+    owner: str,
+    repo: str,
+    ref: str,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Return Semgrep / SAST GitHub Check Run status for a commit SHA or branch ref."""
+    if not owner or not repo or not ref:
+        raise HTTPException(status_code=400, detail="owner, repo, and ref are required")
+    try:
+        return github_service.sast_checks_ok(owner, repo, ref)
+    except Exception as e:
+        logger.warning("sast-status failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to list SAST checks: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Request / Response Models
+# ---------------------------------------------------------------------------
+
+class ReviewPRRequest(BaseModel):
+    owner: str
+    repo: str
+    pr_number: int
+
+
+class ReviewSnippetRequest(BaseModel):
+    code: str
+    language: str = "unknown"
+
+
+class ReviewRepoRequest(BaseModel):
+    owner: str
+    repo: str
+    branch: str | None = None
+    file_patterns: list[str] | None = None  # e.g. ["*.py", "src/**/*.ts"]
+
+
+class AutoFixLoopRequest(BaseModel):
+    owner: str
+    repo: str
+    pr_number: int
+    max_iterations: int = 3
+    auto_comment: bool = False  # Stage D: default off — require approve-post flow
+
+
+class WebhookConfigRequest(BaseModel):
+    owner: str
+    repo: str
+    enabled: bool = True
+    auto_review: bool = True
+    auto_comment: bool = False  # Stage D: do not auto-post without human approve
+    webhook_secret: str = ""  # optional shared secret for signature verification
+
+
+class ReviewFinding(BaseModel):
+    severity: str
+    category: str
+    title: str
+    description: str
+    file: str | None = None
+    line: int | None = None
+    suggestion: str | None = None
+    code_snippet: str | None = None
+
+
+class ReviewCategories(BaseModel):
+    bugs: int = 0
+    vulnerabilities: int = 0
+    performance: int = 0
+    code_quality: int = 0
+    architecture: int = 0
+    best_practices: int = 0
+
+
+class ReviewResponse(BaseModel):
+    summary: str
+    quality_score: int
+    total_issues: int
+    categories: dict
+    findings: list[dict]
+    strengths: list[str]
+    recommendations: list[str]
+    tokens_used: int
+    model: str
+    pr_number: int | None = None
+    repo: str | None = None
+    branch: str | None = None
+    files_scanned: int | None = None
+    total_lines: int | None = None
+    scanned_files: list[str] | None = None
+    chunks_reviewed: int | None = None
+    review_session_id: int | None = None  # ReviewSession row — history now shared across PR/snippet/repo review
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/pr", response_model=ReviewResponse)
+def review_pull_request(
+    req: ReviewPRRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Run AI code review on a GitHub Pull Request.
+
+    Fetches the PR diff from GitHub and analyses it for bugs,
+    vulnerabilities, code quality issues, and structural problems.
+    """
+    try:
+        pr = github_service.get_pull(req.owner, req.repo, req.pr_number)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Could not fetch PR: {e}")
+
+    try:
+        files_raw = github_service.get_pull_files(req.owner, req.repo, req.pr_number)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Could not fetch PR files: {e}")
+
+    files = [
+        {
+            "filename": f.filename,
+            "status": f.status,
+            "additions": f.additions,
+            "deletions": f.deletions,
+            "patch": f.patch,
+        }
+        for f in files_raw
+    ]
+
+    try:
+        result = review_pr_diff(
+            owner=req.owner,
+            repo=req.repo,
+            pr_number=req.pr_number,
+            pr_title=pr.title,
+            pr_body=pr.body,
+            files=files,
+            user_id=current_user.user_id,
+            db=db,
+        )
+        return ReviewResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@router.post("/snippet", response_model=ReviewResponse)
+def review_snippet(
+    req: ReviewSnippetRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Run AI code review on a standalone code snippet."""
+    if not req.code.strip():
+        raise HTTPException(status_code=400, detail="Code snippet cannot be empty.")
+
+    try:
+        result = review_code_snippet(code=req.code, language=req.language, user_id=current_user.user_id, db=db)
+        return ReviewResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Inline PR Review Endpoints
+# ---------------------------------------------------------------------------
+
+class PostCommentRequest(BaseModel):
+    owner: str
+    repo: str
+    pr_number: int
+    body: str
+    commit_sha: str | None = None
+    path: str | None = None
+    line: int | None = None
+
+
+class PostReviewRequest(BaseModel):
+    owner: str
+    repo: str
+    pr_number: int
+    auto_comment: bool = False  # Stage D: default off — use /ultrareview approve-post + post-github
+
+
+@router.post("/pr/inline")
+def review_pr_and_post_comments(
+    req: PostReviewRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Review a PR; posting is opt-in via auto_comment (default False since Stage D).
+
+    Prefer POST /api/ultrareview/{session_id}/approve-post then /post-github for gated posts.
+    """
+    if req.auto_comment:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Direct auto_comment posting is disabled. "
+                "Run review with auto_comment=false, then "
+                "POST /api/ultrareview/{session_id}/approve-post and /post-github."
+            ),
+        )
+    # First, run the review (never posts)
+    review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)
+    try:
+        review_result = review_pull_request(review_req, current_user=current_user, db=db)
+    except HTTPException:
+        raise
+    return review_result
+
+
+@router.post("/pr/comment")
+def post_review_comment(req: PostCommentRequest):
+    """Post a single comment on a PR (inline or general)."""
+    if not post_pr_review_comment:
+        raise HTTPException(status_code=503, detail="PR comment feature not available")
+    try:
+        result = post_pr_review_comment(
+            owner=req.owner, repo=req.repo, pr_number=req.pr_number,
+            body=req.body, commit_sha=req.commit_sha,
+            path=req.path, line=req.line,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to post comment: {e}")
+
+
+@router.get("/pr/{owner}/{repo}/{pr_number}/comments")
+def get_review_comments(owner: str, repo: str, pr_number: int):
+    """Get all review comments on a PR."""
+    if not get_pr_review_comments:
+        raise HTTPException(status_code=503, detail="PR comments feature not available")
+    try:
+        return get_pr_review_comments(owner, repo, pr_number)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to get comments: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Full Repository Scan
+# ---------------------------------------------------------------------------
+
+@router.post("/repo", response_model=ReviewResponse)
+def review_full_repo(
+    req: ReviewRepoRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Scan an entire GitHub repository and run AI code review on all source files.
+
+    Unlike PR review (which only checks changed files), this scans ALL source files
+    in the repo — useful for new repos, legacy repos, and full security audits.
+    """
+    try:
+        result = review_repo_files(
+            owner=req.owner,
+            repo=req.repo,
+            branch=req.branch,
+            file_patterns=req.file_patterns,
+            user_id=current_user.user_id,
+            db=db,
+        )
+        return ReviewResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Repo scan failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Auto-Fix Loop: Review → Generate Fixes → Re-review
+# ---------------------------------------------------------------------------
+
+@router.post("/auto-fix-loop")
+def auto_fix_loop(
+    req: AutoFixLoopRequest,
+    current_user: CurrentUser = Depends(enforce_token_budget),
+    db: Session = Depends(get_db),
+):
+    """Run the auto-fix loop: review PR → generate fix suggestions → post to PR.
+
+    Flow:
+    1. Run AI code review on the PR
+    2. For each finding, generate a specific fix suggestion
+    3. Post fix suggestions as inline comments on the PR
+    4. Return the review + all suggested fixes
+
+    The 'max_iterations' parameter controls how many review passes to run
+    (each pass focuses on remaining unfixed issues from the previous pass).
+    Budget is checked once up front — each iteration still spends tokens,
+    so max_iterations should stay small relative to the per-user budget.
+    """
+    all_iterations: list[dict] = []
+    total_tokens = 0
+    total_fixes_posted = 0
+
+    for iteration in range(1, req.max_iterations + 1):
+        # Step 1: Run review
+        review_req = ReviewPRRequest(owner=req.owner, repo=req.repo, pr_number=req.pr_number)
+        try:
+            review_result = review_pull_request(review_req, current_user=current_user, db=db)
+        except HTTPException:
+            raise
+
+        total_tokens += review_result.tokens_used
+
+        # If no issues found, we're done
+        if review_result.total_issues == 0:
+            all_iterations.append({
+                "iteration": iteration,
+                "action": "clean",
+                "total_issues": 0,
+                "quality_score": review_result.quality_score,
+                "message": "No issues found — code is clean.",
+            })
+            break
+
+        # Step 2: Generate fix prompt for each finding
+        fix_suggestions: list[dict] = []
+        for finding in review_result.findings:
+            fix = {
+                "severity": finding.get("severity", "info"),
+                "category": finding.get("category", ""),
+                "title": finding.get("title", ""),
+                "file": finding.get("file"),
+                "line": finding.get("line"),
+                "description": finding.get("description", ""),
+                "suggestion": finding.get("suggestion", ""),
+                "code_snippet": finding.get("code_snippet", ""),
+            }
+            fix_suggestions.append(fix)
+
+        # Step 3: GitHub posting is gated (Stage D) — use ultrareview approve-post + post-github
+        posted_count = 0
+        if req.auto_comment:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "auto_comment posting disabled. Use "
+                    "POST /api/ultrareview/{session_id}/approve-post then /post-github "
+                    "or /start-fix-run."
+                ),
+            )
+
+        total_fixes_posted += posted_count
+
+        all_iterations.append({
+            "iteration": iteration,
+            "action": "review_and_fix",
+            "total_issues": review_result.total_issues,
+            "quality_score": review_result.quality_score,
+            "fixes_posted": posted_count,
+            "findings": fix_suggestions,
+        })
+
+        # If quality is high enough, stop early
+        if review_result.quality_score >= 90 and review_result.total_issues <= 2:
+            break
+
+    return {
+        "owner": req.owner,
+        "repo": req.repo,
+        "pr_number": req.pr_number,
+        "total_iterations": len(all_iterations),
+        "total_tokens_used": total_tokens,
+        "total_fixes_posted": total_fixes_posted,
+        "final_quality_score": all_iterations[-1]["quality_score"] if all_iterations else 0,
+        "iterations": all_iterations,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GitHub Webhook — Auto-trigger review on new PRs (DB-persisted)
+# ---------------------------------------------------------------------------
+
+
+def _webhook_to_dict(row: ReviewWebhookConfig) -> dict:
+    return {
+        "owner": row.owner,
+        "repo": row.repo,
+        "enabled": row.enabled,
+        "auto_review": row.auto_review,
+        "auto_comment": row.auto_comment,
+        "webhook_secret": row.webhook_secret or "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+@router.post("/webhook/configure")
+def configure_webhook(
+    req: WebhookConfigRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Configure auto-review webhook for a repository (persisted)."""
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == req.owner, ReviewWebhookConfig.repo == req.repo)
+        .first()
+    )
+    if not row:
+        row = ReviewWebhookConfig(owner=req.owner, repo=req.repo)
+        db.add(row)
+    row.enabled = req.enabled
+    row.auto_review = req.auto_review
+    row.auto_comment = req.auto_comment
+    row.webhook_secret = req.webhook_secret
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return {"status": "configured", "config": _webhook_to_dict(row)}
+
+
+@router.get("/webhook/configure/{owner}/{repo}")
+def get_webhook_config(
+    owner: str,
+    repo: str,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == owner, ReviewWebhookConfig.repo == repo)
+        .first()
+    )
+    if not row:
+        return {
+            "owner": owner,
+            "repo": repo,
+            "enabled": False,
+            "auto_review": False,
+            "auto_comment": False,
+            "webhook_secret": "",
+        }
+    return _webhook_to_dict(row)
+
+
+@router.get("/webhook/configs")
+def list_webhook_configs(
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return [_webhook_to_dict(r) for r in db.query(ReviewWebhookConfig).all()]
+
+
+@router.post("/webhook/github")
+async def github_webhook(request: Request, db: Session = Depends(get_db)):
+    """Receive GitHub webhook events and auto-trigger code review.
+
+    Supports pull_request events (opened, synchronize, reopened).
+    Checks Rules Engine for auto_review_enabled kill switch.
+    If a rule with type='review' and action='block' is active, auto-review is skipped.
+    """
+    body = await request.body()
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = request.headers.get("X-GitHub-Event", "")
+    if event_type != "pull_request":
+        return {"status": "ignored", "reason": f"Event type '{event_type}' not handled"}
+
+    action = payload.get("action", "")
+    if action not in ("opened", "synchronize", "reopened"):
+        return {"status": "ignored", "reason": f"PR action '{action}' not handled"}
+
+    pr = payload.get("pull_request", {})
+    pr_number = pr.get("number")
+    repo_full = payload.get("repository", {}).get("full_name", "")
+
+    if not pr_number or not repo_full:
+        raise HTTPException(status_code=400, detail="Missing PR number or repository info")
+
+    parts = repo_full.split("/")
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="Invalid repository format")
+
+    owner, repo_name = parts[0], parts[1]
+
+    row = (
+        db.query(ReviewWebhookConfig)
+        .filter(ReviewWebhookConfig.owner == owner, ReviewWebhookConfig.repo == repo_name)
+        .first()
+    )
+    if not row or not row.enabled or not row.auto_review:
+        return {"status": "skipped", "reason": "Auto-review not enabled for this repo"}
+    config = _webhook_to_dict(row)
+
+    # Signature verification was previously opt-in — any repo where an admin
+    # hadn't gotten around to setting webhook_secret accepted unauthenticated
+    # POSTs that triggered a real review run. Now mandatory: no secret
+    # configured means the webhook is rejected, not silently trusted.
+    secret = config.get("webhook_secret", "")
+    if not secret:
+        raise HTTPException(
+            status_code=403,
+            detail="Webhook secret not configured for this repo — set one via POST /webhook/configure before GitHub events will be accepted",
+        )
+    sig_header = request.headers.get("X-Hub-Signature-256", "")
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig_header, expected):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+
+    from app.security.emergency_stop import is_emergency_stop_active
+
+    if is_emergency_stop_active(db):
+        return {"status": "blocked", "reason": "Global emergency stop is active"}
+
+    # Check Rules Engine kill switch
+    block_rules = db.query(Rule).filter(
+        Rule.is_active == True,
+        Rule.rule_type == "review",
+        Rule.action == "block",
+    ).all()
+
+    for rule in block_rules:
+        # Check if rule applies to this repo
+        try:
+            if re.search(rule.condition, repo_full, re.IGNORECASE):
+                return {
+                    "status": "blocked",
+                    "reason": f"Rule '{rule.name}' blocks auto-review for this repo",
+                    "rule_id": rule.id,
+                }
+        except re.error:
+            pass
+
+    # Run the review — webhook-triggered, no logged-in user (GitHub is the
+    # caller, already bypasses normal Bearer auth per auth_middleware.py's
+    # open-path list) so there's no per-user budget to check against; use a
+    # system identity purely for audit/history attribution, not enforcement.
+    try:
+        review_req = ReviewPRRequest(owner=owner, repo=repo_name, pr_number=pr_number)
+        system_user = CurrentUser(user_id=None, username="github-webhook", email="", auth_mode="system", token="")
+        review_result = review_pull_request(review_req, current_user=system_user, db=db)
+
+        posted_comments = []
+        if config.get("auto_comment", False) and post_pr_review_comment:
+            # Post summary
+            summary = f"## Mentrix Auto-Review\n\n"
+            summary += f"**Triggered by:** PR #{pr_number} {action}\n"
+            summary += f"**Quality Score:** {review_result.quality_score}/100\n"
+            summary += f"**Issues Found:** {review_result.total_issues}\n\n"
+            summary += f"{review_result.summary}\n\n"
+
+            if review_result.findings:
+                summary += "### Findings\n\n"
+                for f in review_result.findings[:10]:  # Limit to top 10
+                    sev_icon = {"critical": "\U0001f6d1", "high": "\u26a0\ufe0f", "medium": "\U0001f4a1", "low": "\u2139\ufe0f"}.get(
+                        f.get("severity", ""), "\U0001f4a1"
+                    )
+                    summary += f"- {sev_icon} **{f.get('title', '')}**"
+                    if f.get("file"):
+                        summary += f" (`{f['file']}`)"
+                    summary += "\n"
+
+            try:
+                comment = post_pr_review_comment(
+                    owner=owner, repo=repo_name, pr_number=pr_number,
+                    body=summary,
+                )
+                posted_comments.append(comment)
+            except Exception as e:
+                posted_comments.append({"error": str(e)})
+
+        check_run = None
+        head_sha = pr.get("head", {}).get("sha") or ""
+        if head_sha:
+            try:
+                critical = sum(
+                    1 for f in (review_result.findings or [])
+                    if isinstance(f, dict) and f.get("severity") == "critical"
+                )
+                conclusion = "success"
+                if critical > 0 or review_result.quality_score < 60:
+                    conclusion = "failure"
+                elif review_result.total_issues > 0:
+                    conclusion = "neutral"
+                check_run = github_service.create_check_run(
+                    owner=owner,
+                    repo=repo_name,
+                    name="Mentrix Review",
+                    head_sha=head_sha,
+                    conclusion=conclusion,
+                    title=f"Quality {review_result.quality_score}/100",
+                    summary=(
+                        f"{review_result.summary}\n\n"
+                        f"Issues: {review_result.total_issues} | Critical: {critical}"
+                    ),
+                )
+            except Exception as e:
+                logger.warning("Failed to create Mentrix check run: %s", e)
+                check_run = {"error": str(e)}
+
+        return {
+            "status": "reviewed",
+            "pr_number": pr_number,
+            "repo": repo_full,
+            "quality_score": review_result.quality_score,
+            "total_issues": review_result.total_issues,
+            "comments_posted": len([c for c in posted_comments if "error" not in c]),
+            "check_run": check_run,
+        }
+
+    except Exception as e:
+        logger.error("Auto-review failed for PR #%s on %s: %s", pr_number, repo_full, e)
+        return {"status": "error", "reason": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Rules Engine Integration — Evaluate code against active rules
+# ---------------------------------------------------------------------------
+
+@router.post("/evaluate-rules")
+def evaluate_review_rules(req: ReviewPRRequest, db: Session = Depends(get_db)):
+    """Run code review AND evaluate findings against active Rules Engine rules.
+
+    This combines AI code review with regex-based rule evaluation:
+    1. First runs AI code review on the PR
+    2. Then evaluates all active 'review' rules against the PR diff
+    3. Merges results — rule matches become additional findings
+
+    Rules with action='block' will set a 'blocked' flag in the response,
+    indicating the PR should not be merged.
+    """
+    # Step 1: Run AI review
+    try:
+        review_result = review_pull_request(req)
+    except HTTPException:
+        raise
+
+    # Step 2: Get PR diff for rule evaluation
+    try:
+        files_raw = github_service.get_pull_files(req.owner, req.repo, req.pr_number)
+        diff_text = "\n".join(f.patch or "" for f in files_raw)
+    except Exception:
+        diff_text = ""
+
+    # Step 3: Evaluate active review rules
+    review_rules = db.query(Rule).filter(
+        Rule.is_active == True,
+        Rule.rule_type == "review",
+    ).all()
+
+    rule_findings: list[dict] = []
+    is_blocked = False
+
+    for rule in review_rules:
+        try:
+            if re.search(rule.condition, diff_text, re.MULTILINE | re.IGNORECASE):
+                rule_findings.append({
+                    "severity": rule.severity,
+                    "category": "best_practices",
+                    "title": f"Rule: {rule.name}",
+                    "description": rule.description or f"Custom rule '{rule.name}' matched",
+                    "file": None,
+                    "line": None,
+                    "suggestion": f"Action: {rule.action}",
+                    "code_snippet": None,
+                    "rule_id": rule.id,
+                    "rule_action": rule.action,
+                })
+                if rule.action == "block":
+                    is_blocked = True
+        except re.error:
+            pass
+
+    # Merge findings
+    all_findings = list(review_result.findings) + rule_findings
+
+    return {
+        "review": review_result.model_dump(),
+        "rule_findings": rule_findings,
+        "total_rule_matches": len(rule_findings),
+        "merged_findings": all_findings,
+        "merged_total_issues": review_result.total_issues + len(rule_findings),
+        "is_blocked": is_blocked,
+        "blocked_by_rules": [rf["title"] for rf in rule_findings if rf.get("rule_action") == "block"],
+    }

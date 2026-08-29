@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio
+      # Ephemeral vault key for this job only — never commit ENCRYPTION_KEY values.
+      - name: Mint CI encryption key
+        working-directory: backend
+        run: |
+          python -c "import os; from cryptography.fernet import Fernet; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('ENCRYPTION_KEY='+Fernet.generate_key().decode()+'\n')"
+      - name: Pytest
+        env:
+          ZECT_RATE_LIMIT_DISABLED: "1"
+          ZECT_USERNAME: test@zect.local
+          ZECT_PASSWORD: test-pass-1234
+          ZECT_AUTH_MODE: local
+          ZECT_AUTH_ENFORCE: "true"
+          DATABASE_URL: sqlite:///./test_zect.db
+          LATTICE_ENABLED: "true"
+          RAG_ENABLED: "true"
+          MENTRIX_ENABLED: "true"
+          MENTRIX_PR_DRY_RUN: "true"
+          ZECT_CODING_ENGINE: mock
+          ZECT_ALLOW_OFFLINE_BUILD_STUB: "1"
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci || npm install
+      - name: Typecheck / build
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install frontend + Playwright
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npx playwright install chromium
+      - name: Mint CI encryption key
+        working-directory: backend
+        run: |
+          python -c "import os; from cryptography.fernet import Fernet; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('ENCRYPTION_KEY='+Fernet.generate_key().decode()+'\n')"
+      - name: Start API
+        working-directory: backend
+        env:
+          ZECT_RATE_LIMIT_DISABLED: "1"
+          ZECT_USERNAME: test@zect.local
+          ZECT_PASSWORD: test-pass-1234
+          ZECT_AUTH_MODE: local
+          ZECT_AUTH_ENFORCE: "true"
+          ZECT_PYTEST: "1"
+          DATABASE_URL: sqlite:///./e2e_zect.db
+          MENTRIX_PR_DRY_RUN: "true"
+          MENTRIX_ENABLED: "true"
+          ZECT_CODING_ENGINE: mock
+          ZECT_ALLOW_OFFLINE_BUILD_STUB: "1"
+        run: |
+          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/zect-api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 1; done
+      - name: Playwright e2e (core product)
+        working-directory: frontend
+        env:
+          CI: "true"
+          ZECT_USERNAME: test@zect.local
+          ZECT_PASSWORD: test-pass-1234
+          VITE_API_URL: http://127.0.0.1:8000
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+        run: npm run test:e2e:core
+
+  # ZECT_DESKTOP_WINDOWS: supported Electron release journey. Skip ≠ PASS.
+  # ubuntu e2e cannot launch electron.exe; this job must fail if the binary is missing.
+  e2e-electron:
+    runs-on: windows-latest
+    needs: [backend, frontend]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            electron/package-lock.json
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install frontend + Playwright
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install chromium
+      - name: Install Electron
+        working-directory: electron
+        run: npm ci
+      - name: Assert electron.exe
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "electron/node_modules/electron/dist/electron.exe")) {
+            throw "electron.exe missing after npm ci — skip ≠ PASS"
+          }
+      - name: Mint CI encryption key
+        working-directory: backend
+        shell: bash
+        run: |
+          python -c "import os; from cryptography.fernet import Fernet; open(os.environ['GITHUB_ENV'],'a',encoding='utf-8').write('ENCRYPTION_KEY='+Fernet.generate_key().decode()+'\n')"
+      - name: Start API
+        working-directory: backend
+        env:
+          ZECT_RATE_LIMIT_DISABLED: "1"
+          ZECT_USERNAME: test@zect.local
+          ZECT_PASSWORD: test-pass-1234
+          ZECT_AUTH_MODE: local
+          ZECT_AUTH_ENFORCE: "true"
+          ZECT_PYTEST: "1"
+          DATABASE_URL: sqlite:///./e2e_zect.db
+          MENTRIX_PR_DRY_RUN: "true"
+          MENTRIX_ENABLED: "true"
+          ZECT_CODING_ENGINE: mock
+          ZECT_ALLOW_OFFLINE_BUILD_STUB: "1"
+        shell: bash
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > api.log 2>&1 &
+          for i in $(seq 1 45); do curl -sf http://127.0.0.1:8000/healthz && break; sleep 2; done
+          curl -sf http://127.0.0.1:8000/healthz
+      - name: Playwright Electron release E2E
+        working-directory: frontend
+        env:
+          CI: "true"
+          ZECT_REQUIRE_ELECTRON: "1"
+          ZECT_USERNAME: test@zect.local
+          ZECT_PASSWORD: test-pass-1234
+          VITE_API_URL: http://127.0.0.1:8000
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:5173
+        run: npm run test:e2e:electron

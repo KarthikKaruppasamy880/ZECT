@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link } from "react-router-dom";
 import {
-  BookOpen, Plus, Play, Trash2, Edit3, X, Save, Clock, Star, ChevronDown, ChevronUp,
+  BookOpen, Plus, Play, Trash2, Edit3, X, Save, Clock, Star, ChevronDown, ChevronUp, Loader2,
 } from "lucide-react";
 import {
   getPlaybooks, createPlaybook, updatePlaybook, deletePlaybook,
@@ -18,6 +19,10 @@ export default function Playbooks() {
   const [showCreate, setShowCreate] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [runTarget, setRunTarget] = useState<any | null>(null);
+  const [runVars, setRunVars] = useState<Record<string, string>>({});
+  const [running, setRunning] = useState(false);
+  const [lastRun, setLastRun] = useState<any | null>(null);
   const [form, setForm] = useState({
     name: "", description: "", category: "general",
     steps: [{ order: 1, title: "", prompt: "" }],
@@ -86,12 +91,36 @@ export default function Playbooks() {
     }
   };
 
-  const handleRun = async (id: number) => {
+  const openRun = (pb: any) => {
+    const vars: Record<string, string> = {};
+    for (const v of pb.variables || []) {
+      const key = typeof v === "string" ? v : v?.name || v?.key;
+      if (key) vars[String(key)] = "";
+    }
+    const joined = JSON.stringify(pb.steps || []);
+    const found = joined.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g);
+    for (const m of found) {
+      const key = m[1].trim();
+      if (key && !(key in vars)) vars[key] = "";
+    }
+    setRunTarget(pb);
+    setRunVars(vars);
+    setLastRun(null);
+  };
+
+  const handleRunConfirm = async () => {
+    if (!runTarget) return;
     try {
-      await runPlaybook(id);
+      setRunning(true);
+      setError("");
+      const result = await runPlaybook(runTarget.id, runVars);
+      setLastRun(result);
+      setRunTarget(null);
       load();
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -129,15 +158,19 @@ export default function Playbooks() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="zect-page max-w-6xl mx-auto space-y-6" data-testid="playbooks-page">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="h-6 w-6 text-purple-600" /> Playbooks
           </h1>
-          <p className="text-sm text-slate-500 mt-1">{total} playbooks — reusable prompt templates and workflows</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {total} playbooks — multi-step Mentrix workflows with variables. Reuse prompts to ship faster
+            and avoid retyping context.
+          </p>
         </div>
         <button
+          type="button"
           onClick={() => { setShowCreate(true); setEditId(null); resetForm(); }}
           className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
         >
@@ -146,10 +179,27 @@ export default function Playbooks() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert" data-testid="playbooks-error">{error}</div>
       )}
 
-      {/* Category filter */}
+      {lastRun && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm" data-testid="playbook-last-run">
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold text-emerald-900">
+              Run #{lastRun.id} — {lastRun.status} ({lastRun.steps_completed}/{lastRun.total_steps} steps)
+            </p>
+            <Link to="/mentrix" className="text-emerald-800 underline text-xs font-medium">
+              Open Mentrix Delivery
+            </Link>
+          </div>
+          {lastRun.output_summary && (
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap text-xs text-emerald-950/80">
+              {lastRun.output_summary}
+            </pre>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2 flex-wrap">
         <button
           onClick={() => setFilterCat("")}
@@ -172,7 +222,6 @@ export default function Playbooks() {
         ))}
       </div>
 
-      {/* Create / Edit Form */}
       {(showCreate || editId) && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
@@ -181,13 +230,13 @@ export default function Playbooks() {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="flex gap-3">
+          <div className="grid md:grid-cols-2 gap-3">
             <input
               type="text"
               placeholder="Playbook Name"
               value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })}
-              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm"
+              className="px-4 py-2 border border-slate-300 rounded-lg text-sm"
             />
             <select
               value={form.category}
@@ -195,7 +244,7 @@ export default function Playbooks() {
               className="px-4 py-2 border border-slate-300 rounded-lg text-sm"
             >
               {CATEGORIES.map(c => (
-                <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                <option key={c} value={c}>{c}</option>
               ))}
             </select>
           </div>
@@ -207,46 +256,82 @@ export default function Playbooks() {
             className="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm"
           />
           <div className="space-y-3">
-            <p className="text-sm font-medium text-slate-700">Steps</p>
+            <p className="text-sm font-medium text-slate-700">Steps (use {"{{variable}}"} placeholders)</p>
             {form.steps.map((step, idx) => (
               <div key={idx} className="flex gap-2 items-start">
-                <span className="mt-2 text-xs text-slate-400 w-6 text-center">{idx + 1}</span>
                 <div className="flex-1 space-y-2">
                   <input
                     type="text"
                     placeholder={`Step ${idx + 1} title`}
                     value={step.title}
                     onChange={e => updateStep(idx, "title", e.target.value)}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
                   />
                   <textarea
-                    placeholder="Prompt / instructions for this step"
+                    placeholder="Prompt"
                     value={step.prompt}
                     onChange={e => updateStep(idx, "prompt", e.target.value)}
                     rows={2}
-                    className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-mono"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
                   />
                 </div>
-                {form.steps.length > 1 && (
-                  <button onClick={() => removeStep(idx)} className="mt-2 text-slate-400 hover:text-red-500">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
+                <button type="button" onClick={() => removeStep(idx)} className="text-slate-400 hover:text-red-600 p-1">
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))}
-            <button onClick={addStep} className="text-sm text-purple-600 hover:text-purple-700">+ Add Step</button>
+            <button type="button" onClick={addStep} className="text-sm text-purple-600 hover:underline">
+              + Add step
+            </button>
           </div>
           <button
             onClick={editId ? handleUpdate : handleCreate}
-            disabled={!form.name}
-            className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm disabled:opacity-50"
+            className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm"
           >
-            <Save className="h-4 w-4" /> {editId ? "Update" : "Save"}
+            <Save className="h-4 w-4" /> {editId ? "Save" : "Create"}
           </button>
         </div>
       )}
 
-      {/* Playbooks List */}
+      {runTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="playbook-run-modal">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-900">Run {runTarget.name}</h3>
+              <button type="button" onClick={() => setRunTarget(null)} className="text-slate-400">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            {Object.keys(runVars).length === 0 ? (
+              <p className="text-sm text-slate-500">No variables detected — run with step prompts as-is.</p>
+            ) : (
+              <div className="space-y-2">
+                {Object.keys(runVars).map((key) => (
+                  <div key={key}>
+                    <label className="text-xs font-medium text-slate-600">{key}</label>
+                    <input
+                      type="text"
+                      value={runVars[key]}
+                      onChange={(e) => setRunVars({ ...runVars, [key]: e.target.value })}
+                      className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={running}
+              onClick={handleRunConfirm}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {running ? "Running…" : "Execute playbook"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600" />
@@ -277,11 +362,10 @@ export default function Playbooks() {
                     <div className="flex items-center gap-4 mt-2 text-xs text-slate-400">
                       <span>{(pb.steps || []).length} steps</span>
                       <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Used {pb.usage_count || 0} times</span>
-                      <span>Created {pb.created_at ? new Date(pb.created_at).toLocaleDateString() : "—"}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 ml-3">
-                    <button onClick={() => handleRun(pb.id)} className="p-1.5 text-slate-400 hover:text-green-600 rounded" title="Run Playbook">
+                    <button onClick={() => openRun(pb)} className="p-1.5 text-slate-400 hover:text-green-600 rounded" title="Run Playbook" data-testid="playbook-run-btn">
                       <Play className="h-4 w-4" />
                     </button>
                     <button onClick={() => startEdit(pb)} className="p-1.5 text-slate-400 hover:text-purple-600 rounded">

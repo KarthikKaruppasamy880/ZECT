@@ -7,36 +7,147 @@ from dotenv import load_dotenv
 import traceback
 
 # Load backend/.env regardless of process cwd (fixes auth/env when uvicorn cwd differs).
+# override=True so CHATTERBOX_BASE_URL from .env wins over stale shell localhost values.
+# Under a real pytest run, preserve auth/DB env set by conftest so .env cannot
+# silently stomp test credentials (TI-001).
+# Stray ZECT_PYTEST=1 left in an interactive shell must NOT preserve test@zect.local
+# over backend/.env (that caused live login 401 for the configured local admin).
+import os as _os_for_dotenv
+import sys as _sys_for_dotenv
+
 _backend_root = Path(__file__).resolve().parents[1]
-load_dotenv(_backend_root / ".env")
+_ZECT_PYTEST_FLAG = (_os_for_dotenv.getenv("ZECT_PYTEST") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+_PYTEST_RUNNER = (
+    "PYTEST_CURRENT_TEST" in _os_for_dotenv.environ
+    or bool((_os_for_dotenv.getenv("PYTEST_VERSION") or "").strip())
+    or "pytest" in _sys_for_dotenv.modules
+)
+_UNDER_PYTEST = _ZECT_PYTEST_FLAG and _PYTEST_RUNNER
+if _ZECT_PYTEST_FLAG and not _PYTEST_RUNNER:
+    print(
+        "[ZECT AUTH] Ignoring stray ZECT_PYTEST outside pytest — "
+        "loading auth from backend/.env (interactive uvicorn)."
+    )
+_PRESERVE_ENV_KEYS = (
+    "ZECT_USERNAME",
+    "ZECT_PASSWORD",
+    "ZECT_AUTH_MODE",
+    "ZECT_AUTH_ENFORCE",
+    "DATABASE_URL",
+)
+_saved_env = {
+    k: _os_for_dotenv.environ[k]
+    for k in _PRESERVE_ENV_KEYS
+    if _UNDER_PYTEST and k in _os_for_dotenv.environ
+}
+_PACKAGED = (_os_for_dotenv.getenv("ZECT_PACKAGED") or "").strip() in ("1", "true", "yes")
+_user_data = (_os_for_dotenv.getenv("ZECT_USER_DATA") or "").strip()
+if _PACKAGED:
+    # Never load installer-tree .env (secrets). Optional per-user config only.
+    if _user_data:
+        from pathlib import Path as _P
 
-from app.database import init_db, SessionLocal
-from app.models import Project, Repo
-from app.routers import projects, github, settings, analytics, repo_analysis, auth, llm, code_review
-from app.routers import build_phase, review_phase, deploy_phase, skills, token_controls, model_selection, orchestration, context_management
-from app.routers import audit_trail, ultrareview, jira_integration, slack_integration, rules_engine, export_share, user_sessions, generated_outputs
-from app.routers import mcp, app_runner, file_explorer, git_ops, ci_monitor, autofix
-from app.routers import memory, dream_engine, data_layer, data_flywheel, permissions, transfer, skills_engine
-from app.routers import conversations, knowledge_base, playbooks, scheduler, secrets_manager, code_index, session_insights
-from app.routers import repo_clone, repo_browser
-from app.routers import agent_mode, persistent_sessions, ci_remediation, sandbox, realtime, file_watcher, diff_viewer
+        _user_env = _P(_user_data) / "config" / ".env"
+        if _user_env.is_file():
+            load_dotenv(_user_env, override=False)
+else:
+    load_dotenv(_backend_root / ".env", override=True)
+if _saved_env:
+    _os_for_dotenv.environ.update(_saved_env)
+_auth_user = (_os_for_dotenv.getenv("ZECT_USERNAME") or "").strip()
+if _auth_user and not _UNDER_PYTEST:
+    print(f"[ZECT AUTH] Local login identity: {_auth_user}")
+
+# Initialize encryption vault (must be before other imports that use secrets)
+from app.security.vault import vault
+try:
+    _ = vault.get_key()
+except Exception as e:
+    raise RuntimeError(f"❌ Failed to initialize encryption vault: {e}")
+
+from app.infrastructure.database import init_db, SessionLocal
+from app.models import Project, Repo, Rule
+from app.api import register_routers
 from app.middleware.rate_limiter import RateLimitMiddleware
+from app.middleware.auth_middleware import AuthMiddleware
+from app.middleware.correlation import CorrelationIdMiddleware
 
-app = FastAPI(title="ZECT API", version="2.0.0", redirect_slashes=False)
+app = FastAPI(title="ZECT API", version="3.0.0", redirect_slashes=False)
 
-# Rate limiting: 120 requests/minute per IP, burst of 20
+# Rate limiting (env: ZECT_RATE_LIMIT_RPM / BURST / DISABLED) — high local defaults for e2e
 # NOTE: added BEFORE CORS so CORS wraps everything (middleware order is LIFO)
-app.add_middleware(RateLimitMiddleware, requests_per_minute=120, burst=20)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuthMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 # CORS — must be the LAST middleware added so it is the OUTERMOST wrapper.
 # This ensures CORS headers are present on ALL responses including 500 errors.
+# ✅ SECURITY: Whitelist only trusted origins, not "*"
+import os
+_ALLOWED_ORIGINS = os.getenv(
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173"
+).split(",")
+
+if os.getenv("ENV") == "production":
+    # Override with production origins
+    _ALLOWED_ORIGINS = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "https://yourdomain.com,https://app.yourdomain.com"
+    ).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=_ALLOWED_ORIGINS,  # ✅ Whitelist only
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],  # ✅ Explicit methods
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Correlation-Id"],
+    # Browsers only expose a small safe-listed set of response headers to JS
+    # by default (Cache-Control, Content-Type, etc.) — any custom header,
+    # like X-Mentrix-TTS-Engine, is invisible to fetch()'s res.headers.get()
+    # unless explicitly exposed here, even though the server did send it.
+    expose_headers=[
+        "X-Mentrix-TTS-Engine",
+        "X-Mentrix-TTS-Content-Type",
+        "X-Correlation-Id",
+        "X-Zect-Preview-Kind",
+        "X-Zect-Preview-Kind",
+    ],
 )
+
+# ✅ Add additional security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    from app.infrastructure.observability import bind_correlation, current_correlation, new_id
+
+    cid = (request.headers.get("x-correlation-id") or current_correlation() or "").strip() or new_id()
+    bind_correlation(cid)
+    response = await call_next(request)
+    response.headers.setdefault("X-Correlation-Id", cid)
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # Enforce HTTPS in production
+    if os.getenv("ENV") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # XSS Protection (legacy, but doesn't hurt)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Content Security Policy (basic)
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+
+    return response
 
 
 @app.exception_handler(Exception)
@@ -47,93 +158,82 @@ async def global_exception_handler(request: Request, exc: Exception):
     blocks the response entirely, showing a misleading 'CORS error'.
     """
     tb = traceback.format_exc()
-    print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
-    origin = request.headers.get("origin", "*")
+    try:
+        print(f"[ZECT ERROR] {request.method} {request.url}: {exc}\n{tb}")
+    except UnicodeEncodeError:
+        print(f"[ZECT ERROR] {request.method} {request.url}: {type(exc).__name__}")
+    # Echoing back any Origin header (previously done unconditionally) bypasses
+    # the CORSMiddleware allowlist above for this response class specifically —
+    # only reflect it when it's actually on the allowlist, same policy as every
+    # other response.
+    origin = request.headers.get("origin", "")
+    headers = {
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    if origin in _ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=500,
         content={
-            "detail": str(exc),
+            "detail": str(exc).encode("ascii", "replace").decode("ascii"),
             "error_type": type(exc).__name__,
         },
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        },
+        headers=headers,
     )
 
-app.include_router(projects.router)
-app.include_router(github.router)
-app.include_router(settings.router)
-app.include_router(analytics.router)
-app.include_router(repo_analysis.router)
-app.include_router(auth.router)
-app.include_router(llm.router)
-app.include_router(code_review.router)
-app.include_router(build_phase.router)
-app.include_router(review_phase.router)
-app.include_router(deploy_phase.router)
-app.include_router(skills.router)
-app.include_router(token_controls.router)
-app.include_router(model_selection.router)
-app.include_router(orchestration.router)
-app.include_router(context_management.router)
-
-# Enterprise routers
-app.include_router(audit_trail.router)
-app.include_router(ultrareview.router)
-app.include_router(jira_integration.router)
-app.include_router(slack_integration.router)
-app.include_router(rules_engine.router)
-app.include_router(export_share.router)
-app.include_router(user_sessions.router)
-app.include_router(generated_outputs.router)
-app.include_router(mcp.router)
-app.include_router(app_runner.router)
-app.include_router(file_explorer.router)
-app.include_router(git_ops.router)
-app.include_router(ci_monitor.router)
-app.include_router(autofix.router)
-
-# Zinnia Agentic Intelligence System
-app.include_router(memory.router)
-app.include_router(dream_engine.router)
-app.include_router(data_layer.router)
-app.include_router(data_flywheel.router)
-app.include_router(permissions.router)
-app.include_router(transfer.router)
-app.include_router(skills_engine.router)
-
-# Category C: New Features
-app.include_router(conversations.router)
-app.include_router(knowledge_base.router)
-app.include_router(playbooks.router)
-app.include_router(scheduler.router)
-app.include_router(secrets_manager.router)
-app.include_router(code_index.router)
-app.include_router(session_insights.router)
-
-# Deep Repo Integration
-app.include_router(repo_clone.router)
-app.include_router(repo_browser.router)
-
-# Gap Fixes — v2.0 features
-app.include_router(agent_mode.router)
-app.include_router(persistent_sessions.router)
-app.include_router(ci_remediation.router)
-app.include_router(sandbox.router)
-app.include_router(realtime.router)
-app.include_router(file_watcher.router)
-app.include_router(diff_viewer.router)
+# Phase 1: thin api/ layer registers domain routers (no business logic here).
+register_routers(app)
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"status": "ok"}
+    from app.infrastructure.database import database_mode, engine as _db_engine
+
+    mode = database_mode()
+    return {
+        "status": "ok",
+        "product": "ZECT",
+        "agent": "Mentrix",
+        "database_mode": mode,
+        "database_dialect": _db_engine.dialect.name,
+        "database_lifecycle": (
+            "alembic_upgrade_heads" if mode == "server_postgres" else "create_all_additive"
+        ),
+    }
+
+
+DEMO_PROJECT_NAMES = frozenset(
+    {
+        "Policy Admin Modernization",
+        "Claims Processing API",
+        "Agent Portal Redesign",
+        "Underwriting Rules Engine",
+        "Customer Notifications Service",
+        "Document Intelligence Pipeline",
+    }
+)
+
+
+def purge_demo_projects():
+    """Remove seeded demo projects by known name so dashboards show real work only."""
+    db = SessionLocal()
+    try:
+        rows = db.query(Project).filter(Project.name.in_(DEMO_PROJECT_NAMES)).all()
+        for p in rows:
+            db.delete(p)
+        if rows:
+            db.commit()
+            print(f"[ZECT] Purged {len(rows)} demo project(s)")
+    finally:
+        db.close()
 
 
 def seed_demo_projects():
+    """Only when ZECT_SEED_DEMO_PROJECTS=true (off by default)."""
+    if os.getenv("ZECT_SEED_DEMO_PROJECTS", "").strip().lower() not in ("1", "true", "yes"):
+        return
     db = SessionLocal()
     if db.query(Project).count() > 0:
         db.close()
@@ -221,7 +321,73 @@ def seed_demo_projects():
     db.close()
 
 
+def seed_default_rules():
+    """Seed Mentrix default Rules Engine policies (idempotent by name)."""
+    db = SessionLocal()
+    defaults = [
+        {
+            "name": "mentrix-no-secrets-in-slack",
+            "description": "Block MCP Slack posts that look like secrets",
+            "rule_type": "security",
+            "condition": r"(api[_-]?key|secret|password|token)\s*[:=]",
+            "action": "block",
+            "severity": "critical",
+        },
+        {
+            "name": "mentrix-no-eval",
+            "description": "Flag dangerous eval usage in review",
+            "rule_type": "review",
+            "condition": r"\beval\s*\(",
+            "action": "warn",
+            "severity": "high",
+        },
+        {
+            "name": "mentrix-auto-review-kill-switch",
+            "description": "Example block pattern for auto-review (inactive by default)",
+            "rule_type": "review",
+            "condition": r"^__never_match_mentrix_kill_switch__$",
+            "action": "block",
+            "severity": "medium",
+        },
+        {
+            "name": "mentrix-sandbox-before-pr",
+            "description": "Quality gate reminder — sandbox required before PR",
+            "rule_type": "quality_gate",
+            "condition": r"create.?pr|open.?pull.?request",
+            "action": "warn",
+            "severity": "high",
+        },
+    ]
+    try:
+        for d in defaults:
+            exists = db.query(Rule).filter(Rule.name == d["name"]).first()
+            if exists:
+                continue
+            db.add(Rule(is_active=d["name"] != "mentrix-auto-review-kill-switch", **d))
+        db.commit()
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def on_startup():
     init_db()
+    purge_demo_projects()
     seed_demo_projects()
+    seed_default_rules()
+    try:
+        from app.domains.personal_agent.schedule_ticker import start_schedule_ticker
+
+        start_schedule_ticker()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    try:
+        from app.domains.personal_agent.schedule_ticker import stop_schedule_ticker
+
+        stop_schedule_ticker()
+    except Exception:  # noqa: BLE001
+        pass

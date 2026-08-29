@@ -80,19 +80,26 @@ class MentrixNativeCodingRuntime:
         except Exception as exc:  # noqa: BLE001
             raise ValueError(str(exc)) from exc
 
+        # Structured record of what compose_rich_agent_context_pack /
+        # compose_context_pack actually assembled -- surfaced on the run so
+        # a Mission's "Context Used" can be rendered with the same
+        # knowledge/lattice_hits/lattice_indexed/blueprint shape Ask/Plan
+        # already use (see ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_
+        # PLAN.md Phase D), not just the raw prompt text.
+        context_used: dict[str, Any] | None = None
         agent_context = (kwargs.get("agent_context") or "").strip()
         if not agent_context:
             # Same provenance-aware Project Intelligence pipeline Ask/Plan
             # use, when there's enough identity (repo_id/project_id) to look
-            # it up -- see agent_context.compose_rich_agent_context. Falls
-            # back to the thinner compose_coding_agent_context when there
+            # it up -- see agent_context.compose_rich_agent_context_pack.
+            # Falls back to the thinner compose_context_pack when there
             # isn't (an ad-hoc workspace not tied to any registered
             # project/repo), so this never blocks a build either way.
             if repo_id or project_id is not None:
                 try:
-                    from app.services.coding_engine.agent_context import compose_rich_agent_context
+                    from app.services.coding_engine.agent_context import compose_rich_agent_context_pack
 
-                    agent_context = compose_rich_agent_context(
+                    pack = compose_rich_agent_context_pack(
                         goal=goal,
                         workspace=str(ws),
                         project_id=int(project_id) if project_id is not None else None,
@@ -101,19 +108,25 @@ class MentrixNativeCodingRuntime:
                         work_item_id=int(work_item_id) if work_item_id is not None else None,
                         db=kwargs.get("db"),
                     )
+                    agent_context = str(pack.get("text") or "")
+                    if agent_context:
+                        context_used = {k: pack.get(k) for k in ("knowledge", "lattice_hits", "lattice_indexed", "blueprint")}
                 except Exception:  # noqa: BLE001
                     agent_context = ""
             if not agent_context:
                 try:
-                    from app.services.coding_engine.agent_context import compose_coding_agent_context
+                    from app.services.coding_engine.agent_context import compose_context_pack
 
-                    agent_context = compose_coding_agent_context(
+                    pack = compose_context_pack(
                         goal=goal,
                         project_id=int(project_id) if project_id is not None else None,
                         skill_id=int(skill_id) if skill_id is not None else None,
                         project_key=project_key,
                         db=kwargs.get("db"),
                     )
+                    agent_context = str(pack.get("text") or "")
+                    if agent_context:
+                        context_used = {k: pack.get(k) for k in ("knowledge", "lattice_hits", "lattice_indexed", "blueprint")}
                 except Exception:  # noqa: BLE001
                     agent_context = ""
 
@@ -132,6 +145,7 @@ class MentrixNativeCodingRuntime:
             "max_steps": max_steps,
             "expected_files": expected_files,
             "agent_context": agent_context,
+            "context_used": context_used,
             "role": role,
             "allowed_tools": allowed_tools,
             "mission_id": mission_id,
@@ -165,6 +179,7 @@ class MentrixNativeCodingRuntime:
             "workspace": run["workspace"],
             "status": run["status"],
             "model": run.get("model"),
+            "context_used": run.get("context_used"),
             "files_written": list(run.get("files_written") or []),
             "pending_approvals": [
                 {"action_id": k, **{kk: vv for kk, vv in v.items() if kk != "content"}}

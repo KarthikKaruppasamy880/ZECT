@@ -26,6 +26,7 @@ import {
   codingAgentCancelMission,
   codingAgentCreateMission,
   codingAgentCreateSession,
+  codingAgentGetSession,
   codingAgentResolveMentions,
   codingAgentResumeMission,
   codingAgentRetryMission,
@@ -310,6 +311,7 @@ function MissionPane({
           {mission?.status || "idle"} · no auto-merge
         </span>
       </div>
+      <ContextUsedStrip used={mission?.context_used} />
 
       <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 py-2">
         <label className="block text-[10px] uppercase text-slate-400">Goal</label>
@@ -1070,9 +1072,12 @@ function ChatPane({
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const writtenRef = useRef<string[]>([]);
+  const sessionIdRef = useRef<string | null>(initialSessionId);
+  sessionIdRef.current = sessionId;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1109,6 +1114,14 @@ function ChatPane({
     if (ev.event === "completed" || ev.event === "failed" || ev.event === "cancelled") {
       setBusy(false);
       setStatus(ev.event);
+      const sid = sessionIdRef.current;
+      if (sid) {
+        void codingAgentGetSession(sid)
+          .then((s) => setContextUsed(s?.context_used ?? null))
+          .catch(() => {
+            /* Context Used is a display nicety -- never blocks on it. */
+          });
+      }
     }
   };
 
@@ -1135,6 +1148,7 @@ function ChatPane({
     const g = goal.trim();
     if (!g || !workspaceRoot) return;
     setError(null);
+    setContextUsed(null);
     writtenRef.current = [];
     pushLine({ kind: "user", text: g });
     setBusy(true);
@@ -1183,6 +1197,7 @@ function ChatPane({
     <>
       <div className="border-b border-slate-50 px-3 py-1 text-[10px] text-slate-400" data-testid="mentrix-coding-agent-chat-status">
         chat · {status}
+        <ContextUsedStrip used={contextUsed} />
       </div>
       <div className="flex-1 space-y-2 overflow-auto px-3 py-2 text-xs" data-testid="mentrix-coding-agent-log">
         {lines.length === 0 ? (

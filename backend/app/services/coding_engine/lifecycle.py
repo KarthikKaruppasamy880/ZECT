@@ -257,6 +257,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "plan_approved_hash": mission.get("plan_approved_hash") or "",
         "plan_approved": bool(mission.get("plan_approved")),
         "git_approved": bool(mission.get("git_approved")),
+        "context_used": mission.get("context_used"),
         "repos": repos,
         "files": [f for r in repos for f in (r.get("files") or [])],
         "commands": [c for r in repos for c in (r.get("commands") or [])],
@@ -1078,6 +1079,8 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             "files_written": list(out.get("files_written") or []),
             "run_id": out.get("run_id"),
         }
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         written = list(out.get("files_written") or [])
         if written:
             files = list(repo.get("files") or [])
@@ -1183,6 +1186,8 @@ def _diagnose_and_repair_repo(
             repo_id=repo.get("repository_id"),
             work_item_id=mission.get("work_item_id"),
         )
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         written = list(out.get("files_written") or [])
         if written:
             files = list(repo.get("files") or [])
@@ -1262,6 +1267,8 @@ def _run_app_and_browser_verification(
             repo_id=repo.get("repository_id"),
             work_item_id=mission.get("work_item_id"),
         )
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         summary = str(out.get("summary") or out.get("status") or "")
         written = list(out.get("files_written") or [])
         if written:

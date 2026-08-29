@@ -2067,6 +2067,9 @@ export type CodingAgentMission = {
   native_implement?: unknown;
   events?: Array<{ event?: string; message?: string; at?: string }>;
   evidence?: Array<{ event?: string; message?: string; at?: string }>;
+  /** What the Coder/Tester/Debugger role actually saw for its most recent
+   * turn -- same shape ASK/PLAN's project_intelligence summary uses. */
+  context_used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null;
 };
 
 export const codingAgentCreateMission = (body: {

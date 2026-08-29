@@ -172,7 +172,7 @@ def _workspace_grep_items(workspace: Any, goal: str, *, repository_id: str = "")
     return items
 
 
-def compose_rich_agent_context(
+def compose_rich_agent_context_pack(
     *,
     goal: str,
     workspace: str = "",
@@ -182,19 +182,33 @@ def compose_rich_agent_context(
     work_item_id: int | None = None,
     db: Any = None,
     max_chars: int = 6000,
-) -> str:
+) -> dict[str, Any]:
     """The SAME provenance-aware Project Intelligence pipeline Ask/Plan use
     (ProjectIntelligenceService + MentrixContextEngine) -- not the thinner,
     independently-implemented compose_coding_agent_context below -- so the
     Coder/Tester/Debugger roles see the same Lattice/knowledge/blueprint
     context a human already reviewed via Ask/Plan for this repository, not
     a separately-assembled approximation of it. See
-    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase C.
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phases C and D.
 
-    Returns "" (never raises) if Project Intelligence is unavailable --
-    callers fall back to compose_coding_agent_context, so a build is never
-    blocked on this.
+    Same shape as compose_context_pack() (knowledge/lattice_hits/
+    lattice_indexed/blueprint/text) so a Mission's "Context Used" can be
+    rendered with the exact same component Ask/Plan already use, not a
+    second display concept -- see mentrix_lead.py / coding_engine_mentrix.py
+    callers, which persist this dict on the run/mission for that purpose.
+
+    Returns an empty-but-well-shaped dict (never raises) if Project
+    Intelligence is unavailable -- callers fall back to
+    compose_coding_agent_context, so a build is never blocked on this.
     """
+    meta: dict[str, Any] = {
+        "knowledge": False,
+        "lattice_hits": 0,
+        "lattice_indexed": False,
+        "blueprint": False,
+        "project_key": (project_key or "").strip() or None,
+        "text": "",
+    }
     own_session = False
     if db is None:
         try:
@@ -203,7 +217,7 @@ def compose_rich_agent_context(
             db = SessionLocal()
             own_session = True
         except Exception:  # noqa: BLE001
-            return ""
+            return meta
     try:
         from app.services.work_items.context_engine import MentrixContextEngine
         from app.services.work_items.project_intelligence import ProjectIntelligenceService
@@ -236,15 +250,31 @@ def compose_rich_agent_context(
         text = pack.text_blob()
         if len(text) > max_chars:
             text = text[: max_chars - 20] + "\n…(truncated)"
-        return text
+        lattice_hits = list((snap.lattice or {}).get("hits") or [])
+        meta.update(
+            {
+                "knowledge": bool(snap.knowledge),
+                "lattice_hits": len(lattice_hits),
+                "lattice_indexed": str((snap.lattice or {}).get("status") or "") == "READY",
+                "blueprint": bool((snap.blueprint or {}).get("snippet")),
+                "text": text,
+            }
+        )
+        return meta
     except Exception:  # noqa: BLE001
-        return ""
+        return meta
     finally:
         if own_session:
             try:
                 db.close()
             except Exception:  # noqa: BLE001
                 pass
+
+
+def compose_rich_agent_context(**kwargs: Any) -> str:
+    """Text-only view of compose_rich_agent_context_pack(), for callers that
+    only need the prompt text (see coding_engine_mentrix.py's start_run)."""
+    return str(compose_rich_agent_context_pack(**kwargs).get("text") or "")
 
 
 def compose_coding_agent_context(

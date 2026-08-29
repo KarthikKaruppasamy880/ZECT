@@ -215,6 +215,17 @@ export default function DeveloperWorkspace() {
     }
     if (rootPath) setShowImport(false);
   }, [rootPath, visibleRoots.length]);
+  // The import panel actually renders on `showImport || !rootPath` (see
+  // below), not `showImport` alone -- a root can still be loading (empty
+  // rootPath) when the user clicks the button. Toggling bare `showImport`
+  // off that stale value could set it to `true` while the panel was only
+  // showing because of the !rootPath fallback; once userToggledImport
+  // latches, the auto-hide effect above never runs again, and rootPath
+  // populating moments later would then leave the panel stuck open forever
+  // (showImport stays true, `showImport || !rootPath` stays true). Toggle
+  // the actual combined visibility instead so the click always means what
+  // it currently shows ("Hide import" vs "Import local clone").
+  const importPanelVisible = showImport || !rootPath;
   const [chrome, setChrome] = useState(() => loadWorkspaceChrome());
   const showExplorer = chrome.explorer;
   const showAgent = chrome.agent;
@@ -894,12 +905,12 @@ export default function DeveloperWorkspace() {
             data-testid="workspace-import-local"
             onClick={() => {
               userToggledImport.current = true;
-              setShowImport((v) => !v);
+              setShowImport(!importPanelVisible);
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
           >
             <FolderOpen className="h-3.5 w-3.5" />
-            {showImport ? "Hide import" : "Import local clone"}
+            {importPanelVisible ? "Hide import" : "Import local clone"}
           </button>
           <button
             type="button"
@@ -963,7 +974,7 @@ export default function DeveloperWorkspace() {
         </div>
       </div>
 
-      {(showImport || !rootPath) && (
+      {importPanelVisible && (
         <div className="shrink-0 overflow-y-auto max-h-40" data-testid="workspace-import-panel">
           <RepoOnboardingPanel
             projectId={activeProjectId}

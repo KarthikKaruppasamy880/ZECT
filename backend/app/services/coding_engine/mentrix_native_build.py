@@ -145,5 +145,6 @@ def run_mentrix_native_build(
         "generated_code": "",
         "engine": "mentrix_native",
         "model": summary.get("model"),
+        "context_used": summary.get("context_used"),
         "events_tail": (summary.get("events") or [])[-8:],
     }

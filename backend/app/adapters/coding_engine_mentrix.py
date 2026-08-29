@@ -72,31 +72,55 @@ class MentrixNativeCodingRuntime:
         project_id = kwargs.get("project_id")
         skill_id = kwargs.get("skill_id")
         project_key = (kwargs.get("project_key") or "").strip() or None
-        agent_context = (kwargs.get("agent_context") or "").strip()
-        if not agent_context:
-            try:
-                from app.services.coding_engine.agent_context import compose_coding_agent_context
-
-                agent_context = compose_coding_agent_context(
-                    goal=goal,
-                    project_id=int(project_id) if project_id is not None else None,
-                    skill_id=int(skill_id) if skill_id is not None else None,
-                    project_key=project_key,
-                    db=kwargs.get("db"),
-                )
-            except Exception:  # noqa: BLE001
-                agent_context = ""
+        repo_id = str(kwargs.get("repo_id") or "").strip()
+        work_item_id = kwargs.get("work_item_id")
 
         try:
             ws = resolve_workspace(workspace)
         except Exception as exc:  # noqa: BLE001
             raise ValueError(str(exc)) from exc
 
+        agent_context = (kwargs.get("agent_context") or "").strip()
+        if not agent_context:
+            # Same provenance-aware Project Intelligence pipeline Ask/Plan
+            # use, when there's enough identity (repo_id/project_id) to look
+            # it up -- see agent_context.compose_rich_agent_context. Falls
+            # back to the thinner compose_coding_agent_context when there
+            # isn't (an ad-hoc workspace not tied to any registered
+            # project/repo), so this never blocks a build either way.
+            if repo_id or project_id is not None:
+                try:
+                    from app.services.coding_engine.agent_context import compose_rich_agent_context
+
+                    agent_context = compose_rich_agent_context(
+                        goal=goal,
+                        workspace=str(ws),
+                        project_id=int(project_id) if project_id is not None else None,
+                        project_key=project_key,
+                        repository_id=repo_id or None,
+                        work_item_id=int(work_item_id) if work_item_id is not None else None,
+                        db=kwargs.get("db"),
+                    )
+                except Exception:  # noqa: BLE001
+                    agent_context = ""
+            if not agent_context:
+                try:
+                    from app.services.coding_engine.agent_context import compose_coding_agent_context
+
+                    agent_context = compose_coding_agent_context(
+                        goal=goal,
+                        project_id=int(project_id) if project_id is not None else None,
+                        skill_id=int(skill_id) if skill_id is not None else None,
+                        project_key=project_key,
+                        db=kwargs.get("db"),
+                    )
+                except Exception:  # noqa: BLE001
+                    agent_context = ""
+
         role = str(kwargs.get("role") or "").strip() or None
         allowed_tools = kwargs.get("allowed_tools")
         allowed_tools = list(allowed_tools) if allowed_tools else None
         mission_id = str(kwargs.get("mission_id") or "").strip()
-        repo_id = str(kwargs.get("repo_id") or "").strip()
 
         run: dict[str, Any] = {
             "id": run_id,
@@ -112,6 +136,7 @@ class MentrixNativeCodingRuntime:
             "allowed_tools": allowed_tools,
             "mission_id": mission_id,
             "repo_id": repo_id,
+            "work_item_id": work_item_id,
             "model_route_mode": model_route_mode,
             "events": [],
             "artifacts": [],

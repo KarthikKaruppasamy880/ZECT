@@ -504,6 +504,9 @@ def _run_coder(worktree: str, *, goal: str, deterministic: bool) -> dict[str, An
         goal=goal,
         workspace=worktree,
         expected_files=[MARKER_FILE],
+        project_id=wi.project_id,
+        repo_id=rid,
+        work_item_id=wi.id,
     )
     return {
         "ok": bool(native.get("ok")),

@@ -169,6 +169,9 @@ export const developerAsk = (body: {
   project_id?: number | null;
   repository_id?: number | null;
   repository_ids?: number[];
+  /** data:image/...;base64,... URLs -- e.g. a pasted screenshot. Sent to
+   * the model as real vision content (see backend llm_phase.run_ask). */
+  images?: string[];
 }) =>
   request<DeveloperAskResponse>("/api/mentrix/developer/ask", {
     method: "POST",
@@ -180,6 +183,7 @@ export type DeveloperAskTurn = {
   answer: string;
   model: string;
   offline: boolean;
+  image_count?: number;
   created_at: string | null;
 };
 

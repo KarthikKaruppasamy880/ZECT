@@ -108,6 +108,145 @@ def compose_context_pack(
     return meta
 
 
+_ASK_STOP = frozenset(
+    {
+        "what", "which", "where", "when", "this", "that", "with", "from",
+        "file", "files", "does", "define", "defines", "token",
+    }
+)
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+
+
+def _workspace_grep_items(workspace: Any, goal: str, *, repository_id: str = "") -> list[Any]:
+    """Same authorized-local-grep the Ask/Plan pipeline uses
+    (developer_service.py's _workspace_file_items), adapted for the Agent
+    path's already-resolved filesystem workspace Path instead of a DB Repo
+    row's local_path -- the caller (coding_engine_mentrix.start_run) has
+    already validated/jailed `workspace` via resolve_workspace(), so this
+    does not re-check path_under_allowed_roots."""
+    import os
+    import re
+    from pathlib import Path
+
+    from app.services.work_items.context_engine import ProvenanceItem
+
+    root = Path(workspace)
+    if not root.is_dir():
+        return []
+    tokens = [t for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", goal or "") if t.lower() not in _ASK_STOP]
+    tokens = sorted(set(tokens), key=len, reverse=True)[:5]
+    if not tokens:
+        return []
+    regexes = [re.compile(re.escape(t), re.IGNORECASE) for t in tokens]
+    items: list[Any] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            fpath = Path(dirpath) / name
+            try:
+                if fpath.stat().st_size > 400_000:
+                    continue
+                text = fpath.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = str(fpath.relative_to(root)).replace("\\", "/")
+            for i, line in enumerate(text.splitlines(), 1):
+                if any(rx.search(line) for rx in regexes):
+                    items.append(
+                        ProvenanceItem(
+                            source_type="workspace_file",
+                            source_id=f"{rel}:{i}",
+                            content=f"{rel}:{i}: {line.strip()[:240]}",
+                            repository=repository_id,
+                            freshness="current",
+                            verification_state="file_search",
+                            selection_reason="authorized_local_grep",
+                            retrieval_score=1.0,
+                        )
+                    )
+                    if len(items) >= 12:
+                        return items
+                    break
+    return items
+
+
+def compose_rich_agent_context(
+    *,
+    goal: str,
+    workspace: str = "",
+    project_id: int | None = None,
+    project_key: str | None = None,
+    repository_id: str | int | None = None,
+    work_item_id: int | None = None,
+    db: Any = None,
+    max_chars: int = 6000,
+) -> str:
+    """The SAME provenance-aware Project Intelligence pipeline Ask/Plan use
+    (ProjectIntelligenceService + MentrixContextEngine) -- not the thinner,
+    independently-implemented compose_coding_agent_context below -- so the
+    Coder/Tester/Debugger roles see the same Lattice/knowledge/blueprint
+    context a human already reviewed via Ask/Plan for this repository, not
+    a separately-assembled approximation of it. See
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase C.
+
+    Returns "" (never raises) if Project Intelligence is unavailable --
+    callers fall back to compose_coding_agent_context, so a build is never
+    blocked on this.
+    """
+    own_session = False
+    if db is None:
+        try:
+            from app.infrastructure.database import SessionLocal
+
+            db = SessionLocal()
+            own_session = True
+        except Exception:  # noqa: BLE001
+            return ""
+    try:
+        from app.services.work_items.context_engine import MentrixContextEngine
+        from app.services.work_items.project_intelligence import ProjectIntelligenceService
+
+        rid: int | None = None
+        if repository_id is not None:
+            try:
+                rid = int(repository_id)
+            except (TypeError, ValueError):
+                rid = None
+
+        snap = ProjectIntelligenceService().snapshot(
+            project_id=project_id,
+            project_key=project_key or "",
+            repository_id=rid,
+            db=db,
+            query=goal,
+        )
+        file_items = _workspace_grep_items(workspace, goal, repository_id=str(rid or "")) if workspace else []
+        pack = MentrixContextEngine().build(
+            work_item_id=work_item_id,
+            repository_id=rid,
+            goal=goal,
+            knowledge_hits=snap.knowledge,
+            memory_hits=snap.memory,
+            lattice_hits=list((snap.lattice or {}).get("hits") or []),
+            blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
+            extra_items=file_items,
+        )
+        text = pack.text_blob()
+        if len(text) > max_chars:
+            text = text[: max_chars - 20] + "\n…(truncated)"
+        return text
+    except Exception:  # noqa: BLE001
+        return ""
+    finally:
+        if own_session:
+            try:
+                db.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def compose_coding_agent_context(
     *,
     goal: str,

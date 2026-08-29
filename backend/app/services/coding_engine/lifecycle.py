@@ -1069,6 +1069,7 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_CODER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
         )
         results.append(out)
         repo["native_build"] = {
@@ -1180,6 +1181,7 @@ def _diagnose_and_repair_repo(
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_DEBUGGER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
         )
         written = list(out.get("files_written") or [])
         if written:
@@ -1258,6 +1260,7 @@ def _run_app_and_browser_verification(
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_TESTER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
         )
         summary = str(out.get("summary") or out.get("status") or "")
         written = list(out.get("files_written") or [])

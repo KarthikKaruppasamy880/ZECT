@@ -100,5 +100,6 @@ def run_explore_phase(mission: dict[str, Any], repo: dict[str, Any], wt: Path) -
         max_steps=int(os.getenv("MENTRIX_CODING_AGENT_EXPLORE_MAX_STEPS", "12")),
         mission_id=mission.get("id"),
         repo_id=repo.get("repository_id"),
+        work_item_id=mission.get("work_item_id"),
     )
     return _last_completed_message(out)

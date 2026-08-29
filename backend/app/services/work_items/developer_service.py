@@ -688,6 +688,8 @@ class MentrixDeveloperService:
                 workspace=ws,
                 expected_files=["mentrix_p0_agent_marker.py"],
                 project_id=wi.project_id,
+                repo_id=wi.repository_id,
+                work_item_id=wi.id,
             )
             files_written = list(native.get("files_written") or [])
             events_tail = list(native.get("events_tail") or [])

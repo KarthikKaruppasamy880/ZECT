@@ -345,19 +345,33 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
 
 @router.get("/runs")
 def list_runs(limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
-    """List Mentrix + legacy + Mission-backed agent runs.
+    """List Mentrix + legacy + Mission-backed agent runs as one chronologically
+    merged, correctly paginated projection.
 
     Mission-backed entries are a live projection of the canonical Mission
     JSON store (lifecycle.list_missions) -- not a second history table --
     per the migration direction: legacy route -> canonical Mission ->
-    Mission/Event persistence -> Runs projection/UI.
+    Mission/Event persistence -> Runs projection/UI. The other two engines
+    (legacy agent_orchestrator, ForgeLoop's MentrixRun) remain genuinely
+    separate execution paths for non-Mission-backed asks (see
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase D) -- this
+    endpoint's job is only to present all three as one truthful, correctly
+    paginated, chronologically-ordered list, not to eliminate the other two.
+
+    Each source is queried for `offset + limit` rows (enough candidates to
+    merge-sort correctly across all three before paginating) -- the
+    previous version queried each source for `limit` independently and
+    concatenated them, which could return up to 3x the requested page size
+    with no cross-source ordering (a legacy/Mentrix row newer than every
+    Mission row would still sort after all of them).
     """
     from app.models import MentrixRun
     from app.services.agent_orchestrator import list_agent_runs
     from app.services.coding_engine.lifecycle import list_missions
 
-    legacy = list_agent_runs(db, limit, offset)
-    mentrix_rows = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(limit).all()
+    fetch = offset + limit
+    legacy = list_agent_runs(db, fetch, 0)
+    mentrix_rows = db.query(MentrixRun).order_by(MentrixRun.id.desc()).limit(fetch).all()
     mentrix = [
         {
             "id": r.id,
@@ -380,9 +394,11 @@ def list_runs(limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
     ]
     missions = [
         _serialize_mission_as_agent_run(m, task=m.get("goal") or "", model="", workspace="")
-        for m in list_missions(limit=limit, offset=offset)
+        for m in list_missions(limit=fetch, offset=0)
     ]
-    return missions + mentrix + (legacy if isinstance(legacy, list) else [])
+    combined = missions + mentrix + (legacy if isinstance(legacy, list) else [])
+    combined.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return combined[offset : offset + limit]
 
 
 @router.delete("/run/{run_id}")

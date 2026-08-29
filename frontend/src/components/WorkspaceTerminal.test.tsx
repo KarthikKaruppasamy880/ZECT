@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -14,9 +15,22 @@ vi.mock("@/lib/api", () => ({
   })),
 }));
 
-vi.mock("./RealTerminal", () => ({
-  default: ({ workspaceRoot }: { workspaceRoot: string }) => <div data-testid="real-terminal-stub">{workspaceRoot}</div>,
-}));
+const mountCounts: Record<string, number> = {};
+
+vi.mock("./RealTerminal", async () => {
+  const { useEffect } = await import("react");
+  return {
+    default: ({ workspaceRoot }: { workspaceRoot: string }) => {
+      // Mount tracking must fire once per component *instance* (on mount),
+      // not once per render -- a bare counter in the function body would
+      // also increment on every re-render triggered by a tab switch.
+      useEffect(() => {
+        mountCounts[workspaceRoot] = (mountCounts[workspaceRoot] || 0) + 1;
+      }, [workspaceRoot]);
+      return <div data-testid="real-terminal-stub">{workspaceRoot}</div>;
+    },
+  };
+});
 
 describe("WorkspaceTerminal", () => {
   it("shows attach-root CTA and disables input when cwd is empty", () => {
@@ -76,5 +90,41 @@ describe("WorkspaceTerminal", () => {
     expect(onClosePanel).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("workspace-terminal-tab-close-1"));
     expect(onCloseSession).toHaveBeenCalledWith("t1");
+  });
+
+  it("keeps every session's RealTerminal mounted across tab switches (does not kill and respawn the shell)", () => {
+    for (const k of Object.keys(mountCounts)) delete mountCounts[k];
+    function Harness() {
+      const [activeSessionId, setActiveSessionId] = useState("t1");
+      return (
+        <WorkspaceTerminal
+          workspaceRoot="C:/tmp/zect"
+          sessions={[
+            { id: "t1", repoId: 1, rootPath: "C:/tmp/repo-one", label: "repo-one" },
+            { id: "t2", repoId: 2, rootPath: "C:/tmp/repo-two", label: "repo-two" },
+          ]}
+          activeSessionId={activeSessionId}
+          onSelectSession={setActiveSessionId}
+        />
+      );
+    }
+    render(
+      <MemoryRouter>
+        <Harness />
+      </MemoryRouter>,
+    );
+    // Both sessions' terminals mount immediately (not just the active tab).
+    const stubs = screen.getAllByTestId("real-terminal-stub");
+    expect(stubs.map((n) => n.textContent).sort()).toEqual(["C:/tmp/repo-one", "C:/tmp/repo-two"]);
+    expect(mountCounts["C:/tmp/repo-one"]).toBe(1);
+    expect(mountCounts["C:/tmp/repo-two"]).toBe(1);
+
+    // Switching tabs must not unmount/remount either terminal.
+    fireEvent.click(screen.getByTestId("workspace-terminal-tab-2"));
+    fireEvent.click(screen.getByTestId("workspace-terminal-tab-1"));
+    fireEvent.click(screen.getByTestId("workspace-terminal-tab-2"));
+    expect(mountCounts["C:/tmp/repo-one"]).toBe(1);
+    expect(mountCounts["C:/tmp/repo-two"]).toBe(1);
+    expect(screen.getAllByTestId("real-terminal-stub")).toHaveLength(2);
   });
 });

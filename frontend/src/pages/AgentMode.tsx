@@ -21,6 +21,7 @@ import {
   agentListRuns,
   agentResumeRun,
   agentStartRun,
+  codingAgentApprovePlan,
   type AgentModeRun,
 } from "@/lib/api";
 
@@ -118,6 +119,23 @@ export default function AgentMode() {
       void fetchRuns();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Resume failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const approvePlan = async (runId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Mission-backed runs only (run_id is "mission-<uuid>") -- this button
+      // only ever renders for status === "awaiting_approval", which the
+      // backend only sets on a mission-backed run.
+      await codingAgentApprovePlan(runId.replace(/^mission-/, ""));
+      setActiveRun(await agentGetRun(runId));
+      void fetchRuns();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Approve failed");
     } finally {
       setLoading(false);
     }
@@ -321,6 +339,16 @@ export default function AgentMode() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {activeRun.status === "awaiting_approval" && (
+                <button
+                  type="button"
+                  onClick={() => void approvePlan(activeRun.run_id)}
+                  className="px-3 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded text-sm flex items-center gap-1"
+                  data-testid="agent-approve-plan"
+                >
+                  <CheckCircle className="w-3 h-3" /> Approve Plan &amp; Build
+                </button>
+              )}
               {activeRun.status === "paused" && (
                 <button
                   type="button"
@@ -330,7 +358,9 @@ export default function AgentMode() {
                   <Play className="w-3 h-3" /> Resume
                 </button>
               )}
-              {(activeRun.status === "running" || activeRun.status === "paused") && (
+              {(activeRun.status === "running" ||
+                activeRun.status === "paused" ||
+                activeRun.status === "awaiting_approval") && (
                 <button
                   type="button"
                   onClick={() => void cancelRun(activeRun.run_id)}
@@ -352,6 +382,20 @@ export default function AgentMode() {
           </div>
 
           <p className="text-sm text-slate-700">{activeRun.task}</p>
+
+          {activeRun.status === "awaiting_approval" && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-3 space-y-2" data-testid="agent-plan-review">
+              <p className="text-xs font-semibold text-teal-800">
+                Review the PLAN below before any worktree is created or file is written:
+              </p>
+              <pre className="text-xs text-slate-800 whitespace-pre-wrap font-mono bg-white border border-teal-100 rounded p-2 max-h-56 overflow-auto">
+                {String(
+                  (activeRun.result?.mission as { plan?: string } | undefined)?.plan || "(no plan text)",
+                )}
+              </pre>
+            </div>
+          )}
+
           <p className="text-xs text-slate-500">
             Tokens: {(activeRun.total_tokens ?? 0).toLocaleString()} | Model: {activeRun.model || "—"}
             {runWorkspace ? ` | Workspace: ${runWorkspace}` : ""}

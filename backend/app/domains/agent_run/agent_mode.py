@@ -152,6 +152,11 @@ def _serialize_mission_as_agent_run(mission: dict[str, Any], *, task: str, model
     status = _MISSION_STATUS.get(execution_state, execution_state or "running")
     if mission.get("phase") == "cancelled" or mission.get("status") == "cancelled":
         status = "cancelled"
+    elif mission.get("phase") == "awaiting_plan_approval" and not mission.get("plan_approved"):
+        # A file-writing mission must never look "running"/"stopped" while it
+        # is actually just sitting there waiting for a human to read the PLAN
+        # and approve it -- see the governance fix in start_agent_run() below.
+        status = "awaiting_approval"
     steps = [
         {
             "id": i,
@@ -220,7 +225,15 @@ def start_agent_run(req: AgentRunRequest, db: Session = Depends(get_db)):
             # files with no worktree isolation, no commit, no Ultra Review,
             # no EvidenceVerifier). Hand off to the same canonical
             # coding_engine Mission/Harness Developer Workspace uses.
-            from app.services.coding_engine.lifecycle import approve_plan_in_background, start_mission
+            #
+            # The mission is returned in its "awaiting_plan_approval" phase
+            # and deliberately NOT auto-approved here: worktree isolation and
+            # every file edit only happen after a human reads the PLAN and
+            # calls POST /api/coding-agent/missions/{id}/approve-plan (the
+            # same gate the canonical Mission panel uses). Auto-approving on
+            # the caller's behalf would let a file-writing agent run execute
+            # with zero human confirmation.
+            from app.services.coding_engine.lifecycle import start_mission
 
             label = Path(workspace).name or "workspace"
             mission = start_mission(
@@ -230,7 +243,6 @@ def start_agent_run(req: AgentRunRequest, db: Session = Depends(get_db)):
                 mode=mode,
                 source="legacy_agent_mode",
             )
-            mission = approve_plan_in_background(mission["id"])
             return _serialize_mission_as_agent_run(mission, task=req.task, model=req.model, workspace=workspace)
 
         run = run_mentrix(

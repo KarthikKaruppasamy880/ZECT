@@ -1,11 +1,12 @@
 """Legacy Agent Mode (/api/agent/run) must not remain a second independent
 coding engine. A file-writing submission (mode=upgrade/bugfix + a real
 workspace path) now hands off to the SAME canonical coding_engine Mission
-used by Developer Workspace instead of forge_loop.orchestrator, executes in
-the background so the HTTP call does not block for the whole mission, and
-its history is a live projection of the canonical Mission JSON store -- not
-a second run table. chat/review_only modes and missing-workspace requests
-are left exactly as they were (they never wrote files either way)."""
+used by Developer Workspace instead of forge_loop.orchestrator, returns the
+PLAN for a human to review (never auto-approves -- see the Phase A
+governance fix in agent_mode.py), and its history is a live projection of
+the canonical Mission JSON store -- not a second run table. chat/review_only
+modes and missing-workspace requests are left exactly as they were (they
+never wrote files either way)."""
 
 from __future__ import annotations
 
@@ -64,7 +65,7 @@ class TestFileWritingModeRedirectsToTheRealMission:
             patch(
                 "app.services.coding_engine.mentrix_native_build.run_mentrix_native_build",
                 side_effect=_fake_build("calc.py", "def add(a, b):\n    return a + b\n"),
-            ),
+            ) as mocked_build,
             patch("app.services.forge_loop.orchestrator.run_mentrix") as mocked_forge_loop,
         ):
             resp = client.post(
@@ -76,45 +77,38 @@ class TestFileWritingModeRedirectsToTheRealMission:
             body = resp.json()
             assert body["run_id"].startswith(_MISSION_RUN_PREFIX)
             assert body["engine"] == "coding_engine_mission"
+            assert body["status"] == "awaiting_approval", "must not auto-approve without a human"
+            assert not mocked_build.called, "no file should be written before a human approves the PLAN"
             assert not mocked_forge_loop.called, "file-writing legacy submissions must not use forge_loop"
 
-            # Poll the same legacy GET endpoint until the background mission finishes.
             mission_id = body["run_id"][len(_MISSION_RUN_PREFIX) :]
-            for _ in range(100):
-                got = client.get(f"/api/agent/run/{_MISSION_RUN_PREFIX}{mission_id}", headers=auth_headers)
-                if got.json()["status"] not in ("running",):
-                    break
-                time.sleep(0.05)
-            final = got.json()
+            approved = client.post(
+                f"/api/coding-agent/missions/{mission_id}/approve-plan", headers=auth_headers
+            )
+            assert approved.status_code == 200, approved.text
+
+            final = client.get(f"/api/agent/run/{body['run_id']}", headers=auth_headers).json()
             assert final["status"] == "completed", final
             assert "calc.py" in final["files_written"]
 
-    def test_post_returns_before_the_mission_finishes(self, ws, client, auth_headers):
-        """The HTTP call must not block for the whole mission -- only the
-        legacy /api/agent/run screen's single-await contract was ever tied to
-        forge_loop's synchronous run_mentrix(); the mission-backed redirect
-        must background the real execution instead of reproducing that block."""
+    def test_post_does_not_build_until_a_human_approves_the_plan(self, ws, client, auth_headers):
+        """This is the exact governance bug the Phase A fix closes: the
+        legacy /api/agent/run redirect used to call approve_plan_in_background()
+        itself, so a file-writing mission executed with zero human
+        confirmation. The POST must now return the PLAN for review only."""
         repo = _init_repo(ws / "backend")
-        gate = threading.Event()
-        with (
-            patch("app.services.coding_engine.propose_patches.propose_from_plan", return_value={}),
-            patch(
-                "app.services.coding_engine.mentrix_native_build.run_mentrix_native_build",
-                side_effect=_fake_build("calc.py", "def add(a, b):\n    return a + b\n", gate=gate),
-            ),
-        ):
-            started = time.monotonic()
+        with patch(
+            "app.services.coding_engine.mentrix_native_build.run_mentrix_native_build"
+        ) as mocked_build:
             resp = client.post(
                 "/api/agent/run",
                 headers=auth_headers,
                 json={"task": "Fix add()", "stages": ["build"], "mode": "upgrade", "workspace": str(repo)},
             )
-            elapsed = time.monotonic() - started
             assert resp.status_code == 200
-            assert elapsed < 4.0, "POST /api/agent/run must not block on the gated background mission"
             body = resp.json()
-            assert body["status"] == "running"
-            gate.set()
+            assert body["status"] == "awaiting_approval"
+            assert not mocked_build.called, "must not build before a human approves the PLAN"
 
     def test_chat_mode_still_uses_forge_loop_unchanged(self, ws, client, auth_headers):
         with patch("app.services.forge_loop.orchestrator.run_mentrix") as mocked, patch(
@@ -193,11 +187,11 @@ class TestMissionBackedRunsResolveToTheSameCanonicalMission:
             run_id = resp.json()["run_id"]
             mission_id = run_id[len(_MISSION_RUN_PREFIX) :]
 
-            for _ in range(100):
-                canonical = client.get(f"/api/coding-agent/missions/{mission_id}", headers=auth_headers)
-                if canonical.json()["phase"] not in ("isolating", "editing", "awaiting_plan_approval"):
-                    break
-                time.sleep(0.05)
+            approved = client.post(
+                f"/api/coding-agent/missions/{mission_id}/approve-plan", headers=auth_headers
+            )
+            assert approved.status_code == 200, approved.text
+            canonical = client.get(f"/api/coding-agent/missions/{mission_id}", headers=auth_headers)
 
         assert canonical.status_code == 200, canonical.text
         assert canonical.json()["id"] == mission_id
@@ -227,7 +221,30 @@ class TestMissionBackedRunsResolveToTheSameCanonicalMission:
         run_ids = [r.get("run_id") for r in listing.json()]
         assert run_id in run_ids
 
+    def test_cancel_before_approval_never_builds(self, ws, client, auth_headers):
+        """Cancelling a mission that's still awaiting a human's PLAN approval
+        (the common case now that approval is never automatic) must not
+        build anything, and must leave the run showing as cancelled."""
+        repo = _init_repo(ws / "backend")
+        with patch(
+            "app.services.coding_engine.mentrix_native_build.run_mentrix_native_build"
+        ) as mocked_build:
+            resp = client.post(
+                "/api/agent/run",
+                headers=auth_headers,
+                json={"task": "Fix add()", "stages": ["build"], "mode": "upgrade", "workspace": str(repo)},
+            )
+            run_id = resp.json()["run_id"]
+            cancelled = client.delete(f"/api/agent/run/{run_id}", headers=auth_headers)
+            assert cancelled.status_code == 200, cancelled.text
+            assert cancelled.json()["status"] == "cancelled"
+            assert not mocked_build.called
+            got = client.get(f"/api/agent/run/{run_id}", headers=auth_headers)
+            assert got.json()["status"] == "cancelled"
+
     def test_cancel_mission_backed_run(self, ws, client, auth_headers):
+        """Cancelling a mission that a human already approved and is mid-flight
+        must be reflected as cancelled once the gated build unblocks."""
         repo = _init_repo(ws / "backend")
         gate = threading.Event()
         with (
@@ -243,9 +260,25 @@ class TestMissionBackedRunsResolveToTheSameCanonicalMission:
                 json={"task": "Fix add()", "stages": ["build"], "mode": "upgrade", "workspace": str(repo)},
             )
             run_id = resp.json()["run_id"]
+            mission_id = run_id[len(_MISSION_RUN_PREFIX) :]
+
+            # approve-plan blocks the caller until the mission finishes -- a
+            # real human approving from the UI experiences this same block,
+            # so exercise it from a background thread to be able to cancel
+            # mid-flight, same as a human changing their mind mid-build.
+            approve_thread = threading.Thread(
+                target=client.post,
+                args=(f"/api/coding-agent/missions/{mission_id}/approve-plan",),
+                kwargs={"headers": auth_headers},
+                daemon=True,
+            )
+            approve_thread.start()
+            time.sleep(0.3)  # let approval pass the cancellation check and reach the gated build
+
             cancelled = client.delete(f"/api/agent/run/{run_id}", headers=auth_headers)
             assert cancelled.status_code == 200, cancelled.text
             assert cancelled.json()["status"] == "cancelled"
             gate.set()
+            approve_thread.join(timeout=5)
             got = client.get(f"/api/agent/run/{run_id}", headers=auth_headers)
             assert got.json()["status"] == "cancelled"

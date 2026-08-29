@@ -85,11 +85,11 @@ class TestStartRunUsesRichContextWhenIdentityIsAvailable:
 
         with (
             patch(
-                "app.services.coding_engine.agent_context.compose_rich_agent_context",
-                return_value="RICH CONTEXT HERE",
+                "app.services.coding_engine.agent_context.compose_rich_agent_context_pack",
+                return_value={"text": "RICH CONTEXT HERE", "knowledge": True, "lattice_hits": 3, "lattice_indexed": True, "blueprint": False},
             ) as rich,
             patch(
-                "app.services.coding_engine.agent_context.compose_coding_agent_context"
+                "app.services.coding_engine.agent_context.compose_context_pack"
             ) as thin,
         ):
             rt = MentrixNativeCodingRuntime()
@@ -106,6 +106,12 @@ class TestStartRunUsesRichContextWhenIdentityIsAvailable:
         run = rt._runs[run_id]  # noqa: SLF001 -- inspecting internal state is the point of this test
         assert run["agent_context"] == "RICH CONTEXT HERE"
         assert run["work_item_id"] == 42
+        assert run["context_used"] == {
+            "knowledge": True,
+            "lattice_hits": 3,
+            "lattice_indexed": True,
+            "blueprint": False,
+        }
 
     def test_falls_back_to_thin_pipeline_when_rich_context_is_empty(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ZECT_WORKSPACE_ROOT", str(tmp_path))
@@ -113,10 +119,13 @@ class TestStartRunUsesRichContextWhenIdentityIsAvailable:
         ws.mkdir()
 
         with (
-            patch("app.services.coding_engine.agent_context.compose_rich_agent_context", return_value=""),
             patch(
-                "app.services.coding_engine.agent_context.compose_coding_agent_context",
-                return_value="thin fallback context",
+                "app.services.coding_engine.agent_context.compose_rich_agent_context_pack",
+                return_value={"text": ""},
+            ),
+            patch(
+                "app.services.coding_engine.agent_context.compose_context_pack",
+                return_value={"text": "thin fallback context", "knowledge": False, "lattice_hits": 0, "lattice_indexed": False, "blueprint": False},
             ) as thin,
         ):
             rt = MentrixNativeCodingRuntime()
@@ -133,8 +142,8 @@ class TestStartRunUsesRichContextWhenIdentityIsAvailable:
         ws.mkdir()
 
         with (
-            patch("app.services.coding_engine.agent_context.compose_rich_agent_context") as rich,
-            patch("app.services.coding_engine.agent_context.compose_coding_agent_context", return_value=""),
+            patch("app.services.coding_engine.agent_context.compose_rich_agent_context_pack") as rich,
+            patch("app.services.coding_engine.agent_context.compose_context_pack", return_value={"text": ""}),
         ):
             rt = MentrixNativeCodingRuntime()
             rt.start_run("Fix the thing", workspace=str(ws), auto_approve_edits=False)

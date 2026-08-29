@@ -29,7 +29,7 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 # already did -- the Developer composer's @file-attachment picker needs to
 # accept source/config/log files, not just prose documents.
 _PLAIN_TEXT_EXT = {
-    ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".log",
+    ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".log", ".xml",
     ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".sql", ".sh", ".ps1",
 }
 ALLOWED_EXT = _PLAIN_TEXT_EXT | {".docx", ".pdf", ".pptx"}

@@ -30,7 +30,7 @@ def _route(*, user_allows_cloud: bool | None = None, policy: str | None = None):
 
 
 def _chat(
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     *,
     max_tokens: int = 2000,
     temperature: float = 0.3,
@@ -174,8 +174,17 @@ def run_ask(
     repo_context: str = "",
     repo_id: int | None = None,
     db: Any = None,
+    images: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Clarify requirements (Ask Mode). Offline/blocked when policy forbids cloud."""
+    """Clarify requirements (Ask Mode). Offline/blocked when policy forbids cloud.
+
+    `images`, when given, are data URLs (data:image/png;base64,...) -- e.g. a
+    screenshot pasted into the composer. The OpenAI SDK's chat.completions.create
+    already accepts multimodal content blocks natively for vision-capable
+    models, so this only needs to shape the final user message correctly; if
+    the configured model isn't vision-capable, the provider itself returns a
+    clear API error rather than this silently dropping the image.
+    """
     context = repo_context or ""
     if repo_id and db is not None and not context:
         from app.domains.agent_run.llm import _build_repo_context
@@ -186,7 +195,7 @@ def run_ask(
         "You are ZECT Mentrix Ask — clarify upgrade requirements. "
         "Be concise; list open questions and assumed defaults for any-language → any-language ports."
     )
-    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     if context:
         messages.append(
             {
@@ -194,7 +203,13 @@ def run_ask(
                 "content": f"Repository / Lattice context:\n\n{context[:8000]}",
             }
         )
-    messages.append({"role": "user", "content": question})
+    if images:
+        content: list[dict[str, Any]] = [{"type": "text", "text": question}]
+        for url in images:
+            content.append({"type": "image_url", "image_url": {"url": url}})
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": question})
 
     out = _chat(messages, max_tokens=2000, temperature=0.3)
     if out.get("ok"):

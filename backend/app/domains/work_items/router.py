@@ -218,6 +218,9 @@ def delete_event_forbidden(work_item_id: int, event_id: int, _user: CurrentUser 
 # ---- Mentrix Developer API ----
 
 
+_MAX_IMAGE_DATA_URL_CHARS = 12_000_000  # ~9MB decoded, generous for a screenshot
+
+
 class AskIn(BaseModel):
     question: str
     work_item_id: Optional[int] = None
@@ -226,6 +229,10 @@ class AskIn(BaseModel):
     repository_ids: list[int] = Field(default_factory=list)
     repository_ref: str = ""
     base_commit_sha: str = ""
+    # data:image/<type>;base64,... URLs -- e.g. a screenshot pasted into the
+    # composer. Passed straight through to the model as vision content; see
+    # llm_phase.run_ask.
+    images: list[str] = Field(default_factory=list)
 
 
 class PlanIn(BaseModel):
@@ -258,6 +265,12 @@ def developer_ask(
 ):
     from app.services.work_items.developer_service import MentrixDeveloperService
 
+    for url in body.images:
+        if not url.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="images must be data:image/... URLs")
+        if len(url) > _MAX_IMAGE_DATA_URL_CHARS:
+            raise HTTPException(status_code=400, detail="image too large")
+
     return MentrixDeveloperService(db).ask(
         question=body.question,
         work_item_id=body.work_item_id,
@@ -267,6 +280,7 @@ def developer_ask(
         repository_ref=body.repository_ref,
         base_commit_sha=body.base_commit_sha,
         actor=getattr(user, "email", "") or "",
+        images=body.images or None,
     )
 
 

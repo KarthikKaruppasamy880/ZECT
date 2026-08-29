@@ -59,6 +59,12 @@ def test_parse_txt_and_docx():
     assert "table_formula_completeness" in pr2.partial
 
 
+def test_parse_xml_attachment():
+    pr = parse_document("process.xml", b"<bpmn:process><task>Approve</task></bpmn:process>", "application/xml")
+    assert "<task>Approve</task>" in pr.markdown
+    assert pr.parser_name == "text_utf8"
+
+
 def test_project_shared_reuses_content_version(db):
     session, u1, u2 = db
     payload = b"# Spec\n\nShared design doc about auth."

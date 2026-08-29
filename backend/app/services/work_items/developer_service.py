@@ -294,6 +294,7 @@ class MentrixDeveloperService:
         repository_ref: str = "",
         base_commit_sha: str = "",
         actor: str = "",
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         wi = self._ensure_work_item(
             work_item_id=work_item_id,
@@ -340,6 +341,7 @@ class MentrixDeveloperService:
             repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=question)).text_blob(),
             repo_id=wi.repository_id,
             db=self.db,
+            images=images or None,
         )
         tel = build_telemetry(
             requested_provider="local" if mentrix_local_llm_configured() else "cloud",
@@ -380,6 +382,9 @@ class MentrixDeveloperService:
                 "answer": answer,
                 "model": str(tel.get("actual_model") or tel.get("requested_model") or ""),
                 "offline": bool(result.get("offline")),
+                # Only a count is persisted, never the image bytes -- this
+                # audit log is not an image store; images are single-turn.
+                "image_count": len(images or []),
             },
             commit=True,
         )
@@ -418,6 +423,7 @@ class MentrixDeveloperService:
                     "answer": str(payload.get("answer") or ""),
                     "model": str(payload.get("model") or ""),
                     "offline": bool(payload.get("offline")),
+                    "image_count": int(payload.get("image_count") or 0),
                     "created_at": row.created_at.isoformat() if row.created_at else None,
                 }
             )

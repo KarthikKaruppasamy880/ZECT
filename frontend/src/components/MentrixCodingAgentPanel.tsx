@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import ModelSelector from "@/components/ModelSelector";
 import { MentionAutocomplete, MentionContextStrip } from "@/components/MentionComposerAddons";
+import { ComposerAttachmentBar } from "@/components/ComposerAttachmentBar";
 import { hasMentions } from "@/lib/mentions";
+import { useComposerAttachments, imageFilesFromClipboard } from "@/hooks/useComposerAttachments";
 import {
   codingAgentApprove,
   codingAgentApproveGit,
@@ -33,9 +35,7 @@ import {
   developerAsk,
   developerAskHistory,
   developerPlan,
-  getDocumentMarkdown,
   mentrixStartRun,
-  uploadDocument,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
   type ContextPack,
@@ -226,6 +226,7 @@ function MissionPane({
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  const attach = useComposerAttachments(projectId);
 
   useEffect(() => {
     if (seedMission) setMission(seedMission);
@@ -278,15 +279,18 @@ function MissionPane({
         return;
       }
     }
+    const docBlob = attach.documentContextBlob();
+    const goalWithAttachments = docBlob ? `${g}\n\n${docBlob}` : g;
     await run(() =>
       codingAgentCreateMission({
-        goal: g,
+        goal: goalWithAttachments,
         project_id: projectId,
         work_item_id: workItemId,
         roots,
         patches_by_repo: patches,
       }),
     );
+    attach.reset();
   };
 
   const phase = mission?.phase || "idle";
@@ -318,6 +322,17 @@ function MissionPane({
           rows={2}
           data-testid="mentrix-coding-agent-mission-goal"
         />
+        <ComposerAttachmentBar
+          attachments={attach.attachments}
+          images={attach.images}
+          attaching={attach.attaching}
+          onAttachFiles={(files) => void attach.attachFiles(files, { allowImages: false })}
+          onRemoveAttachment={attach.removeAttachment}
+          onRemoveImage={attach.removeImage}
+          allowImages={false}
+          testIdPrefix="mentrix-coding-agent-mission"
+        />
+        {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
         <details className="rounded border border-slate-100 px-2 py-1">
           <summary
             className="cursor-pointer text-[10px] text-slate-500"
@@ -641,6 +656,7 @@ function AskPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  const attach = useComposerAttachments(projectId);
   void workspaceRoot;
 
   // Restore the conversation whenever this pane mounts with a known
@@ -677,12 +693,16 @@ function AskPane({
     setError(null);
     try {
       const ids = repoIdsFromRoots(roots);
+      const docBlob = attach.documentContextBlob();
+      const askedText = docBlob ? `${question}\n\n${docBlob}` : question;
+      const images = attach.images.map((i) => i.dataUrl);
       const res = await developerAsk({
-        question,
+        question: askedText,
         project_id: projectId ?? undefined,
         work_item_id: workItemId ?? undefined,
         repository_id: ids[0],
         repository_ids: ids,
+        images: images.length ? images : undefined,
       });
       // Reusing the same work_item_id on every subsequent call (instead of
       // letting the backend spawn a fresh WorkItem each time) is what makes
@@ -692,9 +712,10 @@ function AskPane({
       }
       setTurns((prev) => [
         ...prev,
-        { question, answer: res.answer || "", model: "", offline: false, created_at: null },
+        { question, answer: res.answer || "", model: "", offline: false, image_count: images.length, created_at: null },
       ]);
       setQ("");
+      attach.reset();
       setContextUsed(contextFromDeveloperPi(res.project_intelligence));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ask failed");
@@ -709,10 +730,24 @@ function AskPane({
       <textarea
         value={q}
         onChange={(e) => setQ(e.target.value)}
+        onPaste={(e) => {
+          const imgs = imageFilesFromClipboard(e);
+          if (imgs.length) void attach.attachFiles(imgs);
+        }}
         className="mt-1 min-h-[4rem] rounded border border-slate-200 px-2 py-1"
-        placeholder="Search or explain this workspace…"
+        placeholder="Search or explain this workspace… (paste a screenshot to ask about it)"
         data-testid="mentrix-coding-agent-ask-input"
       />
+      <ComposerAttachmentBar
+        attachments={attach.attachments}
+        images={attach.images}
+        attaching={attach.attaching}
+        onAttachFiles={(files) => void attach.attachFiles(files)}
+        onRemoveAttachment={attach.removeAttachment}
+        onRemoveImage={attach.removeImage}
+        testIdPrefix="mentrix-coding-agent-ask"
+      />
+      {attach.error ? <p className="mt-1 text-rose-600">{attach.error}</p> : null}
       <div className="mt-2 flex gap-1">
         <button
           type="button"
@@ -787,8 +822,7 @@ function PlanPane({
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const mdRef = useRef<HTMLTextAreaElement | null>(null);
   const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
-  const [attachments, setAttachments] = useState<{ id: number; filename: string; markdown: string }[]>([]);
-  const [attaching, setAttaching] = useState(false);
+  const attach = useComposerAttachments(projectId);
 
   /** Resolve every @mention against real data and fold both that and any
    * uploaded attachments into one context blob to prepend to what actually
@@ -810,25 +844,9 @@ function PlanPane({
         /* Context resolution failing must never block Save/Approve & Build. */
       }
     }
-    for (const a of attachments) parts.push(`[attachment:${a.filename}]\n${a.markdown}`);
+    const docBlob = attach.documentContextBlob();
+    if (docBlob) parts.push(docBlob);
     return parts.length ? `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Plan\n\n` : "";
-  };
-
-  const attachFile = async (file: File) => {
-    setAttaching(true);
-    setError(null);
-    try {
-      const { artifact } = await uploadDocument({ file, projectId: projectId ?? undefined });
-      const doc = await getDocumentMarkdown(artifact.id);
-      setAttachments((prev) => [
-        ...prev,
-        { id: artifact.id, filename: file.name, markdown: doc.markdown || "" },
-      ]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Attachment upload failed");
-    } finally {
-      setAttaching(false);
-    }
   };
 
   const save = async () => {
@@ -950,27 +968,17 @@ function PlanPane({
         textareaRef={mdRef}
       />
       <MentionContextStrip pack={mentionPack} />
-      <div className="mt-1 flex items-center gap-2">
-        <label className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600">
-          {attaching ? "Uploading…" : "Attach file"}
-          <input
-            type="file"
-            className="hidden"
-            data-testid="mentrix-coding-agent-plan-attach"
-            accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,.py,.ts,.tsx,.js,.jsx,.pdf,.docx,.pptx"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void attachFile(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {attachments.map((a) => (
-          <span key={a.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-            {a.filename}
-          </span>
-        ))}
-      </div>
+      <ComposerAttachmentBar
+        attachments={attach.attachments}
+        images={attach.images}
+        attaching={attach.attaching}
+        onAttachFiles={(files) => void attach.attachFiles(files, { allowImages: false })}
+        onRemoveAttachment={attach.removeAttachment}
+        onRemoveImage={attach.removeImage}
+        allowImages={false}
+        testIdPrefix="mentrix-coding-agent-plan"
+      />
+      {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
       {error ? (
         <p className="text-rose-600" data-testid="mentrix-coding-agent-plan-error">
           {error}

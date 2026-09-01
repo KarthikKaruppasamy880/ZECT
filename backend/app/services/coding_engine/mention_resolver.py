@@ -282,11 +282,13 @@ def _resolve_skill(value: str, *, db: Any) -> ProvenanceItem:
     )
 
 
-def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
-    """No rule loader exists anywhere in the codebase today -- this is the
-    first one. Deliberately flat (no per-path hierarchy) for a first pass:
-    concatenates whatever of ZECT.md/AGENTS.md/.zect/rules/*/.cursor/rules/*
-    exists under the workspace root, most-specific-looking first."""
+def load_workspace_rules(workspace: Path) -> str:
+    """Concatenate ZECT.md/AGENTS.md/.zect/rules/*/.cursor/rules/* content,
+    if any exists under the workspace root, most-specific-looking first.
+    Deliberately flat (no per-path hierarchy) for a first pass. Shared by
+    the on-demand @rule mention (below) and the standing RULES/SKILLS
+    prompt layer in coding_engine_mentrix.py -- one rule loader, not two.
+    Returns "" when nothing is found (never raises)."""
     found: list[str] = []
     for name in RULE_FILENAMES:
         p = workspace / name
@@ -301,12 +303,17 @@ def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
                         f"# {d}/{rule_file.name}\n"
                         f"{rule_file.read_text(encoding='utf-8', errors='replace')[:4000]}"
                     )
-    if not found:
+    return "\n\n".join(found)[:8000]
+
+
+def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
+    content = load_workspace_rules(workspace)
+    if not content:
         return _unresolved("rule", "", "no ZECT.md/AGENTS.md/.zect/rules/.cursor/rules found")
     return ProvenanceItem(
         source_type="mention:rule",
         source_id="workspace_rules",
-        content="\n\n".join(found)[:8000],
+        content=content,
         verification_state="rules_file",
         freshness="current",
         selection_reason="user_mentioned",

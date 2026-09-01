@@ -1213,7 +1213,8 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
     from app.services.coding_engine.mentrix_lead import ROLE_CODER, ROLE_TOOL_ALLOWLISTS, run_explore_phase
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
 
-    base_goal = f"{mission.get('goal') or ''}\n\nPLAN:\n{mission.get('plan') or ''}"
+    base_goal = str(mission.get("goal") or "")
+    approved_plan = str(mission.get("plan") or "")
     results: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         wt = str(repo.get("worktree_path") or "").strip()
@@ -1248,6 +1249,7 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
             work_item_id=mission.get("work_item_id"),
+            approved_plan=approved_plan,
         )
         results.append(out)
         repo["native_build"] = {
@@ -1366,6 +1368,7 @@ def _diagnose_and_repair_repo(
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
             work_item_id=mission.get("work_item_id"),
+            approved_plan=str(mission.get("plan") or ""),
         )
         if out.get("context_used"):
             mission["context_used"] = out["context_used"]
@@ -1447,6 +1450,7 @@ def _run_app_and_browser_verification(
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
             work_item_id=mission.get("work_item_id"),
+            approved_plan=str(mission.get("plan") or ""),
         )
         if out.get("context_used"):
             mission["context_used"] = out["context_used"]

@@ -2547,6 +2547,30 @@ export const workspaceSearch = (body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+export type WorkspaceProblem = {
+  tool?: string;
+  severity?: string;
+  file?: string;
+  path?: string;
+  abs_path?: string;
+  line?: number;
+  column?: number;
+  message?: string;
+  repo_id?: number;
+  root_label?: string;
+};
+
+export const workspaceProblems = (repoIds: number[]) =>
+  request<{
+    ok: boolean;
+    problems: WorkspaceProblem[];
+    checked: string[];
+    skipped: { repo_id?: number; reason?: string }[];
+  }>("/api/workspace/problems", {
+    method: "POST",
+    body: JSON.stringify({ repo_ids: repoIds }),
+  });
+
 export const indexRepo = (repoPath: string, repoId?: number, fileExtensions?: string[]) =>
   request<any>("/api/code-index/index", {
     method: "POST",

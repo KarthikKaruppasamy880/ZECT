@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
 from app.infrastructure.database import get_db
-from app.services.workspace_multi_root import search_workspace
+from app.services.workspace_multi_root import search_workspace, workspace_problems
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 
@@ -37,3 +37,16 @@ def workspace_search(
         current_file=req.current_file,
         max_results=req.max_results,
     )
+
+
+class WorkspaceProblemsRequest(BaseModel):
+    repo_ids: list[int] = Field(default_factory=list)
+
+
+@router.post("/problems")
+def workspace_problems_endpoint(
+    req: WorkspaceProblemsRequest,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    return workspace_problems(db, repo_ids=req.repo_ids)

@@ -74,9 +74,12 @@ def _build_system_content(run: dict[str, Any], role_note: str) -> str:
     return "\n\n".join(sections)
 
 
-def _build_user_content(run: dict[str, Any], workspace: Path, followup: str | None) -> str:
+def _build_user_content(run: dict[str, Any], workspace: Path) -> str:
     """MISSION GOAL -> APPROVED PLAN -> current task, each its own section
-    instead of one flat string -- see _build_system_content above."""
+    instead of one flat string -- see _build_system_content above. This is
+    the SEED user message only; a later follow-up (see _agent_loop) is
+    appended as its own new history turn, not folded in here.
+    """
     sections = [f"## MISSION GOAL\n{run['goal']}"]
     approved_plan = str(run.get("approved_plan") or "").strip()
     if approved_plan:
@@ -84,10 +87,92 @@ def _build_user_content(run: dict[str, Any], workspace: Path, followup: str | No
     task_lines = [f"Workspace: {workspace}"]
     if run.get("expected_files"):
         task_lines.append(f"Expected files (prefer these): {run['expected_files']}")
-    if followup:
-        task_lines.append(f"Follow-up: {followup}")
     sections.append("## CURRENT TASK\n" + "\n".join(task_lines))
     return "\n\n".join(sections)
+
+
+def _group_into_turns(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Group history entries after the seed system+user pair into turns --
+    a turn starts with a user or assistant message and absorbs any
+    immediately-following tool-role messages. Condensation below only ever
+    cuts BETWEEN turns, never inside one, so a tool_calls assistant message
+    can never be separated from its tool results (which the chat-completion
+    APIs require to stay paired, on pain of a 400)."""
+    turns: list[list[dict[str, Any]]] = []
+    for msg in messages:
+        if msg.get("role") == "tool" and turns:
+            turns[-1].append(msg)
+        else:
+            turns.append([msg])
+    return turns
+
+
+_CONDENSED_SUMMARY_HEADER = (
+    "## EARLIER IN THIS RUN (condensed so this conversation stays within "
+    "budget; shortened, not fabricated)"
+)
+
+
+def _summarize_turns(turns: list[list[dict[str, Any]]]) -> list[str]:
+    lines: list[str] = []
+    for turn in turns:
+        for msg in turn:
+            role = msg.get("role")
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls") or []
+                if tool_calls:
+                    names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+                    lines.append(f"- called {', '.join(names)}")
+                elif msg.get("content"):
+                    lines.append(f"- assistant: {str(msg['content'])[:160]}")
+            elif role == "tool":
+                lines.append(f"  -> {str(msg.get('content') or '')[:160]}")
+            elif role == "user":
+                lines.append(f"- follow-up: {str(msg.get('content') or '')[:200]}")
+    return lines
+
+
+def _condense_history(history: list[dict[str, Any]], max_turns: int) -> list[dict[str, Any]]:
+    """Mission Memory: once a run/follow-up conversation grows past
+    max_turns REAL (non-summary) turns, fold everything older than the most
+    recent max_turns into one deterministic textual digest (tool names +
+    truncated outputs/content) instead of silently dropping it -- the gap
+    this closes: "history rebuilt fresh each call, dropping prior turns
+    rather than condensing" (see
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase E).
+    Deterministic, not another LLM call, so it can't itself fail or
+    hallucinate. The evidence/audit timeline (run["events"]) is a
+    completely separate, never-condensed list -- this only ever shrinks
+    what the model sees on its next turn.
+
+    Idempotent: an existing summary (detected by its header, always
+    immediately after the seed system+user pair) is treated as a fixed
+    prefix, not a turn subject to re-condensing -- otherwise calling this
+    every loop step would re-wrap the summary inside itself on every call
+    once the kept window alone exceeds max_turns.
+    """
+    if len(history) < 2:
+        return history
+    system_msg, seed_user_msg = history[0], history[1]
+    rest = history[2:]
+    existing_summary_body = ""
+    if (
+        rest
+        and rest[0].get("role") == "user"
+        and str(rest[0].get("content") or "").startswith(_CONDENSED_SUMMARY_HEADER)
+    ):
+        existing_summary_body = str(rest[0]["content"])[len(_CONDENSED_SUMMARY_HEADER) :].strip()
+        rest = rest[1:]
+    turns = _group_into_turns(rest)
+    if len(turns) <= max_turns:
+        return history
+    keep = turns[-max_turns:] if max_turns > 0 else []
+    to_fold = turns[: len(turns) - max_turns] if max_turns > 0 else turns
+    new_lines = _summarize_turns(to_fold)
+    body = "\n".join([existing_summary_body, *new_lines]) if existing_summary_body else "\n".join(new_lines)
+    summary_msg = {"role": "user", "content": f"{_CONDENSED_SUMMARY_HEADER}\n{body[:4000]}"}
+    flat_keep = [m for turn in keep for m in turn]
+    return [system_msg, seed_user_msg, summary_msg, *flat_keep]
 
 
 class MentrixNativeCodingRuntime:
@@ -413,10 +498,17 @@ class MentrixNativeCodingRuntime:
             if run.get("role")
             else ""
         )
-        history: list[dict[str, Any]] = [
+        # Mission Memory: a follow-up (submit_message resuming a terminal
+        # run) reuses and extends the SAME history this run already built,
+        # rather than rebuilding a fresh system+user seed and losing every
+        # prior tool call/observation -- see _condense_history above.
+        history: list[dict[str, Any]] = run.get("history") or [
             {"role": "system", "content": _build_system_content(run, role_note)},
-            {"role": "user", "content": _build_user_content(run, workspace, followup)},
+            {"role": "user", "content": _build_user_content(run, workspace)},
         ]
+        if followup:
+            history.append({"role": "user", "content": f"## FOLLOW-UP\n{followup}"})
+        run["history"] = history
 
         self._emit(
             run,
@@ -425,9 +517,12 @@ class MentrixNativeCodingRuntime:
             phase="running",
         )
 
+        max_turns = int(os.getenv("MENTRIX_CODING_AGENT_HISTORY_MAX_TURNS", "40"))
         for step in range(max_steps):
             if run.get("cancel"):
                 return
+            history = _condense_history(history, max_turns)
+            run["history"] = history
             try:
                 resp = adapter.create(
                     model=model,

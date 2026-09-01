@@ -63,6 +63,20 @@ describe("Phase E mention types (api/jira/bpmn)", () => {
   });
 });
 
+describe("Phase E mention types (database/schema/table)", () => {
+  it("hasMentions recognizes each new type", () => {
+    expect(hasMentions("check @database")).toBe(true);
+    expect(hasMentions("check @schema")).toBe(true);
+    expect(hasMentions("check @table:users")).toBe(true);
+  });
+  it("MENTION_TYPES lists each new type for the autocomplete dropdown", () => {
+    const types = MENTION_TYPES.map((m) => m.type);
+    for (const t of ["database", "schema", "table"]) {
+      expect(types).toContain(t);
+    }
+  });
+});
+
 describe("applyMention", () => {
   it("inserts a colon-suffixed mention for types that need a value", () => {
     const { text, cursor } = applyMention("please check @fi", 13, 16, "file", true);

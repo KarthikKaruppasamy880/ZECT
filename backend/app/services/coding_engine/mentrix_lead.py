@@ -42,6 +42,7 @@ _READ_ONLY_TOOLS = [
     "read_file",
     "search_code",
     "glob_files",
+    "db_schema",
     "git_status",
     "git_diff",
     "git_log",

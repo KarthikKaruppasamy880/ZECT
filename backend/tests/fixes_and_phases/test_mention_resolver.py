@@ -306,3 +306,62 @@ class TestBlueprint:
     def test_blueprint_mention_without_project_key_is_unresolved(self, ws):
         items = resolve_mentions("@blueprint", workspace=ws, db=object())
         assert items[0].verification_state == "unresolved"
+
+
+class TestApi:
+    def test_api_mention_finds_openapi_spec(self, ws):
+        (ws / "openapi.json").write_text(
+            '{"paths": {"/users": {"get": {}}}}', encoding="utf-8"
+        )
+        items = resolve_mentions("@api", workspace=ws)
+        assert items[0].verification_state == "api_inventory"
+        assert "/users" in items[0].content
+
+    def test_api_mention_with_no_routes_found_is_unresolved(self, ws):
+        items = resolve_mentions("@api", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestJira:
+    def test_jira_mention_reads_a_real_ticket_via_fixture(self, ws, monkeypatch):
+        import json
+
+        raw = {
+            "key": "ZECT-1",
+            "fields": {"summary": "Fix add()", "description": "The add() function is wrong."},
+        }
+        monkeypatch.setenv("ZECT_JIRA_INGEST_FIXTURE_JSON", json.dumps(raw))
+        items = resolve_mentions("@jira:ZECT-1", workspace=ws)
+        assert items[0].verification_state == "jira_ticket"
+        assert "Fix add()" in items[0].content
+
+    def test_jira_mention_without_a_key_is_unresolved(self, ws):
+        items = resolve_mentions("@jira", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+    def test_jira_mention_not_configured_is_unresolved_not_a_crash(self, ws, monkeypatch):
+        monkeypatch.delenv("ZECT_JIRA_INGEST_FIXTURE_JSON", raising=False)
+        items = resolve_mentions("@jira:ZECT-2", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestBpmn:
+    def test_bpmn_mention_reports_engine_status_and_incidents(self, ws):
+        with (
+            patch(
+                "app.adapters.camunda_client.process_engine_status",
+                return_value={"ready": True, "label": "Mentrix Process", "status": "ready", "base_url": "http://x"},
+            ),
+            patch(
+                "app.adapters.camunda_client.list_incidents",
+                return_value={"ok": True, "items": [{"id": "inc-1"}]},
+            ),
+        ):
+            items = resolve_mentions("@bpmn", workspace=ws)
+        assert items[0].verification_state == "process_engine_status"
+        assert "1 open incident" in items[0].content
+
+    def test_bpmn_mention_not_configured_is_unresolved(self, ws, monkeypatch):
+        monkeypatch.delenv("ZECT_CAMUNDA_BASE_URL", raising=False)
+        items = resolve_mentions("@bpmn", workspace=ws)
+        assert items[0].verification_state == "unresolved"

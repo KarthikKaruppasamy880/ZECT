@@ -49,6 +49,20 @@ describe("Phase D mention types (workspace/commit/branch/problem/workitem/bluepr
   });
 });
 
+describe("Phase E mention types (api/jira/bpmn)", () => {
+  it("hasMentions recognizes each new type", () => {
+    expect(hasMentions("check @api")).toBe(true);
+    expect(hasMentions("check @jira:PROJ-1")).toBe(true);
+    expect(hasMentions("check @bpmn")).toBe(true);
+  });
+  it("MENTION_TYPES lists each new type for the autocomplete dropdown", () => {
+    const types = MENTION_TYPES.map((m) => m.type);
+    for (const t of ["api", "jira", "bpmn"]) {
+      expect(types).toContain(t);
+    }
+  });
+});
+
 describe("applyMention", () => {
   it("inserts a colon-suffixed mention for types that need a value", () => {
     const { text, cursor } = applyMention("please check @fi", 13, 16, "file", true);

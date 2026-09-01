@@ -15,6 +15,7 @@ next whitespace). Supported types:
   @repo:<id> @plan:<id> @diff @terminal:<process_id> @error @test
   @lattice:<query> @skill:<id_or_name> @rule
   @workspace @commit:<sha> @branch:<name> @problem @workitem:<id> @blueprint
+  @api @jira:<ticket_key> @bpmn
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from app.services.work_items.context_engine import ProvenanceItem
 
 _MENTION_RE = re.compile(
     r"@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule"
-    r"|workspace|commit|branch|problem|workitem|blueprint)(?::(\S+))?"
+    r"|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn)(?::(\S+))?"
 )
 
 RULE_FILENAMES = ("ZECT.md", "AGENTS.md")
@@ -401,6 +402,24 @@ def _resolve_problem(*, workspace: Path) -> ProvenanceItem:
     )
 
 
+def _resolve_api(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.api_eval import inventory_apis
+
+    result = inventory_apis(workspace=str(workspace))
+    endpoints = result.get("endpoints") or []
+    if not endpoints:
+        return _unresolved("api", "", "no OpenAPI spec or route patterns found in this workspace")
+    lines = [f"{e.get('method')} {e.get('path')} ({e.get('source')})" for e in endpoints[:60]]
+    return ProvenanceItem(
+        source_type="mention:api",
+        source_id="workspace",
+        content="\n".join(lines),
+        verification_state="api_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
 def _resolve_workitem(value: str, *, db: Any, work_item_id: int | None) -> ProvenanceItem:
     if db is None:
         return _unresolved("workitem", value, "no database session available")
@@ -446,6 +465,49 @@ def _resolve_blueprint(*, project_key: str, db: Any) -> ProvenanceItem:
         source_id=project_key,
         content=str(snippet)[:4000],
         verification_state="blueprint",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_jira(value: str) -> ProvenanceItem:
+    if not value:
+        return _unresolved("jira", value, "ticket key required (e.g. @jira:PROJ-123)")
+    from app.domains.work_items.source_adapter import JiraSourceAdapter
+
+    adapter = JiraSourceAdapter()
+    try:
+        raw = adapter.fetch_raw(value)
+        fields = adapter.to_work_item_fields(raw)
+    except Exception as exc:  # noqa: BLE001
+        return _unresolved("jira", value, f"{type(exc).__name__}: {exc}")
+    content = f"{fields.get('title') or ''}\n\n{fields.get('description') or ''}".strip()
+    return ProvenanceItem(
+        source_type="mention:jira",
+        source_id=str(fields.get("external_id") or value),
+        content=content[:4000],
+        verification_state="jira_ticket",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_bpmn() -> ProvenanceItem:
+    from app.adapters.camunda_client import list_incidents, process_engine_status
+
+    status = process_engine_status()
+    if not status.get("ready"):
+        return _unresolved("bpmn", "", str(status.get("detail") or "Mentrix Process not configured"))
+    incidents = list_incidents()
+    items = incidents.get("items") or []
+    lines = [f"{status.get('label')}: {status.get('status')} ({status.get('base_url')})"]
+    lines.append(f"{len(items)} open incident(s)" if items else "no open incidents")
+    lines.extend(str(i)[:200] for i in items[:20])
+    return ProvenanceItem(
+        source_type="mention:bpmn",
+        source_id="process_engine",
+        content="\n".join(lines),
+        verification_state="process_engine_status",
         freshness="current",
         selection_reason="user_mentioned",
     )
@@ -501,6 +563,12 @@ def resolve_mentions(
                 items.append(_resolve_workitem(value, db=db, work_item_id=work_item_id))
             elif mtype == "blueprint":
                 items.append(_resolve_blueprint(project_key=project_key, db=db))
+            elif mtype == "api":
+                items.append(_resolve_api(workspace=workspace))
+            elif mtype == "jira":
+                items.append(_resolve_jira(value))
+            elif mtype == "bpmn":
+                items.append(_resolve_bpmn())
             else:
                 items.append(_unresolved(mtype, value, "unknown mention type"))
         except Exception as exc:  # noqa: BLE001 -- a bad mention must never break the whole message

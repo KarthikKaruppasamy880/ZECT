@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -595,6 +596,182 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
     }
 
 
+def _pyproject_has_section(pyproject: Path, section: str) -> bool:
+    if not pyproject.is_file():
+        return False
+    try:
+        text = pyproject.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return f"[{section}]" in text
+
+
+def _run_py_lint(worktree: Path) -> dict[str, Any]:
+    """Only runs when the repo itself declares ruff config AND ruff is on
+    PATH -- a repo with neither is not blocked by a gate it never opted into."""
+    root = Path(worktree)
+    configured = (
+        (root / "ruff.toml").is_file()
+        or (root / ".ruff.toml").is_file()
+        or _pyproject_has_section(root / "pyproject.toml", "tool.ruff")
+    )
+    if not configured or not shutil.which("ruff"):
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no ruff config/binary"}
+    try:
+        completed = subprocess.run(
+            ["ruff", "check", "."], cwd=str(root), capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "ruff",
+            "detail": "timeout",
+            "command": "ruff check .",
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "ruff",
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": "ruff check .",
+    }
+
+
+def _run_py_typecheck(worktree: Path) -> dict[str, Any]:
+    root = Path(worktree)
+    configured = (
+        (root / "mypy.ini").is_file()
+        or (root / ".mypy.ini").is_file()
+        or _pyproject_has_section(root / "pyproject.toml", "tool.mypy")
+    )
+    if not configured or not shutil.which("mypy"):
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no mypy config/binary"}
+    try:
+        completed = subprocess.run(
+            ["mypy", "."], cwd=str(root), capture_output=True, text=True, timeout=90
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "mypy",
+            "detail": "timeout",
+            "command": "mypy .",
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "mypy",
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": "mypy .",
+    }
+
+
+def _run_js_script_gate(worktree: Path, script_name: str, kind: str) -> dict[str, Any]:
+    """Run a package.json script iff the repo itself declares it -- so "lint"/
+    "typecheck"/"build" mean whatever tooling the repo already wired up
+    (eslint, tsc, next build, vite build, ...) instead of us guessing a
+    command that may not match the project."""
+    root = Path(worktree)
+    pkg = root / "package.json"
+    if not pkg.is_file():
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no package.json"}
+    try:
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    scripts = data.get("scripts") if isinstance(data, dict) else {}
+    scripts = scripts if isinstance(scripts, dict) else {}
+    if script_name not in scripts:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": f"no {script_name} script"}
+    cmd = f"npm run {script_name} --silent"
+    try:
+        completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=180, shell=True)
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": kind,
+            "detail": "timeout",
+            "command": cmd,
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": kind,
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": cmd,
+    }
+
+
+def run_repo_quality_gates(worktree: Path) -> dict[str, Any]:
+    """Deterministic lint/typecheck/build checks, run alongside (before)
+    run_repo_tests. Each individual gate is skipped -- not failed -- when the
+    repo has no matching config/script, so this never blocks a repo on
+    tooling it never opted into. See Phase D of
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md: previously
+    lint/typecheck/build were left entirely to the Coder/Debugger role's own
+    discretion via generic run_command, with no orchestrated pass/fail gate.
+    """
+    steps = [
+        _run_py_lint(worktree),
+        _run_py_typecheck(worktree),
+        _run_js_script_gate(worktree, "lint", "eslint"),
+        _run_js_script_gate(worktree, "typecheck", "tsc"),
+        _run_js_script_gate(worktree, "build", "build"),
+    ]
+    ran = [s for s in steps if s.get("kind") != "none"]
+    if not ran:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no lint/typecheck/build configured"}
+    failed = [s for s in ran if not s.get("ok")]
+    ok = not failed
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "+".join(str(s.get("kind")) for s in ran),
+        "detail": "; ".join(f"{s.get('kind')}:{s.get('status')}" for s in ran),
+        "stdout": "\n".join((s.get("stdout") or "") for s in (failed or ran))[-2000:],
+        "stderr": "\n".join((s.get("stderr") or "") for s in (failed or ran))[-1200:],
+        "command": " ; ".join(str(s.get("command") or "") for s in ran if s.get("command")),
+        "recipes": steps,
+    }
+
+
+def _run_quality_and_tests(worktree: Path) -> dict[str, Any]:
+    """The gate a repo's change must clear: lint/typecheck/build (when
+    configured) MUST pass before tests are even attempted, mirroring ordinary
+    CI ordering and avoiding a wasted test run against code that doesn't
+    build. Returns the same shape as run_repo_tests (ok/status/kind/stdout/
+    stderr/command) so existing callers of run_repo_tests need no changes --
+    a quality-gate failure is reported through the identical fields a test
+    failure would use, and the auto-repair loop treats both uniformly.
+    """
+    quality = run_repo_quality_gates(worktree)
+    if not quality.get("ok"):
+        return quality
+    tests = run_repo_tests(worktree)
+    if quality.get("kind") != "none":
+        tests = dict(tests)
+        tests["quality"] = quality
+    return tests
+
+
 def scan_worktree_security(worktree: Path) -> list[dict[str, Any]]:
     """Fail closed on eval() and obvious hardcoded secrets in the isolated tree."""
     findings: list[dict[str, Any]] = []
@@ -1146,11 +1323,13 @@ def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list
 def _diagnose_and_repair_repo(
     mission: dict[str, Any], repo: dict[str, Any], wt: Path, tests: dict[str, Any]
 ) -> dict[str, Any]:
-    """On test failure, feed the failure output back into the same native agent
-    loop used for real edits (not a second implementation) to diagnose and
-    patch, then rerun. Bounded by MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a
-    persistently-broken repo still reaches ``blocked`` rather than looping
-    forever or getting silently reported as complete.
+    """On a failing check (lint, typecheck, build, or tests -- see
+    _run_quality_and_tests), feed the failure output back into the same
+    native agent loop used for real edits (not a second implementation) to
+    diagnose and patch, then rerun. Bounded by
+    MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a persistently-broken repo still
+    reaches ``blocked`` rather than looping forever or getting silently
+    reported as complete.
     """
     from app.services.coding_engine.mentrix_lead import ROLE_DEBUGGER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
@@ -1160,12 +1339,14 @@ def _diagnose_and_repair_repo(
     current = tests
     while not current.get("ok") and attempts < max_attempts:
         attempts += 1
+        failed_kind = str(current.get("kind") or "check")
         diagnostic_goal = (
-            "The previous change caused this test run to fail:\n\n"
+            f"The previous change caused this check ({failed_kind}) to fail:\n\n"
             f"{(current.get('stdout') or '').strip()}\n{(current.get('stderr') or '').strip()}\n\n"
-            "Diagnose the root cause and patch the affected source file(s) so the "
-            "tests pass. Do not modify test files unless the test itself is "
-            "provably wrong -- explain why in a comment if you do."
+            "Diagnose the root cause and patch the affected source file(s) so "
+            "lint/typecheck/build and tests all pass. Do not modify test files "
+            "unless the test itself is provably wrong -- explain why in a "
+            "comment if you do."
         )
         _emit(
             mission,
@@ -1195,7 +1376,7 @@ def _diagnose_and_repair_repo(
                 if path not in files:
                     files.append(path)
             repo["files"] = files
-        current = run_repo_tests(wt)
+        current = _run_quality_and_tests(wt)
         _emit(
             mission,
             "diagnose_result",
@@ -1278,7 +1459,7 @@ def _run_app_and_browser_verification(
                     files.append(path)
             repo["files"] = files
 
-        retest = run_repo_tests(wt)
+        retest = _run_quality_and_tests(wt)
         if not retest.get("ok"):
             retest = _diagnose_and_repair_repo(mission, repo, wt, retest)
         # "verified" requires BOTH: the agent's own browser-verification turn
@@ -1334,7 +1515,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
                 files.append(path)
         repo["files"] = files
         repo["commands"] = list(applied.get("commands") or [])
-        tests = run_repo_tests(wt)
+        tests = _run_quality_and_tests(wt)
         if not tests.get("ok"):
             tests = _diagnose_and_repair_repo(mission, repo, wt, tests)
         repo["test_ok"] = bool(tests.get("ok"))

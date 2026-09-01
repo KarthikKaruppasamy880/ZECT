@@ -37,7 +37,16 @@ ROLE_DEBUGGER = "debugger"
 # in engineering_agents/roles.py belongs to the separate, disconnected
 # Personal-Agent automation_loops feature -- see module docstring above.)
 
-_READ_ONLY_TOOLS = ["list_dir", "read_file", "search_code", "git_status", "git_diff"]
+_READ_ONLY_TOOLS = [
+    "list_dir",
+    "read_file",
+    "search_code",
+    "glob_files",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_branch",
+]
 _APP_BROWSER_TOOLS = [
     "start_app",
     "restart_app",

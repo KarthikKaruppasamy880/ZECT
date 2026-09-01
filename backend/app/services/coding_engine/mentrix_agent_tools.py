@@ -67,6 +67,21 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "glob_files",
+            "description": "Find files by name/path glob pattern (e.g. '**/*.py', 'src/**/*.tsx'), not by file content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern, relative to the workspace root"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Create or overwrite a file with full contents (relative path).",
             "parameters": {
@@ -126,6 +141,31 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "git log (one line per commit) for the workspace, optionally for one path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "max_count": {"type": "integer", "description": "Max commits to return (default 20, capped at 50)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_branch",
+            "description": "List branches in this workspace (local, plus remote if all=true) and the current branch.",
+            "parameters": {
+                "type": "object",
+                "properties": {"all": {"type": "boolean", "description": "Include remote branches (default false)"}},
             },
         },
     },
@@ -507,6 +547,31 @@ def _execute_tool_inner(
                             return {"ok": True, "hits": hits, "capped": True}
         return {"ok": True, "hits": hits, "capped": False}
 
+    if name == "glob_files":
+        pattern = str(args.get("pattern") or "").strip()
+        if not pattern:
+            return {"ok": False, "error": "pattern_required"}
+        max_results = min(int(args.get("max_results") or 100), 300)
+        skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
+        matches: list[str] = []
+        try:
+            candidates = root.glob(pattern)
+        except (ValueError, NotImplementedError) as exc:
+            return {"ok": False, "error": f"invalid_pattern:{exc}"}
+        for fp in candidates:
+            try:
+                resolved_fp = fp.resolve()
+                rel = resolved_fp.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if any(part in skip for part in rel.parts):
+                continue
+            if resolved_fp.is_file():
+                matches.append(_rel(root, resolved_fp))
+            if len(matches) >= max_results:
+                return {"ok": True, "paths": sorted(matches), "capped": True}
+        return {"ok": True, "paths": sorted(matches), "capped": False}
+
     if name == "write_file":
         rel = str(args.get("path") or "").strip()
         content = args.get("content")
@@ -686,6 +751,42 @@ def _execute_tool_inner(
             return {
                 "ok": completed.returncode == 0,
                 "diff": (completed.stdout or "")[:12000],
+                "stderr": completed.stderr or "",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    if name == "git_log":
+        max_count = min(int(args.get("max_count") or 20), 50)
+        cmd = ["git", "log", f"-{max_count}", "--pretty=format:%H %ad %s", "--date=short"]
+        rel = str(args.get("path") or "").strip()
+        if rel:
+            safe_resolve_target(str(root), rel)
+            cmd.append("--")
+            cmd.append(rel)
+        try:
+            completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=30)
+            return {
+                "ok": completed.returncode == 0,
+                "log": (completed.stdout or "")[:8000],
+                "stderr": completed.stderr or "",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    if name == "git_branch":
+        cmd = ["git", "branch"]
+        if args.get("all"):
+            cmd.append("-a")
+        try:
+            completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=30)
+            current = subprocess.run(
+                ["git", "branch", "--show-current"], cwd=str(root), capture_output=True, text=True, timeout=30
+            )
+            return {
+                "ok": completed.returncode == 0,
+                "branches": (completed.stdout or "")[:4000],
+                "current": (current.stdout or "").strip(),
                 "stderr": completed.stderr or "",
             }
         except Exception as exc:  # noqa: BLE001

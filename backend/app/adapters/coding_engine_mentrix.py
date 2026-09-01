@@ -29,15 +29,65 @@ from app.services.coding_engine.mentrix_agent_tools import (
     resolve_workspace,
 )
 
-_SYSTEM = (
+_SYSTEM_POLICY = (
+    "Do not invent file contents you have not read. "
+    "When the goal is done, reply with a short summary and no further tool calls."
+)
+
+_PRODUCT_ROLE = (
     "You are Mentrix Coding Agent — ZECT's coding agent for this workspace. "
     "Use tools to inspect and edit the repository. Work in any language the repo uses. "
     "Prefer apply_patch for small edits and write_file for new files. "
     "Run tests/linters with run_command when helpful. "
-    "Do not invent file contents you have not read. "
-    "When modernizing legacy code, respect Lattice facts and Blueprint target architecture when provided. "
-    "When the goal is done, reply with a short summary and no further tool calls."
+    "When modernizing legacy code, respect Lattice facts and Blueprint target architecture when provided."
 )
+
+
+def _load_workspace_rules_safe(workspace: Path) -> str:
+    try:
+        from app.services.coding_engine.mention_resolver import load_workspace_rules
+
+        return load_workspace_rules(workspace)
+    except Exception:  # noqa: BLE001 -- a broken rules file must never break a run
+        return ""
+
+
+def _build_system_content(run: dict[str, Any], role_note: str) -> str:
+    """Layered system prompt -- SYSTEM POLICY -> PRODUCT ROLE -> AGENT ROLE ->
+    PROJECT INTELLIGENCE -> RULES/SKILLS -- static-to-dynamic so a caching
+    provider can reuse the common prefix across steps of the same run (the
+    first two sections are identical across every run). Previously one flat
+    concatenated paragraph with no section boundaries at all, and RULES/
+    SKILLS was reachable only via an explicit @rule mention, never as a
+    standing layer -- see ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_
+    PLAN.md Phase E.
+    """
+    sections = [f"## SYSTEM POLICY\n{_SYSTEM_POLICY}", f"## PRODUCT ROLE\n{_PRODUCT_ROLE}"]
+    if role_note.strip():
+        sections.append(f"## AGENT ROLE\n{role_note.strip()}")
+    agent_context = (run.get("agent_context") or "").strip()
+    if agent_context:
+        sections.append(f"## PROJECT INTELLIGENCE\n{agent_context}")
+    rules = _load_workspace_rules_safe(Path(run["workspace"]))
+    if rules:
+        sections.append(f"## RULES/SKILLS\n{rules}")
+    return "\n\n".join(sections)
+
+
+def _build_user_content(run: dict[str, Any], workspace: Path, followup: str | None) -> str:
+    """MISSION GOAL -> APPROVED PLAN -> current task, each its own section
+    instead of one flat string -- see _build_system_content above."""
+    sections = [f"## MISSION GOAL\n{run['goal']}"]
+    approved_plan = str(run.get("approved_plan") or "").strip()
+    if approved_plan:
+        sections.append(f"## APPROVED PLAN\n{approved_plan}")
+    task_lines = [f"Workspace: {workspace}"]
+    if run.get("expected_files"):
+        task_lines.append(f"Expected files (prefer these): {run['expected_files']}")
+    if followup:
+        task_lines.append(f"Follow-up: {followup}")
+    sections.append("## CURRENT TASK\n" + "\n".join(task_lines))
+    return "\n\n".join(sections)
 
 
 class MentrixNativeCodingRuntime:
@@ -134,6 +184,7 @@ class MentrixNativeCodingRuntime:
         allowed_tools = kwargs.get("allowed_tools")
         allowed_tools = list(allowed_tools) if allowed_tools else None
         mission_id = str(kwargs.get("mission_id") or "").strip()
+        approved_plan = str(kwargs.get("approved_plan") or "").strip()
 
         run: dict[str, Any] = {
             "id": run_id,
@@ -146,6 +197,7 @@ class MentrixNativeCodingRuntime:
             "expected_files": expected_files,
             "agent_context": agent_context,
             "context_used": context_used,
+            "approved_plan": approved_plan,
             "role": role,
             "allowed_tools": allowed_tools,
             "mission_id": mission_id,
@@ -362,29 +414,8 @@ class MentrixNativeCodingRuntime:
             else ""
         )
         history: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": _SYSTEM
-                + role_note
-                + (
-                    f"\n\nAdditional Mentrix context (skills/memory/Lattice/Blueprint):\n{run['agent_context']}"
-                    if (run.get("agent_context") or "").strip()
-                    else ""
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Workspace: {workspace}\n"
-                    f"Goal: {run['goal']}\n"
-                    + (
-                        f"Expected files (prefer these): {run['expected_files']}\n"
-                        if run.get("expected_files")
-                        else ""
-                    )
-                    + (f"\nFollow-up: {followup}" if followup else "")
-                ),
-            },
+            {"role": "system", "content": _build_system_content(run, role_note)},
+            {"role": "user", "content": _build_user_content(run, workspace, followup)},
         ]
 
         self._emit(

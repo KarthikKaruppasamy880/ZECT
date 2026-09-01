@@ -29,6 +29,7 @@ import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
 import WorkspaceSearchPanel from "@/components/WorkspaceSearchPanel";
+import WorkspaceProblemsPanel from "@/components/WorkspaceProblemsPanel";
 import SplitPane, { resetSplitLayout } from "@/components/SplitPane";
 import {
   DEFAULT_WORKSPACE_CHROME,
@@ -1461,16 +1462,10 @@ export default function DeveloperWorkspace() {
                   />
                 ) : null}
                 {bottomTab === "problems" ? (
-                  <div data-testid="workspace-problems-panel" className="text-[11px] text-slate-600 space-y-1">
-                    {error ? <p className="text-rose-700">{error}</p> : null}
-                    <p>Active git: {gitSummary || "—"}</p>
-                    {gitChanged.slice(0, 20).map((p) => (
-                      <p key={p} className="font-mono text-[10px]">
-                        {p}
-                      </p>
-                    ))}
-                    {!error && !gitChanged.length ? <p className="text-slate-400">No problems</p> : null}
-                  </div>
+                  <WorkspaceProblemsPanel
+                    repoIds={visibleRoots.map((r) => r.repo_id)}
+                    onOpen={(abs, repoId) => void openFile(abs, undefined, repoId)}
+                  />
                 ) : null}
                 {bottomTab === "tests" || bottomTab === "evidence" ? (
                   <div data-testid={bottomTab === "tests" ? "workspace-tests-panel" : "workspace-evidence-panel"}>

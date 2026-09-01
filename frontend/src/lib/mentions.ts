@@ -5,7 +5,8 @@
 
 export type MentionType =
   | "file" | "folder" | "symbol" | "references" | "repo" | "plan"
-  | "diff" | "terminal" | "error" | "test" | "lattice" | "skill" | "rule";
+  | "diff" | "terminal" | "error" | "test" | "lattice" | "skill" | "rule"
+  | "workspace" | "commit" | "branch" | "problem" | "workitem" | "blueprint";
 
 export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: string }[] = [
   { type: "file", needsValue: true, hint: "read a workspace file" },
@@ -21,6 +22,12 @@ export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: stri
   { type: "lattice", needsValue: true, hint: "search the Lattice graph" },
   { type: "skill", needsValue: true, hint: "a registered skill" },
   { type: "rule", needsValue: false, hint: "ZECT.md/AGENTS.md/.zect/rules" },
+  { type: "workspace", needsValue: false, hint: "workspace root + git status summary" },
+  { type: "commit", needsValue: false, hint: "a commit by sha (default HEAD)" },
+  { type: "branch", needsValue: false, hint: "a branch by name (default current)" },
+  { type: "problem", needsValue: false, hint: "real lint/typecheck findings" },
+  { type: "workitem", needsValue: false, hint: "a WorkItem by id (default active)" },
+  { type: "blueprint", needsValue: false, hint: "this project's Blueprint" },
 ];
 
 // No /g flag: hasMentions only needs a boolean .test(), and a global-flagged
@@ -28,7 +35,8 @@ export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: stri
 // module-level instance would make the SECOND call on the same string return
 // false right after the first returned true. (Found by a test flake, not by
 // inspection -- worth keeping this comment so it isn't reintroduced.)
-const MENTION_RE = /@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule)(?::(\S+))?/;
+const MENTION_RE =
+  /@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule|workspace|commit|branch|problem|workitem|blueprint)(?::(\S+))?/;
 
 /** True if the text has at least one recognized @mention worth resolving. */
 export function hasMentions(text: string): boolean {

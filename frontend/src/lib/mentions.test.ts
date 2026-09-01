@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMention, detectMentionTrigger, hasMentions } from "./mentions";
+import { MENTION_TYPES, applyMention, detectMentionTrigger, hasMentions } from "./mentions";
 
 describe("hasMentions", () => {
   it("detects a recognized mention type", () => {
@@ -29,6 +29,23 @@ describe("detectMentionTrigger", () => {
   });
   it("returns null when there is no @ at all", () => {
     expect(detectMentionTrigger("nothing here", 5)).toBeNull();
+  });
+});
+
+describe("Phase D mention types (workspace/commit/branch/problem/workitem/blueprint)", () => {
+  it("hasMentions recognizes each new type", () => {
+    expect(hasMentions("check @workspace")).toBe(true);
+    expect(hasMentions("check @commit:abc123")).toBe(true);
+    expect(hasMentions("check @branch:main")).toBe(true);
+    expect(hasMentions("check @problem")).toBe(true);
+    expect(hasMentions("check @workitem:5")).toBe(true);
+    expect(hasMentions("check @blueprint")).toBe(true);
+  });
+  it("MENTION_TYPES lists each new type for the autocomplete dropdown", () => {
+    const types = MENTION_TYPES.map((m) => m.type);
+    for (const t of ["workspace", "commit", "branch", "problem", "workitem", "blueprint"]) {
+      expect(types).toContain(t);
+    }
   });
 });
 

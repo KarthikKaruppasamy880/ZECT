@@ -17,7 +17,7 @@ export function MentionAutocomplete({
 }: {
   value: string;
   onChange: (next: string, cursor: number) => void;
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  textareaRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
 }) {
   const cursor = textareaRef.current?.selectionStart ?? value.length;
   const trigger = useMemo(() => detectMentionTrigger(value, cursor), [value, cursor]);

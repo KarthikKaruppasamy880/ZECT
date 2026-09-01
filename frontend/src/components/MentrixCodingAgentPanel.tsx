@@ -658,8 +658,31 @@ function AskPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const qRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useComposerAttachments(projectId);
-  void workspaceRoot;
+
+  /** Resolve every @mention against real data so ASK sees the same truthful
+   * context PLAN already does -- @mentions in the question are decorative
+   * otherwise. */
+  const resolveMentionBlob = async (): Promise<string> => {
+    if (!hasMentions(q) || !workspaceRoot) return "";
+    try {
+      const { pack } = await codingAgentResolveMentions({
+        text: q,
+        workspace: workspaceRoot,
+        work_item_id: workItemId ?? undefined,
+      });
+      setMentionPack(pack);
+      const resolved = pack.items.filter((i) => i.verification_state !== "unresolved");
+      if (!resolved.length) return "";
+      const parts = resolved.map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`);
+      return `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Question\n\n`;
+    } catch {
+      /* Mention resolution failing must never block Ask. */
+      return "";
+    }
+  };
 
   // Restore the conversation whenever this pane mounts with a known
   // work item -- covers tab-switch (unmount/remount), navigate-away-and-back,
@@ -695,8 +718,9 @@ function AskPane({
     setError(null);
     try {
       const ids = repoIdsFromRoots(roots);
+      const mentionBlob = await resolveMentionBlob();
       const docBlob = attach.documentContextBlob();
-      const askedText = docBlob ? `${question}\n\n${docBlob}` : question;
+      const askedText = `${mentionBlob}${question}${docBlob ? `\n\n${docBlob}` : ""}`;
       const images = attach.images.map((i) => i.dataUrl);
       const res = await developerAsk({
         question: askedText,
@@ -730,6 +754,7 @@ function AskPane({
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-ask">
       <p className="text-[10px] text-slate-500">ASK is Q&amp;A only — this path never edits files. Use PLAN → Approve &amp; Build or Implement chat to change code.</p>
       <textarea
+        ref={qRef}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onPaste={(e) => {
@@ -737,9 +762,18 @@ function AskPane({
           if (imgs.length) void attach.attachFiles(imgs);
         }}
         className="mt-1 min-h-[4rem] rounded border border-slate-200 px-2 py-1"
-        placeholder="Search or explain this workspace… (paste a screenshot to ask about it)"
+        placeholder="Search or explain this workspace… (paste a screenshot to ask about it) — @file @workspace @problem @workitem …"
         data-testid="mentrix-coding-agent-ask-input"
       />
+      <MentionAutocomplete
+        value={q}
+        onChange={(next, cursor) => {
+          setQ(next);
+          requestAnimationFrame(() => qRef.current?.setSelectionRange(cursor, cursor));
+        }}
+        textareaRef={qRef}
+      />
+      <MentionContextStrip pack={mentionPack} />
       <ComposerAttachmentBar
         attachments={attach.attachments}
         images={attach.images}
@@ -1073,6 +1107,8 @@ function ChatPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const goalRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const writtenRef = useRef<string[]>([]);
@@ -1144,6 +1180,21 @@ function ChatPane({
     }
   };
 
+  const resolveMentionBlob = async (text: string): Promise<string> => {
+    if (!hasMentions(text) || !workspaceRoot) return "";
+    try {
+      const { pack } = await codingAgentResolveMentions({ text, workspace: workspaceRoot });
+      setMentionPack(pack);
+      const resolved = pack.items.filter((i) => i.verification_state !== "unresolved");
+      if (!resolved.length) return "";
+      const parts = resolved.map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`);
+      return `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Goal\n\n`;
+    } catch {
+      /* Mention resolution failing must never block Run. */
+      return "";
+    }
+  };
+
   const start = async () => {
     const g = goal.trim();
     if (!g || !workspaceRoot) return;
@@ -1153,8 +1204,9 @@ function ChatPane({
     pushLine({ kind: "user", text: g });
     setBusy(true);
     try {
+      const mentionBlob = await resolveMentionBlob(g);
       const res = await codingAgentCreateSession({
-        goal: g,
+        goal: `${mentionBlob}${g}`,
         workspace: workspaceRoot,
         model: chatModel,
         auto_approve_edits: true,
@@ -1257,20 +1309,32 @@ function ChatPane({
         </p>
       ) : null}
       <div className="flex items-center gap-2 border-t border-slate-100 p-2">
-        <input
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void start();
-            }
-          }}
-          disabled={busy || !workspaceRoot}
-          placeholder={workspaceRoot ? "Describe the change…" : "Set workspace root first"}
-          className="flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-xs"
-          data-testid="mentrix-coding-agent-input"
-        />
+        <div className="flex-1">
+          <input
+            ref={goalRef}
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void start();
+              }
+            }}
+            disabled={busy || !workspaceRoot}
+            placeholder={workspaceRoot ? "Describe the change… — @file @workspace @problem @branch …" : "Set workspace root first"}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
+            data-testid="mentrix-coding-agent-input"
+          />
+          <MentionAutocomplete
+            value={goal}
+            onChange={(next, cursor) => {
+              setGoal(next);
+              requestAnimationFrame(() => goalRef.current?.setSelectionRange(cursor, cursor));
+            }}
+            textareaRef={goalRef}
+          />
+          <MentionContextStrip pack={mentionPack} />
+        </div>
         {busy ? (
           <button
             type="button"

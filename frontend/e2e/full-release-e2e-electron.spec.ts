@@ -68,6 +68,14 @@ async function sessionToken(page: Page) {
   return handle.jsonValue();
 }
 
+/** CI's smaller virtual display can leave the agent panel too short for its
+ * own scrollable content to register as visible (e.g. the plan-path link)
+ * even though the element genuinely exists -- maximizing gives it room. */
+async function maximizeAgentPanel(page: Page) {
+  const btn = page.getByTestId("workspace-maximize-agent");
+  if (await btn.isVisible().catch(() => false)) await btn.click();
+}
+
 test.describe("full release E2E electron", () => {
   test.setTimeout(300_000);
 
@@ -227,6 +235,7 @@ test.describe("full release E2E electron", () => {
 
       await openWorkspace(page, projectId, repoId);
       await openCodingAgentMission(page);
+      await maximizeAgentPanel(page);
       await page.getByTestId("mentrix-coding-agent-ask-tab").click();
       await expect(page.getByTestId("mentrix-coding-agent-ask-input")).toBeVisible({ timeout: 15_000 });
 
@@ -302,6 +311,7 @@ test.describe("full release E2E electron", () => {
         await loginIfNeeded(page, username, password);
         await openWorkspace(page, projectId, repoId);
         await openCodingAgentMission(page);
+        await maximizeAgentPanel(page);
         // Re-attachment (finding F4): the same Mission must reappear from the
         // persisted session/WorkItem pointer -- no "start a mission" empty form.
         await expect(page.getByTestId("mentrix-coding-agent-phase")).not.toContainText("idle", { timeout: 30_000 });

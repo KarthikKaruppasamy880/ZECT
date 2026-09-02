@@ -83,4 +83,31 @@ describe("Developer ASK mode", () => {
       repository_ids: [44, 45],
     });
   });
+
+  it("sends the active repo as the primary repository_id, not roots[0] (CP-01)", async () => {
+    render(
+      <MentrixCodingAgentPanel
+        workspaceRoot="C:/tmp/zect"
+        projectId={9}
+        activeRepoId={45}
+        roots={[
+          { id: 44, label: "zoas", path: "C:/tmp/zect" },
+          { id: 45, label: "zaf", path: "C:/tmp/zaf" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));
+    fireEvent.change(screen.getByTestId("mentrix-coding-agent-ask-input"), {
+      target: { value: "Explain Lattice ingest" },
+    });
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-send"));
+    await waitFor(() => expect(developerAsk).toHaveBeenCalled());
+    expect(developerAsk).toHaveBeenCalledWith({
+      question: "Explain Lattice ingest",
+      project_id: 9,
+      work_item_id: undefined,
+      repository_id: 45,
+      repository_ids: [44, 45],
+    });
+  });
 });

@@ -1389,6 +1389,7 @@ export default function DeveloperWorkspace() {
                 initialSessionId={deepSession || null}
                 projectId={activeProjectId}
                 workItemId={workItemId}
+                activeRepoId={activeRepoId}
                 roots={visibleRoots
                   .filter((r) => r.local_path)
                   .map((r) => ({

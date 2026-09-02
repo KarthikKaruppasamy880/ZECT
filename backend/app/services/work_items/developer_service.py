@@ -282,7 +282,13 @@ class MentrixDeveloperService:
         wi: WorkItem,
         goal: str,
         repository_ids: list[int],
+        *,
+        primary_repository_id: int | None = None,
     ) -> dict[str, Any]:
+        # The authoritative primary is the WorkItem's own sticky binding when
+        # it has one; repository_ids[0] is only a fallback for a WorkItem
+        # that hasn't bound to a repo yet (finding A2 / CP-01).
+        primary_rid = primary_repository_id or wi.repository_id or (repository_ids[0] if repository_ids else None)
         per_repo: list[dict[str, Any]] = []
         packs = []
         pi_by_repo: dict[str, Any] = {}
@@ -308,10 +314,15 @@ class MentrixDeveloperService:
                 }
             )
             pi_by_repo[str(rid)] = built.get("pi")
-        merged = merge_context_packs(packs) if packs else self.context_engine.build(goal=goal)
+        merged = (
+            merge_context_packs(packs, primary_repository_id=primary_rid)
+            if packs
+            else self.context_engine.build(goal=goal)
+        )
+        primary_key = str(primary_rid) if primary_rid is not None else (str(repository_ids[0]) if repository_ids else "")
         return {
             "pack": merged.to_dict(),
-            "pi": pi_by_repo.get(str(repository_ids[0])) if repository_ids else {},
+            "pi": pi_by_repo.get(primary_key, pi_by_repo.get(str(repository_ids[0])) if repository_ids else {}),
             "pack_obj": merged,
             "context_by_repository": per_repo,
             "affected_repos": [b for b in per_repo],
@@ -343,10 +354,16 @@ class MentrixDeveloperService:
             self.db,
             project_id=project_id or wi.project_id,
             repository_ids=repository_ids,
-            repository_id=repository_id or wi.repository_id,
+            # The WorkItem's own binding wins once set -- a WorkItem is
+            # scoped to one primary repo for its whole lifetime, so a later
+            # call must not let a differently-active repo in the caller's
+            # UI silently rebind it (finding A2 / CP-01). Only a brand-new
+            # WorkItem (wi.repository_id still unset) takes the request's
+            # repository_id as its first binding.
+            repository_id=wi.repository_id or repository_id,
         )
         if len(authorized) > 1:
-            built = self._build_multi_repo(wi, question, authorized)
+            built = self._build_multi_repo(wi, question, authorized, primary_repository_id=wi.repository_id)
         else:
             built = self._build_pack(wi, question)
             if authorized:
@@ -501,10 +518,11 @@ class MentrixDeveloperService:
             self.db,
             project_id=project_id or wi.project_id,
             repository_ids=repository_ids,
-            repository_id=repository_id or wi.repository_id,
+            # Same sticky-binding rule as ask() -- see comment there.
+            repository_id=wi.repository_id or repository_id,
         )
         if len(authorized) > 1:
-            built = self._build_multi_repo(wi, goal, authorized)
+            built = self._build_multi_repo(wi, goal, authorized, primary_repository_id=wi.repository_id)
         else:
             built = self._build_pack(wi, goal)
             if authorized:

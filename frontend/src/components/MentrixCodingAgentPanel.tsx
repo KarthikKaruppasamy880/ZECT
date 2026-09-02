@@ -62,6 +62,11 @@ type Props = {
   projectId?: number | null;
   workItemId?: number | null;
   roots?: CodingAgentMissionRoot[];
+  /** The repo the user actually has selected in the workspace chrome right
+   *  now. Ask/Plan must send this as the primary repository_id -- without
+   *  it they fall back to roots[0], which is fetch order, not user intent,
+   *  and silently binds a new WorkItem to the wrong repo (finding A2). */
+  activeRepoId?: number | null;
   onWorkItemResolved?: (id: number) => void;
   /** A Mission id from the URL, the persisted session or the WorkItem, so the
    *  pane re-attaches to a Mission that is already running instead of
@@ -93,6 +98,7 @@ export default function MentrixCodingAgentPanel({
   projectId = null,
   workItemId = null,
   roots = [],
+  activeRepoId = null,
   onWorkItemResolved,
   missionId = null,
   onMissionChanged,
@@ -178,6 +184,7 @@ export default function MentrixCodingAgentPanel({
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
+          activeRepoId={activeRepoId}
           onCreatePlan={(seed) => {
             setAskSeed(seed);
             setTab("plan");
@@ -191,6 +198,7 @@ export default function MentrixCodingAgentPanel({
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
+          activeRepoId={activeRepoId}
           workspaceRoot={workspaceRoot}
           model={chatModel}
           onApproved={(mission) => {
@@ -692,6 +700,16 @@ function repoIdsFromRoots(roots: CodingAgentMissionRoot[]): number[] {
   return roots.map((r) => r.id).filter((id) => Number.isFinite(id) && id > 0);
 }
 
+/** The user's active-repo selection must win as the primary repository_id
+ *  whenever it's one of the authorized roots -- ids[0] is fetch order, not
+ *  user intent, and is what silently bound new WorkItems to the wrong repo
+ *  (finding A2 / CP-01). Falls back to ids[0] only when there's no active
+ *  selection or it isn't one of the authorized roots. */
+function primaryRepoId(ids: number[], activeRepoId: number | null | undefined): number | undefined {
+  if (activeRepoId != null && ids.includes(activeRepoId)) return activeRepoId;
+  return ids[0];
+}
+
 /** No model-capability registry exists in ZECT today (see ModelSelector) --
  * this is a soft, best-effort hint, not an enforced gate. A false negative
  * just means a missed warning; the real failure mode (a genuinely
@@ -829,6 +847,7 @@ function AskPane({
   workItemId,
   projectId,
   roots,
+  activeRepoId,
   onCreatePlan,
   onWorkItemResolved,
 }: {
@@ -837,6 +856,7 @@ function AskPane({
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
+  activeRepoId?: number | null;
   onCreatePlan: (seed: AskToPlanSeed) => void;
   onWorkItemResolved?: (id: number) => void;
 }) {
@@ -930,7 +950,7 @@ function AskPane({
         question: askedText,
         project_id: projectId ?? undefined,
         work_item_id: workItemId ?? undefined,
-        repository_id: ids[0],
+        repository_id: primaryRepoId(ids, activeRepoId),
         repository_ids: ids,
         images: images.length ? images : undefined,
       });
@@ -1062,6 +1082,7 @@ function PlanPane({
   workItemId,
   projectId,
   roots,
+  activeRepoId,
   workspaceRoot,
   model,
   onApproved,
@@ -1073,6 +1094,7 @@ function PlanPane({
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
+  activeRepoId?: number | null;
   workspaceRoot: string;
   model: string;
   onApproved: (mission: CodingAgentMission) => void;
@@ -1181,7 +1203,7 @@ function PlanPane({
         goal: g,
         project_id: projectId ?? undefined,
         work_item_id: workItemId ?? undefined,
-        repository_id: ids[0],
+        repository_id: primaryRepoId(ids, activeRepoId),
         repository_ids: ids,
       });
       setMarkdown(res.plan || "");

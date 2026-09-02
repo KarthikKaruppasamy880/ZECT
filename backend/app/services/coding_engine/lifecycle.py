@@ -259,6 +259,7 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "plan_approved": bool(mission.get("plan_approved")),
         "git_approved": bool(mission.get("git_approved")),
         "context_used": mission.get("context_used"),
+        "primary_repository_id": mission.get("primary_repository_id"),
         "repos": repos,
         "files": [f for r in repos for f in (r.get("files") or [])],
         "commands": [c for r in repos for c in (r.get("commands") or [])],
@@ -1038,6 +1039,7 @@ def start_mission(
     propose_if_empty: bool = False,
     mode: str = "",
     source: str = "",
+    primary_repository_id: int | None = None,
 ) -> dict[str, Any]:
     if not (goal or "").strip():
         raise ValueError("goal_required")
@@ -1071,6 +1073,13 @@ def start_mission(
         "git_approved": False,
         "project_id": project_id,
         "work_item_id": work_item_id,
+        # The WorkItem's own sticky repository_id, when known -- the single
+        # authoritative "which repo is primary" fact for this Mission, so
+        # patch proposal/application (propose_patches.py) doesn't have to
+        # guess from roots[0] ordering (finding A2 / CP-01). Falls back to
+        # the first authorized root only when no WorkItem binding exists.
+        "primary_repository_id": primary_repository_id
+        or (roots[0].get("id") or roots[0].get("repository_id") if roots else None),
         "patches_by_repo": _stringify_patch_map(patches_by_repo),
         "propose_if_empty": bool(propose_if_empty),
         "workspace_parent": str(parent),

@@ -152,6 +152,18 @@ function collectGitPaths(st: Record<string, unknown> | null | undefined): string
   return out;
 }
 
+/** True when a Mission-reported file change should refresh the open editor buffer:
+ * the changed path resolves to the currently open file, and it has no unsaved edits. */
+export function shouldReloadFileOnAgentChange(
+  paths: string[],
+  openPath: string,
+  isDirty: boolean,
+  resolve: (p: string) => string,
+): boolean {
+  if (!openPath || isDirty) return false;
+  return paths.some((p) => resolve(p) === openPath);
+}
+
 /**
  * Phase 3 — unified developer workspace (Stages A–E).
  */
@@ -708,16 +720,19 @@ export default function DeveloperWorkspace() {
     void openFile(active.path, undefined, active.repoId);
   }, [visibleRoots, wsSession.openEditors]);
 
-  const openAgentPath = (relOrAbs: string) => {
-    if (!rootPath) return;
-    const abs =
-      isPathInsideRoot(normalizePath(relOrAbs), rootPath) &&
+  const resolveAgentPath = (relOrAbs: string): string => {
+    if (!rootPath) return normalizePath(relOrAbs);
+    return isPathInsideRoot(normalizePath(relOrAbs), rootPath) &&
       (normalizePath(relOrAbs).startsWith(normalizePath(rootPath)) ||
         /^[a-zA-Z]:[\\/]/.test(relOrAbs) ||
         relOrAbs.startsWith("/"))
-        ? normalizePath(relOrAbs)
-        : normalizePath(`${rootPath.replace(/[/\\]+$/, "")}/${relOrAbs.replace(/^[/\\]+/, "")}`);
-    void openFile(abs);
+      ? normalizePath(relOrAbs)
+      : normalizePath(`${rootPath.replace(/[/\\]+$/, "")}/${relOrAbs.replace(/^[/\\]+/, "")}`);
+  };
+
+  const openAgentPath = (relOrAbs: string) => {
+    if (!rootPath) return;
+    void openFile(resolveAgentPath(relOrAbs));
     setAgentFiles((prev) => (prev.includes(relOrAbs) ? prev : [...prev, relOrAbs]));
   };
 
@@ -1363,6 +1378,11 @@ export default function DeveloperWorkspace() {
                   setAgentFiles((prev) => Array.from(new Set([...prev, ...paths])));
                   void loadTree();
                   void refreshGit(rootPath);
+                  const openPath = selectedPathRef.current;
+                  const isDirty = contentRef.current !== baselineRef.current;
+                  if (shouldReloadFileOnAgentChange(paths, openPath, isDirty, resolveAgentPath)) {
+                    void openFile(openPath);
+                  }
                 }}
                 onTestOutput={(text) => setLastTestLog(text)}
                 initialGoal={deepGoal}

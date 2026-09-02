@@ -254,7 +254,8 @@ def file_tree(path: str = Query(...), depth: int = 3):
         items = []
         try:
             for item in sorted(dir_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-                if item.name.startswith(".") or item.name in ("node_modules", "__pycache__", "venv", "dist", "build", ".git"):
+                # .zect/plans/*.plan.md must remain visible; other dotfiles stay hidden.
+                if (item.name.startswith(".") and item.name != ".zect") or item.name in ("node_modules", "__pycache__", "venv", "dist", "build", ".git"):
                     continue
                 entry = {
                     "name": item.name,

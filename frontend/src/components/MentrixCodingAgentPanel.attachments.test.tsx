@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
+  listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
+  linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),
+  uploadImageAttachment: vi.fn(),
+  getAttachmentRawDataUrl: vi.fn(),
   developerAsk: vi.fn(async () => ({
     work_item_id: 1,
     answer: "It's a screenshot of a dashboard.",
@@ -82,16 +86,38 @@ describe("Composer attachments", () => {
     expect(await screen.findByTestId("mentrix-coding-agent-ask-attachment-chip")).toHaveTextContent("notes.md");
   });
 
-  it("PLAN: attachment bar has no image support (text documents only)", async () => {
+  it("PLAN: attachment bar has image parity with ASK (not a reduced composer)", async () => {
     render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-plan-tab"));
 
     const input = screen.getByTestId("mentrix-coding-agent-plan-attach-input") as HTMLInputElement;
-    expect(input.accept).not.toContain("image");
+    expect(input.accept).toContain(".png");
 
     const file = textFile("design.md");
     fireEvent.change(input, { target: { files: [file] } });
     expect(await screen.findByTestId("mentrix-coding-agent-plan-attachment-chip")).toHaveTextContent("design.md");
+  });
+
+  it("PLAN: pasting a screenshot into the markdown editor attaches it", async () => {
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-plan-tab"));
+
+    const md = screen.getByTestId("mentrix-coding-agent-plan-md");
+    const file = pngFile();
+    fireEvent.paste(md, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }] } });
+
+    await waitFor(() => expect(screen.getByTestId("mentrix-coding-agent-plan-image-chip")).toBeInTheDocument());
+  });
+
+  it("MISSION: pasting a screenshot into the goal textarea attaches it", async () => {
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-mission-tab"));
+
+    const goal = screen.getByTestId("mentrix-coding-agent-mission-goal");
+    const file = pngFile();
+    fireEvent.paste(goal, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }] } });
+
+    await waitFor(() => expect(screen.getByTestId("mentrix-coding-agent-mission-image-chip")).toBeInTheDocument());
   });
 
   it("AGENT: attached document text is folded into the goal sent to codingAgentCreateMission", async () => {

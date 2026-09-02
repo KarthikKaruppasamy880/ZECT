@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const codingAgentGetPlan = vi.fn();
-const codingAgentSavePlan = vi.fn(async () => ({
+const codingAgentSavePlan = vi.fn(async (..._args: any[]) => ({
   ok: true,
   id: "1-coding",
   path: "C:/repo/.zect/plans/1-coding.plan.md",
@@ -13,8 +13,8 @@ vi.mock("@/lib/api", () => ({
   developerAsk: vi.fn(async () => ({ answer: "a", work_item_id: 1 })),
   developerAskHistory: vi.fn(async () => ({ turns: [] })),
   developerPlan: vi.fn(),
-  codingAgentGetPlan: (...args: unknown[]) => codingAgentGetPlan(...args),
-  codingAgentSavePlan: (...args: unknown[]) => codingAgentSavePlan(...args),
+  codingAgentGetPlan: (...args: any[]) => codingAgentGetPlan(...args),
+  codingAgentSavePlan: (...args: any[]) => codingAgentSavePlan(...args),
   codingAgentListPlans: vi.fn(async () => ({ ok: true, plans: [] })),
   codingAgentCreateMission: vi.fn(),
   codingAgentApprovePlan: vi.fn(),

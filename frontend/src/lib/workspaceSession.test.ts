@@ -24,6 +24,7 @@ describe("workspaceSession", () => {
       workItemId: 9,
       projectId: 4,
       activeRepoId: 1,
+      codingMissionId: null,
     });
     const raw = localStorage.getItem(WORKSPACE_SESSION_KEY) || "";
     expect(raw).not.toMatch(/token|password|secret/i);
@@ -33,6 +34,35 @@ describe("workspaceSession", () => {
     expect(loaded.workItemId).toBe(9);
     expect(loaded.projectId).toBe(4);
     expect(loaded.activeRepoId).toBe(1);
+  });
+
+  // A Mission id is what lets the Developer pane re-attach after a reload
+  // instead of offering to start a second Mission (finding F4).
+  it("round-trips the coding mission id", () => {
+    saveWorkspaceSession({
+      openEditors: [],
+      terminals: [],
+      activeTerminalId: null,
+      workItemId: null,
+      projectId: null,
+      activeRepoId: null,
+      codingMissionId: "mission-abc",
+    });
+    expect(loadWorkspaceSession().codingMissionId).toBe("mission-abc");
+  });
+
+  it("ignores a blank or non-string mission id", () => {
+    localStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify({ codingMissionId: "   " }));
+    expect(loadWorkspaceSession().codingMissionId).toBeNull();
+    localStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify({ codingMissionId: 42 }));
+    expect(loadWorkspaceSession().codingMissionId).toBeNull();
+  });
+
+  it("defaults to null for a session saved before mission ids were persisted", () => {
+    localStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify({ workItemId: 3 }));
+    const loaded = loadWorkspaceSession();
+    expect(loaded.workItemId).toBe(3);
+    expect(loaded.codingMissionId).toBeNull();
   });
 
   it("upserts editor tabs without reordering existing ones", () => {

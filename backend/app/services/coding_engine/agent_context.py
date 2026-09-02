@@ -205,6 +205,10 @@ def compose_rich_agent_context_pack(
         "knowledge": False,
         "lattice_hits": 0,
         "lattice_indexed": False,
+        # The real canonical state, not just the indexed/not-indexed
+        # collapse -- a UI that only has the boolean renders NOT_INDEXED for
+        # NOT_APPLICABLE, INDEXING and STALE alike (finding F6).
+        "lattice_state": "NOT_APPLICABLE",
         "blueprint": False,
         "project_key": (project_key or "").strip() or None,
         "text": "",
@@ -229,9 +233,21 @@ def compose_rich_agent_context_pack(
             except (TypeError, ValueError):
                 rid = None
 
+        pk = (project_key or "").strip()
+        if not pk and rid is not None:
+            # A Mission knows its repository but not the Lattice key the
+            # Lattice page indexed under. Without deriving it here the
+            # snapshot below returns NOT_APPLICABLE and the Mission reports
+            # lattice_indexed=false against a READY graph -- finding F6.
+            from app.services.lattice.indexer import project_key_for_repository
+
+            pk = project_key_for_repository(db, rid)
+            if pk:
+                meta["project_key"] = pk
+
         snap = ProjectIntelligenceService().snapshot(
             project_id=project_id,
-            project_key=project_key or "",
+            project_key=pk,
             repository_id=rid,
             db=db,
             query=goal,
@@ -251,11 +267,14 @@ def compose_rich_agent_context_pack(
         if len(text) > max_chars:
             text = text[: max_chars - 20] + "\n…(truncated)"
         lattice_hits = list((snap.lattice or {}).get("hits") or [])
+        lat = snap.lattice or {}
+        state = str(lat.get("status") or lat.get("state") or "").strip().upper() or "NOT_APPLICABLE"
         meta.update(
             {
                 "knowledge": bool(snap.knowledge),
                 "lattice_hits": len(lattice_hits),
-                "lattice_indexed": str((snap.lattice or {}).get("status") or "") == "READY",
+                "lattice_indexed": state == "READY",
+                "lattice_state": state,
                 "blueprint": bool((snap.blueprint or {}).get("snippet")),
                 "text": text,
             }

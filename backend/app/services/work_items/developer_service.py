@@ -103,7 +103,15 @@ class MentrixDeveloperService:
         sha = base_commit_sha or wi.base_commit_sha or ""
         project_key = ""
         try:
-            if wi.project_id and self.db is not None:
+            # The Lattice indexes per repository root under
+            # derive_project_key(owner, repo) -- the same key the frontend
+            # computes -- so a Project display name would look up a graph
+            # that was never written (finding F6). Only fall back to the
+            # project name for a work item with no repository at all.
+            from app.services.lattice.indexer import project_key_for_repository
+
+            project_key = project_key_for_repository(self.db, rid)
+            if not project_key and wi.project_id and self.db is not None:
                 from app.models import Project
 
                 p = self.db.query(Project).filter(Project.id == wi.project_id).first()

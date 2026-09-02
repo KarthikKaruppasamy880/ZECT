@@ -62,7 +62,7 @@ describe("Context Used is visible in Agent and Implement, not just Ask/Plan", ()
     fireEvent.click(screen.getByTestId("mentrix-coding-agent-start-mission"));
 
     const strip = await screen.findByTestId("mentrix-coding-agent-context-used");
-    expect(strip).toHaveTextContent("Lattice 4 hits");
+    expect(strip).toHaveTextContent("Lattice READY · 4 hits");
     expect(strip).toHaveTextContent("Knowledge");
   });
 
@@ -76,7 +76,7 @@ describe("Context Used is visible in Agent and Implement, not just Ask/Plan", ()
 
     await waitFor(() => expect(codingAgentGetSession).toHaveBeenCalled());
     await waitFor(() =>
-      expect(screen.getByTestId("mentrix-coding-agent-context-used")).toHaveTextContent("Lattice 2 hits"),
+      expect(screen.getByTestId("mentrix-coding-agent-context-used")).toHaveTextContent("Lattice READY · 2 hits"),
     );
     expect(screen.getByTestId("mentrix-coding-agent-context-used")).toHaveTextContent("Blueprint");
   });

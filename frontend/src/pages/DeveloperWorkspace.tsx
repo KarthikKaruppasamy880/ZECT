@@ -72,6 +72,7 @@ import {
   gitStatus,
   gitPull,
   gitWorktrees,
+  getWorkItem,
   mentrixGetRun,
   mentrixListRuns,
 } from "@/lib/api";
@@ -162,6 +163,10 @@ export default function DeveloperWorkspace() {
   const deepGoal = searchParams.get("goal") || "";
   const deepWorkItem = searchParams.get("work_item_id");
   const urlWorkItem = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
+  // `?run=` carries a numeric Mentrix run id OR a Mission uuid. Only the
+  // numeric form was ever honoured, so a shared Mission link opened an empty
+  // start form (finding F4).
+  const urlMissionId = deepRunId && !/^\d+$/.test(deepRunId) ? deepRunId : "";
   const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos, setActiveRepo, setActiveProject } =
     useActiveProject();
   const { latticeStatus: latticeIdx, loadingStatus: latticeLoading } = useWorkspaceRepoContext();
@@ -316,9 +321,31 @@ export default function DeveloperWorkspace() {
   const selectedPathRef = useRef("");
   const [bufferTick, setBufferTick] = useState(0);
   const workItemId = urlWorkItem || wsSession.workItemId;
+  const [workItemMissionId, setWorkItemMissionId] = useState("");
+  // URL wins (an explicit link), then whatever this browser last had, then
+  // the durable WorkItem.coding_mission_id -- which is what survives a fresh
+  // browser or a different machine.
+  const missionId = urlMissionId || wsSession.codingMissionId || workItemMissionId || null;
   useEffect(() => {
     saveWorkspaceSession(wsSession);
   }, [wsSession]);
+  useEffect(() => {
+    if (!workItemId) {
+      setWorkItemMissionId("");
+      return;
+    }
+    let cancelled = false;
+    void getWorkItem(workItemId)
+      .then((wi) => {
+        if (!cancelled) setWorkItemMissionId(String(wi?.coding_mission_id || ""));
+      })
+      .catch(() => {
+        if (!cancelled) setWorkItemMissionId("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workItemId]);
   useEffect(() => {
     if (urlWorkItem && wsSession.workItemId !== urlWorkItem) {
       setWsSession((prev) => ({ ...prev, workItemId: urlWorkItem }));
@@ -1350,6 +1377,10 @@ export default function DeveloperWorkspace() {
                     path: r.local_path as string,
                   }))}
                 onWorkItemResolved={(id) => setWsSession((prev) => ({ ...prev, workItemId: id }))}
+                missionId={missionId}
+                onMissionChanged={(id) =>
+                  setWsSession((prev) => (prev.codingMissionId === id ? prev : { ...prev, codingMissionId: id }))
+                }
               />
               </div>
             </div>

@@ -139,6 +139,9 @@ export type WorkItemRecord = {
   plan_version?: number;
   approved_plan_hash?: string;
   mentrix_run_id?: number | null;
+  /** Durable Mission binding, so the Developer pane can re-attach to a
+   *  running Mission from any browser (finding F4). */
+  coding_mission_id?: string;
   worktree_path?: string;
   current_commit_sha?: string;
   description?: string;
@@ -2069,7 +2072,15 @@ export type CodingAgentMission = {
   evidence?: Array<{ event?: string; message?: string; at?: string }>;
   /** What the Coder/Tester/Debugger role actually saw for its most recent
    * turn -- same shape ASK/PLAN's project_intelligence summary uses. */
-  context_used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null;
+  context_used?: {
+    knowledge?: boolean;
+    lattice_hits?: number;
+    lattice_indexed?: boolean;
+    /** Canonical Lattice state, so a Mission cannot render NOT_INDEXED for
+     *  what is really NOT_APPLICABLE, INDEXING or STALE (finding F6). */
+    lattice_state?: string;
+    blueprint?: boolean;
+  } | null;
 };
 
 export const codingAgentCreateMission = (body: {

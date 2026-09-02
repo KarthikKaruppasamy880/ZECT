@@ -17,6 +17,7 @@ import ModelSelector from "@/components/ModelSelector";
 import { MentionAutocomplete, MentionContextStrip } from "@/components/MentionComposerAddons";
 import { ComposerAttachmentBar } from "@/components/ComposerAttachmentBar";
 import { hasMentions } from "@/lib/mentions";
+import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
 import { useComposerAttachments, imageFilesFromClipboard } from "@/hooks/useComposerAttachments";
 import {
   codingAgentApprove,
@@ -26,6 +27,7 @@ import {
   codingAgentCancelMission,
   codingAgentCreateMission,
   codingAgentCreateSession,
+  codingAgentGetMission,
   codingAgentGetSession,
   codingAgentResolveMentions,
   codingAgentResumeMission,
@@ -57,6 +59,11 @@ type Props = {
   workItemId?: number | null;
   roots?: CodingAgentMissionRoot[];
   onWorkItemResolved?: (id: number) => void;
+  /** A Mission id from the URL, the persisted session or the WorkItem, so the
+   *  pane re-attaches to a Mission that is already running instead of
+   *  offering to start a new one (finding F4). */
+  missionId?: string | null;
+  onMissionChanged?: (id: string) => void;
 };
 
 type Line = {
@@ -83,6 +90,8 @@ export default function MentrixCodingAgentPanel({
   workItemId = null,
   roots = [],
   onWorkItemResolved,
+  missionId = null,
+  onMissionChanged,
 }: Props) {
   const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
@@ -190,6 +199,8 @@ export default function MentrixCodingAgentPanel({
           roots={roots}
           workspaceRoot={workspaceRoot}
           seedMission={handoffMission}
+          missionId={missionId}
+          onMissionChanged={onMissionChanged}
           onOpenPath={onOpenPath}
           onFilesChanged={onFilesChanged}
           onTestOutput={onTestOutput}
@@ -206,6 +217,8 @@ function MissionPane({
   roots,
   workspaceRoot,
   seedMission,
+  missionId,
+  onMissionChanged,
   onOpenPath,
   onFilesChanged,
   onTestOutput,
@@ -216,6 +229,8 @@ function MissionPane({
   roots: CodingAgentMissionRoot[];
   workspaceRoot: string;
   seedMission?: CodingAgentMission | null;
+  missionId?: string | null;
+  onMissionChanged?: (id: string) => void;
   onOpenPath?: (path: string) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
@@ -227,11 +242,47 @@ function MissionPane({
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  const [reattaching, setReattaching] = useState(false);
   const attach = useComposerAttachments(projectId);
 
   useEffect(() => {
     if (seedMission) setMission(seedMission);
   }, [seedMission]);
+
+  // A Mission lives on the server, but the pane only ever held it in React
+  // state, so navigating away and back showed an empty "start a mission"
+  // form while the real Mission was still running (finding F4). Re-attach
+  // from the durable id the page hands down.
+  const knownMissionId = mission?.id || "";
+  useEffect(() => {
+    const wanted = (missionId || "").trim();
+    if (!wanted || wanted === knownMissionId) return;
+    let cancelled = false;
+    setReattaching(true);
+    void codingAgentGetMission(wanted)
+      .then((m) => {
+        if (cancelled || !m?.id) return;
+        setMission(m);
+        const files = m.files || [];
+        if (files.length) onFilesChanged?.(files);
+      })
+      .catch(() => {
+        // A stale id (mission expired, or a different machine) must not
+        // block starting a new mission -- leave the form usable.
+      })
+      .finally(() => {
+        if (!cancelled) setReattaching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionId, knownMissionId]);
+
+  useEffect(() => {
+    if (knownMissionId) onMissionChanged?.(knownMissionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knownMissionId]);
 
   useEffect(() => {
     if (!mission?.tests) return;
@@ -312,6 +363,14 @@ function MissionPane({
         </span>
       </div>
       <ContextUsedStrip used={mission?.context_used} />
+      {reattaching ? (
+        <p
+          className="px-3 pt-1 text-[10px] text-slate-500"
+          data-testid="mentrix-coding-agent-mission-reattaching"
+        >
+          Re-attaching to mission {missionId}…
+        </p>
+      ) : null}
 
       <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 py-2">
         <label className="block text-[10px] uppercase text-slate-400">Goal</label>
@@ -605,28 +664,42 @@ function repoIdsFromRoots(roots: CodingAgentMissionRoot[]): number[] {
   return roots.map((r) => r.id).filter((id) => Number.isFinite(id) && id > 0);
 }
 
+type ContextUsedLite = {
+  knowledge?: boolean;
+  lattice_hits?: number;
+  lattice_indexed?: boolean;
+  lattice_state?: string;
+  blueprint?: boolean;
+};
+
 function contextFromDeveloperPi(pi?: {
   lattice?: { status?: string; state?: string; hits?: unknown[] };
   knowledge?: unknown[];
   blueprint?: { snippet?: string };
-} | null): { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } {
+} | null): ContextUsedLite {
   const hits = Array.isArray(pi?.lattice?.hits) ? pi.lattice.hits.length : 0;
-  const status = String(pi?.lattice?.status || pi?.lattice?.state || "").toUpperCase();
+  const state = canonicalLatticeState(pi?.lattice?.status || pi?.lattice?.state);
   return {
     knowledge: Array.isArray(pi?.knowledge) && pi.knowledge.length > 0,
     lattice_hits: hits,
-    lattice_indexed: ["READY", "INDEXED", "OK"].includes(status) || hits > 0,
+    lattice_indexed: state === "READY",
+    lattice_state: state,
     blueprint: Boolean(pi?.blueprint?.snippet),
   };
 }
 
-function ContextUsedStrip({ used }: { used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null }) {
+function ContextUsedStrip({ used }: { used?: ContextUsedLite | null }) {
   if (!used) return null;
-  const lattice = used.lattice_indexed
-    ? used.lattice_hits
-      ? `Lattice ${used.lattice_hits} hits`
-      : "Lattice indexed"
-    : "Lattice NOT INDEXED";
+  // The same canonical state the Developer header shows, so a Mission and
+  // the header can never disagree about the Lattice (finding F6). Falling
+  // back to the boolean keeps older persisted context packs readable.
+  const state = canonicalLatticeState(
+    used.lattice_state || (used.lattice_indexed ? "READY" : "NOT_INDEXED"),
+  );
+  const lattice =
+    state === "READY" && used.lattice_hits
+      ? `${latticeHeaderLabel(state)} · ${used.lattice_hits} hits`
+      : latticeHeaderLabel(state);
   return (
     <p className="mt-1 text-[10px] text-slate-500" data-testid="mentrix-coding-agent-context-used">
       Context used · {lattice}

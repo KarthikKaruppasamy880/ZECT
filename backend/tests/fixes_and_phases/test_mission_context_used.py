@@ -55,6 +55,7 @@ class TestComposeRichAgentContextPackShape:
             "knowledge": False,
             "lattice_hits": 0,
             "lattice_indexed": False,
+            "lattice_state": "NOT_APPLICABLE",
             "blueprint": False,
             "project_key": None,
             "text": "",

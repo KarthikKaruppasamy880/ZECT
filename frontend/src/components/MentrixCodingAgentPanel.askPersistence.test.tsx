@@ -15,6 +15,9 @@ vi.mock("@/lib/api", () => ({
   developerPlan: vi.fn(),
   codingAgentSavePlan: vi.fn(),
   codingAgentListPlans: vi.fn(async () => ({ ok: true, plans: [] })),
+  codingAgentGetPlan: vi.fn(async () => {
+    throw new Error("plan_not_found");
+  }),
   codingAgentCreateMission: vi.fn(),
   codingAgentCreateSession: vi.fn(),
   codingAgentApprovePlan: vi.fn(),

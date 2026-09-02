@@ -188,6 +188,15 @@ export type DeveloperAskTurn = {
   offline: boolean;
   image_count?: number;
   created_at: string | null;
+  /** Compact context-used summary persisted alongside this turn (absent on
+   * turns recorded before this field existed -- treat as unknown, not empty). */
+  context_used?: {
+    knowledge?: boolean;
+    lattice_hits?: number;
+    lattice_indexed?: boolean;
+    lattice_state?: string;
+    blueprint?: boolean;
+  } | null;
 };
 
 export const developerAskHistory = (workItemId: number) =>

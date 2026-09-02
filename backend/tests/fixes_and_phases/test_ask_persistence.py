@@ -10,13 +10,15 @@ restore the conversation across navigation/refresh/backend restart."""
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
 from sqlalchemy.orm import Session
 
+from app.domains.work_items.events import append_event
 from app.infrastructure.database import SessionLocal
-from app.models import Project, Repo
+from app.models import Project, Repo, WorkItemEvent
 from app.services.work_items.developer_service import MentrixDeveloperService
 
 
@@ -83,3 +85,90 @@ def test_ask_history_empty_for_unused_work_item(db: Session, tmp_path, monkeypat
     p, _r = _seed_project_with_repo(db)
     svc = MentrixDeveloperService(db)
     assert svc.ask_history(999_999_999) == []
+
+
+_CONTEXT_USED_KEYS = {"knowledge", "lattice_hits", "lattice_indexed", "lattice_state", "blueprint"}
+
+
+def test_ask_turn_persists_context_used_summary_matching_the_response(db: Session, tmp_path, monkeypatch):
+    """The gap this closes: ask()'s HTTP response already carries
+    project_intelligence, but nothing durable summarized it, so the
+    Context Used strip went blank on reload. The persisted ask_turn event
+    must carry the SAME compact summary contextFromDeveloperPi() derives
+    from a live response, not a second, independently-computed shape."""
+    monkeypatch.setenv("ZECT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("ZECT_MODEL_FALLBACK_POLICY", "never")
+    p, r = _seed_project_with_repo(db)
+    svc = MentrixDeveloperService(db)
+
+    res = svc.ask(question="What does this repo do?", project_id=p.id, repository_id=r.id)
+    wi_id = res["work_item_id"]
+
+    row = (
+        db.query(WorkItemEvent)
+        .filter(WorkItemEvent.work_item_id == wi_id, WorkItemEvent.event_type == "ask_turn")
+        .order_by(WorkItemEvent.id.desc())
+        .first()
+    )
+    assert row is not None
+    payload = json.loads(row.payload_json)
+    context_used = payload.get("context_used")
+    assert isinstance(context_used, dict)
+    assert set(context_used) == _CONTEXT_USED_KEYS
+
+    from app.services.work_items.developer_service import _context_used_summary
+
+    assert context_used == _context_used_summary(res.get("project_intelligence")), (
+        "the persisted summary must match what this same call actually computed"
+    )
+
+
+def test_ask_history_returns_context_used_on_replay(db: Session, tmp_path, monkeypatch):
+    monkeypatch.setenv("ZECT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("ZECT_MODEL_FALLBACK_POLICY", "never")
+    p, r = _seed_project_with_repo(db)
+    svc = MentrixDeveloperService(db)
+
+    res = svc.ask(question="What does this repo do?", project_id=p.id, repository_id=r.id)
+    wi_id = res["work_item_id"]
+
+    turns = svc.ask_history(wi_id)
+    assert len(turns) == 1
+    assert "context_used" in turns[0]
+    assert set(turns[0]["context_used"]) == _CONTEXT_USED_KEYS
+
+
+def test_ask_history_tolerates_old_style_event_without_context_used(db: Session, tmp_path, monkeypatch):
+    """Additive change: rows persisted before context_used existed have no
+    such key. ask_history() must not crash and must simply omit the field
+    for that turn rather than backfilling a fake summary."""
+    monkeypatch.setenv("ZECT_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    p, r = _seed_project_with_repo(db)
+    svc = MentrixDeveloperService(db)
+    from app.domains.work_items import service as wi_svc
+
+    wi = wi_svc.create_work_item(
+        db,
+        title="legacy ask",
+        description="legacy",
+        project_id=p.id,
+        repository_id=r.id,
+    )
+    append_event(
+        db,
+        work_item_id=wi.id,
+        event_type="ask_turn",
+        payload={
+            "question": "old question",
+            "answer": "old answer",
+            "model": "gpt-x",
+            "offline": False,
+            "image_count": 0,
+        },
+        commit=True,
+    )
+
+    turns = svc.ask_history(wi.id)
+    assert len(turns) == 1
+    assert turns[0]["question"] == "old question"
+    assert "context_used" not in turns[0], "an old-style row must not fabricate a context_used summary"

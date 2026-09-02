@@ -827,7 +827,17 @@ function AskPane({
     }
     void developerAskHistory(workItemId)
       .then((res) => {
-        if (!cancelled) setTurns(res.turns || []);
+        if (cancelled) return;
+        const turns = res.turns || [];
+        setTurns(turns);
+        // Restore the Context Used strip from the most recent turn's
+        // persisted summary too -- without this it stays blank after a
+        // reload/tab switch until the user asks a brand-new question, even
+        // though the prior turn's context was already computed and is now
+        // durable. Older turns persisted before context_used existed have
+        // no such key -- leave the strip blank rather than guessing.
+        const lastContextUsed = turns[turns.length - 1]?.context_used;
+        if (lastContextUsed) setContextUsed(lastContextUsed);
       })
       .catch(() => {
         /* history is best-effort; a fresh Ask still works without it */

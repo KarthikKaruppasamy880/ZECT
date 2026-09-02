@@ -38,6 +38,32 @@ from app.services.work_items.multi_repo_context import (
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
 
 
+def _context_used_summary(pi: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact, durable summary of a resolved ProjectIntelligenceSnapshot dict
+    (developer_service's `built["pi"]`, i.e. snapshot().to_dict()) -- the
+    same {knowledge, lattice_hits, lattice_indexed, lattice_state, blueprint}
+    shape agent_context.py's compose_rich_agent_context_pack() already
+    computes for Mission's "Context Used" strip, and the frontend's
+    contextFromDeveloperPi() already renders for a live ask() response. Ask
+    persists THIS instead of the full context_pack/project_intelligence
+    blob -- small enough to store per-turn, but enough to re-render the
+    Context Used strip on history replay (tab switch / refresh / restart)
+    without the user having to ask a new question first."""
+    pi = pi or {}
+    lattice = pi.get("lattice") or {}
+    hits = list(lattice.get("hits") or [])
+    state = str(lattice.get("status") or lattice.get("state") or "").strip().upper() or "NOT_APPLICABLE"
+    blueprint = pi.get("blueprint") or {}
+    knowledge = pi.get("knowledge") or []
+    return {
+        "knowledge": bool(knowledge),
+        "lattice_hits": len(hits),
+        "lattice_indexed": state == "READY",
+        "lattice_state": state,
+        "blueprint": bool(blueprint.get("snippet")),
+    }
+
+
 class MentrixDeveloperService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -381,6 +407,10 @@ class MentrixDeveloperService:
         # Full (untruncated) turn, persisted separately from the truncated
         # "ask" audit event above -- this is what ask_history() replays to
         # restore the conversation across navigation/refresh/restart.
+        # context_used is a compact summary of built["pi"] (the same
+        # project_intelligence returned in this call's HTTP response) --
+        # persisting it here is what lets the Context Used strip survive a
+        # reload instead of going blank until the next fresh ask() call.
         append_event(
             self.db,
             work_item_id=wi.id,
@@ -393,6 +423,7 @@ class MentrixDeveloperService:
                 # Only a count is persisted, never the image bytes -- this
                 # audit log is not an image store; images are single-turn.
                 "image_count": len(images or []),
+                "context_used": _context_used_summary(built.get("pi")),
             },
             commit=True,
         )
@@ -425,16 +456,21 @@ class MentrixDeveloperService:
                 payload = json.loads(row.payload_json or "{}")
             except (TypeError, ValueError):
                 payload = {}
-            turns.append(
-                {
-                    "question": str(payload.get("question") or ""),
-                    "answer": str(payload.get("answer") or ""),
-                    "model": str(payload.get("model") or ""),
-                    "offline": bool(payload.get("offline")),
-                    "image_count": int(payload.get("image_count") or 0),
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                }
-            )
+            turn = {
+                "question": str(payload.get("question") or ""),
+                "answer": str(payload.get("answer") or ""),
+                "model": str(payload.get("model") or ""),
+                "offline": bool(payload.get("offline")),
+                "image_count": int(payload.get("image_count") or 0),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            # Additive: rows persisted before context_used existed have no
+            # such key -- leave it absent rather than backfilling a fake
+            # summary, so the frontend can tell "unknown" from "empty".
+            context_used = payload.get("context_used")
+            if isinstance(context_used, dict):
+                turn["context_used"] = context_used
+            turns.append(turn)
         return turns
 
     def plan(

@@ -1,12 +1,16 @@
 """ZECT Document Intelligence API — upload/parse/retrieve with provenance."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.core.scopes import PROJECT_SHARED, USER_PRIVATE
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
@@ -82,6 +86,17 @@ async def upload_document(
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
+    except IntegrityError as e:
+        # CP-03 (finding K1): never let a raw SQL/constraint-name/filesystem
+        # path leak into the ASK/PLAN composer -- log the real detail
+        # server-side only. ingest_document() already retries a genuine
+        # content-hash race internally; reaching here means retries were
+        # exhausted or an unrelated integrity error occurred.
+        logger.exception("document upload hit a database conflict")
+        raise HTTPException(409, detail="attachment_conflict: please retry the upload") from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("document upload failed")
+        raise HTTPException(500, detail="attachment_upload_failed") from e
     return {"ok": True, "artifact": out, "permission": perm}
 
 
@@ -119,6 +134,9 @@ async def upload_image_attachment(
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("image attachment upload failed")
+        raise HTTPException(500, detail="attachment_upload_failed") from e
     return {"ok": True, "artifact": out}
 
 

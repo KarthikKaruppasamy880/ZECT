@@ -365,3 +365,59 @@ class TestBpmn:
         monkeypatch.delenv("ZECT_CAMUNDA_BASE_URL", raising=False)
         items = resolve_mentions("@bpmn", workspace=ws)
         assert items[0].verification_state == "unresolved"
+
+
+def _write_model(ws):
+    (ws / "models.py").write_text(
+        (
+            "from sqlalchemy import Column, Integer, String\n"
+            "from app.db import Base\n\n"
+            "class User(Base):\n"
+            '    __tablename__ = "users"\n'
+            "    id = Column(Integer, primary_key=True)\n"
+            "    email = Column(String, nullable=False)\n"
+        ),
+        encoding="utf-8",
+    )
+
+
+class TestDatabase:
+    def test_database_mention_summarizes_tables_and_migrations(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@database", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "users" in items[0].content
+
+    def test_database_mention_with_nothing_found_is_unresolved(self, ws):
+        items = resolve_mentions("@database", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestSchema:
+    def test_schema_mention_lists_all_tables_with_columns(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@schema", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "email:String" in items[0].content
+
+    def test_schema_mention_with_no_models_is_unresolved(self, ws):
+        items = resolve_mentions("@schema", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestTable:
+    def test_table_mention_reads_one_tables_columns(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@table:users", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "email" in items[0].content
+        assert "User" in items[0].content
+
+    def test_table_mention_without_a_name_is_unresolved(self, ws):
+        items = resolve_mentions("@table", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+    def test_table_mention_unknown_table_is_unresolved(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@table:nonexistent", workspace=ws)
+        assert items[0].verification_state == "unresolved"

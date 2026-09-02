@@ -82,6 +82,21 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "db_schema",
+            "description": (
+                "Governed, read-only DB schema inventory for this workspace -- SQLAlchemy models and "
+                "Alembic migrations only (static analysis, no live database connection or credentials). "
+                "Returns all tables when table is omitted, or one table's columns when given."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"table": {"type": "string", "description": "Optional table name to look up"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Create or overwrite a file with full contents (relative path).",
             "parameters": {
@@ -571,6 +586,22 @@ def _execute_tool_inner(
             if len(matches) >= max_results:
                 return {"ok": True, "paths": sorted(matches), "capped": True}
         return {"ok": True, "paths": sorted(matches), "capped": False}
+
+    if name == "db_schema":
+        from app.services.quality.db_schema_eval import inventory_db_schema
+
+        inv = inventory_db_schema(workspace=str(root))
+        table = str(args.get("table") or "").strip()
+        if not table:
+            return {
+                "ok": True,
+                "tables": [{"table_name": t["table_name"], "model_class": t["model_class"]} for t in inv["tables"]],
+                "migration_count": len(inv["migrations"]),
+            }
+        match = next((t for t in inv["tables"] if t["table_name"].lower() == table.lower()), None)
+        if not match:
+            return {"ok": False, "error": f"not_found:{table}"}
+        return {"ok": True, "table": match}
 
     if name == "write_file":
         rel = str(args.get("path") or "").strip()

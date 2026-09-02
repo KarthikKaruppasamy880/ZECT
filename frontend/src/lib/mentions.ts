@@ -7,7 +7,8 @@ export type MentionType =
   | "file" | "folder" | "symbol" | "references" | "repo" | "plan"
   | "diff" | "terminal" | "error" | "test" | "lattice" | "skill" | "rule"
   | "workspace" | "commit" | "branch" | "problem" | "workitem" | "blueprint"
-  | "api" | "jira" | "bpmn";
+  | "api" | "jira" | "bpmn"
+  | "database" | "schema" | "table";
 
 export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: string }[] = [
   { type: "file", needsValue: true, hint: "read a workspace file" },
@@ -32,6 +33,9 @@ export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: stri
   { type: "api", needsValue: false, hint: "OpenAPI/route inventory for this workspace" },
   { type: "jira", needsValue: true, hint: "a Jira ticket by key" },
   { type: "bpmn", needsValue: false, hint: "process engine status + open incidents" },
+  { type: "database", needsValue: false, hint: "DB tables + migrations overview" },
+  { type: "schema", needsValue: false, hint: "every table's columns" },
+  { type: "table", needsValue: true, hint: "one table's columns by name" },
 ];
 
 // No /g flag: hasMentions only needs a boolean .test(), and a global-flagged
@@ -40,7 +44,7 @@ export const MENTION_TYPES: { type: MentionType; needsValue: boolean; hint: stri
 // false right after the first returned true. (Found by a test flake, not by
 // inspection -- worth keeping this comment so it isn't reintroduced.)
 const MENTION_RE =
-  /@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn)(?::(\S+))?/;
+  /@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn|database|schema|table)(?::(\S+))?/;
 
 /** True if the text has at least one recognized @mention worth resolving. */
 export function hasMentions(text: string): boolean {

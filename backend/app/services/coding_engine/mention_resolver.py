@@ -16,6 +16,7 @@ next whitespace). Supported types:
   @lattice:<query> @skill:<id_or_name> @rule
   @workspace @commit:<sha> @branch:<name> @problem @workitem:<id> @blueprint
   @api @jira:<ticket_key> @bpmn
+  @database @schema @table:<table_name>
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ from app.services.work_items.context_engine import ProvenanceItem
 
 _MENTION_RE = re.compile(
     r"@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule"
-    r"|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn)(?::(\S+))?"
+    r"|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn"
+    r"|database|schema|table)(?::(\S+))?"
 )
 
 RULE_FILENAMES = ("ZECT.md", "AGENTS.md")
@@ -409,6 +411,27 @@ def _resolve_problem(*, workspace: Path) -> ProvenanceItem:
     )
 
 
+def _resolve_database(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    inv = inventory_db_schema(workspace=str(workspace))
+    if not inv["tables"] and not inv["migrations"]:
+        return _unresolved("database", "", "no SQLAlchemy models or Alembic migrations found in this workspace")
+    lines = [f"{inv['count']} table(s), {len(inv['migrations'])} migration(s)"]
+    lines.extend(f"- {t['table_name']} ({t['model_class']})" for t in inv["tables"])
+    if inv["migrations"]:
+        lines.append("Most recent migrations:")
+        lines.extend(f"  {m['revision']}: {m['message']}" for m in inv["migrations"][-10:])
+    return ProvenanceItem(
+        source_type="mention:database",
+        source_id="workspace",
+        content="\n".join(lines)[:6000],
+        verification_state="db_schema_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
 def _resolve_api(*, workspace: Path) -> ProvenanceItem:
     from app.services.quality.api_eval import inventory_apis
 
@@ -422,6 +445,26 @@ def _resolve_api(*, workspace: Path) -> ProvenanceItem:
         source_id="workspace",
         content="\n".join(lines),
         verification_state="api_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_schema(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    inv = inventory_db_schema(workspace=str(workspace))
+    if not inv["tables"]:
+        return _unresolved("schema", "", "no SQLAlchemy models found in this workspace")
+    lines = []
+    for t in inv["tables"]:
+        cols = ", ".join(f"{c['name']}:{c['type']}" for c in t["columns"])
+        lines.append(f"{t['table_name']} ({t['model_class']}): {cols}")
+    return ProvenanceItem(
+        source_type="mention:schema",
+        source_id="workspace",
+        content="\n".join(lines)[:8000],
+        verification_state="db_schema_inventory",
         freshness="current",
         selection_reason="user_mentioned",
     )
@@ -520,6 +563,27 @@ def _resolve_bpmn() -> ProvenanceItem:
     )
 
 
+def _resolve_table(value: str, *, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    if not value:
+        return _unresolved("table", value, "table name required (e.g. @table:users)")
+    inv = inventory_db_schema(workspace=str(workspace))
+    match = next((t for t in inv["tables"] if t["table_name"].lower() == value.lower()), None)
+    if not match:
+        return _unresolved("table", value, "no matching table found")
+    cols = "\n".join(f"- {c['name']}: {c['type']}" for c in match["columns"])
+    content = f"{match['table_name']} ({match['model_class']}) -- {match['source']}\n{cols}"
+    return ProvenanceItem(
+        source_type="mention:table",
+        source_id=match["table_name"],
+        content=content[:4000],
+        verification_state="db_schema_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
 def resolve_mentions(
     text: str,
     *,
@@ -576,6 +640,12 @@ def resolve_mentions(
                 items.append(_resolve_jira(value))
             elif mtype == "bpmn":
                 items.append(_resolve_bpmn())
+            elif mtype == "database":
+                items.append(_resolve_database(workspace=workspace))
+            elif mtype == "schema":
+                items.append(_resolve_schema(workspace=workspace))
+            elif mtype == "table":
+                items.append(_resolve_table(value, workspace=workspace))
             else:
                 items.append(_unresolved(mtype, value, "unknown mention type"))
         except Exception as exc:  # noqa: BLE001 -- a bad mention must never break the whole message

@@ -124,7 +124,7 @@ export default function MentrixCodingAgentPanel({
           <Bot className="h-3.5 w-3.5 text-teal-700" />
           Mentrix Coding Agent
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <button
             type="button"
             className={`rounded px-2 py-0.5 text-[10px] ${tab === "ask" ? "bg-teal-700 text-white" : "text-slate-600"}`}

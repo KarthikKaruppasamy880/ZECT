@@ -218,22 +218,35 @@ class MentrixDeveloperService:
         }
     )
 
+    # A bare filename mention ("what does calc.py do") must ground ASK in
+    # that file's real content -- a token-line grep alone finds nothing
+    # when the question's vocabulary doesn't overlap the file's own text
+    # (e.g. asking about "calc.py" when the code never uses the word
+    # "calc"), which is exactly what left ASK unable to say anything but
+    # generic clarifying questions for a trivially small, real file.
+    _FILENAME_RE = re.compile(r"\b[\w][\w\-]*\.[A-Za-z][A-Za-z0-9]{0,8}\b")
+
     def _workspace_file_items(self, *, repository_ids: list[int], query: str) -> list[ProvenanceItem]:
         """Grep authorized local roots so ASK is file-grounded before Lattice is indexed."""
         from app.infrastructure.allowed_paths import path_under_allowed_roots
         from app.models import Repo
 
+        filenames_wanted = {m.lower() for m in self._FILENAME_RE.findall(query or "")}
         tokens = [
             t
             for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query or "")
             if t.lower() not in self._ASK_STOP
         ]
         tokens = sorted(set(tokens), key=len, reverse=True)[:5]
-        if not tokens or not repository_ids:
+        if not tokens and not filenames_wanted:
+            return []
+        if not repository_ids:
             return []
         regexes = [re.compile(re.escape(t), re.IGNORECASE) for t in tokens]
         skip_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
-        items: list[ProvenanceItem] = []
+        filename_items: list[ProvenanceItem] = []
+        line_items: list[ProvenanceItem] = []
+        matched_filenames: set[str] = set()
         for rid in repository_ids:
             repo = self.db.query(Repo).filter(Repo.id == int(rid)).first()
             local = str(getattr(repo, "local_path", "") or "") if repo else ""
@@ -258,24 +271,40 @@ class MentrixDeveloperService:
                     except OSError:
                         continue
                     rel = str(fpath.relative_to(root)).replace("\\", "/")
-                    for i, line in enumerate(text.splitlines(), 1):
-                        if any(rx.search(line) for rx in regexes):
-                            items.append(
-                                ProvenanceItem(
-                                    source_type="workspace_file",
-                                    source_id=f"{rel}:{i}",
-                                    content=f"{rel}:{i}: {line.strip()[:240]}",
-                                    repository=str(rid),
-                                    freshness="current",
-                                    verification_state="file_search",
-                                    selection_reason="authorized_local_grep",
-                                    retrieval_score=1.0,
-                                )
+                    if name.lower() in filenames_wanted and name.lower() not in matched_filenames:
+                        matched_filenames.add(name.lower())
+                        filename_items.append(
+                            ProvenanceItem(
+                                source_type="workspace_file",
+                                source_id=rel,
+                                content=f"{rel}:\n{text[:8000]}",
+                                repository=str(rid),
+                                freshness="current",
+                                verification_state="file_search",
+                                selection_reason="authorized_local_filename_match",
+                                retrieval_score=1.0,
                             )
-                            if len(items) >= 12:
-                                return items
-                            break
-        return items
+                        )
+                        continue
+                    if regexes:
+                        for i, line in enumerate(text.splitlines(), 1):
+                            if any(rx.search(line) for rx in regexes):
+                                line_items.append(
+                                    ProvenanceItem(
+                                        source_type="workspace_file",
+                                        source_id=f"{rel}:{i}",
+                                        content=f"{rel}:{i}: {line.strip()[:240]}",
+                                        repository=str(rid),
+                                        freshness="current",
+                                        verification_state="file_search",
+                                        selection_reason="authorized_local_grep",
+                                        retrieval_score=1.0,
+                                    )
+                                )
+                                break
+                    if len(filename_items) >= 6 and len(filename_items) + len(line_items) >= 12:
+                        return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
+        return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
 
     def _build_multi_repo(
         self,

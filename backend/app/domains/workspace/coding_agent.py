@@ -355,21 +355,38 @@ class PlanSaveIn(BaseModel):
     title: str = "coding"
     markdown: str = Field(..., min_length=1)
     meta: dict = Field(default_factory=dict)
+    workspace: str = ""
+
+
+def _authorized_workspace(workspace: str) -> str:
+    """A plan is written into the target repo, so the same allowed-roots jail
+    every other workspace-writing endpoint uses applies here too."""
+    ws = (workspace or "").strip()
+    if not ws:
+        return ""
+    from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+    try:
+        return str(path_under_allowed_roots(ws))
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.get("/plans")
-def coding_plans(_user: CurrentUser = Depends(get_current_user)):
+def coding_plans(workspace: str = "", _user: CurrentUser = Depends(get_current_user)):
     from app.services.coding_engine.plan_store import list_plans
 
-    return {"ok": True, "plans": list_plans()}
+    return {"ok": True, "plans": list_plans(workspace=_authorized_workspace(workspace))}
 
 
 @router.get("/plans/{plan_id}")
-def coding_plan_get(plan_id: str, _user: CurrentUser = Depends(get_current_user)):
+def coding_plan_get(
+    plan_id: str, workspace: str = "", _user: CurrentUser = Depends(get_current_user)
+):
     from app.services.coding_engine.plan_store import load_plan
 
     try:
-        return load_plan(plan_id)
+        return load_plan(plan_id, workspace=_authorized_workspace(workspace))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="plan_not_found") from None
 
@@ -384,6 +401,7 @@ def coding_plan_save(req: PlanSaveIn, _user: CurrentUser = Depends(get_current_u
             title=req.title,
             markdown=req.markdown,
             meta=req.meta,
+            workspace=_authorized_workspace(req.workspace),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

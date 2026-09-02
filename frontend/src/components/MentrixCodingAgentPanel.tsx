@@ -31,6 +31,7 @@ import {
   codingAgentResumeMission,
   codingAgentRetryMission,
   codingAgentStream,
+  codingAgentGetPlan,
   codingAgentListPlans,
   codingAgentSavePlan,
   developerAsk,
@@ -172,6 +173,7 @@ export default function MentrixCodingAgentPanel({
             setTab("agent");
           }}
           onFilesChanged={onFilesChanged}
+          onOpenPath={onOpenPath}
         />
       ) : tab === "history" ? (
         <HistoryPane
@@ -838,6 +840,7 @@ function PlanPane({
   model,
   onApproved,
   onFilesChanged,
+  onOpenPath,
 }: {
   goalSeed: string;
   workItemId?: number | null;
@@ -847,6 +850,7 @@ function PlanPane({
   model: string;
   onApproved: (mission: CodingAgentMission) => void;
   onFilesChanged?: (paths: string[]) => void;
+  onOpenPath?: (path: string) => void;
 }) {
   const [goal, setGoal] = useState(goalSeed);
   const [markdown, setMarkdown] = useState("");
@@ -858,7 +862,27 @@ function PlanPane({
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const mdRef = useRef<HTMLTextAreaElement | null>(null);
   const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const [planPath, setPlanPath] = useState("");
   const attach = useComposerAttachments(projectId);
+
+  // Reload the saved plan whenever this pane mounts (tab switch, navigate
+  // away and back, reload). Without this the on-disk .plan.md survives but
+  // the editor comes back empty, which reads as "my plan was lost".
+  useEffect(() => {
+    let cancelled = false;
+    void codingAgentGetPlan(`${key}-coding`, workspaceRoot || undefined)
+      .then((saved) => {
+        if (cancelled || !saved?.markdown) return;
+        setMarkdown((current) => (current.trim() ? current : saved.markdown));
+        setPlanPath(saved.path || "");
+      })
+      .catch(() => {
+        /* no saved plan for this work item yet -- start from an empty editor */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, workspaceRoot]);
 
   /** Resolve every @mention against real data and fold both that and any
    * uploaded attachments into one context blob to prepend to what actually
@@ -894,12 +918,15 @@ function PlanPane({
       // the persisted PLAN.md stays exactly what the user wrote; the
       // resolved blob is only prepended when the mission is actually built.
       await resolveContextAndBuildBlob();
-      await codingAgentSavePlan({
+      const saved = await codingAgentSavePlan({
         work_item_or_run: key,
         title: "coding",
         markdown,
         meta: { workspace: workspaceRoot },
+        workspace: workspaceRoot,
       });
+      setPlanPath(saved.path || "");
+      onFilesChanged?.([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -944,7 +971,12 @@ function PlanPane({
     try {
       const contextBlob = await resolveContextAndBuildBlob();
       const augmentedPlan = contextBlob ? `${contextBlob}${markdown}` : markdown;
-      await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown: augmentedPlan });
+      await codingAgentSavePlan({
+        work_item_or_run: key,
+        title: "coding",
+        markdown: augmentedPlan,
+        workspace: workspaceRoot,
+      });
       const created = await codingAgentCreateMission({
         goal: goal.trim() || "Approved PLAN",
         project_id: projectId,
@@ -980,6 +1012,17 @@ function PlanPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-plan-mode">
       <p className="text-[10px] text-slate-500">PLAN.md is scratch in .zect/plans (gitignored). Approve &amp; Build starts the Mentrix implementer in an isolated worktree (same tool loop as Implement chat). Zero edits until then.</p>
+      {planPath ? (
+        <button
+          type="button"
+          onClick={() => onOpenPath?.(planPath)}
+          className="mt-1 truncate text-left font-mono text-[10px] text-teal-700 underline"
+          title={planPath}
+          data-testid="mentrix-coding-agent-plan-path"
+        >
+          {planPath}
+        </button>
+      ) : null}
       <input
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
@@ -1053,10 +1096,10 @@ function HistoryPane({
 }) {
   const [rows, setRows] = useState<Array<{ id: string; markdown?: string; title?: string }>>([]);
   useEffect(() => {
-    void codingAgentListPlans()
+    void codingAgentListPlans(workspaceRoot || undefined)
       .then((r) => setRows(r.plans || []))
       .catch(() => setRows([]));
-  }, []);
+  }, [workspaceRoot]);
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="mentrix-coding-agent-history">
       <div className="max-h-[40%] overflow-auto p-2 text-xs">

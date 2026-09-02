@@ -2116,9 +2116,16 @@ export const codingAgentRetryMission = (missionId: string) =>
     method: "POST",
   });
 
-export const codingAgentListPlans = () =>
+export const codingAgentListPlans = (workspace?: string) =>
   request<{ ok: boolean; plans: Array<{ id: string; markdown?: string; title?: string; work_item_or_run?: string }> }>(
-    "/api/coding-agent/plans",
+    `/api/coding-agent/plans${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`,
+  );
+
+export const codingAgentGetPlan = (planId: string, workspace?: string) =>
+  request<{ ok: boolean; id: string; path?: string; markdown: string; title?: string }>(
+    `/api/coding-agent/plans/${encodeURIComponent(planId)}${
+      workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""
+    }`,
   );
 
 export const codingAgentSavePlan = (body: {
@@ -2126,6 +2133,7 @@ export const codingAgentSavePlan = (body: {
   title?: string;
   markdown: string;
   meta?: Record<string, unknown>;
+  workspace?: string;
 }) =>
   request<{ ok: boolean; id: string; path?: string; markdown: string }>("/api/coding-agent/plans", {
     method: "POST",

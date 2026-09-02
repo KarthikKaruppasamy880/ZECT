@@ -386,18 +386,11 @@ def _load_checkpoint(wt: Path) -> dict[str, Any]:
 
 
 def _ensure_zect_ignored(worktree: Path) -> None:
-    gi = worktree / ".gitignore"
-    try:
-        text = gi.read_text(encoding="utf-8") if gi.is_file() else ""
-    except OSError:
-        return
-    if ".zect/" in text.splitlines() or text.endswith(".zect/\n") or ".zect/\n" in text:
-        return
-    suffix = "" if not text or text.endswith("\n") else "\n"
-    try:
-        gi.write_text(text + suffix + ".zect/\n", encoding="utf-8")
-    except OSError:
-        return
+    # Same policy as plan storage (.zect/ is agent scratch, never the user's
+    # commit) -- kept in one place rather than reimplemented here.
+    from app.services.coding_engine.plan_store import ensure_zect_ignored
+
+    ensure_zect_ignored(worktree)
 
 
 def isolate_worktree(source: str | Path, *, branch: str, dest: str | Path) -> dict[str, Any]:

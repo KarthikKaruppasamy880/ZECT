@@ -39,6 +39,8 @@ import {
   developerAsk,
   developerAskHistory,
   developerPlan,
+  getDocumentMarkdown,
+  listWorkItemAttachments,
   mentrixStartRun,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
@@ -46,6 +48,7 @@ import {
   type DeveloperAskTurn,
   type MentrixCodingAgentEvent,
 } from "@/lib/api";
+import { WorkItemAttachmentsStrip } from "@/components/WorkItemAttachmentsStrip";
 
 type Props = {
   workspaceRoot: string;
@@ -258,7 +261,7 @@ function MissionPane({
   const [showDiff, setShowDiff] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
   const [reattaching, setReattaching] = useState(false);
-  const attach = useComposerAttachments(projectId);
+  const attach = useComposerAttachments(projectId, workItemId);
 
   useEffect(() => {
     if (seedMission) setMission(seedMission);
@@ -347,7 +350,13 @@ function MissionPane({
       }
     }
     const docBlob = attach.documentContextBlob();
-    const goalWithAttachments = docBlob ? `${g}\n\n${docBlob}` : g;
+    const localIds = new Set([
+      ...attach.attachments.map((a) => a.id),
+      ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+    ]);
+    const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+    const combinedBlob = [docBlob, durableBlob].filter(Boolean).join("\n\n");
+    const goalWithAttachments = combinedBlob ? `${g}\n\n${combinedBlob}` : g;
     await run(() =>
       codingAgentCreateMission({
         goal: goalWithAttachments,
@@ -392,6 +401,10 @@ function MissionPane({
         <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
+          onPaste={(e) => {
+            const imgs = imageFilesFromClipboard(e);
+            if (imgs.length) void attach.attachFiles(imgs);
+          }}
           disabled={busy}
           placeholder="Describe the change. Approve &amp; Build implements it in a worktree, then this tab ships the PR. Pull-latest on clones does not start a mission."
           className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
@@ -402,12 +415,12 @@ function MissionPane({
           attachments={attach.attachments}
           images={attach.images}
           attaching={attach.attaching}
-          onAttachFiles={(files) => void attach.attachFiles(files, { allowImages: false })}
+          onAttachFiles={(files) => void attach.attachFiles(files)}
           onRemoveAttachment={attach.removeAttachment}
           onRemoveImage={attach.removeImage}
-          allowImages={false}
           testIdPrefix="mentrix-coding-agent-mission"
         />
+        <WorkItemAttachmentsStrip workItemId={workItemId} />
         {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
         <details className="rounded border border-slate-100 px-2 py-1">
           <summary
@@ -679,6 +692,51 @@ function repoIdsFromRoots(roots: CodingAgentMissionRoot[]): number[] {
   return roots.map((r) => r.id).filter((id) => Number.isFinite(id) && id > 0);
 }
 
+/** No model-capability registry exists in ZECT today (see ModelSelector) --
+ * this is a soft, best-effort hint, not an enforced gate. A false negative
+ * just means a missed warning; the real failure mode (a genuinely
+ * non-vision model) still surfaces the provider's own error either way. */
+const _VISION_CAPABLE_HINTS = ["gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "claude-3", "claude-opus", "claude-sonnet", "claude-haiku", "gemini", "grok"];
+
+function isLikelyVisionCapable(modelId: string): boolean {
+  const m = (modelId || "").toLowerCase();
+  return _VISION_CAPABLE_HINTS.some((hint) => m.includes(hint));
+}
+
+/** Folds in whatever is durably attached to this WorkItem from ANY pane
+ * (not just this one's own local attach state), so an ASK attachment is
+ * actually usable in PLAN/AGENT, not merely visible. `excludeIds` skips
+ * attachments this pane's own local `useComposerAttachments` instance
+ * already uploaded THIS turn, so their content isn't folded in twice.
+ * Images have no text form -- Mission/PLAN goal text has no vision
+ * channel -- so they're only noted by filename here; they remain usable as
+ * real vision content wherever ASK's own `images` param already reaches
+ * the model. */
+async function fetchDurableAttachmentBlob(workItemId: number | null | undefined, excludeIds: Set<number>): Promise<string> {
+  if (workItemId == null) return "";
+  try {
+    const { attachments } = await listWorkItemAttachments(workItemId);
+    const pending = attachments.filter((a) => !excludeIds.has(a.id));
+    if (!pending.length) return "";
+    const parts: string[] = [];
+    for (const a of pending) {
+      if (a.kind === "image") {
+        parts.push(`[attachment:${a.filename}] (image attached earlier in this Mission)`);
+        continue;
+      }
+      try {
+        const doc = await getDocumentMarkdown(a.id);
+        if (doc.markdown) parts.push(`[attachment:${a.filename}]\n${doc.markdown}`);
+      } catch {
+        /* one unreadable attachment must not block the rest */
+      }
+    }
+    return parts.join("\n\n");
+  } catch {
+    return "";
+  }
+}
+
 type ContextUsedLite = {
   knowledge?: boolean;
   lattice_hits?: number;
@@ -767,6 +825,7 @@ function buildAskSeedMarkdown(seed: AskToPlanSeed): string {
 
 function AskPane({
   workspaceRoot,
+  model,
   workItemId,
   projectId,
   roots,
@@ -789,7 +848,7 @@ function AskPane({
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
   const qRef = useRef<HTMLTextAreaElement | null>(null);
-  const attach = useComposerAttachments(projectId);
+  const attach = useComposerAttachments(projectId, workItemId);
 
   /** Resolve every @mention against real data so ASK sees the same truthful
    * context PLAN already does -- @mentions in the question are decorative
@@ -859,7 +918,13 @@ function AskPane({
       const ids = repoIdsFromRoots(roots);
       const mentionBlob = await resolveMentionBlob();
       const docBlob = attach.documentContextBlob();
-      const askedText = `${mentionBlob}${question}${docBlob ? `\n\n${docBlob}` : ""}`;
+      const localIds = new Set([
+        ...attach.attachments.map((a) => a.id),
+        ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+      ]);
+      const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+      const combinedBlob = [docBlob, durableBlob].filter(Boolean).join("\n\n");
+      const askedText = `${mentionBlob}${question}${combinedBlob ? `\n\n${combinedBlob}` : ""}`;
       const images = attach.images.map((i) => i.dataUrl);
       const res = await developerAsk({
         question: askedText,
@@ -874,6 +939,10 @@ function AskPane({
       // the conversation persist at all -- lift it to the parent once resolved.
       if (res.work_item_id && res.work_item_id !== workItemId) {
         onWorkItemResolved?.(res.work_item_id);
+        // Link any attachment made before this WorkItem existed right now,
+        // using the id from this response directly -- waiting for it to
+        // come back down as a prop would race attach.reset() below.
+        await attach.linkPendingTo(res.work_item_id);
       }
       setTurns((prev) => [
         ...prev,
@@ -922,6 +991,12 @@ function AskPane({
         onRemoveImage={attach.removeImage}
         testIdPrefix="mentrix-coding-agent-ask"
       />
+      <WorkItemAttachmentsStrip workItemId={workItemId} />
+      {attach.images.length > 0 && !isLikelyVisionCapable(model) ? (
+        <p className="mt-1 text-[10px] text-amber-600" data-testid="mentrix-coding-agent-ask-vision-hint">
+          {model} may not support image attachments — switch to a vision-capable model for reliable results.
+        </p>
+      ) : null}
       {attach.error ? <p className="mt-1 text-rose-600">{attach.error}</p> : null}
       <div className="mt-2 flex gap-1">
         <button
@@ -1012,13 +1087,13 @@ function PlanPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = String(workItemId || "local");
-  void model;
+  void model; // PLAN never sends images to a model itself -- see AskPane for the vision path.
 
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const mdRef = useRef<HTMLTextAreaElement | null>(null);
   const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
   const [planPath, setPlanPath] = useState("");
-  const attach = useComposerAttachments(projectId);
+  const attach = useComposerAttachments(projectId, workItemId);
 
   // Reload the saved plan whenever this pane mounts (tab switch, navigate
   // away and back, reload). Without this the on-disk .plan.md survives but
@@ -1061,6 +1136,12 @@ function PlanPane({
     }
     const docBlob = attach.documentContextBlob();
     if (docBlob) parts.push(docBlob);
+    const localIds = new Set([
+      ...attach.attachments.map((a) => a.id),
+      ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+    ]);
+    const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+    if (durableBlob) parts.push(durableBlob);
     return parts.length ? `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Plan\n\n` : "";
   };
 
@@ -1189,6 +1270,10 @@ function PlanPane({
         ref={mdRef}
         value={markdown}
         onChange={(e) => setMarkdown(e.target.value)}
+        onPaste={(e) => {
+          const imgs = imageFilesFromClipboard(e);
+          if (imgs.length) void attach.attachFiles(imgs);
+        }}
         className="mt-1 min-h-[8rem] flex-1 rounded border border-slate-200 px-2 py-1 font-mono text-[11px]"
         placeholder="## Plan  --  @file @folder @symbol @references @repo @plan @diff @terminal @error @test @lattice @skill @rule"
         data-testid="mentrix-coding-agent-plan-md"
@@ -1206,12 +1291,12 @@ function PlanPane({
         attachments={attach.attachments}
         images={attach.images}
         attaching={attach.attaching}
-        onAttachFiles={(files) => void attach.attachFiles(files, { allowImages: false })}
+        onAttachFiles={(files) => void attach.attachFiles(files)}
         onRemoveAttachment={attach.removeAttachment}
         onRemoveImage={attach.removeImage}
-        allowImages={false}
         testIdPrefix="mentrix-coding-agent-plan"
       />
+      <WorkItemAttachmentsStrip workItemId={workItemId} />
       {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
       {error ? (
         <p className="text-rose-600" data-testid="mentrix-coding-agent-plan-error">

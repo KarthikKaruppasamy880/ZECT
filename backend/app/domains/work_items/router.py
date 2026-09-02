@@ -181,6 +181,21 @@ def get_events(
     return {"events": [wi_svc.serialize_event(e) for e in wi_svc.list_events(db, work_item_id)]}
 
 
+@router.get("/{work_item_id}/attachments")
+def get_attachments(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Everything attached across ASK/PLAN/AGENT for this WorkItem -- the one
+    list every Developer pane reads, so an ASK attachment is visible in PLAN
+    and AGENT without re-upload (see document_intelligence.service
+    .list_work_item_attachments)."""
+    from app.services.document_intelligence.service import list_work_item_attachments
+
+    return {"attachments": list_work_item_attachments(db, work_item_id=work_item_id)}
+
+
 @router.post("/{work_item_id}/transition")
 def transition(
     work_item_id: int,

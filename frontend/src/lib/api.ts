@@ -2838,7 +2838,27 @@ export type DocumentArtifactInfo = {
   page_count?: number;
   parser_name?: string;
   freshness?: string;
+  /** "document" (parsed/chunked) or "image" (raw bytes, vision content) --
+   *  see backend document_intelligence.service.ingest_image. */
+  kind?: "document" | "image";
+  work_item_id?: number | null;
+  mime_type?: string;
+  bytes_size?: number;
+  created_at?: string;
 };
+
+async function uploadWithAuth<T>(url: string, form: FormData): Promise<T> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API}${url}`, { method: "POST", body: form, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = err.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
 
 export const uploadDocument = async (opts: {
   file: File;
@@ -2846,6 +2866,7 @@ export const uploadDocument = async (opts: {
   scope?: "USER_PRIVATE" | "PROJECT_SHARED";
   sensitivity?: string;
   replaceArtifactId?: number | null;
+  workItemId?: number | null;
 }): Promise<{ ok: boolean; artifact: DocumentArtifactInfo }> => {
   const form = new FormData();
   form.append("file", opts.file);
@@ -2853,17 +2874,41 @@ export const uploadDocument = async (opts: {
   form.append("scope", opts.scope || "USER_PRIVATE");
   form.append("sensitivity", opts.sensitivity || "INTERNAL");
   if (opts.replaceArtifactId != null) form.append("replace_artifact_id", String(opts.replaceArtifactId));
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
-  const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API}/api/documents/upload`, { method: "POST", body: form, headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    const detail = err.detail;
-    throw new Error(typeof detail === "string" ? detail : detail?.message || `Upload failed (${res.status})`);
-  }
-  return res.json();
+  if (opts.workItemId != null) form.append("work_item_id", String(opts.workItemId));
+  return uploadWithAuth<{ ok: boolean; artifact: DocumentArtifactInfo }>("/api/documents/upload", form);
 };
+
+/** A pasted/attached screenshot, stored durably (not just an in-memory data
+ *  URL) so it survives a refresh and PLAN/AGENT can see it without the user
+ *  re-pasting. */
+export const uploadImageAttachment = async (opts: {
+  file: File;
+  projectId?: number | null;
+  workItemId?: number | null;
+}): Promise<{ ok: boolean; artifact: DocumentArtifactInfo }> => {
+  const form = new FormData();
+  form.append("file", opts.file);
+  if (opts.projectId != null) form.append("project_id", String(opts.projectId));
+  if (opts.workItemId != null) form.append("work_item_id", String(opts.workItemId));
+  return uploadWithAuth<{ ok: boolean; artifact: DocumentArtifactInfo }>("/api/documents/upload-image", form);
+};
+
+export const linkAttachmentToWorkItem = (artifactId: number, workItemId: number) =>
+  request<{ ok: boolean; artifact: DocumentArtifactInfo }>(`/api/documents/${artifactId}/link`, {
+    method: "POST",
+    body: JSON.stringify({ work_item_id: workItemId }),
+  });
+
+export const getAttachmentRawDataUrl = (artifactId: number) =>
+  request<{ ok: boolean; artifact_id: number; filename: string; mime_type: string; data_url: string }>(
+    `/api/documents/${artifactId}/raw`,
+  );
+
+/** Everything attached across ASK/PLAN/AGENT for this WorkItem -- the one
+ *  list every Developer pane reads (finding: item 2, native attachments
+ *  must follow the Mission without re-upload). */
+export const listWorkItemAttachments = (workItemId: number) =>
+  request<{ attachments: DocumentArtifactInfo[] }>(`/api/work-items/${workItemId}/attachments`);
 
 export const listDocuments = (projectId?: number | null) =>
   request<{ documents: DocumentArtifactInfo[] }>(

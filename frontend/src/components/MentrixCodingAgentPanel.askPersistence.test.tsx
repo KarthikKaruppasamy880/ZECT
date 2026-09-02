@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
+  getDocumentMarkdown: vi.fn(async () => ({ markdown: "" })),
+  listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
+  linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),
+  uploadImageAttachment: vi.fn(),
+  getAttachmentRawDataUrl: vi.fn(),
   developerAsk: vi.fn(async () => ({
     work_item_id: 42,
     answer: "fresh answer",

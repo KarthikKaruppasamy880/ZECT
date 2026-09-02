@@ -10,6 +10,11 @@ const codingAgentSavePlan = vi.fn(async (..._args: any[]) => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  getDocumentMarkdown: vi.fn(async () => ({ markdown: "" })),
+  listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
+  linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),
+  uploadImageAttachment: vi.fn(),
+  getAttachmentRawDataUrl: vi.fn(),
   developerAsk: vi.fn(async () => ({ answer: "a", work_item_id: 1 })),
   developerAskHistory: vi.fn(async () => ({ turns: [] })),
   developerPlan: vi.fn(),

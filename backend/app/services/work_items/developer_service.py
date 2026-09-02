@@ -302,7 +302,11 @@ class MentrixDeveloperService:
                                     )
                                 )
                                 break
-                    if len(filename_items) >= 6 and len(filename_items) + len(line_items) >= 12:
+                    # Stop as soon as we have enough combined items -- not
+                    # gated on filename_items reaching 6, otherwise a large
+                    # repo with many line-grep hits but few/no filename
+                    # matches would walk the entire tree unbounded.
+                    if len(filename_items) + len(line_items) >= 12:
                         return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
         return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
 

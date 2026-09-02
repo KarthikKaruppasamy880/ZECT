@@ -104,3 +104,18 @@ class TestFilenameGrounding:
         svc = MentrixDeveloperService(db)
 
         assert svc._workspace_file_items(repository_ids=[], query="What does calc.py do?") == []
+
+    def test_caps_at_twelve_on_line_matches_alone_without_needing_filename_hits(self, db, tmp_path):
+        """The early-exit must not require filename_items to reach its own
+        cap first -- a large repo with many line-grep hits and zero
+        filename matches must still stop at 12, not walk the whole tree."""
+        for i in range(20):
+            (tmp_path / f"service_{i}.py").write_text(
+                f"class BudgetValidator{i}:\n    pass\n", encoding="utf-8"
+            )
+        repo = _seed_repo(db, str(tmp_path))
+        svc = MentrixDeveloperService(db)
+
+        items = svc._workspace_file_items(repository_ids=[repo.id], query="Where is BudgetValidator defined?")
+
+        assert len(items) == 12

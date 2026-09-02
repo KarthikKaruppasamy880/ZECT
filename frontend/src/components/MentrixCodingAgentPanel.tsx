@@ -97,10 +97,19 @@ export default function MentrixCodingAgentPanel({
   const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
   const [handoffMission, setHandoffMission] = useState<CodingAgentMission | null>(null);
+  const [askSeed, setAskSeed] = useState<AskToPlanSeed | null>(null);
 
   useEffect(() => {
     setChatModel(model);
   }, [model]);
+
+  // The seed is delivered once, at the exact mount PlanPane makes when this
+  // switch happens (both state updates are batched into the same render).
+  // Clearing it right after means a later, unrelated visit to PLAN never
+  // silently overwrites the user's own edits with stale ASK content.
+  useEffect(() => {
+    if (tab === "plan") setAskSeed(null);
+  }, [tab]);
 
   return (
     <div
@@ -166,12 +175,16 @@ export default function MentrixCodingAgentPanel({
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
-          onCreatePlan={() => setTab("plan")}
+          onCreatePlan={(seed) => {
+            setAskSeed(seed);
+            setTab("plan");
+          }}
           onWorkItemResolved={onWorkItemResolved}
         />
       ) : tab === "plan" ? (
         <PlanPane
           goalSeed={initialGoal}
+          askSeed={askSeed}
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
@@ -690,8 +703,8 @@ function contextFromDeveloperPi(pi?: {
   };
 }
 
-function ContextUsedStrip({ used }: { used?: ContextUsedLite | null }) {
-  if (!used) return null;
+function contextUsedSummaryText(used?: ContextUsedLite | null): string {
+  if (!used) return "";
   // The same canonical state the Developer header shows, so a Mission and
   // the header can never disagree about the Lattice (finding F6). Falling
   // back to the boolean keeps older persisted context packs readable.
@@ -702,13 +715,54 @@ function ContextUsedStrip({ used }: { used?: ContextUsedLite | null }) {
     state === "READY" && used.lattice_hits
       ? `${latticeHeaderLabel(state)} · ${used.lattice_hits} hits`
       : latticeHeaderLabel(state);
+  const parts = [lattice];
+  if (used.knowledge) parts.push("Knowledge");
+  if (used.blueprint) parts.push("Blueprint");
+  return parts.join(" · ");
+}
+
+function ContextUsedStrip({ used }: { used?: ContextUsedLite | null }) {
+  if (!used) return null;
   return (
     <p className="mt-1 text-[10px] text-slate-500" data-testid="mentrix-coding-agent-context-used">
-      Context used · {lattice}
-      {used.knowledge ? " · Knowledge" : ""}
-      {used.blueprint ? " · Blueprint" : ""}
+      Context used · {contextUsedSummaryText(used)}
     </p>
   );
+}
+
+/** Everything ASK gathered for one "Create Plan" click -- so PLAN starts
+ * from the requirement, not a blank textarea the user has to re-paste into.
+ * `version` makes each click distinct even if the underlying question is
+ * unchanged, so the parent can tell "a new handoff happened" from "PlanPane
+ * remounted for an unrelated reason". */
+type AskToPlanSeed = {
+  version: number;
+  question: string;
+  turns: DeveloperAskTurn[];
+  evidence: string;
+  attachmentBlob: string;
+  findings: string;
+};
+
+function buildAskSeedMarkdown(seed: AskToPlanSeed): string {
+  const sections: string[] = ["## Requirements from ASK", ""];
+  if (seed.turns.length) {
+    sections.push("### Conversation");
+    for (const t of seed.turns) {
+      sections.push(`**Q:** ${t.question}`, `**A:** ${t.answer}`, "");
+    }
+  }
+  if (seed.evidence) {
+    sections.push("### Evidence", seed.evidence, "");
+  }
+  if (seed.attachmentBlob) {
+    sections.push("### Attached documents", seed.attachmentBlob, "");
+  }
+  if (seed.findings) {
+    sections.push("### Findings", seed.findings, "");
+  }
+  sections.push("## Plan", "");
+  return sections.join("\n");
 }
 
 function AskPane({
@@ -724,7 +778,7 @@ function AskPane({
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
-  onCreatePlan: () => void;
+  onCreatePlan: (seed: AskToPlanSeed) => void;
   onWorkItemResolved?: (id: number) => void;
 }) {
   const [q, setQ] = useState("");
@@ -871,7 +925,20 @@ function AskPane({
         </button>
         <button
           type="button"
-          onClick={onCreatePlan}
+          onClick={() => {
+            const evidence = (mentionPack?.items || [])
+              .filter((i) => i.verification_state !== "unresolved")
+              .map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`)
+              .join("\n\n");
+            onCreatePlan({
+              version: Date.now(),
+              question: q.trim() || turns[turns.length - 1]?.question || "",
+              turns,
+              evidence,
+              attachmentBlob: attach.documentContextBlob(),
+              findings: contextUsedSummaryText(contextUsed),
+            });
+          }}
           className="rounded border border-slate-300 px-2 py-1"
           data-testid="mentrix-coding-agent-ask-create-plan"
         >
@@ -906,6 +973,7 @@ function AskPane({
 
 function PlanPane({
   goalSeed,
+  askSeed,
   workItemId,
   projectId,
   roots,
@@ -916,6 +984,7 @@ function PlanPane({
   onOpenPath,
 }: {
   goalSeed: string;
+  askSeed?: AskToPlanSeed | null;
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
@@ -925,8 +994,11 @@ function PlanPane({
   onFilesChanged?: (paths: string[]) => void;
   onOpenPath?: (path: string) => void;
 }) {
-  const [goal, setGoal] = useState(goalSeed);
-  const [markdown, setMarkdown] = useState("");
+  // Read once at mount -- askSeed is a one-shot handoff (the parent clears
+  // it right after this pane mounts), so a plain prop read here, not an
+  // effect, is what keeps a later unrelated remount from reapplying it.
+  const [goal, setGoal] = useState(() => (askSeed?.question ? askSeed.question : goalSeed));
+  const [markdown, setMarkdown] = useState(() => (askSeed ? buildAskSeedMarkdown(askSeed) : ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = String(workItemId || "local");

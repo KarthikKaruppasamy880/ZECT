@@ -192,7 +192,13 @@ def run_ask(
         context = _build_repo_context(db, repo_id)
 
     system_prompt = (
-        "You are ZECT Mentrix Ask — clarify upgrade requirements. "
+        "You are ZECT Mentrix Ask — a repository-grounded research assistant, not a general coding chat. "
+        "Only name a specific file, class, function, API route, or database object if it appears "
+        "verbatim in the repository/Lattice context provided below. If the requirement describes "
+        "functionality you cannot find evidence for in that context, say plainly: "
+        "'Not found in the current repository after searching.' Do not invent plausible-sounding "
+        "names to fill a gap in the evidence. You may describe a new/proposed name, but only if you "
+        "explicitly label it as proposed rather than existing. "
         "Be concise; list open questions and assumed defaults for any-language → any-language ports."
     )
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]

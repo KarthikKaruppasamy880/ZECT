@@ -9,7 +9,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const developerAsk = vi.fn(async () => ({
+type MentionItem = { source_type: string; source_id: string; content: string; verification_state: string };
+
+const developerAsk = vi.fn(async (..._args: any[]) => ({
   answer: "Use the existing CampaignService.",
   work_item_id: 7,
   project_intelligence: {
@@ -18,14 +20,14 @@ const developerAsk = vi.fn(async () => ({
     blueprint: { snippet: "" },
   },
 }));
-const developerAskHistory = vi.fn(async () => ({ turns: [] }));
-const codingAgentResolveMentions = vi.fn(async () => ({
-  pack: { items: [] },
+const developerAskHistory = vi.fn(async (..._args: any[]) => ({ turns: [] }));
+const codingAgentResolveMentions = vi.fn(async (..._args: any[]) => ({
+  pack: { items: [] as MentionItem[] },
 }));
 
 vi.mock("@/lib/api", () => ({
-  developerAsk: (...args: unknown[]) => developerAsk(...args),
-  developerAskHistory: (...args: unknown[]) => developerAskHistory(...args),
+  developerAsk: (...args: any[]) => developerAsk(...args),
+  developerAskHistory: (...args: any[]) => developerAskHistory(...args),
   developerPlan: vi.fn(),
   codingAgentGetPlan: vi.fn(async () => {
     throw new Error("plan_not_found");
@@ -35,7 +37,7 @@ vi.mock("@/lib/api", () => ({
   codingAgentCreateMission: vi.fn(),
   codingAgentGetMission: vi.fn(),
   codingAgentApprovePlan: vi.fn(),
-  codingAgentResolveMentions: (...args: unknown[]) => codingAgentResolveMentions(...args),
+  codingAgentResolveMentions: (...args: any[]) => codingAgentResolveMentions(...args),
   codingAgentCreateSession: vi.fn(),
   codingAgentGetSession: vi.fn(),
   codingAgentStream: vi.fn(),

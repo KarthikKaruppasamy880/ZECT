@@ -172,6 +172,40 @@ def _workspace_grep_items(workspace: Any, goal: str, *, repository_id: str = "")
     return items
 
 
+def _authorized_write_contract_block(work_item_id: int | None, db: Any) -> str:
+    """CP-07 -- renders the exact write contract agent_write_policy.py will
+    enforce at write time, built from the SAME AgentWritePolicy object the
+    runtime gate consumes (not a second, independently hand-built notion
+    of "what's authorized"), so the model is grounded in what it can
+    actually touch before it ever proposes a tool call. Best-effort:
+    returns "" on any failure -- a lookup problem here must only mean less
+    grounding, never a blocked build; the hard boundary is
+    agent_write_policy.evaluate_write() at write time, not this text.
+    """
+    if not work_item_id:
+        return ""
+    try:
+        from app.services.coding_engine.agent_write_policy import build_agent_write_policy
+
+        policy = build_agent_write_policy(db, int(work_item_id))
+        if not policy.authorized:
+            return (
+                "## AUTHORIZED WRITE CONTRACT\n"
+                f"BLOCKED: {policy.block_reason} -- {policy.block_detail}\n"
+                "No file writes will be permitted until PLAN is regenerated and re-approved.\n"
+            )
+        lines = [
+            "## AUTHORIZED WRITE CONTRACT",
+            f"primary_repository_id={policy.primary_repo_id} plan_hash={policy.plan_hash[:12]}",
+            "Only these paths/actions will be permitted by the runtime -- do not propose any other path:",
+        ]
+        for impact in policy.file_impacts[:60]:
+            lines.append(f"- {impact.action}: {impact.path}")
+        return "\n".join(lines) + "\n"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def compose_rich_agent_context_pack(
     *,
     goal: str,
@@ -264,6 +298,9 @@ def compose_rich_agent_context_pack(
             extra_items=file_items,
         )
         text = pack.text_blob()
+        contract_block = _authorized_write_contract_block(work_item_id, db)
+        if contract_block:
+            text = f"{contract_block}\n{text}"
         if len(text) > max_chars:
             text = text[: max_chars - 20] + "\n…(truncated)"
         lattice_hits = list((snap.lattice or {}).get("hits") or [])

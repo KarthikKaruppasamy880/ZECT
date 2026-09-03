@@ -43,6 +43,30 @@ _PRODUCT_ROLE = (
 )
 
 
+def _authorize_agent_write(run: dict[str, Any], workspace: Path, name: str, args: dict[str, Any]) -> "agent_write_policy.WriteDecision | None":
+    """CP-07 -- returns None (no opinion, existing behavior unchanged) for
+    non-mutating tools and for runs with no work_item_id (never went
+    through ASK/PLAN, so there is no FILE_IMPACTS.json to check against --
+    the same scope boundary CP-06's approval gate uses). For every other
+    write_file/apply_patch call, this is the last checkpoint before
+    execute_tool() ever touches disk.
+    """
+    from app.services.coding_engine import agent_write_policy
+
+    if name not in agent_write_policy.WRITE_MUTATING_TOOLS:
+        return None
+    work_item_id = run.get("work_item_id")
+    if not work_item_id:
+        return None
+    return agent_write_policy.evaluate_write(
+        work_item_id=work_item_id,
+        repo_id=run.get("repo_id"),
+        tool_name=name,
+        path=str(args.get("path") or ""),
+        workspace=workspace,
+    )
+
+
 def _load_workspace_rules_safe(workspace: Path) -> str:
     try:
         from app.services.coding_engine.mention_resolver import load_workspace_rules
@@ -662,8 +686,18 @@ class MentrixNativeCodingRuntime:
                 ),
             }
         else:
-            tool_policy = "allowed"
-            result = execute_tool(name, args, workspace=workspace, auto_approve_edits=auto_approve)
+            write_decision = _authorize_agent_write(run, workspace, name, args)
+            if write_decision is not None and not write_decision.allowed:
+                tool_policy = "denied"
+                result = {
+                    "ok": False,
+                    "error": f"write_blocked: {write_decision.reason}",
+                    "reason": write_decision.reason,
+                    "detail": write_decision.detail,
+                }
+            else:
+                tool_policy = "allowed"
+                result = execute_tool(name, args, workspace=workspace, auto_approve_edits=auto_approve)
 
         if result.get("needs_approval"):
             tool_policy = "approval_required"
@@ -694,15 +728,28 @@ class MentrixNativeCodingRuntime:
                 tool_policy = "denied"
                 result = {"ok": False, "error": "approval_timeout"}
             else:
-                tool_policy = "allowed"
                 payload_args = dict(payload.get("args") or {})
                 payload_args["_approved"] = True
-                result = execute_tool(
-                    payload["tool"],
-                    payload_args,
-                    workspace=workspace,
-                    auto_approve_edits=True,
-                )
+                # A human approving a pending action authorizes the tool
+                # call, not an escape from the plan's write contract -- the
+                # same check applies here as on the unapproved path.
+                write_decision = _authorize_agent_write(run, workspace, payload["tool"], payload_args)
+                if write_decision is not None and not write_decision.allowed:
+                    tool_policy = "denied"
+                    result = {
+                        "ok": False,
+                        "error": f"write_blocked: {write_decision.reason}",
+                        "reason": write_decision.reason,
+                        "detail": write_decision.detail,
+                    }
+                else:
+                    tool_policy = "allowed"
+                    result = execute_tool(
+                        payload["tool"],
+                        payload_args,
+                        workspace=workspace,
+                        auto_approve_edits=True,
+                    )
 
         if result.get("file_diff") and result.get("path"):
             path = result["path"]

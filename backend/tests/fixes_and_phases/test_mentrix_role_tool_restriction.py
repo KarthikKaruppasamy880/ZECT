@@ -73,6 +73,13 @@ def _run_with_fake_llm(monkeypatch, workspace, *, role, allowed_tools, responses
         role=role,
         allowed_tools=allowed_tools,
         max_steps=4,
+        # CP-08: without an explicit model, start_run() runs this role
+        # through model_router.route_model() -- which correctly refuses to
+        # pick a model when neither a cloud key nor a local LLM is
+        # configured (no silent downgrade). This test injects its own fake
+        # client via openai_compat monkeypatches below, so it must bypass
+        # that auto-routing the same way a real USER_SELECTED call would.
+        model="gpt-4o-mini",
     )
     return rt.wait_until_done(run_id, timeout_s=10)
 

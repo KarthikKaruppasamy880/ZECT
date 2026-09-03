@@ -84,6 +84,10 @@ def test_real_tool_call_populates_action_observation_fields(tmp_path, monkeypatc
         mission_id="mission-abc",
         repo_id="7",
         max_steps=4,
+        # CP-08: bypass model_router.route_model() auto-routing (which
+        # correctly blocks with no cloud/local LLM configured) -- this
+        # test drives its own fake client instead.
+        model="gpt-4o-mini",
     )
     summary = rt.wait_until_done(run_id, timeout_s=10)
 
@@ -124,6 +128,10 @@ def test_denied_tool_call_is_recorded_with_policy_denied(tmp_path, monkeypatch):
         allowed_tools=["list_dir", "read_file"],
         mission_id="mission-xyz",
         max_steps=4,
+        # CP-08: bypass model_router.route_model() auto-routing (which
+        # correctly blocks with no cloud/local LLM configured) -- this
+        # test drives its own fake client instead.
+        model="gpt-4o-mini",
     )
     summary = rt.wait_until_done(run_id, timeout_s=10)
 

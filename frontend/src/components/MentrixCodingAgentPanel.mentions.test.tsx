@@ -51,6 +51,7 @@ const resolvedPack = {
 };
 
 vi.mock("@/lib/api", () => ({
+  codingAgentStreamMission: vi.fn(async () => {}),
   listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
   linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),
   uploadImageAttachment: vi.fn(),

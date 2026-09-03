@@ -298,6 +298,19 @@ def get_mission(mission_id: str) -> dict[str, Any]:
     return _public(_lookup(mission_id))
 
 
+def get_mission_events(mission_id: str, *, after: int = 0) -> list[dict[str, Any]]:
+    """CP-09 -- the full (unlike _public()'s last-40 slice), cursor-filtered
+    event list the Mission/EventStream SSE endpoint sends. `after` is the
+    `seq` of the last event a client already has -- 0 gets everything, so
+    a client with no prior cursor (fresh tab, post-refresh, post-restart)
+    replays this Mission's entire recorded history from disk rather than
+    only whatever fits in a last-N slice.
+    """
+    mission = _lookup(mission_id)
+    events = mission.get("events") or []
+    return [e for e in events if int(e.get("seq") or 0) > after]
+
+
 def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     """Project the canonical durable Mission store as a history list --
     reads the same JSON files _lookup()/_load_mission_from_disk() use, so
@@ -326,6 +339,12 @@ def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     return [_public(data) for _, data in window]
 
 
+def _next_event_seq(mission: dict[str, Any]) -> int:
+    seq = int(mission.get("_event_seq") or 0) + 1
+    mission["_event_seq"] = seq
+    return seq
+
+
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
     if (mission.get("status") == "cancelled" or mission.get("phase") == "cancelled") and event != "cancelled":
         return
@@ -337,8 +356,15 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
             extra[key] = value
         else:
             extra[key] = str(value)[:200]
+    # CP-09: `seq` is the canonical, monotonic ordinal the Mission/
+    # EventStream SSE endpoint cursors on (?after=<seq>) -- every event a
+    # Mission ever records, from this function or from
+    # _bridge_native_events() below, shares this one counter so a client
+    # reconnecting after a tab switch/refresh/backend restart can resume
+    # from exactly where it left off without re-deriving position from
+    # list length (which would break once events get pruned/rotated).
     mission.setdefault("events", []).append(
-        {"event": event, "message": message, "data": extra, "at": _now()}
+        {"event": event, "message": message, "data": extra, "at": _now(), "seq": _next_event_seq(mission)}
     )
     mission["updated_at"] = _now()
     _save_mission(mission)
@@ -363,6 +389,64 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
         )
     except Exception:
         pass
+
+
+def _bridge_native_events(
+    mission: dict[str, Any], run_id: str, *, role: str = "", repository_id: Any = None
+) -> None:
+    """CP-09 -- the fine-grained per-tool-call activity (files read,
+    commands run, individual model routing/token/cost calls) happens on
+    MentrixNativeCodingRuntime's OWN in-memory run; lifecycle.py's mission
+    previously only ever recorded the coarse summary _emit() calls
+    sprinkled around each role invocation, so a backend restart mid-build
+    silently lost every read_file/write_file/run_command/model_call the
+    native loop actually did, and the Developer Agent pane's activity feed
+    could never show them at all. Bridges that run's full event list into
+    the Mission's own durable, JSON-persisted event log -- the ONE
+    canonical activity store the live feed and History both read from --
+    in a single batch/save rather than replaying _emit() per tool call
+    (which would trigger one redundant disk write per event).
+    """
+    if not run_id or (mission.get("status") == "cancelled" or mission.get("phase") == "cancelled"):
+        return
+    try:
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+
+        run = get_mentrix_native_runtime().get_run(run_id)
+    except Exception:  # noqa: BLE001 -- bridging must never fail a build
+        return
+    events = list(run.get("events") or [])
+    if not events:
+        return
+    appended: list[dict[str, Any]] = []
+    for e in events:
+        appended.append(
+            {
+                "event": str(e.get("event") or ""),
+                "message": str(e.get("message") or ""),
+                "data": e.get("data") or {},
+                "at": str(e.get("timestamp") or _now()),
+                "seq": _next_event_seq(mission),
+                "phase": str(e.get("phase") or ""),
+                "role": str(e.get("agent_id") or role or ""),
+                "tool": str(e.get("tool") or ""),
+                "repository_id": repository_id,
+                "provider": str(e.get("provider") or ""),
+                "model": str(e.get("model") or ""),
+                "routing_reason": str(e.get("routing_reason") or ""),
+                "input_tokens": int(e.get("input_tokens") or 0),
+                "output_tokens": int(e.get("output_tokens") or 0),
+                "cached_tokens": int(e.get("cached_tokens") or 0),
+                "estimated_cost": float(e.get("estimated_cost") or 0.0),
+                "duration_ms": e.get("duration_ms"),
+                "status": str(e.get("status") or ""),
+                "evidence_refs": list(e.get("evidence_refs") or []),
+                "source_run_id": run_id,
+            }
+        )
+    mission.setdefault("events", []).extend(appended)
+    mission["updated_at"] = _now()
+    _save_mission(mission)
 
 
 def _write_checkpoint(repo: dict[str, Any]) -> None:
@@ -1373,6 +1457,7 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             work_item_id=mission.get("work_item_id"),
             approved_plan=approved_plan,
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_CODER, repository_id=repo.get("repository_id"))
         results.append(out)
         repo["native_build"] = {
             "ok": out.get("ok"),
@@ -1492,6 +1577,7 @@ def _diagnose_and_repair_repo(
             work_item_id=mission.get("work_item_id"),
             approved_plan=str(mission.get("plan") or ""),
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_DEBUGGER, repository_id=repo.get("repository_id"))
         if out.get("context_used"):
             mission["context_used"] = out["context_used"]
         written = list(out.get("files_written") or [])
@@ -1574,6 +1660,7 @@ def _run_app_and_browser_verification(
             work_item_id=mission.get("work_item_id"),
             approved_plan=str(mission.get("plan") or ""),
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_TESTER, repository_id=repo.get("repository_id"))
         if out.get("context_used"):
             mission["context_used"] = out["context_used"]
         summary = str(out.get("summary") or out.get("status") or "")

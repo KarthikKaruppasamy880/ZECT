@@ -61,6 +61,7 @@ import {
   newTerminalSession,
   saveWorkspaceSession,
   upsertEditorTab,
+  withoutWorkItem,
 } from "@/lib/workspaceSession";
 import {
   fileList,
@@ -75,6 +76,7 @@ import {
   getWorkItem,
   mentrixGetRun,
   mentrixListRuns,
+  type ApiRequestError,
 } from "@/lib/api";
 import { showToast } from "@/components/Toast";
 import { deriveProjectKey, readMentrixWorkspace, writeMentrixWorkspace } from "@/lib/workspaceContext";
@@ -351,8 +353,16 @@ export default function DeveloperWorkspace() {
       .then((wi) => {
         if (!cancelled) setWorkItemMissionId(String(wi?.coding_mission_id || ""));
       })
-      .catch(() => {
-        if (!cancelled) setWorkItemMissionId("");
+      .catch((err: ApiRequestError) => {
+        if (cancelled) return;
+        setWorkItemMissionId("");
+        // CP-09: a confirmed 404 for an id that came from localStorage (not
+        // an explicit URL link, which the user typed/followed on purpose
+        // and shouldn't be silently rewritten) must clear the stale id
+        // there too -- otherwise it keeps poisoning every future mount.
+        if (err?.status === 404 && !urlWorkItem && wsSession.workItemId === workItemId) {
+          setWsSession((prev) => withoutWorkItem(prev));
+        }
       });
     return () => {
       cancelled = true;

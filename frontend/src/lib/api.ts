@@ -53,6 +53,12 @@ export async function apiFetch(path: string, opts?: RequestInit): Promise<Respon
   return fetch(`${getApiBase()}${path}`, { ...opts, headers });
 }
 
+/** Thrown by request() on a non-2xx response. `status` is additive (every
+ *  existing catch-by-message caller is unaffected) so reconciliation logic
+ *  (CP-09) can distinguish "404, this id no longer exists" from any other
+ *  failure without re-fetching or guessing from message text. */
+export type ApiRequestError = Error & { detail?: unknown; status?: number };
+
 export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await apiFetch(path, opts);
   if (!res.ok) {
@@ -65,13 +71,14 @@ export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
         detail.message ||
         detail.detail ||
         res.statusText;
-      const e = new Error(typeof msg === "string" ? msg : res.statusText) as Error & {
-        detail?: unknown;
-      };
+      const e = new Error(typeof msg === "string" ? msg : res.statusText) as ApiRequestError;
       e.detail = detail;
+      e.status = res.status;
       throw e;
     }
-    throw new Error(typeof detail === "string" ? detail : detail?.message || res.statusText);
+    const e = new Error(typeof detail === "string" ? detail : detail?.message || res.statusText) as ApiRequestError;
+    e.status = res.status;
+    throw e;
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -2031,6 +2038,97 @@ export async function codingAgentStream(
   }
 }
 
+/** CP-09 -- the canonical typed Mission/EventStream event shape. Every
+ *  field beyond event/message/at/data is optional: a plain _emit() call
+ *  (phase changes, approvals, blockers) only ever sets a handful of these,
+ *  while a bridged native-tool-loop event (files read, commands run,
+ *  model routing/token/cost) populates the rest. Never contains raw model
+ *  reasoning/chain-of-thought -- `message` is always the concise summary
+ *  the backend already builds (tool name + outcome, not the model's
+ *  internal deliberation). */
+export type MissionEvent = {
+  seq?: number;
+  event: string;
+  message: string;
+  at?: string;
+  data?: Record<string, unknown>;
+  phase?: string;
+  role?: string;
+  tool?: string;
+  repository_id?: number | string | null;
+  provider?: string;
+  model?: string;
+  routing_reason?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_tokens?: number;
+  estimated_cost?: number;
+  duration_ms?: number | null;
+  status?: string;
+  evidence_refs?: string[];
+  source_run_id?: string;
+};
+
+/** SSE stream of a Mission's canonical event log (lifecycle.py's durable,
+ *  JSON-persisted mission.events -- the same store /missions/{id} and
+ *  History both read, no second activity store). `after` is the last
+ *  `seq` already rendered; the server replays only what's missing, so a
+ *  reconnect after a tab switch/refresh/backend restart resumes exactly
+ *  where the client left off. Auto-closes (calls onDone) once the Mission
+ *  pauses/finishes -- callers reconnect with the same cursor on the next
+ *  user action rather than polling in a loop. */
+export async function codingAgentStreamMission(
+  missionId: string,
+  opts: {
+    after?: number;
+    signal?: AbortSignal;
+    onEvent: (ev: MissionEvent) => void;
+    onDone?: () => void;
+  },
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (opts.after != null) params.set("after", String(opts.after));
+  const res = await apiFetch(
+    `/api/coding-agent/missions/${encodeURIComponent(missionId)}/stream?${params.toString()}`,
+    { method: "GET", signal: opts.signal },
+  );
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const e = new Error(typeof err.detail === "string" ? err.detail : "Mission stream failed") as ApiRequestError;
+    e.status = res.status;
+    throw e;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let eventName = "";
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine || eventName === "ping") continue;
+      if (eventName === "done" || eventName === "timeout" || eventName === "error") {
+        opts.onDone?.();
+        continue;
+      }
+      try {
+        opts.onEvent(JSON.parse(dataLine) as MissionEvent);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 export type CodingAgentMissionRoot = {
   id: number;
   label: string;
@@ -2042,6 +2140,11 @@ export type CodingAgentMission = {
   goal: string;
   phase: string;
   status: string;
+  /** "running" | "recoverable" | "blocked" | "stopped" | "completed" --
+   *  see lifecycle.py::mission_execution_state(). Truthful vs. `phase`:
+   *  a Mission can sit at a mid-flight phase like "editing" post-restart
+   *  with nothing actually executing, which reads as "recoverable" here. */
+  execution_state?: string;
   plan: string;
   plan_approved: boolean;
   git_approved: boolean;
@@ -2082,8 +2185,8 @@ export type CodingAgentMission = {
   lattice_stale?: boolean;
   message?: string;
   native_implement?: unknown;
-  events?: Array<{ event?: string; message?: string; at?: string }>;
-  evidence?: Array<{ event?: string; message?: string; at?: string }>;
+  events?: MissionEvent[];
+  evidence?: MissionEvent[];
   /** What the Coder/Tester/Debugger role actually saw for its most recent
    * turn -- same shape ASK/PLAN's project_intelligence summary uses. */
   context_used?: {

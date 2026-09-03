@@ -465,7 +465,17 @@ def resolve_workspace(workspace: str) -> Path:
 
 
 def command_needs_approval(command: str) -> bool:
-    return bool(_DESTRUCTIVE_CMD.search(command or ""))
+    # CP-09A: the old hand-picked _DESTRUCTIVE_CMD list is still checked
+    # (still correct, still fast) but is no longer the only gate --
+    # command_governance.requires_approval() fail-closes on every category
+    # outside READ_ONLY/BUILD/TEST/APP_RUNNER, including UNKNOWN, instead
+    # of silently auto-running anything that isn't obviously destructive.
+    from app.services.coding_engine.command_governance import requires_approval
+
+    if _DESTRUCTIVE_CMD.search(command or ""):
+        return True
+    needs, _category = requires_approval(command)
+    return needs
 
 
 def _rel(root: Path, target: Path) -> str:

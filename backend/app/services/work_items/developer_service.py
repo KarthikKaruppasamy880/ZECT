@@ -712,20 +712,51 @@ class MentrixDeveloperService:
         store.write_json("EXECUTION_MANIFEST.json", manifest)
         store.write_json("AFFECTED_REPOS.json", {"affected_repos": affected})
         from app.services.phases import llm_phase
+        from app.services.work_items import plan_generator
 
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        architecture = plan_generator.detect_repo_architecture(repo_local_path) if repo_local_path else (
+            plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
+        )
         repo_context = (built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob()
         ledger_block = context_package.evidence_ledger_prompt_block() if context_package else ""
-        if ledger_block:
-            repo_context = f"{ledger_block}\n\n{repo_context}"
-        result = llm_phase.run_plan(
+        result = llm_phase.run_grounded_plan(
             goal,
+            evidence_ledger_block=ledger_block,
+            architecture_summary=f"{architecture.primary_language}/{architecture.build_system}",
             repo_context=repo_context,
             constraints=constraints,
-            repo_id=wi.repository_id,
-            db=self.db,
-            upgrade=True,
         )
-        plan_text = str(result.get("plan") or "")
+        narrative_sections = plan_generator.parse_narrative_sections(str(result.get("narrative") or ""))
+        seeded = plan_generator.seed_file_impacts_from_ledger(context_package) if context_package else []
+        proposed = [
+            plan_generator.FileImpact.from_dict(d)
+            for d in (result.get("proposed_file_impacts") or [])
+            if isinstance(d, dict)
+        ]
+        accepted, rejected_reasons = plan_generator.validate_file_impacts(
+            seeded + proposed,
+            context_package=context_package or cp_module.build_context_package(
+                work_item_id=wi.id, primary_repo_id=wi.repository_id, repo_sha=wi.base_commit_sha or "",
+                requirement=goal, ask_findings="", evidence_ledger=[],
+            ),
+            repo_root=repo_local_path or ".",
+            architecture=architecture,
+        )
+        plan_text = plan_generator.render_grounded_plan_markdown(
+            goal=goal,
+            context_package=context_package,
+            architecture=architecture,
+            accepted_impacts=accepted,
+            rejected_reasons=rejected_reasons,
+            narrative_sections=narrative_sections,
+        )
+        placeholder_hits = plan_generator.find_placeholder_violations(plan_text)
+        if placeholder_hits:
+            plan_text = (
+                "⚠️ **Unresolved template content detected and must be replaced before approval**: "
+                + ", ".join(sorted(set(placeholder_hits))) + ".\n\n---\n\n" + plan_text
+            )
         if context_package:
             leaked = self._check_plan_against_not_found(plan_text, context_package)
             if leaked:
@@ -748,6 +779,23 @@ class MentrixDeveloperService:
             )
         written = store.write_plan(plan_text)
         new_hash = written["plan_hash"]
+        # CP-05: write the same grounded plan to the primary repo's real
+        # .zect/plans/ so it appears in Explorer/Monaco immediately, without
+        # requiring the separate manual "Save Plan" click this previously
+        # depended on entirely.
+        repo_plan_path = ""
+        if repo_local_path:
+            try:
+                from app.infrastructure.allowed_paths import path_under_allowed_roots
+                from app.services.coding_engine.plan_store import save_plan as _save_repo_plan
+
+                allowed_root = str(path_under_allowed_roots(repo_local_path))
+                saved = _save_repo_plan(
+                    work_item_or_run=str(wi.id), title="coding", markdown=plan_text, workspace=allowed_root
+                )
+                repo_plan_path = str(saved.get("path") or "")
+            except Exception:  # noqa: BLE001
+                repo_plan_path = ""
         material_change = bool(wi.approved_plan_hash and wi.approved_plan_hash != new_hash)
         wi.plan_version = int(wi.plan_version or 0) + 1
         wi.plan_hash = new_hash
@@ -803,6 +851,10 @@ class MentrixDeveloperService:
             "project_intelligence": built["pi"],
             "mentrix_run_id": run.id,
             "context_package": context_package.to_dict() if context_package else None,
+            "repo_plan_path": repo_plan_path,
+            "architecture": architecture.to_dict(),
+            "file_impacts": [i.to_dict() for i in accepted],
+            "rejected_file_impacts": rejected_reasons,
         }
 
     def approve_plan(self, *, work_item_id: int, actor: str = "") -> dict[str, Any]:

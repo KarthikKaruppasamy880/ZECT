@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const codingAgentGetPlan = vi.fn();
+const developerPlan = vi.fn();
 const codingAgentSavePlan = vi.fn(async (..._args: any[]) => ({
   ok: true,
   id: "1-coding",
@@ -17,7 +18,7 @@ vi.mock("@/lib/api", () => ({
   getAttachmentRawDataUrl: vi.fn(),
   developerAsk: vi.fn(async () => ({ answer: "a", work_item_id: 1 })),
   developerAskHistory: vi.fn(async () => ({ turns: [] })),
-  developerPlan: vi.fn(),
+  developerPlan: (...args: any[]) => developerPlan(...args),
   codingAgentGetPlan: (...args: any[]) => codingAgentGetPlan(...args),
   codingAgentSavePlan: (...args: any[]) => codingAgentSavePlan(...args),
   codingAgentListPlans: vi.fn(async () => ({ ok: true, plans: [] })),
@@ -48,6 +49,37 @@ describe("PLAN draft survives leaving and re-entering the pane", () => {
   beforeEach(() => {
     codingAgentGetPlan.mockReset();
     codingAgentSavePlan.mockClear();
+    developerPlan.mockReset();
+  });
+
+  it("opens the CP-05 grounded plan in Monaco automatically, without a manual Save Plan click", async () => {
+    codingAgentGetPlan.mockRejectedValue(new Error("plan_not_found"));
+    developerPlan.mockResolvedValue({
+      work_item_id: 1,
+      plan: "## Goal\n\nDo the thing.",
+      repo_plan_path: "C:/repo/.zect/plans/1-coding.plan.md",
+    });
+    const onOpenPath = vi.fn();
+    const onFilesChanged = vi.fn();
+    render(
+      <MentrixCodingAgentPanel
+        workspaceRoot="C:/repo"
+        workItemId={1}
+        onOpenPath={onOpenPath}
+        onFilesChanged={onFilesChanged}
+      />,
+    );
+    openPlanTab();
+    fireEvent.change(await screen.findByTestId("mentrix-coding-agent-plan-goal"), {
+      target: { value: "Implement campaign creation" },
+    });
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-revise-plan"));
+
+    await waitFor(() => expect(developerPlan).toHaveBeenCalled());
+    expect(onOpenPath).toHaveBeenCalledWith("C:/repo/.zect/plans/1-coding.plan.md");
+    expect(onFilesChanged).toHaveBeenCalledWith(["C:/repo/.zect/plans/1-coding.plan.md"]);
+    const pathButton = await screen.findByTestId("mentrix-coding-agent-plan-path");
+    expect(pathButton).toHaveTextContent("1-coding.plan.md");
   });
 
   it("reloads the saved plan from the workspace on mount", async () => {

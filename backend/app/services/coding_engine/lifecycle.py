@@ -1018,7 +1018,55 @@ def _apply_patches(mission: dict[str, Any], repo: dict[str, Any], worktree: Path
         if patch.get("command"):
             cmd = str(patch["command"])
             commands.append(cmd)
-            execute_tool("run_command", {"command": cmd}, workspace=root, auto_approve_edits=True)
+            # CP-09A: this call's result used to be discarded entirely --
+            # a command needing approval (or one that simply failed) ran
+            # (or silently didn't) with the patch still reported "ok".
+            # command_governance classifies every command; anything
+            # outside READ_ONLY/BUILD/TEST/APP_RUNNER needs_approval and
+            # must block the mission with a visible reason, same as a
+            # blocked write_file/apply_patch above -- never a silent no-op.
+            from app.services.coding_engine.command_governance import classify_command
+
+            category = classify_command(cmd)
+            cmd_out = execute_tool("run_command", {"command": cmd}, workspace=root, auto_approve_edits=True)
+            if cmd_out.get("needs_approval"):
+                _emit(
+                    mission,
+                    "tool_blocked",
+                    f"{repo.get('label')}: command requires approval ({category}): {cmd[:160]}",
+                    repository_id=repo.get("repository_id"),
+                    category=category,
+                    command=cmd[:400],
+                )
+                return {
+                    "ok": False,
+                    "error": f"command_blocked:{category}",
+                    "path": path,
+                    "files": files,
+                    "commands": commands,
+                }
+            if not cmd_out.get("ok"):
+                _emit(
+                    mission,
+                    "tool_failed",
+                    f"{repo.get('label')}: command failed ({cmd_out.get('error')}): {cmd[:160]}",
+                    repository_id=repo.get("repository_id"),
+                    category=category,
+                )
+                return {
+                    "ok": False,
+                    "error": cmd_out.get("error") or "command_failed",
+                    "path": path,
+                    "files": files,
+                    "commands": commands,
+                }
+            _emit(
+                mission,
+                "command_completed",
+                f"{repo.get('label')}: {cmd[:160]}",
+                repository_id=repo.get("repository_id"),
+                category=category,
+            )
     return {"ok": True, "files": files, "commands": commands}
 
 

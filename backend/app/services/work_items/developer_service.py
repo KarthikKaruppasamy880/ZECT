@@ -277,6 +277,39 @@ class MentrixDeveloperService:
                             break
         return items
 
+    # CP-02 anti-hallucination gate (finding A1): a class/file/route-shaped
+    # name in ASK's prose answer is a factual claim -- "this exists in the
+    # repository" -- and the CMS benchmark proved the model will invent
+    # plausible-sounding ones (CampaignWizard, ApprovalService,
+    # POST /campaigns/initiate) when real grounding is weak. The system
+    # prompt (llm_phase.run_ask) asks the model not to; this is the second,
+    # code-level check that doesn't depend on the model actually listening
+    # (the same two-layer pattern Roo Code uses for tool permissions).
+    _ANSWER_FILENAME_RE = re.compile(r"\b[\w][\w\-]*\.[A-Za-z][A-Za-z0-9]{0,8}\b")
+    _CLASS_LIKE_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+){2,}\b")
+    _API_ROUTE_RE = re.compile(r"\b(?:GET|POST|PUT|DELETE|PATCH)\s+/[\w{}:/-]+")
+
+    def _check_answer_grounding(self, answer: str, pack_obj: Any) -> dict[str, Any]:
+        """Which class/file/route-shaped names in `answer` actually appear in
+        the retrieved context, and which don't. Runs even when there is no
+        context at all -- in that case every named entity is unverified,
+        which is the correct signal (finding A1)."""
+        text = answer or ""
+        candidates: set[str] = set()
+        candidates.update(m.group(0) for m in self._ANSWER_FILENAME_RE.finditer(text))
+        candidates.update(m.group(0) for m in self._CLASS_LIKE_RE.finditer(text))
+        candidates.update(m.group(0) for m in self._API_ROUTE_RE.finditer(text))
+        if not candidates:
+            return {"verified": [], "unverified": [], "checked": True}
+        haystack = "\n".join(
+            str(getattr(it, "content", "") or "") for it in (getattr(pack_obj, "items", None) or [])
+        ).lower()
+        verified: list[str] = []
+        unverified: list[str] = []
+        for name in sorted(candidates):
+            (verified if name.lower() in haystack else unverified).append(name)
+        return {"verified": verified, "unverified": unverified, "checked": True}
+
     def _build_multi_repo(
         self,
         wi: WorkItem,
@@ -414,6 +447,15 @@ class MentrixDeveloperService:
         )
         answer = str(result.get("answer") or "")
         pack_obj = built.get("pack_obj")
+        grounding = self._check_answer_grounding(answer, pack_obj)
+        if grounding["unverified"]:
+            warning = (
+                "⚠️ **Unverified references** — not found in the retrieved repository context, "
+                "so they may be invented rather than real: "
+                + ", ".join(grounding["unverified"][:12])
+                + ". Treat these as illustrative, not confirmed, unless independently verified.\n\n---\n\n"
+            )
+            answer = warning + answer
         source_lines = [
             str(getattr(it, "content", "") or "")
             for it in (getattr(pack_obj, "items", None) or [])
@@ -441,6 +483,7 @@ class MentrixDeveloperService:
                 # audit log is not an image store; images are single-turn.
                 "image_count": len(images or []),
                 "context_used": _context_used_summary(built.get("pi")),
+                "grounding": grounding,
             },
             commit=True,
         )
@@ -452,6 +495,7 @@ class MentrixDeveloperService:
             "affected_repos": built.get("affected_repos") or [],
             "project_intelligence": built["pi"],
             "telemetry": tel,
+            "grounding": grounding,
             "result": result,
         }
 
@@ -487,6 +531,9 @@ class MentrixDeveloperService:
             context_used = payload.get("context_used")
             if isinstance(context_used, dict):
                 turn["context_used"] = context_used
+            grounding = payload.get("grounding")
+            if isinstance(grounding, dict):
+                turn["grounding"] = grounding
             turns.append(turn)
         return turns
 

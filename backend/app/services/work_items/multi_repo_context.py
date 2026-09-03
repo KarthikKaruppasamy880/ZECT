@@ -23,8 +23,16 @@ def resolve_authorized_repository_ids(
     for rid in list(repository_ids or []):
         if rid and rid not in ordered:
             ordered.append(int(rid))
-    if repository_id and int(repository_id) not in ordered:
-        ordered.insert(0, int(repository_id))
+    if repository_id:
+        # The primary repo must be first regardless of where (or whether) it
+        # already sits in repository_ids -- an authorized-but-not-first
+        # match used to leave merge_context_packs()'s packs[0] pointing at
+        # the wrong repo even though the true primary was "authorized"
+        # (finding A2 / CP-01).
+        rid0 = int(repository_id)
+        if rid0 in ordered:
+            ordered.remove(rid0)
+        ordered.insert(0, rid0)
     if not ordered:
         return []
     if project_id is None:
@@ -81,8 +89,22 @@ def _head_sha(local_path: str | None) -> str:
         return ""
 
 
-def merge_context_packs(packs: list[ContextPack], *, token_budget: int = 8000) -> ContextPack:
-    """Merge per-repo packs into one bounded ContextPack (provenance preserved per item)."""
+def merge_context_packs(
+    packs: list[ContextPack],
+    *,
+    token_budget: int = 8000,
+    primary_repository_id: int | None = None,
+) -> ContextPack:
+    """Merge per-repo packs into one bounded ContextPack (provenance preserved per item).
+
+    The merged pack's own repository_id/ref/base_commit_sha (what ASK's
+    "Context Used" reports) must identify by the caller's authoritative
+    primary_repository_id, not by list position -- packs[0] used to always
+    win regardless of which repo the user actually had active, which is
+    what made Context Used lie about the grounded repo (finding A2 / CP-01).
+    Falls back to packs[0] only when no primary id is given or it doesn't
+    match any pack, so existing single-repo callers are unaffected.
+    """
     engine = MentrixContextEngine(token_budget=token_budget)
     merged_items = []
     repo_ids: list[int | None] = []
@@ -91,6 +113,11 @@ def merge_context_packs(packs: list[ContextPack], *, token_budget: int = 8000) -
         merged_items.extend(pack.items)
     # Rebuild under shared budget — items already scored; trim from tail if over budget
     primary = packs[0] if packs else ContextPack()
+    if primary_repository_id is not None:
+        for pack in packs:
+            if pack.repository_id == int(primary_repository_id):
+                primary = pack
+                break
     out = ContextPack(
         work_item_id=primary.work_item_id,
         repository_id=primary.repository_id,

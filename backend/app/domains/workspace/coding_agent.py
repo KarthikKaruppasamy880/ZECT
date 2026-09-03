@@ -240,6 +240,14 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
         roots = _mission_roots(db, req)
         if is_pull_sync_intent(req.goal):
             return sync_authorized_roots(roots)
+        # Resolve the WorkItem's own sticky repository_id up front -- the
+        # same authoritative truth ASK/PLAN use (finding A2 / CP-01) -- so
+        # the Mission never has to guess a primary repo from roots[0] order.
+        wi = None
+        if req.work_item_id:
+            from app.models import WorkItem
+
+            wi = db.query(WorkItem).filter(WorkItem.id == req.work_item_id).first()
         mission = start_mission(
             goal=req.goal.strip(),
             roots=roots,
@@ -249,16 +257,13 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
             project_id=req.project_id,
             workspace_parent=req.workspace_parent,
             propose_if_empty=bool(req.propose_if_empty),
+            primary_repository_id=(wi.repository_id if wi is not None else None),
         )
-        if req.work_item_id:
+        if wi is not None:
             # Canonical Mission-identity pointer -- lets the WorkItem always
             # resolve "its" Mission (see WorkItem.coding_mission_id).
-            from app.models import WorkItem
-
-            wi = db.query(WorkItem).filter(WorkItem.id == req.work_item_id).first()
-            if wi is not None:
-                wi.coding_mission_id = str(mission.get("id") or "")
-                db.commit()
+            wi.coding_mission_id = str(mission.get("id") or "")
+            db.commit()
         return mission
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

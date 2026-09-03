@@ -162,7 +162,10 @@ class TestFollowUpReusesHistory:
         monkeypatch.setattr(openai_compat_mod, "get_openai_compat_client", lambda **_k: client)
 
         rt = MentrixNativeCodingRuntime()
-        run_id = rt.start_run("Look around", workspace=str(workspace), max_steps=4)
+        # CP-08: explicit model bypasses model_router.route_model() auto-
+        # routing (which correctly blocks with no cloud/local LLM
+        # configured) -- this test drives its own fake client instead.
+        run_id = rt.start_run("Look around", workspace=str(workspace), max_steps=4, model="gpt-4o-mini")
         rt.wait_until_done(run_id, timeout_s=10)
 
         # A follow-up must see the SAME seed messages plus everything the

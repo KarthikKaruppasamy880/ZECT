@@ -59,7 +59,10 @@ def _run(monkeypatch, workspace, *, responses, **start_kwargs):
     monkeypatch.setattr(openai_compat_mod, "get_openai_compat_client", lambda **_k: client)
 
     rt = MentrixNativeCodingRuntime()
-    run_id = rt.start_run("Fix add()", workspace=str(workspace), max_steps=2, **start_kwargs)
+    # CP-08: bypass model_router.route_model() auto-routing (which
+    # correctly blocks with no cloud/local LLM configured) -- this helper
+    # drives its own fake/capturing client instead.
+    run_id = rt.start_run("Fix add()", workspace=str(workspace), max_steps=2, model="gpt-4o-mini", **start_kwargs)
     rt.wait_until_done(run_id, timeout_s=10)
     return client
 

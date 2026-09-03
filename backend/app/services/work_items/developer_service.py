@@ -25,6 +25,7 @@ from app.domains.work_items.status import (
 from app.models import MentrixRun, WorkItem, WorkItemEvent
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.work_items.checkpoints import load_execution_state, record_checkpoint
+from app.services.work_items import context_package as cp_module
 from app.services.work_items.context_engine import MentrixContextEngine, ProvenanceItem
 from app.services.work_items.evidence_verifier import EvidenceVerifier
 from app.services.work_items.fallback_policy import resolve_model_route
@@ -290,25 +291,138 @@ class MentrixDeveloperService:
     _API_ROUTE_RE = re.compile(r"\b(?:GET|POST|PUT|DELETE|PATCH)\s+/[\w{}:/-]+")
 
     def _check_answer_grounding(self, answer: str, pack_obj: Any) -> dict[str, Any]:
-        """Which class/file/route-shaped names in `answer` actually appear in
-        the retrieved context, and which don't. Runs even when there is no
-        context at all -- in that case every named entity is unverified,
-        which is the correct signal (finding A1)."""
+        """Backward-compatible shape for existing callers/tests: plain
+        verified/unverified name lists. Delegates to _build_evidence_ledger()
+        (CP-04) so there is exactly one place that decides what counts as
+        grounded, not two independently-drifting implementations."""
+        ledger = self._build_evidence_ledger(answer, pack_obj, repo_id=None, repo_sha="")
+        return {
+            "verified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_VERIFIED),
+            "unverified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_NOT_FOUND),
+            "checked": True,
+        }
+
+    def _build_evidence_ledger(
+        self, answer: str, pack_obj: Any, *, repo_id: int | None, repo_sha: str
+    ) -> list[cp_module.EvidenceLedgerEntry]:
+        """CP-04 Evidence Ledger: which class/file/route-shaped names in
+        `answer` actually appear in the retrieved context, typed and with
+        the specific provenance backing each VERIFIED claim -- the
+        structured replacement for a prose "Unverified references" banner
+        that a later phase (PLAN) would otherwise have to re-interpret from
+        free text. Runs even when there is no context at all -- in that
+        case every named entity is NOT_FOUND, which is the correct signal
+        (finding A1)."""
         text = answer or ""
-        candidates: set[str] = set()
-        candidates.update(m.group(0) for m in self._ANSWER_FILENAME_RE.finditer(text))
-        candidates.update(m.group(0) for m in self._CLASS_LIKE_RE.finditer(text))
-        candidates.update(m.group(0) for m in self._API_ROUTE_RE.finditer(text))
-        if not candidates:
-            return {"verified": [], "unverified": [], "checked": True}
-        haystack = "\n".join(
-            str(getattr(it, "content", "") or "") for it in (getattr(pack_obj, "items", None) or [])
-        ).lower()
-        verified: list[str] = []
-        unverified: list[str] = []
-        for name in sorted(candidates):
-            (verified if name.lower() in haystack else unverified).append(name)
-        return {"verified": verified, "unverified": unverified, "checked": True}
+        typed_candidates: dict[str, str] = {}  # entity -> entity_type, first match wins
+        for m in self._ANSWER_FILENAME_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "file")
+        for m in self._CLASS_LIKE_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "class")
+        for m in self._API_ROUTE_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "api_route")
+        if not typed_candidates:
+            return []
+        items = list(getattr(pack_obj, "items", None) or [])
+        ledger: list[cp_module.EvidenceLedgerEntry] = []
+        for name in sorted(typed_candidates):
+            entity_type = typed_candidates[name]
+            matches = [it for it in items if name.lower() in str(getattr(it, "content", "") or "").lower()]
+            # A content match is the actual evidence -- keep it even when the
+            # matching item has no source_id (a falsy-ref filter here would
+            # silently drop the match itself, not just its label, and wrongly
+            # report a genuinely-grounded entity as NOT_FOUND).
+            refs = [str(getattr(it, "source_id", "") or "unspecified") for it in matches][:5]
+            status = cp_module.STATUS_VERIFIED if matches else cp_module.STATUS_NOT_FOUND
+            ledger.append(
+                cp_module.EvidenceLedgerEntry(
+                    entity=name,
+                    entity_type=entity_type,
+                    status=status,
+                    repo_id=repo_id,
+                    repo_sha=repo_sha,
+                    evidence_refs=refs,
+                )
+            )
+        return ledger
+
+    # CP-04: the canonical ASK -> PLAN structured hand-off. WorkItem.
+    # context_snapshot_json already existed in the schema (serialized in
+    # every WorkItem response) but nothing ever wrote to it -- PLAN
+    # inherited ASK's findings only as a formatted Markdown blob the
+    # frontend built and passed back as the `goal` string, which is exactly
+    # why CP-02's warning banner risked being read as part of the
+    # requirement instead of as structured evidence. Persisting/loading the
+    # ContextPackage here, keyed by WorkItem, is what lets PLAN (and later
+    # AGENT) consume one canonical, typed object instead of re-parsing prose.
+    def _persist_context_package(
+        self,
+        wi: WorkItem,
+        *,
+        requirement: str,
+        ask_findings: str,
+        evidence_ledger: list[cp_module.EvidenceLedgerEntry],
+    ) -> cp_module.ContextPackage:
+        prior = self._load_context_package(wi)
+        merged_ledger = (
+            cp_module.merge_evidence_ledgers(prior.evidence_ledger, evidence_ledger) if prior else evidence_ledger
+        )
+        try:
+            from app.services.document_intelligence.service import list_work_item_attachments
+
+            attachments = [
+                {"id": a["id"], "filename": a["filename"], "content_version_id": a["content_version_id"]}
+                for a in list_work_item_attachments(self.db, work_item_id=wi.id)
+            ]
+        except Exception:  # noqa: BLE001
+            attachments = []
+        pkg = cp_module.build_context_package(
+            work_item_id=wi.id,
+            primary_repo_id=wi.repository_id,
+            repo_sha=wi.base_commit_sha or "",
+            requirement=requirement,
+            ask_findings=ask_findings,
+            evidence_ledger=merged_ledger,
+            attachments=attachments,
+            resolved_mentions=(prior.resolved_mentions if prior else []),
+            scope_decisions=(prior.scope_decisions if prior else {}),
+        )
+        wi.context_snapshot_json = json.dumps(pkg.to_dict())
+        self.db.commit()
+        return pkg
+
+    def _load_context_package(self, wi: WorkItem) -> cp_module.ContextPackage | None:
+        raw = (wi.context_snapshot_json or "").strip()
+        if not raw or raw == "{}":
+            return None
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if not data:
+            return None
+        return cp_module.ContextPackage.from_dict(data)
+
+    # CP-04 deterministic guard (companion to the CMS regression: ASK's
+    # ledger marks CampaignManagement.java / POST /campaigns/initiate
+    # NOT_FOUND, and PLAN must not silently treat them as pre-existing
+    # modify-targets). A NOT_FOUND entity is only acceptable in the plan
+    # text when it's explicitly qualified as new -- full CREATE_NEW/
+    # MODIFY_EXISTING schema enforcement is CP-06's job; this is the
+    # detection layer CP-06 builds stricter validation on top of.
+    _NEW_FILE_QUALIFIERS = ("create_new", "new file", "proposed", "does not exist", "to be created", "not found")
+
+    def _check_plan_against_not_found(self, plan_text: str, pkg: cp_module.ContextPackage) -> set[str]:
+        text_lower = plan_text.lower()
+        leaked: set[str] = set()
+        for entity in pkg.not_found_entities():
+            idx = text_lower.find(entity.lower())
+            if idx == -1:
+                continue
+            window = text_lower[max(0, idx - 60) : idx + len(entity) + 60]
+            if not any(q in window for q in self._NEW_FILE_QUALIFIERS):
+                leaked.add(entity)
+        return leaked
 
     def _build_multi_repo(
         self,
@@ -447,7 +561,14 @@ class MentrixDeveloperService:
         )
         answer = str(result.get("answer") or "")
         pack_obj = built.get("pack_obj")
-        grounding = self._check_answer_grounding(answer, pack_obj)
+        ledger = self._build_evidence_ledger(
+            answer, pack_obj, repo_id=wi.repository_id, repo_sha=wi.base_commit_sha or ""
+        )
+        grounding = {
+            "verified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_VERIFIED),
+            "unverified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_NOT_FOUND),
+            "checked": True,
+        }
         if grounding["unverified"]:
             warning = (
                 "⚠️ **Unverified references** — not found in the retrieved repository context, "
@@ -487,6 +608,9 @@ class MentrixDeveloperService:
             },
             commit=True,
         )
+        context_package = self._persist_context_package(
+            wi, requirement=question, ask_findings=answer, evidence_ledger=ledger
+        )
         return {
             "work_item_id": wi.id,
             "answer": answer,
@@ -497,6 +621,7 @@ class MentrixDeveloperService:
             "telemetry": tel,
             "grounding": grounding,
             "result": result,
+            "context_package": context_package.to_dict(),
         }
 
     def ask_history(self, work_item_id: int) -> list[dict[str, Any]]:
@@ -559,6 +684,11 @@ class MentrixDeveloperService:
             base_commit_sha=base_commit_sha,
             actor=actor,
         )
+        # CP-04: PLAN's authoritative evidence is the ContextPackage ASK
+        # persisted for this WorkItem, not whatever prose (including a
+        # CP-02 warning banner) the caller's `goal` string happens to
+        # contain. May be None for a WorkItem that never went through ASK.
+        context_package = self._load_context_package(wi)
         store = self._store(wi.id)
         record_checkpoint(store, checkpoint_type="op_start", operation_id="plan")
         authorized = resolve_authorized_repository_ids(
@@ -583,15 +713,28 @@ class MentrixDeveloperService:
         store.write_json("AFFECTED_REPOS.json", {"affected_repos": affected})
         from app.services.phases import llm_phase
 
+        repo_context = (built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob()
+        ledger_block = context_package.evidence_ledger_prompt_block() if context_package else ""
+        if ledger_block:
+            repo_context = f"{ledger_block}\n\n{repo_context}"
         result = llm_phase.run_plan(
             goal,
-            repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob(),
+            repo_context=repo_context,
             constraints=constraints,
             repo_id=wi.repository_id,
             db=self.db,
             upgrade=True,
         )
         plan_text = str(result.get("plan") or "")
+        if context_package:
+            leaked = self._check_plan_against_not_found(plan_text, context_package)
+            if leaked:
+                plan_text = (
+                    "⚠️ **Plan references entities ASK could not verify** — the following were marked "
+                    "NOT_FOUND in the repository and must not be treated as existing targets to modify "
+                    "unless explicitly justified as CREATE_NEW: " + ", ".join(sorted(leaked)) + ".\n\n---\n\n"
+                    + plan_text
+                )
         if len(affected) > 1:
             repo_lines = "\n".join(
                 f"- {r.get('label')} (repo_id={r.get('repository_id')}, ref={r.get('repository_ref')}, "
@@ -659,6 +802,7 @@ class MentrixDeveloperService:
             "execution_manifest": manifest,
             "project_intelligence": built["pi"],
             "mentrix_run_id": run.id,
+            "context_package": context_package.to_dict() if context_package else None,
         }
 
     def approve_plan(self, *, work_item_id: int, actor: str = "") -> dict[str, Any]:

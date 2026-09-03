@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 from xml.etree import ElementTree as ET
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.scopes import PROJECT_SHARED, USER_PRIVATE
@@ -285,6 +286,7 @@ def ingest_document(
     sensitivity: str = "INTERNAL",
     replace_artifact_id: int | None = None,
     work_item_id: int | None = None,
+    _retry: int = 0,
 ) -> dict[str, Any]:
     if user_id is None:
         raise ValueError("user_required")
@@ -366,7 +368,16 @@ def ingest_document(
     root = documents_root() / f"u{user_id}" / f"a{art.id}"
     root.mkdir(parents=True, exist_ok=True)
 
-    if cv and scope == PROJECT_SHARED:
+    # CP-03 (finding K1): reuse must apply to every scope, not just
+    # PROJECT_SHARED -- USER_PRIVATE is the scope essentially every
+    # ASK-composer upload uses, and excluding it here is exactly what left
+    # a second identical upload falling through to the unconditional INSERT
+    # below, colliding with uq_doc_content_version_identity. The clone-chunks
+    # logic underneath is already scope-agnostic (owner_user_id, via
+    # _version_owner_key, already isolates USER_PRIVATE versions per user --
+    # widening this condition cannot let one user's content leak into
+    # another's).
+    if cv:
         reused = True
         art.content_version_id = cv.id
         art.status = "READY"
@@ -540,8 +551,35 @@ def ingest_document(
         original_path=str(orig),
         partial_capabilities=list(dict.fromkeys(list(parsed.partial) + (["xlsx"] if "xlsx" in PARTIAL_CAPS else []))),
     )
-    db.add(cv)
-    db.flush()
+    try:
+        db.add(cv)
+        db.flush()
+    except IntegrityError:
+        # CP-03: a concurrent upload of the exact same content (same scope +
+        # project + owner + sha) won the race and committed its own
+        # DocumentContentVersion between our find_reusable_content_version()
+        # lookup above and this flush -- the DB's own unique index is the
+        # only thing that can catch this race with certainty (a Python-level
+        # check-then-insert can never fully close it). Roll back this
+        # attempt and retry once from scratch: the retry's lookup will now
+        # find the winner's row and take the reuse path above instead of
+        # colliding again.
+        db.rollback()
+        if _retry >= 2:
+            raise
+        return ingest_document(
+            db,
+            user_id=user_id,
+            filename=filename,
+            data=data,
+            project_id=project_id,
+            scope=scope,
+            mime_type=mime_type,
+            sensitivity=sensitivity,
+            replace_artifact_id=replace_artifact_id,
+            work_item_id=work_item_id,
+            _retry=_retry + 1,
+        )
     art.content_version_id = cv.id
 
     chunks = chunk_markdown(parsed.markdown)

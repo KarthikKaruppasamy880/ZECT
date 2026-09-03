@@ -210,6 +210,11 @@ export type DeveloperPlanResponse = {
   status?: string;
   context_pack?: Record<string, unknown>;
   project_intelligence?: DeveloperAskResponse["project_intelligence"];
+  /** CP-05: the real repo-local .zect/plans/<id>-coding.plan.md path this
+   *  call just wrote automatically -- present whenever the WorkItem has a
+   *  resolved primary repo, so the caller can open it in Explorer/Monaco
+   *  without a separate manual "Save Plan" step. */
+  repo_plan_path?: string;
 };
 
 export const developerPlan = (body: {

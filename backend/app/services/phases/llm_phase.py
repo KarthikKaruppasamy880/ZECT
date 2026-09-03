@@ -340,6 +340,108 @@ def run_plan(
     }
 
 
+def run_grounded_plan(
+    project_description: str,
+    *,
+    evidence_ledger_block: str = "",
+    architecture_summary: str = "",
+    repo_context: str = "",
+    constraints: str = "",
+) -> dict[str, Any]:
+    """CP-05 grounded plan generator for the Developer ASK/PLAN path --
+    distinct from run_plan() above (which other, unrelated subsystems --
+    bugfix_phase.py, forge_loop/orchestrator.py -- still call, so its
+    existing behavior is left alone rather than risking those callers).
+
+    Asks for prose covering every mandated section except the two
+    file-impact sections (Existing files to modify / New files), which the
+    caller always renders deterministically from a validated FileImpact
+    list -- never from this model's own words. Also asks for a trailing
+    fenced JSON block of *candidate* file impacts (mostly CREATE_NEW
+    proposals); the caller must validate every entry via
+    plan_generator.validate_file_impacts() before accepting any of them --
+    this call's JSON output is a proposal, not a fact.
+    """
+    system_prompt = (
+        "You are ZECT Mentrix Planner -- a repository-grounded engineering planner, not a "
+        "general-purpose writer. Use ONLY the Evidence Ledger and repository context provided "
+        "below as fact. An entity marked NOT_FOUND does not exist in the repository; you may "
+        "propose creating it as a new file (via the trailing JSON block, action CREATE_NEW, with "
+        "an explicit rationale) but must never describe it in prose as already existing or as a "
+        "target to modify. Never invent a phase name, module name, or file path as a placeholder "
+        "(no 'Port Module N', no 'example/file.py', no 'TBD', no generic bracketed names) -- name "
+        "real, specific things or say plainly that something is not yet determined.\n\n"
+        "Write markdown sections with these exact headers, in this order, covering everything "
+        "EXCEPT file impacts (the caller renders those separately from your JSON block): "
+        "Goal, Requirement mapping, Current implementation, Missing implementation, "
+        "Future/excluded scope, Architecture, API impact, DB/migration impact, UI impact, "
+        "Security, Tests, Runtime/App Runner, Browser/Playwright verification, Risks, Delivery, "
+        "Acceptance criteria.\n\n"
+        "After the prose, append one fenced ```json block: "
+        '{"file_impacts": [{"path": "...", "action": "CREATE_NEW|MODIFY_EXISTING|REFERENCE_ONLY|NO_CHANGE", '
+        '"language": "...", "rationale": "...", "dependencies": [...], "verification": "..."}]}. '
+        "Only propose MODIFY_EXISTING/DELETE_EXISTING for paths you can see verified in the "
+        "Evidence Ledger or repository context below -- otherwise use CREATE_NEW or REFERENCE_ONLY."
+    )
+    user_content = f"Requirement:\n{project_description}"
+    if evidence_ledger_block:
+        user_content += f"\n\n{evidence_ledger_block}"
+    if architecture_summary:
+        user_content += f"\n\nDetected repository architecture:\n{architecture_summary}"
+    if repo_context:
+        user_content += f"\n\nRepository context:\n{repo_context[:6000]}"
+    if constraints:
+        user_content += f"\n\nConstraints:\n{constraints}"
+
+    out = _chat(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        max_tokens=3500,
+        temperature=0.3,
+    )
+    if not out.get("ok"):
+        return {
+            "narrative": "",
+            "proposed_file_impacts": [],
+            "model": "offline",
+            "tokens_used": 0,
+            "offline": True,
+            "telemetry": out.get("telemetry"),
+            "error": out.get("error"),
+        }
+
+    content = out["content"]
+    narrative, proposed = _split_narrative_and_file_impacts(content)
+    return {
+        "narrative": narrative,
+        "proposed_file_impacts": proposed,
+        "model": out["model"],
+        "tokens_used": out["tokens_used"],
+        "offline": False,
+        "telemetry": out.get("telemetry"),
+    }
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _split_narrative_and_file_impacts(content: str) -> tuple[str, list[dict[str, Any]]]:
+    import json as _json
+
+    m = _JSON_FENCE_RE.search(content)
+    if not m:
+        return content.strip(), []
+    narrative = (content[: m.start()] + content[m.end() :]).strip()
+    try:
+        data = _json.loads(m.group(1))
+    except _json.JSONDecodeError:
+        return narrative, []
+    impacts = data.get("file_impacts") if isinstance(data, dict) else None
+    return narrative, list(impacts) if isinstance(impacts, list) else []
+
+
 def run_enhance_blueprint(raw_blueprint: str, instructions: str = "") -> dict[str, Any]:
     if not raw_blueprint.strip():
         return {

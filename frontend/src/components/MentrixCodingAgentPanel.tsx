@@ -1208,6 +1208,15 @@ function PlanPane({
       });
       setMarkdown(res.plan || "");
       setContextUsed(contextFromDeveloperPi(res.project_intelligence));
+      // CP-05: the backend already wrote the real repo-local .zect/plans/
+      // file as part of generation -- show it in Explorer and open it in
+      // Monaco immediately, the same as a manual "Save Plan" click used to
+      // require, instead of leaving the user to find and click it.
+      if (res.repo_plan_path) {
+        setPlanPath(res.repo_plan_path);
+        onFilesChanged?.([res.repo_plan_path]);
+        onOpenPath?.(res.repo_plan_path);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Revise failed");
     } finally {

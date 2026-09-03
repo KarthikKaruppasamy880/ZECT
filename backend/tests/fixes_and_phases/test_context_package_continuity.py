@@ -50,10 +50,15 @@ def _mock_ask(monkeypatch, answer: str) -> None:
     monkeypatch.setattr("app.services.phases.llm_phase.run_ask", lambda *a, **kw: {"answer": answer, "model": "test", "offline": False})
 
 
-def _mock_plan(monkeypatch, plan_text: str) -> None:
+def _mock_plan(monkeypatch, narrative: str, *, proposed_file_impacts: list | None = None) -> None:
     monkeypatch.setattr(
-        "app.services.phases.llm_phase.run_plan",
-        lambda *a, **kw: {"plan": plan_text, "model": "test", "offline": False},
+        "app.services.phases.llm_phase.run_grounded_plan",
+        lambda *a, **kw: {
+            "narrative": narrative,
+            "proposed_file_impacts": proposed_file_impacts or [],
+            "model": "test",
+            "offline": False,
+        },
     )
 
 
@@ -98,7 +103,7 @@ class TestAskToPlanDeterministicContinuity:
         wi_id = ask_result["work_item_id"]
         ask_pkg = ask_result["context_package"]
 
-        _mock_plan(monkeypatch, "## Plan\nFix calc.py's add() function.")
+        _mock_plan(monkeypatch, "## Architecture\nFix calc.py's add() function.")
         plan_result = svc.plan(goal="Fix the bug", work_item_id=wi_id)
         plan_pkg = plan_result["context_package"]
 
@@ -117,9 +122,9 @@ class TestAskToPlanDeterministicContinuity:
         svc = MentrixDeveloperService(db)
         wi_id = svc.ask(question="What does calc.py do?", project_id=p.id, repository_id=repo.id)["work_item_id"]
 
-        _mock_plan(monkeypatch, "## Plan\nFirst draft.")
+        _mock_plan(monkeypatch, "## Architecture\nFirst draft.")
         first = svc.plan(goal="Fix the bug", work_item_id=wi_id)["context_package"]
-        _mock_plan(monkeypatch, "## Plan\nRevised draft.")
+        _mock_plan(monkeypatch, "## Architecture\nRevised draft.")
         second = svc.plan(goal="Fix the bug, revised", work_item_id=wi_id)["context_package"]
 
         assert first["evidence_ledger"] == second["evidence_ledger"]
@@ -142,7 +147,7 @@ class TestAskToPlanDeterministicContinuity:
         _mock_ask(monkeypatch, "Reviewing the attached requirement, again.")
         result = svc.ask(question="Analyze the attached BRD", work_item_id=wi_id, project_id=p.id, repository_id=repo.id)
 
-        _mock_plan(monkeypatch, "## Plan\nDraft.")
+        _mock_plan(monkeypatch, "## Architecture\nDraft.")
         plan_pkg = svc.plan(goal="Build it", work_item_id=wi_id)["context_package"]
         assert any(a["id"] == art["id"] for a in plan_pkg["attachments"])
         assert any(a["id"] == art["id"] for a in result["context_package"]["attachments"])
@@ -172,9 +177,13 @@ class TestCmsHallucinationRegression:
         assert "CampaignManagement.java" in not_found
         assert "POST /campaigns/initiate" in not_found
 
+        # The model's own prose narrative treats the NOT_FOUND entities as
+        # if they already exist -- no structured CREATE_NEW proposal at
+        # all. This is the free-text safety net (_check_plan_against_not_found)
+        # over and above the structured file-impact validation.
         _mock_plan(
             monkeypatch,
-            "## Plan\n1. Modify CampaignManagement.java to add the new field.\n"
+            "## Current implementation\n1. Modify CampaignManagement.java to add the new field.\n"
             "2. Submit via POST /campaigns/initiate as before.",
         )
         plan_result = svc.plan(goal="Implement campaign creation", work_item_id=ask_result["work_item_id"])
@@ -189,19 +198,34 @@ class TestCmsHallucinationRegression:
         svc = MentrixDeveloperService(db)
         ask_result = svc.ask(question="Analyze the requirement", project_id=p.id, repository_id=repo.id)
 
+        # The structured path: the model proposes CampaignManagement.java as
+        # an explicit, justified CREATE_NEW file-impact -- this is what
+        # legitimately promotes a NOT_FOUND entity into the plan.
         _mock_plan(
             monkeypatch,
-            "## Plan\n1. CampaignManagement.java does not exist -- CREATE_NEW: new file implementing campaign CRUD.",
+            "## Architecture\nA new campaign creation module will be added.",
+            proposed_file_impacts=[
+                {
+                    "path": "CampaignManagement.java",
+                    "action": "CREATE_NEW",
+                    "language": "java",
+                    "rationale": "Does not exist yet -- new file implementing campaign CRUD.",
+                    "dependencies": [],
+                    "verification": "Add unit tests for campaign creation.",
+                }
+            ],
         )
         plan_result = svc.plan(goal="Implement campaign creation", work_item_id=ask_result["work_item_id"])
 
         assert "Plan references entities ASK could not verify" not in plan_result["plan"]
+        assert "CampaignManagement.java" in plan_result["plan"]
+        assert any(i["path"] == "CampaignManagement.java" and i["action"] == "CREATE_NEW" for i in plan_result["file_impacts"])
 
     def test_plan_with_no_prior_ask_has_no_context_package_and_is_not_checked(self, db: Session, monkeypatch, tmp_path):
         """A WorkItem that never went through ASK has nothing to check
         against -- plan() must not crash and must simply skip the guard."""
         p, repo = _seed_repo(db, str(tmp_path))
-        _mock_plan(monkeypatch, "## Plan\nModify CampaignManagement.java.")
+        _mock_plan(monkeypatch, "## Architecture\nModify CampaignManagement.java.")
         svc = MentrixDeveloperService(db)
         plan_result = svc.plan(goal="Implement campaign creation", project_id=p.id, repository_id=repo.id)
         assert plan_result["context_package"] is None

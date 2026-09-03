@@ -713,12 +713,24 @@ class MentrixDeveloperService:
         )
         repo_context = (built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob()
         ledger_block = context_package.evidence_ledger_prompt_block() if context_package else ""
+        repo_size_files = plan_generator.count_repo_files(repo_local_path) if repo_local_path else 0
+        # CP-08: a big repo is exactly the "do not default a large CMS
+        # implementation to a small/cheap model" case the Model Router
+        # mandate calls out by name -- feed it the real, deterministically
+        # counted file total rather than letting PLAN fall back to a
+        # length-only guess.
+        from app.services.work_items.model_router import COMPLEXITY_COMPLEX as _MR_COMPLEX
+
+        plan_complexity = _MR_COMPLEX if repo_size_files > 150 else ""
         result = llm_phase.run_grounded_plan(
             goal,
             evidence_ledger_block=ledger_block,
             architecture_summary=f"{architecture.primary_language}/{architecture.build_system}",
             repo_context=repo_context,
             constraints=constraints,
+            complexity=plan_complexity,
+            repo_language=architecture.primary_language,
+            repo_size_files=repo_size_files,
         )
         narrative_sections = plan_generator.parse_narrative_sections(str(result.get("narrative") or ""))
         seeded = plan_generator.seed_file_impacts_from_ledger(context_package) if context_package else []

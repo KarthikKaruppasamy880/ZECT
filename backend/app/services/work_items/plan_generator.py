@@ -85,6 +85,27 @@ class RepoArchitecture:
         return asdict(self)
 
 
+def count_repo_files(repo_root: str | Path, *, max_files: int = 4000) -> int:
+    """Deterministic file count for repo-size-aware routing (CP-08's Model
+    Router) -- detect_repo_architecture() short-circuits with an EMPTY
+    extension_counts the moment it finds a build marker (pom.xml,
+    package.json, ...), which is the common case for a real repo, so that
+    dict is not a usable "how big is this repo" signal on its own. This
+    always walks the tree (bounded by max_files, same _SKIP_DIRS as
+    detect_repo_architecture) regardless of whether a build marker exists.
+    """
+    root = Path(repo_root)
+    if not root.is_dir():
+        return 0
+    count = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        count += len(filenames)
+        if count >= max_files:
+            return max_files
+    return count
+
+
 def detect_repo_architecture(repo_root: str | Path, *, max_files: int = 4000) -> RepoArchitecture:
     """Deterministic, filesystem-only detection -- no LLM guess. A CMS/Java
     repo must be recognized as Java *before* any new file is proposed, so a

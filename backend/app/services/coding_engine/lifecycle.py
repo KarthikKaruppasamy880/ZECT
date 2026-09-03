@@ -857,14 +857,50 @@ def review_diff(diff: str) -> dict[str, Any]:
     }
 
 
-def _apply_patches(worktree: Path, patches: list[dict[str, Any]]) -> dict[str, Any]:
+def _apply_patches(mission: dict[str, Any], repo: dict[str, Any], worktree: Path, patches: list[dict[str, Any]]) -> dict[str, Any]:
     root = resolve_workspace(str(worktree))
     files: list[str] = []
     commands: list[str] = []
+    # CP-07: a Mission with no work_item_id never went through ASK/PLAN and
+    # has no FILE_IMPACTS.json to check against -- same scope boundary
+    # CP-06's _plan_validation_gate already uses, preserved here rather
+    # than newly gating Missions built from hand-supplied patches (e.g.
+    # test_coding_agent_production.py's Missions A-G). Any Mission that
+    # DOES carry a work_item_id is fail-closed from here on.
+    work_item_id = mission.get("work_item_id")
     for patch in patches or []:
         path = str(patch.get("path") or "").strip()
         if not path:
             continue
+        tool_name = "write_file" if patch.get("content") is not None else "apply_patch"
+        if work_item_id:
+            from app.services.coding_engine import agent_write_policy
+
+            decision = agent_write_policy.evaluate_write(
+                work_item_id=work_item_id,
+                repo_id=repo.get("repository_id"),
+                tool_name=tool_name,
+                path=path,
+                workspace=root,
+            )
+            if not decision.allowed:
+                _emit(
+                    mission,
+                    "agent_write_blocked",
+                    f"{repo.get('label')}: write to {path} refused ({decision.reason})",
+                    repository_id=repo.get("repository_id"),
+                    path=path,
+                    reason=decision.reason,
+                    detail=decision.detail,
+                )
+                return {"ok": False, "error": f"write_blocked:{decision.reason}", "path": path, "files": files}
+            _emit(
+                mission,
+                "agent_write_allowed",
+                f"{repo.get('label')}: write to {path} authorized ({decision.matched_action})",
+                repository_id=repo.get("repository_id"),
+                path=path,
+            )
         if patch.get("content") is not None:
             out = execute_tool(
                 "write_file",
@@ -1587,7 +1623,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         patches = _patches_for_repo(patches_map, repo)
         repo["patches_applied"] = len(patches)
         wt = Path(repo["worktree_path"])
-        applied = _apply_patches(wt, patches)
+        applied = _apply_patches(mission, repo, wt, patches)
         if not applied.get("ok"):
             repo["blocker"] = applied.get("error") or "edit_failed"
             repo["test_ok"] = False

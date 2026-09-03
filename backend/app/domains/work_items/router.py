@@ -333,6 +333,22 @@ def developer_plan(
     )
 
 
+@developer_router.get("/validate-plan")
+def developer_validate_plan(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """CP-06: on-demand VALID/INVALID/STALE check the UI polls to decide
+    whether Approve & Build should be enabled -- never mutates the
+    WorkItem. approve_plan() re-runs this same check itself as the actual
+    enforcement gate; this endpoint exists so the UI doesn't have to
+    attempt (and fail) a real approval just to show current status."""
+    from app.services.work_items.developer_service import MentrixDeveloperService
+
+    return MentrixDeveloperService(db).validate_plan(work_item_id=work_item_id)
+
+
 @developer_router.post("/approve-plan")
 def developer_approve_plan(
     body: ApprovePlanIn,

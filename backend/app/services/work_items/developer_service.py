@@ -407,22 +407,15 @@ class MentrixDeveloperService:
     # ledger marks CampaignManagement.java / POST /campaigns/initiate
     # NOT_FOUND, and PLAN must not silently treat them as pre-existing
     # modify-targets). A NOT_FOUND entity is only acceptable in the plan
-    # text when it's explicitly qualified as new -- full CREATE_NEW/
-    # MODIFY_EXISTING schema enforcement is CP-06's job; this is the
-    # detection layer CP-06 builds stricter validation on top of.
-    _NEW_FILE_QUALIFIERS = ("create_new", "new file", "proposed", "does not exist", "to be created", "not found")
-
+    # text when it's explicitly qualified as new. CP-06 promotes this
+    # detection into a hard approval-time gate (plan_validator.py); the
+    # scanning logic itself now lives in plan_generator.find_not_found_leaks
+    # so both the generation-time warning banner and the approval-time gate
+    # share one implementation instead of drifting apart.
     def _check_plan_against_not_found(self, plan_text: str, pkg: cp_module.ContextPackage) -> set[str]:
-        text_lower = plan_text.lower()
-        leaked: set[str] = set()
-        for entity in pkg.not_found_entities():
-            idx = text_lower.find(entity.lower())
-            if idx == -1:
-                continue
-            window = text_lower[max(0, idx - 60) : idx + len(entity) + 60]
-            if not any(q in window for q in self._NEW_FILE_QUALIFIERS):
-                leaked.add(entity)
-        return leaked
+        from app.services.work_items import plan_generator
+
+        return plan_generator.find_not_found_leaks(plan_text, pkg.not_found_entities())
 
     def _build_multi_repo(
         self,
@@ -777,8 +770,32 @@ class MentrixDeveloperService:
                 f"Each execution operation is bound to repo_id + worktree under artifacts/worktrees/.\n\n"
                 f"{plan_text}"
             )
+        # CP-06: canonicalize once, here, before anything hashes or persists
+        # it -- plan_store.save_plan()/load_plan() round-trips the
+        # repo-local copy through .strip(), so hashing an un-stripped
+        # plan_text here would make _resolve_current_plan_text() (which
+        # prefers that repo-local copy) compute a different hash than this
+        # one on the very next validation call, falsely reporting a
+        # freshly-generated, never-touched plan as STALE.
+        plan_text = plan_text.strip()
         written = store.write_plan(plan_text)
         new_hash = written["plan_hash"]
+        # CP-06: machine-readable contract proving the rendered plan text
+        # and the accepted file impacts are in sync as of this plan_hash --
+        # plan_validator.py re-checks this at approval time since the
+        # filesystem/evidence state generation relied on can drift before
+        # someone clicks Approve.
+        store.write_json(
+            "FILE_IMPACTS.json",
+            {
+                "work_item_id": wi.id,
+                "primary_repo_id": wi.repository_id,
+                "repo_sha": wi.base_commit_sha or "",
+                "plan_hash": new_hash,
+                "file_impacts": [i.to_dict() for i in accepted],
+                "rejected_file_impacts": rejected_reasons,
+            },
+        )
         # CP-05: write the same grounded plan to the primary repo's real
         # .zect/plans/ so it appears in Explorer/Monaco immediately, without
         # requiring the separate manual "Save Plan" click this previously
@@ -855,7 +872,62 @@ class MentrixDeveloperService:
             "architecture": architecture.to_dict(),
             "file_impacts": [i.to_dict() for i in accepted],
             "rejected_file_impacts": rejected_reasons,
+            "validation": self.validate_plan(work_item_id=wi.id),
         }
+
+    def _resolve_current_plan_text(self, wi: WorkItem, store: ArtifactStore) -> str:
+        # The repo-local .zect/plans/<id>-coding.plan.md is what Explorer/
+        # Monaco actually show and let the user edit -- if it exists, it is
+        # the plan text about to be approved, not necessarily the internal
+        # ArtifactStore mirror written at the last plan() call.
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        if repo_local_path:
+            try:
+                from app.infrastructure.allowed_paths import path_under_allowed_roots
+                from app.services.coding_engine.plan_store import load_plan as _load_repo_plan
+
+                allowed_root = str(path_under_allowed_roots(repo_local_path))
+                loaded = _load_repo_plan(f"{wi.id}-coding", workspace=allowed_root)
+                text = str(loaded.get("markdown") or "")
+                if text.strip():
+                    return text
+            except Exception:  # noqa: BLE001
+                pass
+        return store.read_plan()
+
+    def _validate_plan_impl(self, wi: WorkItem) -> tuple["plan_validator.PlanValidationResult", str]:
+        from app.services.work_items import plan_generator, plan_validator
+        from app.services.work_items.artifact_store import plan_hash_bytes
+
+        store = self._store(wi.id)
+        plan_text = self._resolve_current_plan_text(wi, store)
+        current_hash = plan_hash_bytes(plan_text) if plan_text.strip() else ""
+        sidecar = store.read_json("FILE_IMPACTS.json", default=None) or None
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        architecture = (
+            plan_generator.detect_repo_architecture(repo_local_path)
+            if repo_local_path
+            else plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
+        )
+        context_package = self._load_context_package(wi)
+        result = plan_validator.validate_plan_for_approval(
+            work_item_id=wi.id,
+            primary_repo_id=wi.repository_id,
+            base_commit_sha=wi.base_commit_sha or "",
+            recorded_plan_hash=wi.plan_hash or "",
+            plan_text=plan_text,
+            current_plan_hash=current_hash,
+            sidecar=sidecar,
+            context_package=context_package,
+            repo_root=repo_local_path or ".",
+            architecture=architecture,
+        )
+        return result, plan_text
+
+    def validate_plan(self, *, work_item_id: int) -> dict[str, Any]:
+        wi = wi_svc.get_work_item(self.db, work_item_id)
+        result, _plan_text = self._validate_plan_impl(wi)
+        return result.to_dict()
 
     def approve_plan(self, *, work_item_id: int, actor: str = "") -> dict[str, Any]:
         wi = wi_svc.get_work_item(self.db, work_item_id)

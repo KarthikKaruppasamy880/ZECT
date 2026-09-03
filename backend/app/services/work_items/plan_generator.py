@@ -143,6 +143,42 @@ class FileImpact:
         )
 
 
+# Companion to the CMS regression: ASK's ledger marks
+# CampaignManagement.java / POST /campaigns/initiate NOT_FOUND, and PLAN's
+# free-text narrative must not describe them as already existing. Shared by
+# developer_service.py::plan() (which prepends a warning banner for this at
+# generation time) and plan_validator.py (which hard-blocks approval for
+# the exact same condition, re-checked against whatever text is actually
+# about to be approved) -- one implementation, not two that could drift.
+_NEW_FILE_QUALIFIERS = ("create_new", "new file", "proposed", "does not exist", "to be created", "not found")
+
+
+def find_not_found_leaks(plan_text: str, not_found_entities: set[str]) -> set[str]:
+    """Flags an entity if ANY of its mentions in the text lack a nearby
+    qualifier -- checking only the first occurrence would let a single
+    qualified mention (e.g. a warning banner that itself names the entity
+    with "...unless explicitly justified as CREATE_NEW: X") mask a later,
+    genuinely unqualified claim elsewhere in the same text that a
+    first-occurrence-only check would never even look at."""
+    text_lower = (plan_text or "").lower()
+    leaked: set[str] = set()
+    for entity in not_found_entities:
+        needle = entity.lower()
+        if not needle:
+            continue
+        start = 0
+        while True:
+            idx = text_lower.find(needle, start)
+            if idx == -1:
+                break
+            window = text_lower[max(0, idx - 60) : idx + len(needle) + 60]
+            if not any(q in window for q in _NEW_FILE_QUALIFIERS):
+                leaked.add(entity)
+                break
+            start = idx + len(needle)
+    return leaked
+
+
 def find_placeholder_violations(text: str) -> list[str]:
     """Every literal placeholder pattern found in `text` -- used to reject
     a candidate plan outright rather than let one through with a warning,
@@ -199,7 +235,12 @@ def validate_file_impacts(
     rejected: list[str] = []
     seen_paths: set[str] = set()
     for impact in impacts:
-        path = (impact.path or "").strip().replace("\\", "/").lstrip("/")
+        # Deliberately NOT lstrip("/")-ing a leading slash here: that would
+        # silently rewrite an attempted absolute-path escape (e.g.
+        # "/etc/passwd") into a harmless-looking relative one instead of
+        # rejecting it (CP-06 finding) -- path_escapes_root() below is what
+        # must catch this, not silent normalization.
+        path = (impact.path or "").strip().replace("\\", "/")
         reason = _reject_reason(impact, path, root, not_found, architecture)
         if reason:
             rejected.append(f"{impact.path or '(empty path)'}: {reason}")
@@ -213,6 +254,30 @@ def validate_file_impacts(
     return accepted, rejected
 
 
+def path_escapes_root(path: str, root: str | Path) -> bool:
+    """True if `path` (already relativized) would resolve outside `root` --
+    a literal '..' segment, an absolute path, or (belt-and-suspenders) a
+    resolved path that lands outside root on disk. CP-06 (finding: no prior
+    check existed at all) requires this never silently pass."""
+    if not path:
+        return False
+    # A leading "/" is POSIX-absolute but pathlib's WindowsPath treats it as
+    # merely "relative to the current drive" (is_absolute() == False) --
+    # checking the raw string first closes that platform gap.
+    if path.startswith("/") or path.startswith("\\"):
+        return True
+    if Path(path).is_absolute():
+        return True
+    if any(seg == ".." for seg in Path(path).parts):
+        return True
+    try:
+        resolved_root = Path(root).resolve()
+        resolved_target = (Path(root) / path).resolve()
+        return resolved_root not in resolved_target.parents and resolved_target != resolved_root
+    except OSError:
+        return True
+
+
 def _reject_reason(
     impact: FileImpact, path: str, root: Path, not_found: set[str], architecture: RepoArchitecture
 ) -> str | None:
@@ -220,6 +285,8 @@ def _reject_reason(
         return "empty path"
     if impact.action not in FILE_IMPACT_ACTIONS:
         return f"unknown action {impact.action!r}"
+    if path_escapes_root(path, root):
+        return "path escapes the authorized repository root"
     if find_placeholder_violations(path) or find_placeholder_violations(impact.rationale or ""):
         return "unresolved placeholder content"
     if path in not_found and impact.action in _EXISTENCE_REQUIRED:

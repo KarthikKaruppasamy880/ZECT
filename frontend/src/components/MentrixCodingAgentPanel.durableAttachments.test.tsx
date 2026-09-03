@@ -18,6 +18,7 @@ const getDocumentMarkdown = vi.fn(async (..._args: any[]) => ({ markdown: "# Req
 const developerAsk = vi.fn(async (..._args: any[]) => ({ answer: "ok", work_item_id: 9, project_intelligence: null }));
 
 vi.mock("@/lib/api", () => ({
+  codingAgentStreamMission: vi.fn(async () => {}),
   listWorkItemAttachments: (...args: any[]) => listWorkItemAttachments(...args),
   linkAttachmentToWorkItem: (...args: any[]) => linkAttachmentToWorkItem(...args),
   uploadDocument: (...args: any[]) => uploadDocument(...args),

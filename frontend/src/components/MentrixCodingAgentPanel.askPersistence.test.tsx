@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 vi.mock("@/lib/api", () => ({
+  codingAgentStreamMission: vi.fn(async () => {}),
   getDocumentMarkdown: vi.fn(async () => ({ markdown: "" })),
   listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
   linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),

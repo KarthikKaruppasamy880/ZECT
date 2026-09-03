@@ -21,6 +21,9 @@ vi.mock("@/lib/api", () => ({
   developerAskHistory: vi.fn(async () => ({ turns: [] })),
   developerPlan: vi.fn(),
   codingAgentGetMission: (...args: unknown[]) => codingAgentGetMission(...args),
+  // MissionActivityFeed (CP-09) opens this on mount -- never asserted on in
+  // this file, just needs to resolve so the effect doesn't throw.
+  codingAgentStreamMission: vi.fn(async () => {}),
   codingAgentGetPlan: vi.fn(async () => {
     throw new Error("plan_not_found");
   }),
@@ -108,6 +111,33 @@ describe("Mission re-attachment (F4)", () => {
       expect(screen.queryByTestId("mentrix-coding-agent-mission-reattaching")).not.toBeInTheDocument(),
     );
     expect(screen.getByTestId("mentrix-coding-agent-mission-goal")).not.toBeDisabled();
+  });
+
+  it("CP-09: a confirmed 404 clears the stale mission id at its source instead of only leaving the form usable", async () => {
+    const err = new Error("mission_not_found") as Error & { status?: number };
+    err.status = 404;
+    codingAgentGetMission.mockRejectedValue(err);
+    const onMissionChanged = vi.fn();
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/repo" missionId="gone" onMissionChanged={onMissionChanged} />);
+
+    await waitFor(() => expect(codingAgentGetMission).toHaveBeenCalled());
+    // Cleared, not just left alone -- otherwise the same dead id is handed
+    // back in on every future mount (the exact bug this fixes).
+    await waitFor(() => expect(onMissionChanged).toHaveBeenCalledWith(""));
+  });
+
+  it("does not clear the mission id on a non-404 failure (e.g. a transient network error)", async () => {
+    const err = new Error("network_error") as Error & { status?: number };
+    err.status = 502;
+    codingAgentGetMission.mockRejectedValue(err);
+    const onMissionChanged = vi.fn();
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/repo" missionId="flaky" onMissionChanged={onMissionChanged} />);
+
+    await waitFor(() => expect(codingAgentGetMission).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByTestId("mentrix-coding-agent-mission-reattaching")).not.toBeInTheDocument(),
+    );
+    expect(onMissionChanged).not.toHaveBeenCalledWith("");
   });
 
   it("never fetches when there is no mission id", async () => {

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import ModelSelector from "@/components/ModelSelector";
+import MissionActivityFeed from "@/components/MissionActivityFeed";
 import { MentionAutocomplete, MentionContextStrip } from "@/components/MentionComposerAddons";
 import { ComposerAttachmentBar } from "@/components/ComposerAttachmentBar";
 import { hasMentions } from "@/lib/mentions";
@@ -42,6 +43,7 @@ import {
   getDocumentMarkdown,
   listWorkItemAttachments,
   mentrixStartRun,
+  type ApiRequestError,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
   type ContextPack,
@@ -54,7 +56,7 @@ type Props = {
   workspaceRoot: string;
   model?: string;
   onModelChange?: (id: string) => void;
-  onOpenPath?: (relativeOrAbsolutePath: string) => void;
+  onOpenPath?: (relativeOrAbsolutePath: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
   initialGoal?: string;
@@ -257,7 +259,7 @@ function MissionPane({
   seedMission?: CodingAgentMission | null;
   missionId?: string | null;
   onMissionChanged?: (id: string) => void;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
 }) {
@@ -292,9 +294,14 @@ function MissionPane({
         const files = m.files || [];
         if (files.length) onFilesChanged?.(files);
       })
-      .catch(() => {
+      .catch((err: ApiRequestError) => {
         // A stale id (mission expired, or a different machine) must not
         // block starting a new mission -- leave the form usable.
+        // CP-09: a confirmed 404 must also clear the stale id at its
+        // source (the persisted session/WorkItem pointer this `missionId`
+        // prop derives from) -- otherwise it keeps getting handed back in
+        // on every future mount, silently retrying the same dead mission.
+        if (err?.status === 404) onMissionChanged?.("");
       })
       .finally(() => {
         if (!cancelled) setReattaching(false);
@@ -551,14 +558,14 @@ function MissionPane({
         ) : null}
 
         <section data-testid="mentrix-coding-agent-evidence">
-          <h4 className="text-[10px] font-semibold uppercase text-slate-500">Evidence</h4>
-          <ul className="max-h-24 overflow-auto text-[11px] text-slate-600">
-            {evidence.slice(-8).map((ev, i) => (
-              <li key={`${ev.at}-${i}`}>
-                {ev.event}: {ev.message}
-              </li>
-            ))}
-          </ul>
+          <h4 className="text-[10px] font-semibold uppercase text-slate-500">Activity</h4>
+          <MissionActivityFeed
+            missionId={mission?.id || null}
+            initialEvents={evidence}
+            executionState={mission?.execution_state}
+            onOpenPath={onOpenPath}
+            onShowDiff={() => setShowDiff(true)}
+          />
         </section>
       </div>
 
@@ -1099,7 +1106,7 @@ function PlanPane({
   model: string;
   onApproved: (mission: CodingAgentMission) => void;
   onFilesChanged?: (paths: string[]) => void;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
 }) {
   // Read once at mount -- askSeed is a one-shot handoff (the parent clears
   // it right after this pane mounts), so a plain prop read here, not an
@@ -1360,7 +1367,7 @@ function HistoryPane({
 }: {
   workspaceRoot: string;
   chatModel: string;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   initialGoal: string;
   initialSessionId: string | null;
@@ -1409,7 +1416,7 @@ function ChatPane({
 }: {
   workspaceRoot: string;
   chatModel: string;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   initialGoal: string;
   initialSessionId: string | null;

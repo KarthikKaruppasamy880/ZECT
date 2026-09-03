@@ -8,6 +8,8 @@ import {
   saveWorkspaceSession,
   upsertEditorTab,
   closeTerminalSession,
+  withoutMission,
+  withoutWorkItem,
 } from "./workspaceSession";
 
 describe("workspaceSession", () => {
@@ -80,5 +82,40 @@ describe("workspaceSession", () => {
     const b = newTerminalSession(2, "C:/tmp/b", "b");
     expect(closeTerminalSession([a, b], a.id).map((t) => t.id)).toEqual([b.id]);
     expect(closeTerminalSession([a], a.id)).toEqual([]);
+  });
+
+  // CP-09: a WorkItem/Mission id that 404s on the backend must not keep
+  // being handed back in on every future mount.
+  it("withoutWorkItem clears both workItemId and codingMissionId, other fields untouched", () => {
+    const session = {
+      openEditors: [{ repoId: 1, path: "a.ts" }],
+      terminals: [],
+      activeTerminalId: null,
+      workItemId: 9,
+      projectId: 4,
+      activeRepoId: 1,
+      codingMissionId: "mission-abc",
+    };
+    const next = withoutWorkItem(session);
+    expect(next.workItemId).toBeNull();
+    expect(next.codingMissionId).toBeNull();
+    expect(next.projectId).toBe(4);
+    expect(next.activeRepoId).toBe(1);
+    expect(next.openEditors).toBe(session.openEditors);
+  });
+
+  it("withoutMission clears only codingMissionId -- a dead Mission does not imply a dead WorkItem", () => {
+    const session = {
+      openEditors: [],
+      terminals: [],
+      activeTerminalId: null,
+      workItemId: 9,
+      projectId: 4,
+      activeRepoId: 1,
+      codingMissionId: "mission-abc",
+    };
+    const next = withoutMission(session);
+    expect(next.codingMissionId).toBeNull();
+    expect(next.workItemId).toBe(9);
   });
 });

@@ -11,6 +11,7 @@ const codingAgentSavePlan = vi.fn(async (..._args: any[]) => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  codingAgentStreamMission: vi.fn(async () => {}),
   getDocumentMarkdown: vi.fn(async () => ({ markdown: "" })),
   listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
   linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),

@@ -5,6 +5,7 @@ Public provider name: mentrix_native. No third-party product branding.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -382,25 +383,15 @@ class MentrixNativeCodingRuntime:
                 {"action_id": k, **{kk: vv for kk, vv in v.items() if kk != "content"}}
                 for k, v in (run.get("pending") or {}).items()
             ],
-            "events": [
-                {
-                    "sequence_id": e.sequence_id,
-                    "event": e.event,
-                    "message": e.message,
-                    "phase": e.phase,
-                    "data": e.data,
-                    "mission_id": e.mission_id,
-                    "agent_id": e.agent_id,
-                    "repo_id": e.repo_id,
-                    "tool": e.tool,
-                    "policy": e.policy,
-                    "timestamp": e.timestamp,
-                    "status": e.status,
-                    "duration_ms": e.duration_ms,
-                    "evidence_refs": e.evidence_refs,
-                }
-                for e in run["events"]
-            ],
+            # CP-09: dataclasses.asdict() rather than a hand-picked field
+            # list -- CP-08 added role/provider/model/routing_reason/
+            # context_budget/input_tokens/output_tokens/cached_tokens/
+            # estimated_cost to RuntimeEvent, and this dict comprehension
+            # was never updated, so lifecycle.py's Mission bridge (which
+            # reads get_run()["events"]) silently saw none of that CP-08
+            # telemetry. asdict() means a future RuntimeEvent field
+            # reaches every caller of get_run() automatically.
+            "events": [dataclasses.asdict(e) for e in run["events"]],
         }
 
     def stream_events(self, run_id: str, after: int = 0) -> list[RuntimeEvent]:

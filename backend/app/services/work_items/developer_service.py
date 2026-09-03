@@ -39,7 +39,7 @@ from app.services.work_items.multi_repo_context import (
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
 
 
-def _context_used_summary(pi: dict[str, Any] | None) -> dict[str, Any]:
+def _context_used_summary(pi: dict[str, Any] | None, skill: Any = None) -> dict[str, Any]:
     """Compact, durable summary of a resolved ProjectIntelligenceSnapshot dict
     (developer_service's `built["pi"]`, i.e. snapshot().to_dict()) -- the
     same {knowledge, lattice_hits, lattice_indexed, lattice_state, blueprint}
@@ -56,13 +56,20 @@ def _context_used_summary(pi: dict[str, Any] | None) -> dict[str, Any]:
     state = str(lattice.get("status") or lattice.get("state") or "").strip().upper() or "NOT_APPLICABLE"
     blueprint = pi.get("blueprint") or {}
     knowledge = pi.get("knowledge") or []
-    return {
+    summary = {
         "knowledge": bool(knowledge),
         "lattice_hits": len(hits),
         "lattice_indexed": state == "READY",
         "lattice_state": state,
         "blueprint": bool(blueprint.get("snippet")),
     }
+    if skill is not None:
+        summary["skill"] = {
+            "skill_name": skill.skill_name,
+            "skill_source_version": skill.skill_version,
+            "selection_reason": skill.reason,
+        }
+    return summary
 
 
 class MentrixDeveloperService:
@@ -527,6 +534,23 @@ class MentrixDeveloperService:
         if route.blocked and route.provider == "none":
             # Still allow offline clarifying answer via llm_phase offline path
             pass
+        from app.services.coding_engine.skill_router import ROLE_ASK, select_skill_with_db
+
+        skill = select_skill_with_db(self.db, ROLE_ASK, project_id=wi.project_id)
+        append_event(
+            self.db,
+            work_item_id=wi.id,
+            event_type="skill_selected",
+            payload=skill.to_event_data(),
+            commit=True,
+        )
+        # CP-09B: the skill's own instructions are surfaced via the
+        # skill_selected event + context_used.skill above, deliberately
+        # NOT folded into repo_context here -- llm_phase.run_ask()'s
+        # offline path echoes repo_context[:2500] verbatim into the
+        # returned answer, and ASK's whole CP-02 contract is that the
+        # answer is grounded ONLY in retrieved repo content, never in
+        # prose a skill selection added.
         result = llm_phase.run_ask(
             question,
             repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=question)).text_blob(),
@@ -596,7 +620,7 @@ class MentrixDeveloperService:
                 # Only a count is persisted, never the image bytes -- this
                 # audit log is not an image store; images are single-turn.
                 "image_count": len(images or []),
-                "context_used": _context_used_summary(built.get("pi")),
+                "context_used": _context_used_summary(built.get("pi"), skill=skill),
                 "grounding": grounding,
             },
             commit=True,
@@ -722,11 +746,21 @@ class MentrixDeveloperService:
         from app.services.work_items.model_router import COMPLEXITY_COMPLEX as _MR_COMPLEX
 
         plan_complexity = _MR_COMPLEX if repo_size_files > 150 else ""
+        from app.services.coding_engine.skill_router import ROLE_PLAN, select_skill_with_db
+
+        skill = select_skill_with_db(self.db, ROLE_PLAN, project_id=wi.project_id)
+        append_event(
+            self.db,
+            work_item_id=wi.id,
+            event_type="skill_selected",
+            payload=skill.to_event_data(),
+            commit=True,
+        )
         result = llm_phase.run_grounded_plan(
             goal,
             evidence_ledger_block=ledger_block,
             architecture_summary=f"{architecture.primary_language}/{architecture.build_system}",
-            repo_context=repo_context,
+            repo_context=skill.goal_prefix() + repo_context,
             constraints=constraints,
             complexity=plan_complexity,
             repo_language=architecture.primary_language,

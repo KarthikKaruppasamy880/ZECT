@@ -224,6 +224,141 @@ SEED_SKILLS = [
         },
         "is_seed": True,
     },
+    # ── CP-09B: Skills Router mappings not already covered by a seed
+    # above (ASK/PLAN/CODER/browser-acceptance/UI/security/DB/BPMN/PR
+    # readiness/prompt-engineering) -- ask/debug/final-code-review reuse
+    # zinnia-reconcile-equivalent... reuse the existing zinnia-debug and
+    # zinnia-code-review seeds above rather than duplicating them.
+    {
+        "name": "zect-reconcile",
+        "version": "1.0.0",
+        "description": "Ground an ASK answer in the retrieved repo context and EvidenceLedger before answering",
+        "category": "reconciliation",
+        "trigger_pattern": "reconcile|evidence.ledger|ask",
+        "manifest": {
+            "inputs": ["question", "repo_context", "evidence_ledger"],
+            "outputs": ["grounded_answer", "unverified_references"],
+            "config": {"checks": ["evidence_ledger_verified"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-plan",
+        "version": "1.0.0",
+        "description": "Produce a grounded, file-impact-accurate plan from the approved ContextPackage",
+        "category": "planning",
+        "trigger_pattern": "grounded.plan|file.impact|approved.plan|plan.validation",
+        "manifest": {
+            "inputs": ["goal", "evidence_ledger_block", "architecture_summary"],
+            "outputs": ["file_impacts", "plan_markdown"],
+            "config": {"checks": ["plan_validator_status_valid"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-build",
+        "version": "1.0.0",
+        "description": "Implement an approved plan's file impacts across one or more repos",
+        "category": "coding",
+        "trigger_pattern": "build|implement|multi.file.coding",
+        "manifest": {
+            "inputs": ["goal", "explore_findings", "approved_plan"],
+            "outputs": ["files_written"],
+            "config": {"checks": ["agent_write_policy_authorized"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-browser-test",
+        "version": "1.0.0",
+        "description": "Start the app and verify the change in a real browser (screenshot/console/network)",
+        "category": "verification",
+        "trigger_pattern": "browser.test|playwright|acceptance.ui|screenshot",
+        "manifest": {
+            "inputs": ["goal", "runtime_recipes"],
+            "outputs": ["verified", "summary"],
+            "config": {"checks": ["no_new_console_errors", "no_failed_network_requests"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-ui-review",
+        "version": "1.0.0",
+        "description": "Review a UI diff for layout, overflow, clipping, and visual-regression risk",
+        "category": "quality",
+        "trigger_pattern": "ui.review|layout.overflow|visual.regression|clipping",
+        "manifest": {
+            "inputs": ["diff", "screenshots"],
+            "outputs": ["layout_findings"],
+            "config": {"checks": ["no_overflow_or_clipping"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-security-review",
+        "version": "1.0.0",
+        "description": "Review a security-sensitive diff for injection, secrets, and auth/authz regressions",
+        "category": "security",
+        "trigger_pattern": "security.review|vulnerability.scan|secrets.exposure|auth.sensitive",
+        "manifest": {
+            "inputs": ["diff"],
+            "outputs": ["security_findings"],
+            "config": {"checks": ["no_hardcoded_secrets", "owasp_top_10"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-db-review",
+        "version": "1.0.0",
+        "description": "Review a database/schema diff for migration safety and backward compatibility",
+        "category": "database",
+        "trigger_pattern": "database.schema|migration.review|db.review",
+        "manifest": {
+            "inputs": ["diff", "migration_files"],
+            "outputs": ["migration_findings"],
+            "config": {"checks": ["migration_reversible"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-bpmn-review",
+        "version": "1.0.0",
+        "description": "Review a BPMN/Camunda process diff for workflow-correctness regressions",
+        "category": "workflow",
+        "trigger_pattern": "bpmn|camunda|workflow.process.review",
+        "manifest": {
+            "inputs": ["diff", "bpmn_files"],
+            "outputs": ["workflow_findings"],
+            "config": {"checks": ["bpmn_schema_valid"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "zect-pr-ready",
+        "version": "1.0.0",
+        "description": "Confirm a Mission's changes are commit/PR-ready before the DELIVERY role runs git",
+        "category": "delivery",
+        "trigger_pattern": "pr.ready|delivery.readiness|git.commit.push",
+        "manifest": {
+            "inputs": ["files_written", "test_results"],
+            "outputs": ["ready", "blocking_reasons"],
+            "config": {"checks": ["tests_passing", "no_auto_merge"]},
+        },
+        "is_seed": True,
+    },
+    {
+        "name": "prompt-engineer",
+        "version": "1.0.0",
+        "description": "Optimize an instruction/system-prompt fragment for clarity, brevity, and grounding",
+        "category": "prompting",
+        "trigger_pattern": "prompt.engineer|optimize.prompt|prompt.optimization",
+        "manifest": {
+            "inputs": ["prompt_fragment"],
+            "outputs": ["optimized_prompt"],
+            "config": {},
+        },
+        "is_seed": True,
+    },
 ]
 
 

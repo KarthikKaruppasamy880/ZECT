@@ -189,7 +189,9 @@ def test_start_agent_creates_isolated_worktrees(db: Session, tmp_path, monkeypat
     planned = svc.plan(
         goal="Isolated worktrees",
         project_id=p.id,
+        repository_id=r1.id,
         repository_ids=[r1.id, r2.id],
+        base_commit_sha=main_a,
         actor="test@zect.local",
     )
     wid = planned["work_item_id"]
@@ -230,7 +232,9 @@ def test_one_repo_test_fail_does_not_hide_sibling(db: Session, tmp_path, monkeyp
     planned = svc.plan(
         goal="Do not hide sibling failure",
         project_id=p.id,
+        repository_id=r1.id,
         repository_ids=[r1.id, r2.id],
+        base_commit_sha=_head(alpha),
         actor="test@zect.local",
     )
     wid = planned["work_item_id"]
@@ -271,7 +275,9 @@ def test_frontend_blocked_others_pass_not_ready(db: Session, tmp_path, monkeypat
     planned = svc.plan(
         goal="shared+backend pass, frontend blocked",
         project_id=p.id,
+        repository_id=shared.id,
         repository_ids=[shared.id, backend.id, frontend.id],
+        base_commit_sha=_head(Path(shared.local_path)),
         actor="test@zect.local",
     )
     wid = planned["work_item_id"]
@@ -301,7 +307,9 @@ def test_pr_head_change_invalidates_stale_evidence(db: Session, tmp_path, monkey
     planned = svc.plan(
         goal="Stale evidence after HEAD move",
         project_id=p.id,
+        repository_id=r1.id,
         repository_ids=[r1.id, r2.id],
+        base_commit_sha=_head(alpha),
         actor="test@zect.local",
     )
     wid = planned["work_item_id"]

@@ -260,6 +260,10 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "git_approved": bool(mission.get("git_approved")),
         "context_used": mission.get("context_used"),
         "primary_repository_id": mission.get("primary_repository_id"),
+        # CP-06: structured VALID/INVALID/STALE + findings from the last
+        # approve-plan attempt, so the UI can show *why* Approve & Build is
+        # blocked instead of just a generic 409.
+        "plan_validation": mission.get("plan_validation"),
         "repos": repos,
         "files": [f for r in repos for f in (r.get("files") or [])],
         "commands": [c for r in repos for c in (r.get("commands") or [])],
@@ -1139,10 +1143,90 @@ def approve_plan_in_background(mission_id: str) -> dict[str, Any]:
     return get_mission(mid)
 
 
+def _plan_validation_gate(mission: dict[str, Any]) -> "plan_validator.PlanValidationResult | None":
+    """Returns None when this Mission is out of scope for CP-06 (no
+    work_item_id, or that WorkItem never produced a grounded-plan machine
+    contract) -- lifecycle.py is deliberately DB-decoupled everywhere else,
+    so this opens a short-lived session only for this one lookup and fails
+    OPEN (returns None, preserving prior behavior) on any unexpected error
+    rather than blocking a Mission that has nothing to do with the
+    grounded ASK/PLAN pipeline this gate targets."""
+    wi_id = mission.get("work_item_id")
+    if not wi_id:
+        return None
+    try:
+        import json as _json
+
+        from app.domains.work_items import service as wi_svc
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items import plan_generator, plan_validator
+        from app.services.work_items.artifact_store import ArtifactStore, plan_hash_bytes
+        from app.services.work_items.context_package import ContextPackage
+        from app.services.work_items.multi_repo_context import repo_binding
+
+        db = SessionLocal()
+        try:
+            wi = wi_svc.get_work_item(db, int(wi_id))
+            store = ArtifactStore(wi.id)
+            sidecar = store.read_json("FILE_IMPACTS.json", default=None) or None
+            if not sidecar:
+                return None
+            plan_text = str(mission.get("plan") or "")
+            current_hash = plan_hash_bytes(plan_text) if plan_text.strip() else ""
+            repo_local_path = str(repo_binding(db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+            architecture = (
+                plan_generator.detect_repo_architecture(repo_local_path)
+                if repo_local_path
+                else plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
+            )
+            context_package = None
+            raw = (wi.context_snapshot_json or "").strip()
+            if raw and raw != "{}":
+                data = _json.loads(raw)
+                if data:
+                    context_package = ContextPackage.from_dict(data)
+            return plan_validator.validate_plan_for_approval(
+                work_item_id=wi.id,
+                primary_repo_id=wi.repository_id,
+                base_commit_sha=wi.base_commit_sha or "",
+                recorded_plan_hash=wi.plan_hash or "",
+                plan_text=plan_text,
+                current_plan_hash=current_hash,
+                sidecar=sidecar,
+                context_package=context_package,
+                repo_root=repo_local_path or ".",
+                architecture=architecture,
+            )
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _approve_plan_impl(mission_id: str) -> dict[str, Any]:
     mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
+
+    # CP-06: this is the actual "Approve & Build" button's call path (the
+    # Developer Workspace UI hits POST /api/coding-agent/missions/{id}/
+    # approve-plan, never developer_service.py's WorkItem-level
+    # approve_plan) -- so the hard pre-approval gate belongs here, not
+    # there. Only enforced when this Mission is tied to a WorkItem that
+    # actually went through the grounded ASK/PLAN pipeline (has a
+    # FILE_IMPACTS.json machine contract); a Mission created directly
+    # without a work_item_id, or one whose WorkItem never called
+    # developer plan(), was never part of that flow and keeps its
+    # pre-CP-06 behavior (silent re-hash on drift) unchanged.
+    gate = _plan_validation_gate(mission)
+    if gate is not None and not gate.ok:
+        detail = "; ".join(f"{f.rule}: {f.detail}" for f in gate.findings) or gate.status
+        _emit(mission, "plan_validation_failed", f"PLAN failed validation ({gate.status}): {detail}")
+        mission["plan_validation"] = gate.to_dict()
+        raise ValueError(f"plan_validation_failed:{gate.status}")
+    if gate is not None:
+        mission["plan_validation"] = gate.to_dict()
+
     existing = _stringify_patch_map(mission.get("patches_by_repo"))
     has_patches = any(existing.get(str(k)) for k in existing)
     if mission.get("propose_if_empty") and not has_patches:

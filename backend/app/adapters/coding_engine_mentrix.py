@@ -222,10 +222,6 @@ class MentrixNativeCodingRuntime:
         run_id = str(uuid4())
         auto_approve = bool(kwargs.get("auto_approve_edits", True))
         explicit_model = (kwargs.get("model") or "").strip()
-        model = explicit_model or mentrix_llm_chat_model()
-        model_route_mode = str(kwargs.get("model_route_mode") or "").strip() or (
-            USER_SELECTED if explicit_model else AUTO_ROUTED
-        )
         max_steps = int(kwargs.get("max_steps") or os.getenv("MENTRIX_CODING_AGENT_MAX_STEPS", "24"))
         expected_files = list(kwargs.get("expected_files") or [])
         project_id = kwargs.get("project_id")
@@ -233,11 +229,50 @@ class MentrixNativeCodingRuntime:
         project_key = (kwargs.get("project_key") or "").strip() or None
         repo_id = str(kwargs.get("repo_id") or "").strip()
         work_item_id = kwargs.get("work_item_id")
+        role_for_routing = str(kwargs.get("role") or "").strip()
 
         try:
             ws = resolve_workspace(workspace)
         except Exception as exc:  # noqa: BLE001
             raise ValueError(str(exc)) from exc
+
+        routing_decision = None
+        if explicit_model:
+            model = explicit_model
+            model_route_mode = str(kwargs.get("model_route_mode") or "").strip() or USER_SELECTED
+        else:
+            # CP-08: pick a model that fits this role/build size instead of
+            # always the one global mentrix_llm_chat_model() default -- a
+            # large multi-file Java build must be eligible for the
+            # strongest configured coding/reasoning model, not whatever
+            # happens to be the UI's cheap default.
+            from app.services.work_items import model_router as _mr
+            from app.services.work_items import plan_generator as _pg
+
+            task_type = {
+                "debugger": _mr.TASK_DEBUGGING,
+                "tester": _mr.TASK_VISION_BROWSER,
+                "explore": _mr.TASK_DEEP_ASK,  # read-only repo investigation, not a coding task
+            }.get(role_for_routing, _mr.TASK_MULTI_FILE_CODING)
+            architecture = _pg.detect_repo_architecture(str(ws))
+            repo_size_files = _pg.count_repo_files(str(ws))
+            complexity = (
+                _mr.COMPLEXITY_COMPLEX
+                if len(expected_files) > 5 or repo_size_files > 150
+                else _mr.COMPLEXITY_MODERATE
+            )
+            task = _mr.TaskProfile(
+                task_type=task_type, phase="agent", role=role_for_routing,
+                complexity=complexity, repo_language=architecture.primary_language,
+                repo_size_files=repo_size_files, needs_tool_calling=True,
+            )
+            routing_decision = _mr.route_model(task, mode=AUTO_ROUTED)
+            # No silent downgrade: a blocked decision leaves `model` empty
+            # rather than falling back to mentrix_llm_chat_model() -- see
+            # _agent_loop, which checks routing_decision.blocked before
+            # ever trying to resolve an adapter for an empty model string.
+            model = routing_decision.selected_model
+            model_route_mode = str(kwargs.get("model_route_mode") or "").strip() or AUTO_ROUTED
 
         # Structured record of what compose_rich_agent_context_pack /
         # compose_context_pack actually assembled -- surfaced on the run so
@@ -313,6 +348,7 @@ class MentrixNativeCodingRuntime:
             "repo_id": repo_id,
             "work_item_id": work_item_id,
             "model_route_mode": model_route_mode,
+            "routing_decision": routing_decision.to_dict() if routing_decision is not None else None,
             "events": [],
             "artifacts": [],
             "messages": [],
@@ -467,6 +503,15 @@ class MentrixNativeCodingRuntime:
         status: str = "",
         duration_ms: int | None = None,
         evidence_refs: list[str] | None = None,
+        role: str = "",
+        provider: str = "",
+        model: str = "",
+        routing_reason: str = "",
+        context_budget: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_tokens: int = 0,
+        estimated_cost: float = 0.0,
     ) -> RuntimeEvent:
         with self._lock:
             run["seq"] = int(run.get("seq") or 0) + 1
@@ -485,6 +530,15 @@ class MentrixNativeCodingRuntime:
                 status=status,
                 duration_ms=duration_ms,
                 evidence_refs=list(evidence_refs or []),
+                role=role or str(run.get("role") or ""),
+                provider=provider,
+                model=model,
+                routing_reason=routing_reason,
+                context_budget=context_budget,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                estimated_cost=estimated_cost,
             )
             run["events"].append(ev)
         return ev
@@ -499,6 +553,24 @@ class MentrixNativeCodingRuntime:
         role_tools = (
             [t for t in TOOL_SPECS if t["function"]["name"] in allowed_tools] if allowed_tools else TOOL_SPECS
         )
+
+        routing_decision = run.get("routing_decision")
+        if routing_decision and routing_decision.get("blocked"):
+            # CP-08: start_run() already determined no configured model
+            # satisfies this role/task -- fail exactly the same way an
+            # unavailable USER_SELECTED model does (never substitute the
+            # global default mentrix_llm_chat_model() just to make
+            # progress).
+            run["status"] = "failed"
+            self._emit(
+                run,
+                "failed",
+                f"blocked_external: no configured model satisfies this task "
+                f"({routing_decision.get('block_reason')}) -- not silently substituting a different model",
+                phase="failed",
+                routing_reason=str(routing_decision.get("routing_reason") or ""),
+            )
+            return
 
         try:
             adapter, model = get_agent_model_adapter(
@@ -602,6 +674,42 @@ class MentrixNativeCodingRuntime:
                     run["status"] = "failed"
                     self._emit(run, "failed", f"LLM error: {exc2}", phase="failed")
                     return
+
+            # CP-08: resp.usage was computed by every adapter (AdapterUsage)
+            # but discarded here pre-CP-08 -- record it on the Mission/
+            # EventStream instead of throwing it away, matching the exact
+            # field set the Model Router mandate requires.
+            usage = getattr(resp, "usage", None)
+            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+            if input_tokens or output_tokens:
+                from app.services.work_items.model_router import estimate_cost_usd
+
+                routing_decision = run.get("routing_decision") or {}
+                self._emit(
+                    run,
+                    "model_call",
+                    f"{adapter.provider_name}/{model}: {input_tokens} in / {output_tokens} out tokens",
+                    phase="running",
+                    provider=adapter.provider_name,
+                    model=model,
+                    routing_reason=str(routing_decision.get("routing_reason") or ""),
+                    context_budget=int(routing_decision.get("context_budget") or 0),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cached_tokens=0,  # no provider in use reports cache stats today
+                    estimated_cost=estimate_cost_usd(model, input_tokens=input_tokens, output_tokens=output_tokens),
+                )
+                try:
+                    from app.token_tracker import log_tokens
+
+                    log_tokens(
+                        action="coding_agent", feature="mentrix_native", model=model,
+                        prompt_tokens=input_tokens, completion_tokens=output_tokens,
+                        total_tokens=input_tokens + output_tokens,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
 
             msg = resp.choices[0].message
             tool_calls = getattr(msg, "tool_calls", None) or []

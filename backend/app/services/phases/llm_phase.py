@@ -13,7 +13,43 @@ from app.adapters.llm.openai_compat import (
     openai_compat_available,
 )
 from app.services.work_items.fallback_policy import resolve_model_route
+from app.services.work_items.model_router import (
+    COMPLEXITY_COMPLEX,
+    COMPLEXITY_MODERATE,
+    COMPLEXITY_TRIVIAL,
+    TASK_DEEP_ASK,
+    TASK_LIGHTWEIGHT_ASK,
+    TASK_PLAN,
+    ModelRouteDecision,
+    TaskProfile,
+    estimate_cost_usd,
+    estimate_tokens,
+    route_model,
+)
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
+
+
+class _RouteShape:
+    """Adapts a CP-08 ModelRouteDecision to the attribute shape _chat()
+    already branches on (route.blocked/.provider/.model/.allow_cloud_
+    context/.fallback_used/.fallback_reason) -- fallback_policy.RouteDecision's
+    own shape, so passing a `task` costs _chat() nothing structurally.
+    """
+
+    def __init__(self, decision: ModelRouteDecision) -> None:
+        self.decision = decision
+        self.model = decision.selected_model
+        self.blocked = decision.blocked
+        self.block_reason = decision.block_reason
+        if decision.selected_provider == "mentrix_local":
+            self.provider = "local"
+        elif decision.selected_provider in ("anthropic", "openai_compat"):
+            self.provider = "cloud"
+        else:
+            self.provider = "none"
+        self.allow_cloud_context = self.provider == "cloud"
+        self.fallback_used = any(not s.accepted for s in decision.chain)
+        self.fallback_reason = decision.routing_reason if self.fallback_used else ""
 
 
 def _route(*, user_allows_cloud: bool | None = None, policy: str | None = None):
@@ -36,8 +72,19 @@ def _chat(
     temperature: float = 0.3,
     policy: str | None = None,
     user_allows_cloud: bool | None = None,
+    task: TaskProfile | None = None,
 ) -> dict[str, Any]:
-    """Call openai_compat gateway. Honors fallback policy (never blocks cloud)."""
+    """Call the configured model. Honors fallback policy (never blocks cloud).
+
+    `task`, when given, routes through CP-08's canonical model_router
+    instead of the flat single-default `_route()` below -- e.g. a complex
+    PLAN can land on claude-opus-5 rather than always the one env-var
+    default every other call gets, and the pick is auditable (route.chain).
+    Left None (every pre-CP-08 caller: run_plan, run_enhance_blueprint),
+    behavior is byte-for-byte what it was before this module existed.
+    """
+    if task is not None:
+        return _chat_routed(messages, max_tokens=max_tokens, temperature=temperature, policy=policy, user_allows_cloud=user_allows_cloud, task=task)
     route = _route(user_allows_cloud=user_allows_cloud, policy=policy)
     timer = TelemetryTimer()
     if route.blocked or route.provider == "none":
@@ -168,6 +215,138 @@ def _chat(
         }
 
 
+def _chat_routed(
+    messages: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    temperature: float,
+    policy: str | None,
+    user_allows_cloud: bool | None,
+    task: TaskProfile,
+) -> dict[str, Any]:
+    """Task-aware sibling of the block above _chat() delegates to when a
+    `task` is given. Dispatches through agent_model_adapter.get_agent_
+    model_adapter() rather than the raw OpenAI-compat client directly --
+    the router can select an Anthropic model for a complex PLAN, and only
+    the adapter abstraction (already proven by the AGENT tool-calling
+    loop) knows how to actually call Anthropic; the plain client used by
+    the non-routed path above only ever speaks to an OpenAI-compatible
+    endpoint.
+    """
+    from app.adapters.llm.agent_model_adapter import AUTO_ROUTED, ModelProviderError, get_agent_model_adapter
+
+    decision = route_model(task, mode=AUTO_ROUTED, policy=policy, user_allows_cloud=user_allows_cloud)
+    route = _RouteShape(decision)
+    timer = TelemetryTimer()
+
+    def _blocked(reason: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "blocked": True,
+            "offline": True,
+            "content": "",
+            "model": "",
+            "tokens_used": 0,
+            "telemetry": build_telemetry(
+                requested_provider=route.provider or "none",
+                requested_model=mentrix_llm_chat_model(),
+                actual_provider="none",
+                actual_model="",
+                fallback_used=route.fallback_used,
+                fallback_reason=reason,
+                latency_ms=timer.latency_ms(),
+                operation_id="llm_phase",
+                routing_reason=decision.routing_reason,
+                routing_chain=[s.to_dict() for s in decision.chain],
+                phase=task.phase,
+                context_budget=decision.context_budget,
+            ),
+            "error": reason,
+        }
+
+    if decision.blocked:
+        return _blocked(decision.block_reason)
+    if route.provider == "cloud" and not route.allow_cloud_context:
+        return _blocked("cloud_context_forbidden")
+
+    model = decision.selected_model
+    try:
+        adapter, resolved_model = get_agent_model_adapter(model, mode=AUTO_ROUTED)
+    except ModelProviderError as exc:
+        # Belt-and-suspenders: route_model() already confirmed this
+        # provider's policy/availability, so this should not happen -- if
+        # it ever does, block rather than silently trying the next
+        # candidate outside the recorded chain.
+        return _blocked(f"adapter_unavailable:{exc.reason}")
+
+    try:
+        resp = adapter.create(
+            model=resolved_model, messages=messages, tools=None, tool_choice="auto",
+            temperature=temperature, max_tokens=max_tokens,
+        )
+        content = resp.choices[0].message.content or ""
+        usage = resp.usage
+        try:
+            from app.token_tracker import log_tokens
+
+            log_tokens(
+                action="llm_phase", feature="forge_loop", model=resolved_model,
+                prompt_tokens=usage.prompt_tokens, completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        estimated_cost = estimate_cost_usd(resolved_model, input_tokens=usage.prompt_tokens, output_tokens=usage.completion_tokens)
+        return {
+            "ok": True,
+            "blocked": False,
+            "offline": False,
+            "content": content,
+            "model": resolved_model,
+            "tokens_used": usage.total_tokens,
+            "telemetry": build_telemetry(
+                requested_provider=route.provider,
+                requested_model=decision.requested_model or resolved_model,
+                actual_provider=resp.provider,
+                actual_model=resolved_model,
+                fallback_used=route.fallback_used,
+                fallback_reason=route.fallback_reason,
+                latency_ms=timer.latency_ms(),
+                operation_id="llm_phase",
+                phase=task.phase,
+                routing_reason=decision.routing_reason,
+                context_budget=decision.context_budget,
+                input_tokens=usage.prompt_tokens,
+                output_tokens=usage.completion_tokens,
+                cached_tokens=0,
+                estimated_cost=estimated_cost,
+            ),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "ok": False,
+            "blocked": False,
+            "offline": True,
+            "content": "",
+            "model": "error",
+            "tokens_used": 0,
+            "telemetry": build_telemetry(
+                requested_provider=route.provider,
+                requested_model=decision.requested_model or model,
+                actual_provider="error",
+                actual_model="",
+                fallback_used=route.fallback_used,
+                fallback_reason=str(e)[:200],
+                latency_ms=timer.latency_ms(),
+                operation_id="llm_phase",
+                phase=task.phase,
+                routing_reason=decision.routing_reason,
+                context_budget=decision.context_budget,
+            ),
+            "error": str(e),
+        }
+
+
 def run_ask(
     question: str,
     *,
@@ -209,15 +388,33 @@ def run_ask(
                 "content": f"Repository / Lattice context:\n\n{context[:8000]}",
             }
         )
+    task: TaskProfile | None = None
     if images:
+        # CP-08 scope boundary: the router's TASK_VISION_BROWSER candidates
+        # include Anthropic models, but agent_model_adapter's OpenAI->
+        # Anthropic message translation (_to_anthropic_messages) only
+        # handles plain-string and tool-call content today -- a multipart
+        # image_url content list falls through its str(content) fallback
+        # and would ship Anthropic a garbled text repr instead of an image
+        # block. Keep this path on its existing, already-working
+        # OpenAI-compat-only route (task=None) rather than risk sending a
+        # broken vision request; AGENT's browser-verification role (which
+        # only ever sends image content via a tool *result*, already
+        # handled correctly by that same translator) is unaffected.
         content: list[dict[str, Any]] = [{"type": "text", "text": question}]
         for url in images:
             content.append({"type": "image_url", "image_url": {"url": url}})
         messages.append({"role": "user", "content": content})
     else:
         messages.append({"role": "user", "content": question})
+        task = TaskProfile(
+            task_type=TASK_DEEP_ASK if len(context) > 4000 else TASK_LIGHTWEIGHT_ASK,
+            phase="ask",
+            complexity=COMPLEXITY_MODERATE if len(context) > 4000 else COMPLEXITY_TRIVIAL,
+            context_tokens_estimate=estimate_tokens(context) + estimate_tokens(question),
+        )
 
-    out = _chat(messages, max_tokens=2000, temperature=0.3)
+    out = _chat(messages, max_tokens=2000, temperature=0.3, task=task)
     if out.get("ok"):
         return {
             "answer": out["content"],
@@ -347,6 +544,9 @@ def run_grounded_plan(
     architecture_summary: str = "",
     repo_context: str = "",
     constraints: str = "",
+    complexity: str = "",
+    repo_language: str = "",
+    repo_size_files: int = 0,
 ) -> dict[str, Any]:
     """CP-05 grounded plan generator for the Developer ASK/PLAN path --
     distinct from run_plan() above (which other, unrelated subsystems --
@@ -393,6 +593,20 @@ def run_grounded_plan(
     if constraints:
         user_content += f"\n\nConstraints:\n{constraints}"
 
+    combined_context = evidence_ledger_block + architecture_summary + repo_context + constraints
+    context_tokens = estimate_tokens(combined_context) + estimate_tokens(project_description)
+    # PLAN is inherently more consequential than a lightweight ASK -- never
+    # trivial by default -- and escalates to COMPLEX on either an explicit
+    # signal from the caller (developer_service.py knows real file-impact/
+    # repo-size counts) or a large enough context on its own, so a big CMS
+    # PLAN is eligible for the strongest configured model even if nobody
+    # bothered to pass complexity explicitly.
+    resolved_complexity = complexity or (COMPLEXITY_COMPLEX if context_tokens > 3000 else COMPLEXITY_MODERATE)
+    task = TaskProfile(
+        task_type=TASK_PLAN, phase="plan", complexity=resolved_complexity,
+        repo_language=repo_language, repo_size_files=repo_size_files,
+        context_tokens_estimate=context_tokens,
+    )
     out = _chat(
         [
             {"role": "system", "content": system_prompt},
@@ -400,6 +614,7 @@ def run_grounded_plan(
         ],
         max_tokens=3500,
         temperature=0.3,
+        task=task,
     )
     if not out.get("ok"):
         return {

@@ -210,8 +210,29 @@ def shrink_region_away_from(region: dict[str, int], obstacle: dict[str, int], *,
     oc = _int(obstacle.get("cx"))
     oy = _int(obstacle.get("y"))
     oc_y = _int(obstacle.get("cy"))
+    # A tall, narrow obstacle (a Zinnia accent/divider bar -- see
+    # classify_decorative_shape's own PROTECTED_BRAND_ELEMENT ratio test)
+    # must always be avoided horizontally regardless of which third of the
+    # slide its x falls in -- the position-bucket branches below only
+    # covered the far-right and far-left-and-narrow cases, leaving a gap
+    # for a divider sitting in the middle third (~25%-45% across) that
+    # fell through to the horizontal-band branch meant for wide, short
+    # obstacles, never shrinking the body's width at all. Reproduced live:
+    # a full-width AI-generated body text box was placed directly across
+    # the Zinnia "Gradient Bottom" layout's own vertical divider bar.
+    tall_narrow = oc < slide_cx * 0.22 and oc_y > slide_cy * 0.45
+    if tall_narrow:
+        gap = 80000
+        room_left = ox - out["x"]
+        room_right = (out["x"] + out["cx"]) - (ox + oc)
+        if room_left >= room_right:
+            out["cx"] = max(int(slide_cx * 0.2), ox - out["x"] - gap)
+        else:
+            new_x = ox + oc + gap
+            out["cx"] = max(int(slide_cx * 0.2), (out["x"] + out["cx"]) - new_x)
+            out["x"] = new_x
     # Obstacle on right half — shrink body to left of it
-    if ox > slide_cx * 0.45:
+    elif ox > slide_cx * 0.45:
         gap = 80000
         new_cx = max(int(slide_cx * 0.2), ox - out["x"] - gap)
         out["cx"] = min(out["cx"], new_cx)

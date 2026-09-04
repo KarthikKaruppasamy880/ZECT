@@ -211,6 +211,28 @@ def compose_regions(
             max_cy = sb["y"] + sb["cy"] - region["y"]
             region["cx"] = min(region["cx"], max(int(Inches(0.8)), max_cx))
             region["cy"] = min(region["cy"], max(int(Inches(0.6)), max_cy))
+    # safe_content_bounds above is computed once from the layout's OWN
+    # primary body placeholder -- when that placeholder gets reassigned as
+    # the title above (a layout with only one placeholder and no
+    # dedicated title type) every OTHER region computed here (subtitle,
+    # body, visual) lands at a y-band that cached safe box was never
+    # shrunk for, so a protected decoration (e.g. a Zinnia layout's own
+    # vertical divider bar) that only intrudes at one of those bands never
+    # gets checked at all. Re-shrink every final region directly against
+    # every protected region, not just the cached safe box. Reproduced
+    # live twice: first with body/visual only, which still left the
+    # "subtitle" region (the else-branch fallback below, used whenever
+    # this layout has no dedicated subtitle placeholder) colliding with
+    # the Zinnia "Gradient Bottom" layout's divider -- title is included
+    # too since nothing here guarantees it can never be the one that
+    # lands in a protected band on some other layout.
+    protected = list(sem.get("protected_regions") or [])
+    if protected:
+        from app.services.mentrix.presentation.template_semantics import shrink_region_away_from
+
+        for key, region in (("title", title), ("subtitle", subtitle), ("body", body), ("visual", visual)):
+            for prot in protected:
+                region.update(shrink_region_away_from(region, prot, slide_cx=cx, slide_cy=cy))
     return {"title": title, "subtitle": subtitle, "body": body, "visual": visual, "safe": safe, "semantic_map": sem}
 
 

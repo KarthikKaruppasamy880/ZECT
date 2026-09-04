@@ -236,7 +236,7 @@ def _apply_visual_blocks(slide, spec: dict[str, Any], *, user_id: str) -> None:
                 _drop_pictures(slide)
                 replaced_image = True
             paint_image(slide, block, geom, user_id=user_id)
-        elif kind in {"shape", "metric", "quote", "diagram", "icon"}:
+        elif kind in {"shape", "metric", "quote", "diagram", "icon", "card_grid"}:
             from app.services.mentrix.presentation.visual import paint_block
 
             paint_block(slide, block, geom, user_id=user_id)

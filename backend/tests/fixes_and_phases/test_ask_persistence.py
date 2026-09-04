@@ -87,7 +87,7 @@ def test_ask_history_empty_for_unused_work_item(db: Session, tmp_path, monkeypat
     assert svc.ask_history(999_999_999) == []
 
 
-_CONTEXT_USED_KEYS = {"knowledge", "lattice_hits", "lattice_indexed", "lattice_state", "blueprint"}
+_CONTEXT_USED_KEYS = {"knowledge", "lattice_hits", "lattice_indexed", "lattice_state", "blueprint", "skill"}
 
 
 def test_ask_turn_persists_context_used_summary_matching_the_response(db: Session, tmp_path, monkeypatch):
@@ -116,9 +116,14 @@ def test_ask_turn_persists_context_used_summary_matching_the_response(db: Sessio
     assert isinstance(context_used, dict)
     assert set(context_used) == _CONTEXT_USED_KEYS
 
+    from app.services.coding_engine.skill_router import ROLE_ASK, select_skill_with_db
     from app.services.work_items.developer_service import _context_used_summary
 
-    assert context_used == _context_used_summary(res.get("project_intelligence")), (
+    # CP-09B: ask() selects a skill deterministically (no LLM call), so the
+    # same selection is reproducible here for comparison rather than
+    # threading the live SkillSelection object out of ask()'s response.
+    skill = select_skill_with_db(db, ROLE_ASK, project_id=p.id)
+    assert context_used == _context_used_summary(res.get("project_intelligence"), skill=skill), (
         "the persisted summary must match what this same call actually computed"
     )
 

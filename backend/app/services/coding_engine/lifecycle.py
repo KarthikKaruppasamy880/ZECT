@@ -1466,8 +1466,11 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
     """
     from app.services.coding_engine.mentrix_lead import ROLE_CODER, ROLE_TOOL_ALLOWLISTS, run_explore_phase
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
 
-    base_goal = str(mission.get("goal") or "")
+    skill = select_skill(ROLE_CODER)
+    _emit(mission, "skill_selected", f"Coder role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
+    base_goal = skill.goal_prefix() + str(mission.get("goal") or "")
     approved_plan = str(mission.get("plan") or "")
     results: list[dict[str, Any]] = []
     for repo in mission["repos"]:
@@ -1590,6 +1593,10 @@ def _diagnose_and_repair_repo(
     """
     from app.services.coding_engine.mentrix_lead import ROLE_DEBUGGER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
+
+    skill = select_skill(ROLE_DEBUGGER, signals={"test_failed": True})
+    _emit(mission, "skill_selected", f"Debugger role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
 
     max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX", "2"))
     attempts = int(repo.get("auto_repair_attempts") or 0)
@@ -1597,7 +1604,7 @@ def _diagnose_and_repair_repo(
     while not current.get("ok") and attempts < max_attempts:
         attempts += 1
         failed_kind = str(current.get("kind") or "check")
-        diagnostic_goal = (
+        diagnostic_goal = skill.goal_prefix() + (
             f"The previous change caused this check ({failed_kind}) to fail:\n\n"
             f"{(current.get('stdout') or '').strip()}\n{(current.get('stderr') or '').strip()}\n\n"
             "Diagnose the root cause and patch the affected source file(s) so "
@@ -1664,11 +1671,15 @@ def _run_app_and_browser_verification(
     """
     from app.services.coding_engine.mentrix_lead import ROLE_TESTER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
     from app.services.workspace.runtime_discovery import discover_runtime_recipes
 
     discovered = discover_runtime_recipes(str(wt))
     if not discovered.get("recipes"):
         return {"ran": False, "reason": "no_runnable_app_detected"}
+
+    skill = select_skill(ROLE_TESTER, signals={"browser_acceptance": True})
+    _emit(mission, "skill_selected", f"Tester role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
 
     max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_BROWSER_VERIFY_MAX", "2"))
     attempt = 0
@@ -1676,7 +1687,7 @@ def _run_app_and_browser_verification(
     summary = ""
     while attempt < max_attempts and not verified:
         attempt += 1
-        goal = (
+        goal = skill.goal_prefix() + (
             "The unit tests pass. Now verify the change actually works at runtime: "
             "call start_app (with no command, so the real project start command is "
             "discovered -- if it returns needs_recipe_choice, pick the most relevant "

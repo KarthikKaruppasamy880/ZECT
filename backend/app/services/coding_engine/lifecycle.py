@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -257,6 +258,12 @@ def _public(mission: dict[str, Any]) -> dict[str, Any]:
         "plan_approved_hash": mission.get("plan_approved_hash") or "",
         "plan_approved": bool(mission.get("plan_approved")),
         "git_approved": bool(mission.get("git_approved")),
+        "context_used": mission.get("context_used"),
+        "primary_repository_id": mission.get("primary_repository_id"),
+        # CP-06: structured VALID/INVALID/STALE + findings from the last
+        # approve-plan attempt, so the UI can show *why* Approve & Build is
+        # blocked instead of just a generic 409.
+        "plan_validation": mission.get("plan_validation"),
         "repos": repos,
         "files": [f for r in repos for f in (r.get("files") or [])],
         "commands": [c for r in repos for c in (r.get("commands") or [])],
@@ -291,6 +298,19 @@ def get_mission(mission_id: str) -> dict[str, Any]:
     return _public(_lookup(mission_id))
 
 
+def get_mission_events(mission_id: str, *, after: int = 0) -> list[dict[str, Any]]:
+    """CP-09 -- the full (unlike _public()'s last-40 slice), cursor-filtered
+    event list the Mission/EventStream SSE endpoint sends. `after` is the
+    `seq` of the last event a client already has -- 0 gets everything, so
+    a client with no prior cursor (fresh tab, post-refresh, post-restart)
+    replays this Mission's entire recorded history from disk rather than
+    only whatever fits in a last-N slice.
+    """
+    mission = _lookup(mission_id)
+    events = mission.get("events") or []
+    return [e for e in events if int(e.get("seq") or 0) > after]
+
+
 def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     """Project the canonical durable Mission store as a history list --
     reads the same JSON files _lookup()/_load_mission_from_disk() use, so
@@ -319,6 +339,12 @@ def list_missions(limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
     return [_public(data) for _, data in window]
 
 
+def _next_event_seq(mission: dict[str, Any]) -> int:
+    seq = int(mission.get("_event_seq") or 0) + 1
+    mission["_event_seq"] = seq
+    return seq
+
+
 def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> None:
     if (mission.get("status") == "cancelled" or mission.get("phase") == "cancelled") and event != "cancelled":
         return
@@ -330,8 +356,15 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
             extra[key] = value
         else:
             extra[key] = str(value)[:200]
+    # CP-09: `seq` is the canonical, monotonic ordinal the Mission/
+    # EventStream SSE endpoint cursors on (?after=<seq>) -- every event a
+    # Mission ever records, from this function or from
+    # _bridge_native_events() below, shares this one counter so a client
+    # reconnecting after a tab switch/refresh/backend restart can resume
+    # from exactly where it left off without re-deriving position from
+    # list length (which would break once events get pruned/rotated).
     mission.setdefault("events", []).append(
-        {"event": event, "message": message, "data": extra, "at": _now()}
+        {"event": event, "message": message, "data": extra, "at": _now(), "seq": _next_event_seq(mission)}
     )
     mission["updated_at"] = _now()
     _save_mission(mission)
@@ -356,6 +389,64 @@ def _emit(mission: dict[str, Any], event: str, message: str, **data: Any) -> Non
         )
     except Exception:
         pass
+
+
+def _bridge_native_events(
+    mission: dict[str, Any], run_id: str, *, role: str = "", repository_id: Any = None
+) -> None:
+    """CP-09 -- the fine-grained per-tool-call activity (files read,
+    commands run, individual model routing/token/cost calls) happens on
+    MentrixNativeCodingRuntime's OWN in-memory run; lifecycle.py's mission
+    previously only ever recorded the coarse summary _emit() calls
+    sprinkled around each role invocation, so a backend restart mid-build
+    silently lost every read_file/write_file/run_command/model_call the
+    native loop actually did, and the Developer Agent pane's activity feed
+    could never show them at all. Bridges that run's full event list into
+    the Mission's own durable, JSON-persisted event log -- the ONE
+    canonical activity store the live feed and History both read from --
+    in a single batch/save rather than replaying _emit() per tool call
+    (which would trigger one redundant disk write per event).
+    """
+    if not run_id or (mission.get("status") == "cancelled" or mission.get("phase") == "cancelled"):
+        return
+    try:
+        from app.adapters.coding_runtime import get_mentrix_native_runtime
+
+        run = get_mentrix_native_runtime().get_run(run_id)
+    except Exception:  # noqa: BLE001 -- bridging must never fail a build
+        return
+    events = list(run.get("events") or [])
+    if not events:
+        return
+    appended: list[dict[str, Any]] = []
+    for e in events:
+        appended.append(
+            {
+                "event": str(e.get("event") or ""),
+                "message": str(e.get("message") or ""),
+                "data": e.get("data") or {},
+                "at": str(e.get("timestamp") or _now()),
+                "seq": _next_event_seq(mission),
+                "phase": str(e.get("phase") or ""),
+                "role": str(e.get("agent_id") or role or ""),
+                "tool": str(e.get("tool") or ""),
+                "repository_id": repository_id,
+                "provider": str(e.get("provider") or ""),
+                "model": str(e.get("model") or ""),
+                "routing_reason": str(e.get("routing_reason") or ""),
+                "input_tokens": int(e.get("input_tokens") or 0),
+                "output_tokens": int(e.get("output_tokens") or 0),
+                "cached_tokens": int(e.get("cached_tokens") or 0),
+                "estimated_cost": float(e.get("estimated_cost") or 0.0),
+                "duration_ms": e.get("duration_ms"),
+                "status": str(e.get("status") or ""),
+                "evidence_refs": list(e.get("evidence_refs") or []),
+                "source_run_id": run_id,
+            }
+        )
+    mission.setdefault("events", []).extend(appended)
+    mission["updated_at"] = _now()
+    _save_mission(mission)
 
 
 def _write_checkpoint(repo: dict[str, Any]) -> None:
@@ -384,18 +475,11 @@ def _load_checkpoint(wt: Path) -> dict[str, Any]:
 
 
 def _ensure_zect_ignored(worktree: Path) -> None:
-    gi = worktree / ".gitignore"
-    try:
-        text = gi.read_text(encoding="utf-8") if gi.is_file() else ""
-    except OSError:
-        return
-    if ".zect/" in text.splitlines() or text.endswith(".zect/\n") or ".zect/\n" in text:
-        return
-    suffix = "" if not text or text.endswith("\n") else "\n"
-    try:
-        gi.write_text(text + suffix + ".zect/\n", encoding="utf-8")
-    except OSError:
-        return
+    # Same policy as plan storage (.zect/ is agent scratch, never the user's
+    # commit) -- kept in one place rather than reimplemented here.
+    from app.services.coding_engine.plan_store import ensure_zect_ignored
+
+    ensure_zect_ignored(worktree)
 
 
 def isolate_worktree(source: str | Path, *, branch: str, dest: str | Path) -> dict[str, Any]:
@@ -594,6 +678,182 @@ def run_repo_tests(worktree: Path) -> dict[str, Any]:
     }
 
 
+def _pyproject_has_section(pyproject: Path, section: str) -> bool:
+    if not pyproject.is_file():
+        return False
+    try:
+        text = pyproject.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return f"[{section}]" in text
+
+
+def _run_py_lint(worktree: Path) -> dict[str, Any]:
+    """Only runs when the repo itself declares ruff config AND ruff is on
+    PATH -- a repo with neither is not blocked by a gate it never opted into."""
+    root = Path(worktree)
+    configured = (
+        (root / "ruff.toml").is_file()
+        or (root / ".ruff.toml").is_file()
+        or _pyproject_has_section(root / "pyproject.toml", "tool.ruff")
+    )
+    if not configured or not shutil.which("ruff"):
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no ruff config/binary"}
+    try:
+        completed = subprocess.run(
+            ["ruff", "check", "."], cwd=str(root), capture_output=True, text=True, timeout=60
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "ruff",
+            "detail": "timeout",
+            "command": "ruff check .",
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "ruff",
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": "ruff check .",
+    }
+
+
+def _run_py_typecheck(worktree: Path) -> dict[str, Any]:
+    root = Path(worktree)
+    configured = (
+        (root / "mypy.ini").is_file()
+        or (root / ".mypy.ini").is_file()
+        or _pyproject_has_section(root / "pyproject.toml", "tool.mypy")
+    )
+    if not configured or not shutil.which("mypy"):
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no mypy config/binary"}
+    try:
+        completed = subprocess.run(
+            ["mypy", "."], cwd=str(root), capture_output=True, text=True, timeout=90
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": "mypy",
+            "detail": "timeout",
+            "command": "mypy .",
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "mypy",
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": "mypy .",
+    }
+
+
+def _run_js_script_gate(worktree: Path, script_name: str, kind: str) -> dict[str, Any]:
+    """Run a package.json script iff the repo itself declares it -- so "lint"/
+    "typecheck"/"build" mean whatever tooling the repo already wired up
+    (eslint, tsc, next build, vite build, ...) instead of us guessing a
+    command that may not match the project."""
+    root = Path(worktree)
+    pkg = root / "package.json"
+    if not pkg.is_file():
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no package.json"}
+    try:
+        data = json.loads(pkg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    scripts = data.get("scripts") if isinstance(data, dict) else {}
+    scripts = scripts if isinstance(scripts, dict) else {}
+    if script_name not in scripts:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": f"no {script_name} script"}
+    cmd = f"npm run {script_name} --silent"
+    try:
+        completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=180, shell=True)
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "status": "fail",
+            "kind": kind,
+            "detail": "timeout",
+            "command": cmd,
+            "stdout": "",
+            "stderr": "timeout",
+        }
+    ok = completed.returncode == 0
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": kind,
+        "exit_code": completed.returncode,
+        "stdout": (completed.stdout or "")[-1200:],
+        "stderr": (completed.stderr or "")[-600:],
+        "command": cmd,
+    }
+
+
+def run_repo_quality_gates(worktree: Path) -> dict[str, Any]:
+    """Deterministic lint/typecheck/build checks, run alongside (before)
+    run_repo_tests. Each individual gate is skipped -- not failed -- when the
+    repo has no matching config/script, so this never blocks a repo on
+    tooling it never opted into. See Phase D of
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md: previously
+    lint/typecheck/build were left entirely to the Coder/Debugger role's own
+    discretion via generic run_command, with no orchestrated pass/fail gate.
+    """
+    steps = [
+        _run_py_lint(worktree),
+        _run_py_typecheck(worktree),
+        _run_js_script_gate(worktree, "lint", "eslint"),
+        _run_js_script_gate(worktree, "typecheck", "tsc"),
+        _run_js_script_gate(worktree, "build", "build"),
+    ]
+    ran = [s for s in steps if s.get("kind") != "none"]
+    if not ran:
+        return {"ok": True, "status": "skipped", "kind": "none", "detail": "no lint/typecheck/build configured"}
+    failed = [s for s in ran if not s.get("ok")]
+    ok = not failed
+    return {
+        "ok": ok,
+        "status": "pass" if ok else "fail",
+        "kind": "+".join(str(s.get("kind")) for s in ran),
+        "detail": "; ".join(f"{s.get('kind')}:{s.get('status')}" for s in ran),
+        "stdout": "\n".join((s.get("stdout") or "") for s in (failed or ran))[-2000:],
+        "stderr": "\n".join((s.get("stderr") or "") for s in (failed or ran))[-1200:],
+        "command": " ; ".join(str(s.get("command") or "") for s in ran if s.get("command")),
+        "recipes": steps,
+    }
+
+
+def _run_quality_and_tests(worktree: Path) -> dict[str, Any]:
+    """The gate a repo's change must clear: lint/typecheck/build (when
+    configured) MUST pass before tests are even attempted, mirroring ordinary
+    CI ordering and avoiding a wasted test run against code that doesn't
+    build. Returns the same shape as run_repo_tests (ok/status/kind/stdout/
+    stderr/command) so existing callers of run_repo_tests need no changes --
+    a quality-gate failure is reported through the identical fields a test
+    failure would use, and the auto-repair loop treats both uniformly.
+    """
+    quality = run_repo_quality_gates(worktree)
+    if not quality.get("ok"):
+        return quality
+    tests = run_repo_tests(worktree)
+    if quality.get("kind") != "none":
+        tests = dict(tests)
+        tests["quality"] = quality
+    return tests
+
+
 def scan_worktree_security(worktree: Path) -> list[dict[str, Any]]:
     """Fail closed on eval() and obvious hardcoded secrets in the isolated tree."""
     findings: list[dict[str, Any]] = []
@@ -681,14 +941,50 @@ def review_diff(diff: str) -> dict[str, Any]:
     }
 
 
-def _apply_patches(worktree: Path, patches: list[dict[str, Any]]) -> dict[str, Any]:
+def _apply_patches(mission: dict[str, Any], repo: dict[str, Any], worktree: Path, patches: list[dict[str, Any]]) -> dict[str, Any]:
     root = resolve_workspace(str(worktree))
     files: list[str] = []
     commands: list[str] = []
+    # CP-07: a Mission with no work_item_id never went through ASK/PLAN and
+    # has no FILE_IMPACTS.json to check against -- same scope boundary
+    # CP-06's _plan_validation_gate already uses, preserved here rather
+    # than newly gating Missions built from hand-supplied patches (e.g.
+    # test_coding_agent_production.py's Missions A-G). Any Mission that
+    # DOES carry a work_item_id is fail-closed from here on.
+    work_item_id = mission.get("work_item_id")
     for patch in patches or []:
         path = str(patch.get("path") or "").strip()
         if not path:
             continue
+        tool_name = "write_file" if patch.get("content") is not None else "apply_patch"
+        if work_item_id:
+            from app.services.coding_engine import agent_write_policy
+
+            decision = agent_write_policy.evaluate_write(
+                work_item_id=work_item_id,
+                repo_id=repo.get("repository_id"),
+                tool_name=tool_name,
+                path=path,
+                workspace=root,
+            )
+            if not decision.allowed:
+                _emit(
+                    mission,
+                    "agent_write_blocked",
+                    f"{repo.get('label')}: write to {path} refused ({decision.reason})",
+                    repository_id=repo.get("repository_id"),
+                    path=path,
+                    reason=decision.reason,
+                    detail=decision.detail,
+                )
+                return {"ok": False, "error": f"write_blocked:{decision.reason}", "path": path, "files": files}
+            _emit(
+                mission,
+                "agent_write_allowed",
+                f"{repo.get('label')}: write to {path} authorized ({decision.matched_action})",
+                repository_id=repo.get("repository_id"),
+                path=path,
+            )
         if patch.get("content") is not None:
             out = execute_tool(
                 "write_file",
@@ -722,7 +1018,55 @@ def _apply_patches(worktree: Path, patches: list[dict[str, Any]]) -> dict[str, A
         if patch.get("command"):
             cmd = str(patch["command"])
             commands.append(cmd)
-            execute_tool("run_command", {"command": cmd}, workspace=root, auto_approve_edits=True)
+            # CP-09A: this call's result used to be discarded entirely --
+            # a command needing approval (or one that simply failed) ran
+            # (or silently didn't) with the patch still reported "ok".
+            # command_governance classifies every command; anything
+            # outside READ_ONLY/BUILD/TEST/APP_RUNNER needs_approval and
+            # must block the mission with a visible reason, same as a
+            # blocked write_file/apply_patch above -- never a silent no-op.
+            from app.services.coding_engine.command_governance import classify_command
+
+            category = classify_command(cmd)
+            cmd_out = execute_tool("run_command", {"command": cmd}, workspace=root, auto_approve_edits=True)
+            if cmd_out.get("needs_approval"):
+                _emit(
+                    mission,
+                    "tool_blocked",
+                    f"{repo.get('label')}: command requires approval ({category}): {cmd[:160]}",
+                    repository_id=repo.get("repository_id"),
+                    category=category,
+                    command=cmd[:400],
+                )
+                return {
+                    "ok": False,
+                    "error": f"command_blocked:{category}",
+                    "path": path,
+                    "files": files,
+                    "commands": commands,
+                }
+            if not cmd_out.get("ok"):
+                _emit(
+                    mission,
+                    "tool_failed",
+                    f"{repo.get('label')}: command failed ({cmd_out.get('error')}): {cmd[:160]}",
+                    repository_id=repo.get("repository_id"),
+                    category=category,
+                )
+                return {
+                    "ok": False,
+                    "error": cmd_out.get("error") or "command_failed",
+                    "path": path,
+                    "files": files,
+                    "commands": commands,
+                }
+            _emit(
+                mission,
+                "command_completed",
+                f"{repo.get('label')}: {cmd[:160]}",
+                repository_id=repo.get("repository_id"),
+                category=category,
+            )
     return {"ok": True, "files": files, "commands": commands}
 
 
@@ -867,6 +1211,7 @@ def start_mission(
     propose_if_empty: bool = False,
     mode: str = "",
     source: str = "",
+    primary_repository_id: int | None = None,
 ) -> dict[str, Any]:
     if not (goal or "").strip():
         raise ValueError("goal_required")
@@ -900,6 +1245,13 @@ def start_mission(
         "git_approved": False,
         "project_id": project_id,
         "work_item_id": work_item_id,
+        # The WorkItem's own sticky repository_id, when known -- the single
+        # authoritative "which repo is primary" fact for this Mission, so
+        # patch proposal/application (propose_patches.py) doesn't have to
+        # guess from roots[0] ordering (finding A2 / CP-01). Falls back to
+        # the first authorized root only when no WorkItem binding exists.
+        "primary_repository_id": primary_repository_id
+        or (roots[0].get("id") or roots[0].get("repository_id") if roots else None),
         "patches_by_repo": _stringify_patch_map(patches_by_repo),
         "propose_if_empty": bool(propose_if_empty),
         "workspace_parent": str(parent),
@@ -959,10 +1311,90 @@ def approve_plan_in_background(mission_id: str) -> dict[str, Any]:
     return get_mission(mid)
 
 
+def _plan_validation_gate(mission: dict[str, Any]) -> "plan_validator.PlanValidationResult | None":
+    """Returns None when this Mission is out of scope for CP-06 (no
+    work_item_id, or that WorkItem never produced a grounded-plan machine
+    contract) -- lifecycle.py is deliberately DB-decoupled everywhere else,
+    so this opens a short-lived session only for this one lookup and fails
+    OPEN (returns None, preserving prior behavior) on any unexpected error
+    rather than blocking a Mission that has nothing to do with the
+    grounded ASK/PLAN pipeline this gate targets."""
+    wi_id = mission.get("work_item_id")
+    if not wi_id:
+        return None
+    try:
+        import json as _json
+
+        from app.domains.work_items import service as wi_svc
+        from app.infrastructure.database import SessionLocal
+        from app.services.work_items import plan_generator, plan_validator
+        from app.services.work_items.artifact_store import ArtifactStore, plan_hash_bytes
+        from app.services.work_items.context_package import ContextPackage
+        from app.services.work_items.multi_repo_context import repo_binding
+
+        db = SessionLocal()
+        try:
+            wi = wi_svc.get_work_item(db, int(wi_id))
+            store = ArtifactStore(wi.id)
+            sidecar = store.read_json("FILE_IMPACTS.json", default=None) or None
+            if not sidecar:
+                return None
+            plan_text = str(mission.get("plan") or "")
+            current_hash = plan_hash_bytes(plan_text) if plan_text.strip() else ""
+            repo_local_path = str(repo_binding(db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+            architecture = (
+                plan_generator.detect_repo_architecture(repo_local_path)
+                if repo_local_path
+                else plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
+            )
+            context_package = None
+            raw = (wi.context_snapshot_json or "").strip()
+            if raw and raw != "{}":
+                data = _json.loads(raw)
+                if data:
+                    context_package = ContextPackage.from_dict(data)
+            return plan_validator.validate_plan_for_approval(
+                work_item_id=wi.id,
+                primary_repo_id=wi.repository_id,
+                base_commit_sha=wi.base_commit_sha or "",
+                recorded_plan_hash=wi.plan_hash or "",
+                plan_text=plan_text,
+                current_plan_hash=current_hash,
+                sidecar=sidecar,
+                context_package=context_package,
+                repo_root=repo_local_path or ".",
+                architecture=architecture,
+            )
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _approve_plan_impl(mission_id: str) -> dict[str, Any]:
     mission = _lookup(mission_id)
     if mission.get("status") == "cancelled":
         raise ValueError("mission_cancelled")
+
+    # CP-06: this is the actual "Approve & Build" button's call path (the
+    # Developer Workspace UI hits POST /api/coding-agent/missions/{id}/
+    # approve-plan, never developer_service.py's WorkItem-level
+    # approve_plan) -- so the hard pre-approval gate belongs here, not
+    # there. Only enforced when this Mission is tied to a WorkItem that
+    # actually went through the grounded ASK/PLAN pipeline (has a
+    # FILE_IMPACTS.json machine contract); a Mission created directly
+    # without a work_item_id, or one whose WorkItem never called
+    # developer plan(), was never part of that flow and keeps its
+    # pre-CP-06 behavior (silent re-hash on drift) unchanged.
+    gate = _plan_validation_gate(mission)
+    if gate is not None and not gate.ok:
+        detail = "; ".join(f"{f.rule}: {f.detail}" for f in gate.findings) or gate.status
+        _emit(mission, "plan_validation_failed", f"PLAN failed validation ({gate.status}): {detail}")
+        mission["plan_validation"] = gate.to_dict()
+        raise ValueError(f"plan_validation_failed:{gate.status}")
+    if gate is not None:
+        mission["plan_validation"] = gate.to_dict()
+
     existing = _stringify_patch_map(mission.get("patches_by_repo"))
     has_patches = any(existing.get(str(k)) for k in existing)
     if mission.get("propose_if_empty") and not has_patches:
@@ -1034,8 +1466,12 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
     """
     from app.services.coding_engine.mentrix_lead import ROLE_CODER, ROLE_TOOL_ALLOWLISTS, run_explore_phase
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
 
-    base_goal = f"{mission.get('goal') or ''}\n\nPLAN:\n{mission.get('plan') or ''}"
+    skill = select_skill(ROLE_CODER)
+    _emit(mission, "skill_selected", f"Coder role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
+    base_goal = skill.goal_prefix() + str(mission.get("goal") or "")
+    approved_plan = str(mission.get("plan") or "")
     results: list[dict[str, Any]] = []
     for repo in mission["repos"]:
         wt = str(repo.get("worktree_path") or "").strip()
@@ -1069,7 +1505,10 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_CODER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
+            approved_plan=approved_plan,
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_CODER, repository_id=repo.get("repository_id"))
         results.append(out)
         repo["native_build"] = {
             "ok": out.get("ok"),
@@ -1077,6 +1516,8 @@ def _run_native_implementer(mission: dict[str, Any]) -> None:
             "files_written": list(out.get("files_written") or []),
             "run_id": out.get("run_id"),
         }
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         written = list(out.get("files_written") or [])
         if written:
             files = list(repo.get("files") or [])
@@ -1142,26 +1583,34 @@ def _patches_for_repo(patches_map: dict[str, Any], repo: dict[str, Any]) -> list
 def _diagnose_and_repair_repo(
     mission: dict[str, Any], repo: dict[str, Any], wt: Path, tests: dict[str, Any]
 ) -> dict[str, Any]:
-    """On test failure, feed the failure output back into the same native agent
-    loop used for real edits (not a second implementation) to diagnose and
-    patch, then rerun. Bounded by MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a
-    persistently-broken repo still reaches ``blocked`` rather than looping
-    forever or getting silently reported as complete.
+    """On a failing check (lint, typecheck, build, or tests -- see
+    _run_quality_and_tests), feed the failure output back into the same
+    native agent loop used for real edits (not a second implementation) to
+    diagnose and patch, then rerun. Bounded by
+    MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX so a persistently-broken repo still
+    reaches ``blocked`` rather than looping forever or getting silently
+    reported as complete.
     """
     from app.services.coding_engine.mentrix_lead import ROLE_DEBUGGER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
+
+    skill = select_skill(ROLE_DEBUGGER, signals={"test_failed": True})
+    _emit(mission, "skill_selected", f"Debugger role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
 
     max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_AUTO_REPAIR_MAX", "2"))
     attempts = int(repo.get("auto_repair_attempts") or 0)
     current = tests
     while not current.get("ok") and attempts < max_attempts:
         attempts += 1
-        diagnostic_goal = (
-            "The previous change caused this test run to fail:\n\n"
+        failed_kind = str(current.get("kind") or "check")
+        diagnostic_goal = skill.goal_prefix() + (
+            f"The previous change caused this check ({failed_kind}) to fail:\n\n"
             f"{(current.get('stdout') or '').strip()}\n{(current.get('stderr') or '').strip()}\n\n"
-            "Diagnose the root cause and patch the affected source file(s) so the "
-            "tests pass. Do not modify test files unless the test itself is "
-            "provably wrong -- explain why in a comment if you do."
+            "Diagnose the root cause and patch the affected source file(s) so "
+            "lint/typecheck/build and tests all pass. Do not modify test files "
+            "unless the test itself is provably wrong -- explain why in a "
+            "comment if you do."
         )
         _emit(
             mission,
@@ -1180,7 +1629,12 @@ def _diagnose_and_repair_repo(
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_DEBUGGER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
+            approved_plan=str(mission.get("plan") or ""),
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_DEBUGGER, repository_id=repo.get("repository_id"))
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         written = list(out.get("files_written") or [])
         if written:
             files = list(repo.get("files") or [])
@@ -1188,7 +1642,7 @@ def _diagnose_and_repair_repo(
                 if path not in files:
                     files.append(path)
             repo["files"] = files
-        current = run_repo_tests(wt)
+        current = _run_quality_and_tests(wt)
         _emit(
             mission,
             "diagnose_result",
@@ -1217,11 +1671,15 @@ def _run_app_and_browser_verification(
     """
     from app.services.coding_engine.mentrix_lead import ROLE_TESTER, ROLE_TOOL_ALLOWLISTS
     from app.services.coding_engine.mentrix_native_build import run_mentrix_native_build
+    from app.services.coding_engine.skill_router import select_skill
     from app.services.workspace.runtime_discovery import discover_runtime_recipes
 
     discovered = discover_runtime_recipes(str(wt))
     if not discovered.get("recipes"):
         return {"ran": False, "reason": "no_runnable_app_detected"}
+
+    skill = select_skill(ROLE_TESTER, signals={"browser_acceptance": True})
+    _emit(mission, "skill_selected", f"Tester role: {skill.skill_name or 'no skill matched'}", **skill.to_event_data())
 
     max_attempts = int(os.getenv("MENTRIX_CODING_AGENT_BROWSER_VERIFY_MAX", "2"))
     attempt = 0
@@ -1229,7 +1687,7 @@ def _run_app_and_browser_verification(
     summary = ""
     while attempt < max_attempts and not verified:
         attempt += 1
-        goal = (
+        goal = skill.goal_prefix() + (
             "The unit tests pass. Now verify the change actually works at runtime: "
             "call start_app (with no command, so the real project start command is "
             "discovered -- if it returns needs_recipe_choice, pick the most relevant "
@@ -1258,7 +1716,12 @@ def _run_app_and_browser_verification(
             allowed_tools=ROLE_TOOL_ALLOWLISTS[ROLE_TESTER],
             mission_id=mission.get("id"),
             repo_id=repo.get("repository_id"),
+            work_item_id=mission.get("work_item_id"),
+            approved_plan=str(mission.get("plan") or ""),
         )
+        _bridge_native_events(mission, str(out.get("run_id") or ""), role=ROLE_TESTER, repository_id=repo.get("repository_id"))
+        if out.get("context_used"):
+            mission["context_used"] = out["context_used"]
         summary = str(out.get("summary") or out.get("status") or "")
         written = list(out.get("files_written") or [])
         if written:
@@ -1268,7 +1731,7 @@ def _run_app_and_browser_verification(
                     files.append(path)
             repo["files"] = files
 
-        retest = run_repo_tests(wt)
+        retest = _run_quality_and_tests(wt)
         if not retest.get("ok"):
             retest = _diagnose_and_repair_repo(mission, repo, wt, retest)
         # "verified" requires BOTH: the agent's own browser-verification turn
@@ -1306,7 +1769,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
         patches = _patches_for_repo(patches_map, repo)
         repo["patches_applied"] = len(patches)
         wt = Path(repo["worktree_path"])
-        applied = _apply_patches(wt, patches)
+        applied = _apply_patches(mission, repo, wt, patches)
         if not applied.get("ok"):
             repo["blocker"] = applied.get("error") or "edit_failed"
             repo["test_ok"] = False
@@ -1324,7 +1787,7 @@ def _run_edit_test_review(mission: dict[str, Any]) -> dict[str, Any]:
                 files.append(path)
         repo["files"] = files
         repo["commands"] = list(applied.get("commands") or [])
-        tests = run_repo_tests(wt)
+        tests = _run_quality_and_tests(wt)
         if not tests.get("ok"):
             tests = _diagnose_and_repair_repo(mission, repo, wt, tests)
         repo["test_ok"] = bool(tests.get("ok"))

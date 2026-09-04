@@ -21,6 +21,9 @@ export type WorkspaceSession = {
   workItemId: number | null;
   projectId: number | null;
   activeRepoId: number | null;
+  /** Server-side Mission id, so a reload or a tab switch re-attaches to a
+   *  running Mission instead of showing an empty start form (finding F4). */
+  codingMissionId: string | null;
 };
 
 function emptySession(): WorkspaceSession {
@@ -31,6 +34,7 @@ function emptySession(): WorkspaceSession {
     workItemId: null,
     projectId: null,
     activeRepoId: null,
+    codingMissionId: null,
   };
 }
 
@@ -68,6 +72,8 @@ export function loadWorkspaceSession(): WorkspaceSession {
       workItemId: typeof raw.workItemId === "number" && raw.workItemId > 0 ? raw.workItemId : null,
       projectId: typeof raw.projectId === "number" && raw.projectId > 0 ? raw.projectId : null,
       activeRepoId: typeof raw.activeRepoId === "number" && raw.activeRepoId > 0 ? raw.activeRepoId : null,
+      codingMissionId:
+        typeof raw.codingMissionId === "string" && raw.codingMissionId.trim() ? raw.codingMissionId.trim() : null,
     };
   } catch {
     return emptySession();
@@ -85,11 +91,34 @@ export function saveWorkspaceSession(session: WorkspaceSession): void {
         workItemId: session.workItemId,
         projectId: session.projectId,
         activeRepoId: session.activeRepoId,
+        codingMissionId: session.codingMissionId,
       }),
     );
   } catch {
     /* ignore quota */
   }
+}
+
+/** CP-09 -- a WorkItem/Mission id persisted in localStorage that no longer
+ *  resolves on the backend (deleted, or a different backend/DB entirely --
+ *  e.g. after `ZECT_USER_DATA`/`ZECT_CODING_MISSIONS_DIR` changes) must not
+ *  keep poisoning every future ASK/PLAN/AGENT interaction by being silently
+ *  re-offered on every mount. Callers reconcile a confirmed 404 by writing
+ *  the result back through `setWsSession`, not by only clearing local
+ *  component state (which is what left the stale id in localStorage
+ *  indefinitely before this fix).
+ *
+ *  Clearing workItemId cascades to codingMissionId: a Mission belongs to
+ *  exactly one WorkItem (WorkItem.coding_mission_id is the durable
+ *  pointer), so a dead WorkItem's mission id is equally meaningless.
+ *  Clearing a Mission on its own (its WorkItem is still perfectly valid)
+ *  must not touch workItemId. */
+export function withoutWorkItem(session: WorkspaceSession): WorkspaceSession {
+  return { ...session, workItemId: null, codingMissionId: null };
+}
+
+export function withoutMission(session: WorkspaceSession): WorkspaceSession {
+  return { ...session, codingMissionId: null };
 }
 
 export function editorTabLabel(path: string): string {

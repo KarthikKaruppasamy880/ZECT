@@ -29,6 +29,7 @@ import WorkspaceTerminal from "@/components/WorkspaceTerminal";
 import MentrixCodingAgentPanel from "@/components/MentrixCodingAgentPanel";
 import WorkspaceContextUsedPanel from "@/components/WorkspaceContextUsedPanel";
 import WorkspaceSearchPanel from "@/components/WorkspaceSearchPanel";
+import WorkspaceProblemsPanel from "@/components/WorkspaceProblemsPanel";
 import SplitPane, { resetSplitLayout } from "@/components/SplitPane";
 import {
   DEFAULT_WORKSPACE_CHROME,
@@ -60,6 +61,7 @@ import {
   newTerminalSession,
   saveWorkspaceSession,
   upsertEditorTab,
+  withoutWorkItem,
 } from "@/lib/workspaceSession";
 import {
   fileList,
@@ -71,8 +73,10 @@ import {
   gitStatus,
   gitPull,
   gitWorktrees,
+  getWorkItem,
   mentrixGetRun,
   mentrixListRuns,
+  type ApiRequestError,
 } from "@/lib/api";
 import { showToast } from "@/components/Toast";
 import { deriveProjectKey, readMentrixWorkspace, writeMentrixWorkspace } from "@/lib/workspaceContext";
@@ -150,6 +154,18 @@ function collectGitPaths(st: Record<string, unknown> | null | undefined): string
   return out;
 }
 
+/** True when a Mission-reported file change should refresh the open editor buffer:
+ * the changed path resolves to the currently open file, and it has no unsaved edits. */
+export function shouldReloadFileOnAgentChange(
+  paths: string[],
+  openPath: string,
+  isDirty: boolean,
+  resolve: (p: string) => string,
+): boolean {
+  if (!openPath || isDirty) return false;
+  return paths.some((p) => resolve(p) === openPath);
+}
+
 /**
  * Phase 3 — unified developer workspace (Stages A–E).
  */
@@ -161,6 +177,10 @@ export default function DeveloperWorkspace() {
   const deepGoal = searchParams.get("goal") || "";
   const deepWorkItem = searchParams.get("work_item_id");
   const urlWorkItem = deepWorkItem && /^\d+$/.test(deepWorkItem) ? Number(deepWorkItem) : null;
+  // `?run=` carries a numeric Mentrix run id OR a Mission uuid. Only the
+  // numeric form was ever honoured, so a shared Mission link opened an empty
+  // start form (finding F4).
+  const urlMissionId = deepRunId && !/^\d+$/.test(deepRunId) ? deepRunId : "";
   const { activeLocalPath, activeRepo, activeRepoId, activeProjectId, activeProjectKey, repos, setActiveRepo, setActiveProject } =
     useActiveProject();
   const { latticeStatus: latticeIdx, loadingStatus: latticeLoading } = useWorkspaceRepoContext();
@@ -215,6 +235,17 @@ export default function DeveloperWorkspace() {
     }
     if (rootPath) setShowImport(false);
   }, [rootPath, visibleRoots.length]);
+  // The import panel actually renders on `showImport || !rootPath` (see
+  // below), not `showImport` alone -- a root can still be loading (empty
+  // rootPath) when the user clicks the button. Toggling bare `showImport`
+  // off that stale value could set it to `true` while the panel was only
+  // showing because of the !rootPath fallback; once userToggledImport
+  // latches, the auto-hide effect above never runs again, and rootPath
+  // populating moments later would then leave the panel stuck open forever
+  // (showImport stays true, `showImport || !rootPath` stays true). Toggle
+  // the actual combined visibility instead so the click always means what
+  // it currently shows ("Hide import" vs "Import local clone").
+  const importPanelVisible = showImport || !rootPath;
   const [chrome, setChrome] = useState(() => loadWorkspaceChrome());
   const showExplorer = chrome.explorer;
   const showAgent = chrome.agent;
@@ -304,9 +335,39 @@ export default function DeveloperWorkspace() {
   const selectedPathRef = useRef("");
   const [bufferTick, setBufferTick] = useState(0);
   const workItemId = urlWorkItem || wsSession.workItemId;
+  const [workItemMissionId, setWorkItemMissionId] = useState("");
+  // URL wins (an explicit link), then whatever this browser last had, then
+  // the durable WorkItem.coding_mission_id -- which is what survives a fresh
+  // browser or a different machine.
+  const missionId = urlMissionId || wsSession.codingMissionId || workItemMissionId || null;
   useEffect(() => {
     saveWorkspaceSession(wsSession);
   }, [wsSession]);
+  useEffect(() => {
+    if (!workItemId) {
+      setWorkItemMissionId("");
+      return;
+    }
+    let cancelled = false;
+    void getWorkItem(workItemId)
+      .then((wi) => {
+        if (!cancelled) setWorkItemMissionId(String(wi?.coding_mission_id || ""));
+      })
+      .catch((err: ApiRequestError) => {
+        if (cancelled) return;
+        setWorkItemMissionId("");
+        // CP-09: a confirmed 404 for an id that came from localStorage (not
+        // an explicit URL link, which the user typed/followed on purpose
+        // and shouldn't be silently rewritten) must clear the stale id
+        // there too -- otherwise it keeps poisoning every future mount.
+        if (err?.status === 404 && !urlWorkItem && wsSession.workItemId === workItemId) {
+          setWsSession((prev) => withoutWorkItem(prev));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workItemId]);
   useEffect(() => {
     if (urlWorkItem && wsSession.workItemId !== urlWorkItem) {
       setWsSession((prev) => ({ ...prev, workItemId: urlWorkItem }));
@@ -669,16 +730,19 @@ export default function DeveloperWorkspace() {
     void openFile(active.path, undefined, active.repoId);
   }, [visibleRoots, wsSession.openEditors]);
 
-  const openAgentPath = (relOrAbs: string) => {
-    if (!rootPath) return;
-    const abs =
-      isPathInsideRoot(normalizePath(relOrAbs), rootPath) &&
+  const resolveAgentPath = (relOrAbs: string): string => {
+    if (!rootPath) return normalizePath(relOrAbs);
+    return isPathInsideRoot(normalizePath(relOrAbs), rootPath) &&
       (normalizePath(relOrAbs).startsWith(normalizePath(rootPath)) ||
         /^[a-zA-Z]:[\\/]/.test(relOrAbs) ||
         relOrAbs.startsWith("/"))
-        ? normalizePath(relOrAbs)
-        : normalizePath(`${rootPath.replace(/[/\\]+$/, "")}/${relOrAbs.replace(/^[/\\]+/, "")}`);
-    void openFile(abs);
+      ? normalizePath(relOrAbs)
+      : normalizePath(`${rootPath.replace(/[/\\]+$/, "")}/${relOrAbs.replace(/^[/\\]+/, "")}`);
+  };
+
+  const openAgentPath = (relOrAbs: string) => {
+    if (!rootPath) return;
+    void openFile(resolveAgentPath(relOrAbs));
     setAgentFiles((prev) => (prev.includes(relOrAbs) ? prev : [...prev, relOrAbs]));
   };
 
@@ -894,12 +958,12 @@ export default function DeveloperWorkspace() {
             data-testid="workspace-import-local"
             onClick={() => {
               userToggledImport.current = true;
-              setShowImport((v) => !v);
+              setShowImport(!importPanelVisible);
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-medium text-indigo-800 hover:bg-indigo-100"
           >
             <FolderOpen className="h-3.5 w-3.5" />
-            {showImport ? "Hide import" : "Import local clone"}
+            {importPanelVisible ? "Hide import" : "Import local clone"}
           </button>
           <button
             type="button"
@@ -963,7 +1027,7 @@ export default function DeveloperWorkspace() {
         </div>
       </div>
 
-      {(showImport || !rootPath) && (
+      {importPanelVisible && (
         <div className="shrink-0 overflow-y-auto max-h-40" data-testid="workspace-import-panel">
           <RepoOnboardingPanel
             projectId={activeProjectId}
@@ -1278,7 +1342,10 @@ export default function DeveloperWorkspace() {
                         content={content}
                         selection={selection}
                         repoId={activeRepoId}
+                        workItemId={workItemId}
+                        projectId={activeProjectId}
                         onApplyCode={applyInlineCode}
+                        onWorkItemResolved={(id) => setWsSession((prev) => ({ ...prev, workItemId: id }))}
                       />
                     ) : null}
                     {showDiff ? (
@@ -1321,12 +1388,18 @@ export default function DeveloperWorkspace() {
                   setAgentFiles((prev) => Array.from(new Set([...prev, ...paths])));
                   void loadTree();
                   void refreshGit(rootPath);
+                  const openPath = selectedPathRef.current;
+                  const isDirty = contentRef.current !== baselineRef.current;
+                  if (shouldReloadFileOnAgentChange(paths, openPath, isDirty, resolveAgentPath)) {
+                    void openFile(openPath);
+                  }
                 }}
                 onTestOutput={(text) => setLastTestLog(text)}
                 initialGoal={deepGoal}
                 initialSessionId={deepSession || null}
                 projectId={activeProjectId}
                 workItemId={workItemId}
+                activeRepoId={activeRepoId}
                 roots={visibleRoots
                   .filter((r) => r.local_path)
                   .map((r) => ({
@@ -1335,6 +1408,10 @@ export default function DeveloperWorkspace() {
                     path: r.local_path as string,
                   }))}
                 onWorkItemResolved={(id) => setWsSession((prev) => ({ ...prev, workItemId: id }))}
+                missionId={missionId}
+                onMissionChanged={(id) =>
+                  setWsSession((prev) => (prev.codingMissionId === id ? prev : { ...prev, codingMissionId: id }))
+                }
               />
               </div>
             </div>
@@ -1447,16 +1524,10 @@ export default function DeveloperWorkspace() {
                   />
                 ) : null}
                 {bottomTab === "problems" ? (
-                  <div data-testid="workspace-problems-panel" className="text-[11px] text-slate-600 space-y-1">
-                    {error ? <p className="text-rose-700">{error}</p> : null}
-                    <p>Active git: {gitSummary || "—"}</p>
-                    {gitChanged.slice(0, 20).map((p) => (
-                      <p key={p} className="font-mono text-[10px]">
-                        {p}
-                      </p>
-                    ))}
-                    {!error && !gitChanged.length ? <p className="text-slate-400">No problems</p> : null}
-                  </div>
+                  <WorkspaceProblemsPanel
+                    repoIds={visibleRoots.map((r) => r.repo_id)}
+                    onOpen={(abs, repoId) => void openFile(abs, undefined, repoId)}
+                  />
                 ) : null}
                 {bottomTab === "tests" || bottomTab === "evidence" ? (
                   <div data-testid={bottomTab === "tests" ? "workspace-tests-panel" : "workspace-evidence-panel"}>

@@ -108,6 +108,231 @@ def compose_context_pack(
     return meta
 
 
+_ASK_STOP = frozenset(
+    {
+        "what", "which", "where", "when", "this", "that", "with", "from",
+        "file", "files", "does", "define", "defines", "token",
+    }
+)
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
+
+
+def _workspace_grep_items(workspace: Any, goal: str, *, repository_id: str = "") -> list[Any]:
+    """Same authorized-local-grep the Ask/Plan pipeline uses
+    (developer_service.py's _workspace_file_items), adapted for the Agent
+    path's already-resolved filesystem workspace Path instead of a DB Repo
+    row's local_path -- the caller (coding_engine_mentrix.start_run) has
+    already validated/jailed `workspace` via resolve_workspace(), so this
+    does not re-check path_under_allowed_roots."""
+    import os
+    import re
+    from pathlib import Path
+
+    from app.services.work_items.context_engine import ProvenanceItem
+
+    root = Path(workspace)
+    if not root.is_dir():
+        return []
+    tokens = [t for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", goal or "") if t.lower() not in _ASK_STOP]
+    tokens = sorted(set(tokens), key=len, reverse=True)[:5]
+    if not tokens:
+        return []
+    regexes = [re.compile(re.escape(t), re.IGNORECASE) for t in tokens]
+    items: list[Any] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            fpath = Path(dirpath) / name
+            try:
+                if fpath.stat().st_size > 400_000:
+                    continue
+                text = fpath.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            rel = str(fpath.relative_to(root)).replace("\\", "/")
+            for i, line in enumerate(text.splitlines(), 1):
+                if any(rx.search(line) for rx in regexes):
+                    items.append(
+                        ProvenanceItem(
+                            source_type="workspace_file",
+                            source_id=f"{rel}:{i}",
+                            content=f"{rel}:{i}: {line.strip()[:240]}",
+                            repository=repository_id,
+                            freshness="current",
+                            verification_state="file_search",
+                            selection_reason="authorized_local_grep",
+                            retrieval_score=1.0,
+                        )
+                    )
+                    if len(items) >= 12:
+                        return items
+                    break
+    return items
+
+
+def _authorized_write_contract_block(work_item_id: int | None, db: Any) -> str:
+    """CP-07 -- renders the exact write contract agent_write_policy.py will
+    enforce at write time, built from the SAME AgentWritePolicy object the
+    runtime gate consumes (not a second, independently hand-built notion
+    of "what's authorized"), so the model is grounded in what it can
+    actually touch before it ever proposes a tool call. Best-effort:
+    returns "" on any failure -- a lookup problem here must only mean less
+    grounding, never a blocked build; the hard boundary is
+    agent_write_policy.evaluate_write() at write time, not this text.
+    """
+    if not work_item_id:
+        return ""
+    try:
+        from app.services.coding_engine.agent_write_policy import build_agent_write_policy
+
+        policy = build_agent_write_policy(db, int(work_item_id))
+        if not policy.authorized:
+            return (
+                "## AUTHORIZED WRITE CONTRACT\n"
+                f"BLOCKED: {policy.block_reason} -- {policy.block_detail}\n"
+                "No file writes will be permitted until PLAN is regenerated and re-approved.\n"
+            )
+        lines = [
+            "## AUTHORIZED WRITE CONTRACT",
+            f"primary_repository_id={policy.primary_repo_id} plan_hash={policy.plan_hash[:12]}",
+            "Only these paths/actions will be permitted by the runtime -- do not propose any other path:",
+        ]
+        for impact in policy.file_impacts[:60]:
+            lines.append(f"- {impact.action}: {impact.path}")
+        return "\n".join(lines) + "\n"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def compose_rich_agent_context_pack(
+    *,
+    goal: str,
+    workspace: str = "",
+    project_id: int | None = None,
+    project_key: str | None = None,
+    repository_id: str | int | None = None,
+    work_item_id: int | None = None,
+    db: Any = None,
+    max_chars: int = 6000,
+) -> dict[str, Any]:
+    """The SAME provenance-aware Project Intelligence pipeline Ask/Plan use
+    (ProjectIntelligenceService + MentrixContextEngine) -- not the thinner,
+    independently-implemented compose_coding_agent_context below -- so the
+    Coder/Tester/Debugger roles see the same Lattice/knowledge/blueprint
+    context a human already reviewed via Ask/Plan for this repository, not
+    a separately-assembled approximation of it. See
+    ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phases C and D.
+
+    Same shape as compose_context_pack() (knowledge/lattice_hits/
+    lattice_indexed/blueprint/text) so a Mission's "Context Used" can be
+    rendered with the exact same component Ask/Plan already use, not a
+    second display concept -- see mentrix_lead.py / coding_engine_mentrix.py
+    callers, which persist this dict on the run/mission for that purpose.
+
+    Returns an empty-but-well-shaped dict (never raises) if Project
+    Intelligence is unavailable -- callers fall back to
+    compose_coding_agent_context, so a build is never blocked on this.
+    """
+    meta: dict[str, Any] = {
+        "knowledge": False,
+        "lattice_hits": 0,
+        "lattice_indexed": False,
+        # The real canonical state, not just the indexed/not-indexed
+        # collapse -- a UI that only has the boolean renders NOT_INDEXED for
+        # NOT_APPLICABLE, INDEXING and STALE alike (finding F6).
+        "lattice_state": "NOT_APPLICABLE",
+        "blueprint": False,
+        "project_key": (project_key or "").strip() or None,
+        "text": "",
+    }
+    own_session = False
+    if db is None:
+        try:
+            from app.infrastructure.database import SessionLocal
+
+            db = SessionLocal()
+            own_session = True
+        except Exception:  # noqa: BLE001
+            return meta
+    try:
+        from app.services.work_items.context_engine import MentrixContextEngine
+        from app.services.work_items.project_intelligence import ProjectIntelligenceService
+
+        rid: int | None = None
+        if repository_id is not None:
+            try:
+                rid = int(repository_id)
+            except (TypeError, ValueError):
+                rid = None
+
+        pk = (project_key or "").strip()
+        if not pk and rid is not None:
+            # A Mission knows its repository but not the Lattice key the
+            # Lattice page indexed under. Without deriving it here the
+            # snapshot below returns NOT_APPLICABLE and the Mission reports
+            # lattice_indexed=false against a READY graph -- finding F6.
+            from app.services.lattice.indexer import project_key_for_repository
+
+            pk = project_key_for_repository(db, rid)
+            if pk:
+                meta["project_key"] = pk
+
+        snap = ProjectIntelligenceService().snapshot(
+            project_id=project_id,
+            project_key=pk,
+            repository_id=rid,
+            db=db,
+            query=goal,
+        )
+        file_items = _workspace_grep_items(workspace, goal, repository_id=str(rid or "")) if workspace else []
+        pack = MentrixContextEngine().build(
+            work_item_id=work_item_id,
+            repository_id=rid,
+            goal=goal,
+            knowledge_hits=snap.knowledge,
+            memory_hits=snap.memory,
+            lattice_hits=list((snap.lattice or {}).get("hits") or []),
+            blueprint_snippet=str((snap.blueprint or {}).get("snippet") or ""),
+            extra_items=file_items,
+        )
+        text = pack.text_blob()
+        contract_block = _authorized_write_contract_block(work_item_id, db)
+        if contract_block:
+            text = f"{contract_block}\n{text}"
+        if len(text) > max_chars:
+            text = text[: max_chars - 20] + "\n…(truncated)"
+        lattice_hits = list((snap.lattice or {}).get("hits") or [])
+        lat = snap.lattice or {}
+        state = str(lat.get("status") or lat.get("state") or "").strip().upper() or "NOT_APPLICABLE"
+        meta.update(
+            {
+                "knowledge": bool(snap.knowledge),
+                "lattice_hits": len(lattice_hits),
+                "lattice_indexed": state == "READY",
+                "lattice_state": state,
+                "blueprint": bool((snap.blueprint or {}).get("snippet")),
+                "text": text,
+            }
+        )
+        return meta
+    except Exception:  # noqa: BLE001
+        return meta
+    finally:
+        if own_session:
+            try:
+                db.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
+def compose_rich_agent_context(**kwargs: Any) -> str:
+    """Text-only view of compose_rich_agent_context_pack(), for callers that
+    only need the prompt text (see coding_engine_mentrix.py's start_run)."""
+    return str(compose_rich_agent_context_pack(**kwargs).get("text") or "")
+
+
 def compose_coding_agent_context(
     *,
     goal: str,

@@ -44,6 +44,24 @@ class RuntimeEvent:
     status: str = ""
     duration_ms: int | None = None
     evidence_refs: list[str] = field(default_factory=list)
+    # CP-08 -- the exact Mission/EventStream telemetry fields the Model
+    # Router mandate requires: phase/role identify *why* a model was
+    # needed, provider/model/routing_reason record *what* got picked and
+    # why, and the token/cost/latency fields make every LLM call's real
+    # cost auditable instead of only visible in a separate DB table
+    # (token_tracker.TokenLog) with no link back to the Mission that
+    # caused it. All default to "unset" so every pre-CP-08 _emit() call
+    # (the vast majority of RuntimeEvents -- tool_start/tool_end/etc, which
+    # have no model call associated with them at all) is unaffected.
+    role: str = ""
+    provider: str = ""
+    model: str = ""
+    routing_reason: str = ""
+    context_budget: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    estimated_cost: float = 0.0
 
 
 class CodingAgentRuntime(Protocol):

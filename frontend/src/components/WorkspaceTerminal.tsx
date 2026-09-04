@@ -37,6 +37,11 @@ function joinCwd(root: string, cwdRel: string): string {
  * process lifecycle from whatever the human types into the interactive
  * shell above it. Switching the Explorer root does not retarget an existing
  * terminal.
+ *
+ * Every session's RealTerminal stays mounted for the session's whole
+ * lifetime (only visibility toggles on tab switch) -- unmounting on switch
+ * would close and respawn that session's real shell process every time,
+ * losing scrollback and any running foreground command.
  */
 export default function WorkspaceTerminal({
   workspaceRoot,
@@ -283,7 +288,7 @@ export default function WorkspaceTerminal({
           ) : null}
         </div>
       ) : null}
-      <div className="flex-1 min-h-0" data-testid="workspace-terminal-output">
+      <div className="relative flex-1 min-h-0" data-testid="workspace-terminal-output">
         {!root ? (
           <div className="p-3 text-amber-200/90 space-y-2" data-testid="workspace-terminal-no-root">
             <p>A real terminal needs a workspace root. Input stays disabled until one is attached.</p>
@@ -300,7 +305,17 @@ export default function WorkspaceTerminal({
             </Link>
           </div>
         ) : (
-          <RealTerminal key={key} workspaceRoot={root} label={label} />
+          (sessions && sessions.length ? sessions : [{ id: "default", rootPath: root, label, repoId: -1 }]).map(
+            (s) => (
+              <div
+                key={s.id}
+                className="absolute inset-0"
+                style={{ visibility: s.id === key ? "visible" : "hidden" }}
+              >
+                <RealTerminal workspaceRoot={s.rootPath || root} label={s.label || label} />
+              </div>
+            ),
+          )
         )}
       </div>
       <div

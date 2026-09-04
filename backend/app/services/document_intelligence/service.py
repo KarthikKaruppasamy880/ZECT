@@ -5,6 +5,7 @@ No second RAG/vector/memory system. OCR/XLSX/image-layout remain honestly PARTIA
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 from xml.etree import ElementTree as ET
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.scopes import PROJECT_SHARED, USER_PRIVATE
@@ -29,7 +31,7 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 # already did -- the Developer composer's @file-attachment picker needs to
 # accept source/config/log files, not just prose documents.
 _PLAIN_TEXT_EXT = {
-    ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".log",
+    ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".log", ".xml",
     ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".sql", ".sh", ".ps1",
 }
 ALLOWED_EXT = _PLAIN_TEXT_EXT | {".docx", ".pdf", ".pptx"}
@@ -283,6 +285,8 @@ def ingest_document(
     mime_type: str = "",
     sensitivity: str = "INTERNAL",
     replace_artifact_id: int | None = None,
+    work_item_id: int | None = None,
+    _retry: int = 0,
 ) -> dict[str, Any]:
     if user_id is None:
         raise ValueError("user_required")
@@ -315,6 +319,8 @@ def ingest_document(
         status="PARSING",
         is_current=True,
         bytes_size=len(data),
+        kind="document",
+        work_item_id=work_item_id,
     )
     db.add(art)
     db.flush()
@@ -362,7 +368,16 @@ def ingest_document(
     root = documents_root() / f"u{user_id}" / f"a{art.id}"
     root.mkdir(parents=True, exist_ok=True)
 
-    if cv and scope == PROJECT_SHARED:
+    # CP-03 (finding K1): reuse must apply to every scope, not just
+    # PROJECT_SHARED -- USER_PRIVATE is the scope essentially every
+    # ASK-composer upload uses, and excluding it here is exactly what left
+    # a second identical upload falling through to the unconditional INSERT
+    # below, colliding with uq_doc_content_version_identity. The clone-chunks
+    # logic underneath is already scope-agnostic (owner_user_id, via
+    # _version_owner_key, already isolates USER_PRIVATE versions per user --
+    # widening this condition cannot let one user's content leak into
+    # another's).
+    if cv:
         reused = True
         art.content_version_id = cv.id
         art.status = "READY"
@@ -536,8 +551,35 @@ def ingest_document(
         original_path=str(orig),
         partial_capabilities=list(dict.fromkeys(list(parsed.partial) + (["xlsx"] if "xlsx" in PARTIAL_CAPS else []))),
     )
-    db.add(cv)
-    db.flush()
+    try:
+        db.add(cv)
+        db.flush()
+    except IntegrityError:
+        # CP-03: a concurrent upload of the exact same content (same scope +
+        # project + owner + sha) won the race and committed its own
+        # DocumentContentVersion between our find_reusable_content_version()
+        # lookup above and this flush -- the DB's own unique index is the
+        # only thing that can catch this race with certainty (a Python-level
+        # check-then-insert can never fully close it). Roll back this
+        # attempt and retry once from scratch: the retry's lookup will now
+        # find the winner's row and take the reuse path above instead of
+        # colliding again.
+        db.rollback()
+        if _retry >= 2:
+            raise
+        return ingest_document(
+            db,
+            user_id=user_id,
+            filename=filename,
+            data=data,
+            project_id=project_id,
+            scope=scope,
+            mime_type=mime_type,
+            sensitivity=sensitivity,
+            replace_artifact_id=replace_artifact_id,
+            work_item_id=work_item_id,
+            _retry=_retry + 1,
+        )
     art.content_version_id = cv.id
 
     chunks = chunk_markdown(parsed.markdown)
@@ -625,6 +667,8 @@ def serialize_artifact(
         "knowledge_entry_id": art.knowledge_entry_id,
         "bytes_size": art.bytes_size,
         "error_message": art.error_message or "",
+        "kind": art.kind or "document",
+        "work_item_id": art.work_item_id,
         "reused_shared_version": reused,
         "parser_name": cv.parser_name if cv else "",
         "parser_version": cv.parser_version if cv else "",
@@ -655,6 +699,113 @@ def get_accessible_artifact(
             return art
         return None
     return None
+
+
+_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_IMAGE_MIME_TO_EXT = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+
+
+def ingest_image(
+    db: Session,
+    *,
+    user_id: int,
+    filename: str,
+    data: bytes,
+    mime_type: str = "",
+    project_id: int | None = None,
+    work_item_id: int | None = None,
+) -> dict[str, Any]:
+    """A pasted/attached screenshot, stored durably (raw bytes, no parsing --
+    there is nothing to chunk) so PLAN/AGENT can reuse it without asking the
+    user to re-attach. Deliberately bypasses ingest_document's
+    parse/version/dedup machinery, which exists for extracting markdown from
+    prose documents, not for vision content."""
+    if user_id is None:
+        raise ValueError("user_required")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise ValueError("file_too_large")
+    ext = Path(filename).suffix.lower() or _IMAGE_MIME_TO_EXT.get(mime_type, "")
+    if ext not in _IMAGE_EXT:
+        raise ValueError(f"unsupported_image_format:{ext or mime_type}")
+
+    art = DocumentArtifact(
+        user_id=user_id,
+        project_id=project_id,
+        scope=USER_PRIVATE,
+        filename=filename[:500],
+        mime_type=mime_type or f"image/{ext.lstrip('.')}",
+        content_sha256=sha256_bytes(data),
+        sensitivity="INTERNAL",
+        status="READY",
+        is_current=True,
+        bytes_size=len(data),
+        kind="image",
+        work_item_id=work_item_id,
+    )
+    db.add(art)
+    db.flush()
+
+    root = documents_root() / f"u{user_id}" / f"a{art.id}"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"original{ext}").write_bytes(data)
+
+    db.commit()
+    db.refresh(art)
+    return serialize_artifact(art)
+
+
+def read_image_data_url(db: Session, *, artifact_id: int, user_id: int) -> dict[str, Any]:
+    art = get_accessible_artifact(db, artifact_id, user_id)
+    if not art or (art.kind or "document") != "image":
+        raise ValueError("image_not_found")
+    root = documents_root() / f"u{art.user_id}" / f"a{art.id}"
+    matches = sorted(root.glob("original.*")) if root.is_dir() else []
+    if not matches:
+        raise ValueError("image_not_found")
+    data = matches[0].read_bytes()
+    b64 = base64.b64encode(data).decode("ascii")
+    mime = art.mime_type or "image/png"
+    return {
+        "artifact_id": art.id,
+        "filename": art.filename,
+        "mime_type": mime,
+        "data_url": f"data:{mime};base64,{b64}",
+    }
+
+
+def link_artifact_to_work_item(db: Session, *, artifact_id: int, user_id: int, work_item_id: int) -> dict[str, Any]:
+    """An ASK attachment uploaded before the WorkItem existed (the very first
+    turn) is linked retroactively once developerAsk() resolves and a real
+    work_item_id is known -- see MentrixCodingAgentPanel's useComposerAttachments
+    usage. A no-op if it's already linked to this same work item."""
+    art = get_accessible_artifact(db, artifact_id, user_id)
+    if not art:
+        raise ValueError("document_not_found")
+    if art.work_item_id and art.work_item_id != work_item_id:
+        raise ValueError("already_linked_to_another_work_item")
+    art.work_item_id = work_item_id
+    db.commit()
+    db.refresh(art)
+    return serialize_artifact(art)
+
+
+def list_work_item_attachments(db: Session, *, work_item_id: int) -> list[dict[str, Any]]:
+    """Everything attached across ASK/PLAN/AGENT for this WorkItem -- the one
+    list every pane reads, so an attachment made in ASK is visible in PLAN
+    and AGENT without re-upload."""
+    rows = (
+        db.query(DocumentArtifact)
+        .filter(DocumentArtifact.work_item_id == work_item_id, DocumentArtifact.is_current == True)  # noqa: E712
+        .order_by(DocumentArtifact.created_at.asc())
+        .all()
+    )
+    return [serialize_artifact(a) for a in rows]
 
 
 def retrieve_document_context(

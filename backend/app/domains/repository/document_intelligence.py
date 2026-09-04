@@ -1,12 +1,16 @@
 """ZECT Document Intelligence API — upload/parse/retrieve with provenance."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.core.scopes import PROJECT_SHARED, USER_PRIVATE
 from app.infrastructure.auth.deps import CurrentUser, get_current_user
@@ -16,6 +20,10 @@ from app.models import DocumentArtifact, DocumentChunk, DocumentContentVersion
 from app.services.document_intelligence.service import (
     get_accessible_artifact,
     ingest_document,
+    ingest_image,
+    link_artifact_to_work_item,
+    list_work_item_attachments,
+    read_image_data_url,
     retrieve_document_context,
     serialize_artifact,
 )
@@ -40,6 +48,7 @@ async def upload_document(
     scope: str = Form(USER_PRIVATE),
     sensitivity: str = Form("INTERNAL"),
     replace_artifact_id: Optional[int] = Form(None),
+    work_item_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -73,10 +82,98 @@ async def upload_document(
             mime_type=file.content_type or "",
             sensitivity=sensitivity,
             replace_artifact_id=replace_artifact_id,
+            work_item_id=work_item_id,
         )
     except ValueError as e:
         raise HTTPException(400, detail=str(e)) from e
+    except IntegrityError as e:
+        # CP-03 (finding K1): never let a raw SQL/constraint-name/filesystem
+        # path leak into the ASK/PLAN composer -- log the real detail
+        # server-side only. ingest_document() already retries a genuine
+        # content-hash race internally; reaching here means retries were
+        # exhausted or an unrelated integrity error occurred.
+        logger.exception("document upload hit a database conflict")
+        raise HTTPException(409, detail="attachment_conflict: please retry the upload") from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("document upload failed")
+        raise HTTPException(500, detail="attachment_upload_failed") from e
     return {"ok": True, "artifact": out, "permission": perm}
+
+
+@router.post("/upload-image", response_model=None)
+@require_authentication
+async def upload_image_attachment(
+    file: UploadFile = File(...),
+    project_id: Optional[int] = Form(None),
+    work_item_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """A pasted/attached screenshot -- durable, not just an in-memory data
+    URL, so it survives a refresh and is visible to PLAN/AGENT without the
+    user re-pasting it."""
+    uid = _uid(current_user)
+    perm = check_tool_permission(db, "document_upload", user_id=uid, project_id=project_id)
+    if not perm.get("allowed") and perm.get("level") == "never":
+        raise HTTPException(403, detail={"error": "permission_denied", **perm})
+
+    from app.services.document_intelligence.service import MAX_UPLOAD_BYTES
+
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail="file_too_large")
+    try:
+        out = ingest_image(
+            db,
+            user_id=uid,
+            filename=file.filename or "screenshot.png",
+            data=data,
+            mime_type=file.content_type or "",
+            project_id=project_id,
+            work_item_id=work_item_id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("image attachment upload failed")
+        raise HTTPException(500, detail="attachment_upload_failed") from e
+    return {"ok": True, "artifact": out}
+
+
+@router.get("/{artifact_id}/raw")
+@require_authentication
+def get_raw_image(
+    artifact_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    uid = _uid(current_user)
+    try:
+        return {"ok": True, **read_image_data_url(db, artifact_id=artifact_id, user_id=uid)}
+    except ValueError as e:
+        raise HTTPException(404, detail=str(e)) from e
+
+
+class LinkAttachmentIn(BaseModel):
+    work_item_id: int
+
+
+@router.post("/{artifact_id}/link")
+@require_authentication
+def link_attachment(
+    artifact_id: int,
+    body: LinkAttachmentIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Retroactively attach an artifact (usually uploaded before a WorkItem
+    existed, e.g. the first ASK turn) to a WorkItem, once one is known."""
+    uid = _uid(current_user)
+    try:
+        out = link_artifact_to_work_item(db, artifact_id=artifact_id, user_id=uid, work_item_id=body.work_item_id)
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
+    return {"ok": True, "artifact": out}
 
 
 @router.get("")

@@ -14,8 +14,12 @@ import {
   X,
 } from "lucide-react";
 import ModelSelector from "@/components/ModelSelector";
+import MissionActivityFeed from "@/components/MissionActivityFeed";
 import { MentionAutocomplete, MentionContextStrip } from "@/components/MentionComposerAddons";
+import { ComposerAttachmentBar } from "@/components/ComposerAttachmentBar";
 import { hasMentions } from "@/lib/mentions";
+import { canonicalLatticeState, latticeHeaderLabel } from "@/lib/contextUsed";
+import { useComposerAttachments, imageFilesFromClipboard } from "@/hooks/useComposerAttachments";
 import {
   codingAgentApprove,
   codingAgentApproveGit,
@@ -24,30 +28,35 @@ import {
   codingAgentCancelMission,
   codingAgentCreateMission,
   codingAgentCreateSession,
+  codingAgentGetMission,
+  codingAgentGetSession,
   codingAgentResolveMentions,
   codingAgentResumeMission,
   codingAgentRetryMission,
   codingAgentStream,
+  codingAgentGetPlan,
   codingAgentListPlans,
   codingAgentSavePlan,
   developerAsk,
   developerAskHistory,
   developerPlan,
   getDocumentMarkdown,
+  listWorkItemAttachments,
   mentrixStartRun,
-  uploadDocument,
+  type ApiRequestError,
   type CodingAgentMission,
   type CodingAgentMissionRoot,
   type ContextPack,
   type DeveloperAskTurn,
   type MentrixCodingAgentEvent,
 } from "@/lib/api";
+import { WorkItemAttachmentsStrip } from "@/components/WorkItemAttachmentsStrip";
 
 type Props = {
   workspaceRoot: string;
   model?: string;
   onModelChange?: (id: string) => void;
-  onOpenPath?: (relativeOrAbsolutePath: string) => void;
+  onOpenPath?: (relativeOrAbsolutePath: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
   initialGoal?: string;
@@ -55,7 +64,17 @@ type Props = {
   projectId?: number | null;
   workItemId?: number | null;
   roots?: CodingAgentMissionRoot[];
+  /** The repo the user actually has selected in the workspace chrome right
+   *  now. Ask/Plan must send this as the primary repository_id -- without
+   *  it they fall back to roots[0], which is fetch order, not user intent,
+   *  and silently binds a new WorkItem to the wrong repo (finding A2). */
+  activeRepoId?: number | null;
   onWorkItemResolved?: (id: number) => void;
+  /** A Mission id from the URL, the persisted session or the WorkItem, so the
+   *  pane re-attaches to a Mission that is already running instead of
+   *  offering to start a new one (finding F4). */
+  missionId?: string | null;
+  onMissionChanged?: (id: string) => void;
 };
 
 type Line = {
@@ -81,15 +100,27 @@ export default function MentrixCodingAgentPanel({
   projectId = null,
   workItemId = null,
   roots = [],
+  activeRepoId = null,
   onWorkItemResolved,
+  missionId = null,
+  onMissionChanged,
 }: Props) {
   const [tab, setTab] = useState<Tab>("agent");
   const [chatModel, setChatModel] = useState(model);
   const [handoffMission, setHandoffMission] = useState<CodingAgentMission | null>(null);
+  const [askSeed, setAskSeed] = useState<AskToPlanSeed | null>(null);
 
   useEffect(() => {
     setChatModel(model);
   }, [model]);
+
+  // The seed is delivered once, at the exact mount PlanPane makes when this
+  // switch happens (both state updates are batched into the same render).
+  // Clearing it right after means a later, unrelated visit to PLAN never
+  // silently overwrites the user's own edits with stale ASK content.
+  useEffect(() => {
+    if (tab === "plan") setAskSeed(null);
+  }, [tab]);
 
   return (
     <div
@@ -101,7 +132,7 @@ export default function MentrixCodingAgentPanel({
           <Bot className="h-3.5 w-3.5 text-teal-700" />
           Mentrix Coding Agent
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <button
             type="button"
             className={`rounded px-2 py-0.5 text-[10px] ${tab === "ask" ? "bg-teal-700 text-white" : "text-slate-600"}`}
@@ -155,15 +186,21 @@ export default function MentrixCodingAgentPanel({
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
-          onCreatePlan={() => setTab("plan")}
+          activeRepoId={activeRepoId}
+          onCreatePlan={(seed) => {
+            setAskSeed(seed);
+            setTab("plan");
+          }}
           onWorkItemResolved={onWorkItemResolved}
         />
       ) : tab === "plan" ? (
         <PlanPane
           goalSeed={initialGoal}
+          askSeed={askSeed}
           workItemId={workItemId}
           projectId={projectId}
           roots={roots}
+          activeRepoId={activeRepoId}
           workspaceRoot={workspaceRoot}
           model={chatModel}
           onApproved={(mission) => {
@@ -171,6 +208,7 @@ export default function MentrixCodingAgentPanel({
             setTab("agent");
           }}
           onFilesChanged={onFilesChanged}
+          onOpenPath={onOpenPath}
         />
       ) : tab === "history" ? (
         <HistoryPane
@@ -189,6 +227,8 @@ export default function MentrixCodingAgentPanel({
           roots={roots}
           workspaceRoot={workspaceRoot}
           seedMission={handoffMission}
+          missionId={missionId}
+          onMissionChanged={onMissionChanged}
           onOpenPath={onOpenPath}
           onFilesChanged={onFilesChanged}
           onTestOutput={onTestOutput}
@@ -205,6 +245,8 @@ function MissionPane({
   roots,
   workspaceRoot,
   seedMission,
+  missionId,
+  onMissionChanged,
   onOpenPath,
   onFilesChanged,
   onTestOutput,
@@ -215,7 +257,9 @@ function MissionPane({
   roots: CodingAgentMissionRoot[];
   workspaceRoot: string;
   seedMission?: CodingAgentMission | null;
-  onOpenPath?: (path: string) => void;
+  missionId?: string | null;
+  onMissionChanged?: (id: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   onTestOutput?: (text: string) => void;
 }) {
@@ -226,10 +270,52 @@ function MissionPane({
   const [error, setError] = useState<string | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [shipNote, setShipNote] = useState<string | null>(null);
+  const [reattaching, setReattaching] = useState(false);
+  const attach = useComposerAttachments(projectId, workItemId);
 
   useEffect(() => {
     if (seedMission) setMission(seedMission);
   }, [seedMission]);
+
+  // A Mission lives on the server, but the pane only ever held it in React
+  // state, so navigating away and back showed an empty "start a mission"
+  // form while the real Mission was still running (finding F4). Re-attach
+  // from the durable id the page hands down.
+  const knownMissionId = mission?.id || "";
+  useEffect(() => {
+    const wanted = (missionId || "").trim();
+    if (!wanted || wanted === knownMissionId) return;
+    let cancelled = false;
+    setReattaching(true);
+    void codingAgentGetMission(wanted)
+      .then((m) => {
+        if (cancelled || !m?.id) return;
+        setMission(m);
+        const files = m.files || [];
+        if (files.length) onFilesChanged?.(files);
+      })
+      .catch((err: ApiRequestError) => {
+        // A stale id (mission expired, or a different machine) must not
+        // block starting a new mission -- leave the form usable.
+        // CP-09: a confirmed 404 must also clear the stale id at its
+        // source (the persisted session/WorkItem pointer this `missionId`
+        // prop derives from) -- otherwise it keeps getting handed back in
+        // on every future mount, silently retrying the same dead mission.
+        if (err?.status === 404) onMissionChanged?.("");
+      })
+      .finally(() => {
+        if (!cancelled) setReattaching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missionId, knownMissionId]);
+
+  useEffect(() => {
+    if (knownMissionId) onMissionChanged?.(knownMissionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [knownMissionId]);
 
   useEffect(() => {
     if (!mission?.tests) return;
@@ -278,15 +364,24 @@ function MissionPane({
         return;
       }
     }
+    const docBlob = attach.documentContextBlob();
+    const localIds = new Set([
+      ...attach.attachments.map((a) => a.id),
+      ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+    ]);
+    const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+    const combinedBlob = [docBlob, durableBlob].filter(Boolean).join("\n\n");
+    const goalWithAttachments = combinedBlob ? `${g}\n\n${combinedBlob}` : g;
     await run(() =>
       codingAgentCreateMission({
-        goal: g,
+        goal: goalWithAttachments,
         project_id: projectId,
         work_item_id: workItemId,
         roots,
         patches_by_repo: patches,
       }),
     );
+    attach.reset();
   };
 
   const phase = mission?.phase || "idle";
@@ -306,18 +401,42 @@ function MissionPane({
           {mission?.status || "idle"} · no auto-merge
         </span>
       </div>
+      <ContextUsedStrip used={mission?.context_used} />
+      {reattaching ? (
+        <p
+          className="px-3 pt-1 text-[10px] text-slate-500"
+          data-testid="mentrix-coding-agent-mission-reattaching"
+        >
+          Re-attaching to mission {missionId}…
+        </p>
+      ) : null}
 
       <div className="min-h-0 flex-1 space-y-2 overflow-auto px-3 py-2">
         <label className="block text-[10px] uppercase text-slate-400">Goal</label>
         <textarea
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
+          onPaste={(e) => {
+            const imgs = imageFilesFromClipboard(e);
+            if (imgs.length) void attach.attachFiles(imgs);
+          }}
           disabled={busy}
           placeholder="Describe the change. Approve &amp; Build implements it in a worktree, then this tab ships the PR. Pull-latest on clones does not start a mission."
           className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
           rows={2}
           data-testid="mentrix-coding-agent-mission-goal"
         />
+        <ComposerAttachmentBar
+          attachments={attach.attachments}
+          images={attach.images}
+          attaching={attach.attaching}
+          onAttachFiles={(files) => void attach.attachFiles(files)}
+          onRemoveAttachment={attach.removeAttachment}
+          onRemoveImage={attach.removeImage}
+          testIdPrefix="mentrix-coding-agent-mission"
+        />
+        <WorkItemAttachmentsStrip workItemId={workItemId} />
+        {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
         <details className="rounded border border-slate-100 px-2 py-1">
           <summary
             className="cursor-pointer text-[10px] text-slate-500"
@@ -439,14 +558,14 @@ function MissionPane({
         ) : null}
 
         <section data-testid="mentrix-coding-agent-evidence">
-          <h4 className="text-[10px] font-semibold uppercase text-slate-500">Evidence</h4>
-          <ul className="max-h-24 overflow-auto text-[11px] text-slate-600">
-            {evidence.slice(-8).map((ev, i) => (
-              <li key={`${ev.at}-${i}`}>
-                {ev.event}: {ev.message}
-              </li>
-            ))}
-          </ul>
+          <h4 className="text-[10px] font-semibold uppercase text-slate-500">Activity</h4>
+          <MissionActivityFeed
+            missionId={mission?.id || null}
+            initialEvents={evidence}
+            executionState={mission?.execution_state}
+            onOpenPath={onOpenPath}
+            onShowDiff={() => setShowDiff(true)}
+          />
         </section>
       </div>
 
@@ -588,42 +707,154 @@ function repoIdsFromRoots(roots: CodingAgentMissionRoot[]): number[] {
   return roots.map((r) => r.id).filter((id) => Number.isFinite(id) && id > 0);
 }
 
+/** The user's active-repo selection must win as the primary repository_id
+ *  whenever it's one of the authorized roots -- ids[0] is fetch order, not
+ *  user intent, and is what silently bound new WorkItems to the wrong repo
+ *  (finding A2 / CP-01). Falls back to ids[0] only when there's no active
+ *  selection or it isn't one of the authorized roots. */
+function primaryRepoId(ids: number[], activeRepoId: number | null | undefined): number | undefined {
+  if (activeRepoId != null && ids.includes(activeRepoId)) return activeRepoId;
+  return ids[0];
+}
+
+/** No model-capability registry exists in ZECT today (see ModelSelector) --
+ * this is a soft, best-effort hint, not an enforced gate. A false negative
+ * just means a missed warning; the real failure mode (a genuinely
+ * non-vision model) still surfaces the provider's own error either way. */
+const _VISION_CAPABLE_HINTS = ["gpt-4o", "gpt-4.1", "gpt-5", "o1", "o3", "claude-3", "claude-opus", "claude-sonnet", "claude-haiku", "gemini", "grok"];
+
+function isLikelyVisionCapable(modelId: string): boolean {
+  const m = (modelId || "").toLowerCase();
+  return _VISION_CAPABLE_HINTS.some((hint) => m.includes(hint));
+}
+
+/** Folds in whatever is durably attached to this WorkItem from ANY pane
+ * (not just this one's own local attach state), so an ASK attachment is
+ * actually usable in PLAN/AGENT, not merely visible. `excludeIds` skips
+ * attachments this pane's own local `useComposerAttachments` instance
+ * already uploaded THIS turn, so their content isn't folded in twice.
+ * Images have no text form -- Mission/PLAN goal text has no vision
+ * channel -- so they're only noted by filename here; they remain usable as
+ * real vision content wherever ASK's own `images` param already reaches
+ * the model. */
+async function fetchDurableAttachmentBlob(workItemId: number | null | undefined, excludeIds: Set<number>): Promise<string> {
+  if (workItemId == null) return "";
+  try {
+    const { attachments } = await listWorkItemAttachments(workItemId);
+    const pending = attachments.filter((a) => !excludeIds.has(a.id));
+    if (!pending.length) return "";
+    const parts: string[] = [];
+    for (const a of pending) {
+      if (a.kind === "image") {
+        parts.push(`[attachment:${a.filename}] (image attached earlier in this Mission)`);
+        continue;
+      }
+      try {
+        const doc = await getDocumentMarkdown(a.id);
+        if (doc.markdown) parts.push(`[attachment:${a.filename}]\n${doc.markdown}`);
+      } catch {
+        /* one unreadable attachment must not block the rest */
+      }
+    }
+    return parts.join("\n\n");
+  } catch {
+    return "";
+  }
+}
+
+type ContextUsedLite = {
+  knowledge?: boolean;
+  lattice_hits?: number;
+  lattice_indexed?: boolean;
+  lattice_state?: string;
+  blueprint?: boolean;
+};
+
 function contextFromDeveloperPi(pi?: {
   lattice?: { status?: string; state?: string; hits?: unknown[] };
   knowledge?: unknown[];
   blueprint?: { snippet?: string };
-} | null): { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } {
+} | null): ContextUsedLite {
   const hits = Array.isArray(pi?.lattice?.hits) ? pi.lattice.hits.length : 0;
-  const status = String(pi?.lattice?.status || pi?.lattice?.state || "").toUpperCase();
+  const state = canonicalLatticeState(pi?.lattice?.status || pi?.lattice?.state);
   return {
     knowledge: Array.isArray(pi?.knowledge) && pi.knowledge.length > 0,
     lattice_hits: hits,
-    lattice_indexed: ["READY", "INDEXED", "OK"].includes(status) || hits > 0,
+    lattice_indexed: state === "READY",
+    lattice_state: state,
     blueprint: Boolean(pi?.blueprint?.snippet),
   };
 }
 
-function ContextUsedStrip({ used }: { used?: { knowledge?: boolean; lattice_hits?: number; lattice_indexed?: boolean; blueprint?: boolean } | null }) {
+function contextUsedSummaryText(used?: ContextUsedLite | null): string {
+  if (!used) return "";
+  // The same canonical state the Developer header shows, so a Mission and
+  // the header can never disagree about the Lattice (finding F6). Falling
+  // back to the boolean keeps older persisted context packs readable.
+  const state = canonicalLatticeState(
+    used.lattice_state || (used.lattice_indexed ? "READY" : "NOT_INDEXED"),
+  );
+  const lattice =
+    state === "READY" && used.lattice_hits
+      ? `${latticeHeaderLabel(state)} · ${used.lattice_hits} hits`
+      : latticeHeaderLabel(state);
+  const parts = [lattice];
+  if (used.knowledge) parts.push("Knowledge");
+  if (used.blueprint) parts.push("Blueprint");
+  return parts.join(" · ");
+}
+
+function ContextUsedStrip({ used }: { used?: ContextUsedLite | null }) {
   if (!used) return null;
-  const lattice = used.lattice_indexed
-    ? used.lattice_hits
-      ? `Lattice ${used.lattice_hits} hits`
-      : "Lattice indexed"
-    : "Lattice NOT INDEXED";
   return (
     <p className="mt-1 text-[10px] text-slate-500" data-testid="mentrix-coding-agent-context-used">
-      Context used · {lattice}
-      {used.knowledge ? " · Knowledge" : ""}
-      {used.blueprint ? " · Blueprint" : ""}
+      Context used · {contextUsedSummaryText(used)}
     </p>
   );
 }
 
+/** Everything ASK gathered for one "Create Plan" click -- so PLAN starts
+ * from the requirement, not a blank textarea the user has to re-paste into.
+ * `version` makes each click distinct even if the underlying question is
+ * unchanged, so the parent can tell "a new handoff happened" from "PlanPane
+ * remounted for an unrelated reason". */
+type AskToPlanSeed = {
+  version: number;
+  question: string;
+  turns: DeveloperAskTurn[];
+  evidence: string;
+  attachmentBlob: string;
+  findings: string;
+};
+
+function buildAskSeedMarkdown(seed: AskToPlanSeed): string {
+  const sections: string[] = ["## Requirements from ASK", ""];
+  if (seed.turns.length) {
+    sections.push("### Conversation");
+    for (const t of seed.turns) {
+      sections.push(`**Q:** ${t.question}`, `**A:** ${t.answer}`, "");
+    }
+  }
+  if (seed.evidence) {
+    sections.push("### Evidence", seed.evidence, "");
+  }
+  if (seed.attachmentBlob) {
+    sections.push("### Attached documents", seed.attachmentBlob, "");
+  }
+  if (seed.findings) {
+    sections.push("### Findings", seed.findings, "");
+  }
+  sections.push("## Plan", "");
+  return sections.join("\n");
+}
+
 function AskPane({
   workspaceRoot,
+  model,
   workItemId,
   projectId,
   roots,
+  activeRepoId,
   onCreatePlan,
   onWorkItemResolved,
 }: {
@@ -632,7 +863,8 @@ function AskPane({
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
-  onCreatePlan: () => void;
+  activeRepoId?: number | null;
+  onCreatePlan: (seed: AskToPlanSeed) => void;
   onWorkItemResolved?: (id: number) => void;
 }) {
   const [q, setQ] = useState("");
@@ -641,7 +873,31 @@ function AskPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
-  void workspaceRoot;
+  const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const qRef = useRef<HTMLTextAreaElement | null>(null);
+  const attach = useComposerAttachments(projectId, workItemId);
+
+  /** Resolve every @mention against real data so ASK sees the same truthful
+   * context PLAN already does -- @mentions in the question are decorative
+   * otherwise. */
+  const resolveMentionBlob = async (): Promise<string> => {
+    if (!hasMentions(q) || !workspaceRoot) return "";
+    try {
+      const { pack } = await codingAgentResolveMentions({
+        text: q,
+        workspace: workspaceRoot,
+        work_item_id: workItemId ?? undefined,
+      });
+      setMentionPack(pack);
+      const resolved = pack.items.filter((i) => i.verification_state !== "unresolved");
+      if (!resolved.length) return "";
+      const parts = resolved.map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`);
+      return `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Question\n\n`;
+    } catch {
+      /* Mention resolution failing must never block Ask. */
+      return "";
+    }
+  };
 
   // Restore the conversation whenever this pane mounts with a known
   // work item -- covers tab-switch (unmount/remount), navigate-away-and-back,
@@ -657,7 +913,17 @@ function AskPane({
     }
     void developerAskHistory(workItemId)
       .then((res) => {
-        if (!cancelled) setTurns(res.turns || []);
+        if (cancelled) return;
+        const turns = res.turns || [];
+        setTurns(turns);
+        // Restore the Context Used strip from the most recent turn's
+        // persisted summary too -- without this it stays blank after a
+        // reload/tab switch until the user asks a brand-new question, even
+        // though the prior turn's context was already computed and is now
+        // durable. Older turns persisted before context_used existed have
+        // no such key -- leave the strip blank rather than guessing.
+        const lastContextUsed = turns[turns.length - 1]?.context_used;
+        if (lastContextUsed) setContextUsed(lastContextUsed);
       })
       .catch(() => {
         /* history is best-effort; a fresh Ask still works without it */
@@ -677,24 +943,40 @@ function AskPane({
     setError(null);
     try {
       const ids = repoIdsFromRoots(roots);
+      const mentionBlob = await resolveMentionBlob();
+      const docBlob = attach.documentContextBlob();
+      const localIds = new Set([
+        ...attach.attachments.map((a) => a.id),
+        ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+      ]);
+      const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+      const combinedBlob = [docBlob, durableBlob].filter(Boolean).join("\n\n");
+      const askedText = `${mentionBlob}${question}${combinedBlob ? `\n\n${combinedBlob}` : ""}`;
+      const images = attach.images.map((i) => i.dataUrl);
       const res = await developerAsk({
-        question,
+        question: askedText,
         project_id: projectId ?? undefined,
         work_item_id: workItemId ?? undefined,
-        repository_id: ids[0],
+        repository_id: primaryRepoId(ids, activeRepoId),
         repository_ids: ids,
+        images: images.length ? images : undefined,
       });
       // Reusing the same work_item_id on every subsequent call (instead of
       // letting the backend spawn a fresh WorkItem each time) is what makes
       // the conversation persist at all -- lift it to the parent once resolved.
       if (res.work_item_id && res.work_item_id !== workItemId) {
         onWorkItemResolved?.(res.work_item_id);
+        // Link any attachment made before this WorkItem existed right now,
+        // using the id from this response directly -- waiting for it to
+        // come back down as a prop would race attach.reset() below.
+        await attach.linkPendingTo(res.work_item_id);
       }
       setTurns((prev) => [
         ...prev,
-        { question, answer: res.answer || "", model: "", offline: false, created_at: null },
+        { question, answer: res.answer || "", model: "", offline: false, image_count: images.length, created_at: null },
       ]);
       setQ("");
+      attach.reset();
       setContextUsed(contextFromDeveloperPi(res.project_intelligence));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ask failed");
@@ -707,12 +989,42 @@ function AskPane({
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-ask">
       <p className="text-[10px] text-slate-500">ASK is Q&amp;A only — this path never edits files. Use PLAN → Approve &amp; Build or Implement chat to change code.</p>
       <textarea
+        ref={qRef}
         value={q}
         onChange={(e) => setQ(e.target.value)}
+        onPaste={(e) => {
+          const imgs = imageFilesFromClipboard(e);
+          if (imgs.length) void attach.attachFiles(imgs);
+        }}
         className="mt-1 min-h-[4rem] rounded border border-slate-200 px-2 py-1"
-        placeholder="Search or explain this workspace…"
+        placeholder="Search or explain this workspace… (paste a screenshot to ask about it) — @file @workspace @problem @workitem …"
         data-testid="mentrix-coding-agent-ask-input"
       />
+      <MentionAutocomplete
+        value={q}
+        onChange={(next, cursor) => {
+          setQ(next);
+          requestAnimationFrame(() => qRef.current?.setSelectionRange(cursor, cursor));
+        }}
+        textareaRef={qRef}
+      />
+      <MentionContextStrip pack={mentionPack} />
+      <ComposerAttachmentBar
+        attachments={attach.attachments}
+        images={attach.images}
+        attaching={attach.attaching}
+        onAttachFiles={(files) => void attach.attachFiles(files)}
+        onRemoveAttachment={attach.removeAttachment}
+        onRemoveImage={attach.removeImage}
+        testIdPrefix="mentrix-coding-agent-ask"
+      />
+      <WorkItemAttachmentsStrip workItemId={workItemId} />
+      {attach.images.length > 0 && !isLikelyVisionCapable(model) ? (
+        <p className="mt-1 text-[10px] text-amber-600" data-testid="mentrix-coding-agent-ask-vision-hint">
+          {model} may not support image attachments — switch to a vision-capable model for reliable results.
+        </p>
+      ) : null}
+      {attach.error ? <p className="mt-1 text-rose-600">{attach.error}</p> : null}
       <div className="mt-2 flex gap-1">
         <button
           type="button"
@@ -725,7 +1037,20 @@ function AskPane({
         </button>
         <button
           type="button"
-          onClick={onCreatePlan}
+          onClick={() => {
+            const evidence = (mentionPack?.items || [])
+              .filter((i) => i.verification_state !== "unresolved")
+              .map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`)
+              .join("\n\n");
+            onCreatePlan({
+              version: Date.now(),
+              question: q.trim() || turns[turns.length - 1]?.question || "",
+              turns,
+              evidence,
+              attachmentBlob: attach.documentContextBlob(),
+              findings: contextUsedSummaryText(contextUsed),
+            });
+          }}
           className="rounded border border-slate-300 px-2 py-1"
           data-testid="mentrix-coding-agent-ask-create-plan"
         >
@@ -760,35 +1085,63 @@ function AskPane({
 
 function PlanPane({
   goalSeed,
+  askSeed,
   workItemId,
   projectId,
   roots,
+  activeRepoId,
   workspaceRoot,
   model,
   onApproved,
   onFilesChanged,
+  onOpenPath,
 }: {
   goalSeed: string;
+  askSeed?: AskToPlanSeed | null;
   workItemId?: number | null;
   projectId?: number | null;
   roots: CodingAgentMissionRoot[];
+  activeRepoId?: number | null;
   workspaceRoot: string;
   model: string;
   onApproved: (mission: CodingAgentMission) => void;
   onFilesChanged?: (paths: string[]) => void;
+  onOpenPath?: (path: string, line?: number) => void;
 }) {
-  const [goal, setGoal] = useState(goalSeed);
-  const [markdown, setMarkdown] = useState("");
+  // Read once at mount -- askSeed is a one-shot handoff (the parent clears
+  // it right after this pane mounts), so a plain prop read here, not an
+  // effect, is what keeps a later unrelated remount from reapplying it.
+  const [goal, setGoal] = useState(() => (askSeed?.question ? askSeed.question : goalSeed));
+  const [markdown, setMarkdown] = useState(() => (askSeed ? buildAskSeedMarkdown(askSeed) : ""));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = String(workItemId || "local");
-  void model;
+  void model; // PLAN never sends images to a model itself -- see AskPane for the vision path.
 
   const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
   const mdRef = useRef<HTMLTextAreaElement | null>(null);
   const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
-  const [attachments, setAttachments] = useState<{ id: number; filename: string; markdown: string }[]>([]);
-  const [attaching, setAttaching] = useState(false);
+  const [planPath, setPlanPath] = useState("");
+  const attach = useComposerAttachments(projectId, workItemId);
+
+  // Reload the saved plan whenever this pane mounts (tab switch, navigate
+  // away and back, reload). Without this the on-disk .plan.md survives but
+  // the editor comes back empty, which reads as "my plan was lost".
+  useEffect(() => {
+    let cancelled = false;
+    void codingAgentGetPlan(`${key}-coding`, workspaceRoot || undefined)
+      .then((saved) => {
+        if (cancelled || !saved?.markdown) return;
+        setMarkdown((current) => (current.trim() ? current : saved.markdown));
+        setPlanPath(saved.path || "");
+      })
+      .catch(() => {
+        /* no saved plan for this work item yet -- start from an empty editor */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key, workspaceRoot]);
 
   /** Resolve every @mention against real data and fold both that and any
    * uploaded attachments into one context blob to prepend to what actually
@@ -810,25 +1163,15 @@ function PlanPane({
         /* Context resolution failing must never block Save/Approve & Build. */
       }
     }
-    for (const a of attachments) parts.push(`[attachment:${a.filename}]\n${a.markdown}`);
+    const docBlob = attach.documentContextBlob();
+    if (docBlob) parts.push(docBlob);
+    const localIds = new Set([
+      ...attach.attachments.map((a) => a.id),
+      ...attach.images.map((i) => i.artifactId).filter((id): id is number => id != null),
+    ]);
+    const durableBlob = await fetchDurableAttachmentBlob(workItemId, localIds);
+    if (durableBlob) parts.push(durableBlob);
     return parts.length ? `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Plan\n\n` : "";
-  };
-
-  const attachFile = async (file: File) => {
-    setAttaching(true);
-    setError(null);
-    try {
-      const { artifact } = await uploadDocument({ file, projectId: projectId ?? undefined });
-      const doc = await getDocumentMarkdown(artifact.id);
-      setAttachments((prev) => [
-        ...prev,
-        { id: artifact.id, filename: file.name, markdown: doc.markdown || "" },
-      ]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Attachment upload failed");
-    } finally {
-      setAttaching(false);
-    }
   };
 
   const save = async () => {
@@ -840,12 +1183,15 @@ function PlanPane({
       // the persisted PLAN.md stays exactly what the user wrote; the
       // resolved blob is only prepended when the mission is actually built.
       await resolveContextAndBuildBlob();
-      await codingAgentSavePlan({
+      const saved = await codingAgentSavePlan({
         work_item_or_run: key,
         title: "coding",
         markdown,
         meta: { workspace: workspaceRoot },
+        workspace: workspaceRoot,
       });
+      setPlanPath(saved.path || "");
+      onFilesChanged?.([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -864,11 +1210,20 @@ function PlanPane({
         goal: g,
         project_id: projectId ?? undefined,
         work_item_id: workItemId ?? undefined,
-        repository_id: ids[0],
+        repository_id: primaryRepoId(ids, activeRepoId),
         repository_ids: ids,
       });
       setMarkdown(res.plan || "");
       setContextUsed(contextFromDeveloperPi(res.project_intelligence));
+      // CP-05: the backend already wrote the real repo-local .zect/plans/
+      // file as part of generation -- show it in Explorer and open it in
+      // Monaco immediately, the same as a manual "Save Plan" click used to
+      // require, instead of leaving the user to find and click it.
+      if (res.repo_plan_path) {
+        setPlanPath(res.repo_plan_path);
+        onFilesChanged?.([res.repo_plan_path]);
+        onOpenPath?.(res.repo_plan_path);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Revise failed");
     } finally {
@@ -890,7 +1245,12 @@ function PlanPane({
     try {
       const contextBlob = await resolveContextAndBuildBlob();
       const augmentedPlan = contextBlob ? `${contextBlob}${markdown}` : markdown;
-      await codingAgentSavePlan({ work_item_or_run: key, title: "coding", markdown: augmentedPlan });
+      await codingAgentSavePlan({
+        work_item_or_run: key,
+        title: "coding",
+        markdown: augmentedPlan,
+        workspace: workspaceRoot,
+      });
       const created = await codingAgentCreateMission({
         goal: goal.trim() || "Approved PLAN",
         project_id: projectId,
@@ -926,6 +1286,17 @@ function PlanPane({
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2 text-xs" data-testid="mentrix-coding-agent-plan-mode">
       <p className="text-[10px] text-slate-500">PLAN.md is scratch in .zect/plans (gitignored). Approve &amp; Build starts the Mentrix implementer in an isolated worktree (same tool loop as Implement chat). Zero edits until then.</p>
+      {planPath ? (
+        <button
+          type="button"
+          onClick={() => onOpenPath?.(planPath)}
+          className="mt-1 truncate text-left font-mono text-[10px] text-teal-700 underline"
+          title={planPath}
+          data-testid="mentrix-coding-agent-plan-path"
+        >
+          {planPath}
+        </button>
+      ) : null}
       <input
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
@@ -937,6 +1308,10 @@ function PlanPane({
         ref={mdRef}
         value={markdown}
         onChange={(e) => setMarkdown(e.target.value)}
+        onPaste={(e) => {
+          const imgs = imageFilesFromClipboard(e);
+          if (imgs.length) void attach.attachFiles(imgs);
+        }}
         className="mt-1 min-h-[8rem] flex-1 rounded border border-slate-200 px-2 py-1 font-mono text-[11px]"
         placeholder="## Plan  --  @file @folder @symbol @references @repo @plan @diff @terminal @error @test @lattice @skill @rule"
         data-testid="mentrix-coding-agent-plan-md"
@@ -950,27 +1325,17 @@ function PlanPane({
         textareaRef={mdRef}
       />
       <MentionContextStrip pack={mentionPack} />
-      <div className="mt-1 flex items-center gap-2">
-        <label className="cursor-pointer rounded border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600">
-          {attaching ? "Uploading…" : "Attach file"}
-          <input
-            type="file"
-            className="hidden"
-            data-testid="mentrix-coding-agent-plan-attach"
-            accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,.py,.ts,.tsx,.js,.jsx,.pdf,.docx,.pptx"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void attachFile(file);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {attachments.map((a) => (
-          <span key={a.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-            {a.filename}
-          </span>
-        ))}
-      </div>
+      <ComposerAttachmentBar
+        attachments={attach.attachments}
+        images={attach.images}
+        attaching={attach.attaching}
+        onAttachFiles={(files) => void attach.attachFiles(files)}
+        onRemoveAttachment={attach.removeAttachment}
+        onRemoveImage={attach.removeImage}
+        testIdPrefix="mentrix-coding-agent-plan"
+      />
+      <WorkItemAttachmentsStrip workItemId={workItemId} />
+      {attach.error ? <p className="text-rose-600">{attach.error}</p> : null}
       {error ? (
         <p className="text-rose-600" data-testid="mentrix-coding-agent-plan-error">
           {error}
@@ -1002,17 +1367,17 @@ function HistoryPane({
 }: {
   workspaceRoot: string;
   chatModel: string;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   initialGoal: string;
   initialSessionId: string | null;
 }) {
   const [rows, setRows] = useState<Array<{ id: string; markdown?: string; title?: string }>>([]);
   useEffect(() => {
-    void codingAgentListPlans()
+    void codingAgentListPlans(workspaceRoot || undefined)
       .then((r) => setRows(r.plans || []))
       .catch(() => setRows([]));
-  }, []);
+  }, [workspaceRoot]);
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden" data-testid="mentrix-coding-agent-history">
       <div className="max-h-[40%] overflow-auto p-2 text-xs">
@@ -1051,7 +1416,7 @@ function ChatPane({
 }: {
   workspaceRoot: string;
   chatModel: string;
-  onOpenPath?: (path: string) => void;
+  onOpenPath?: (path: string, line?: number) => void;
   onFilesChanged?: (paths: string[]) => void;
   initialGoal: string;
   initialSessionId: string | null;
@@ -1062,9 +1427,14 @@ function ChatPane({
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextUsed, setContextUsed] = useState<Parameters<typeof ContextUsedStrip>[0]["used"]>(null);
+  const [mentionPack, setMentionPack] = useState<ContextPack | null>(null);
+  const goalRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const writtenRef = useRef<string[]>([]);
+  const sessionIdRef = useRef<string | null>(initialSessionId);
+  sessionIdRef.current = sessionId;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1101,6 +1471,14 @@ function ChatPane({
     if (ev.event === "completed" || ev.event === "failed" || ev.event === "cancelled") {
       setBusy(false);
       setStatus(ev.event);
+      const sid = sessionIdRef.current;
+      if (sid) {
+        void codingAgentGetSession(sid)
+          .then((s) => setContextUsed(s?.context_used ?? null))
+          .catch(() => {
+            /* Context Used is a display nicety -- never blocks on it. */
+          });
+      }
     }
   };
 
@@ -1123,16 +1501,33 @@ function ChatPane({
     }
   };
 
+  const resolveMentionBlob = async (text: string): Promise<string> => {
+    if (!hasMentions(text) || !workspaceRoot) return "";
+    try {
+      const { pack } = await codingAgentResolveMentions({ text, workspace: workspaceRoot });
+      setMentionPack(pack);
+      const resolved = pack.items.filter((i) => i.verification_state !== "unresolved");
+      if (!resolved.length) return "";
+      const parts = resolved.map((item) => `[${item.source_type}:${item.source_id}]\n${item.content}`);
+      return `## Resolved Context\n\n${parts.join("\n\n")}\n\n## Goal\n\n`;
+    } catch {
+      /* Mention resolution failing must never block Run. */
+      return "";
+    }
+  };
+
   const start = async () => {
     const g = goal.trim();
     if (!g || !workspaceRoot) return;
     setError(null);
+    setContextUsed(null);
     writtenRef.current = [];
     pushLine({ kind: "user", text: g });
     setBusy(true);
     try {
+      const mentionBlob = await resolveMentionBlob(g);
       const res = await codingAgentCreateSession({
-        goal: g,
+        goal: `${mentionBlob}${g}`,
         workspace: workspaceRoot,
         model: chatModel,
         auto_approve_edits: true,
@@ -1175,6 +1570,7 @@ function ChatPane({
     <>
       <div className="border-b border-slate-50 px-3 py-1 text-[10px] text-slate-400" data-testid="mentrix-coding-agent-chat-status">
         chat · {status}
+        <ContextUsedStrip used={contextUsed} />
       </div>
       <div className="flex-1 space-y-2 overflow-auto px-3 py-2 text-xs" data-testid="mentrix-coding-agent-log">
         {lines.length === 0 ? (
@@ -1234,20 +1630,32 @@ function ChatPane({
         </p>
       ) : null}
       <div className="flex items-center gap-2 border-t border-slate-100 p-2">
-        <input
-          value={goal}
-          onChange={(e) => setGoal(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void start();
-            }
-          }}
-          disabled={busy || !workspaceRoot}
-          placeholder={workspaceRoot ? "Describe the change…" : "Set workspace root first"}
-          className="flex-1 rounded-md border border-slate-200 px-2 py-1.5 text-xs"
-          data-testid="mentrix-coding-agent-input"
-        />
+        <div className="flex-1">
+          <input
+            ref={goalRef}
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void start();
+              }
+            }}
+            disabled={busy || !workspaceRoot}
+            placeholder={workspaceRoot ? "Describe the change… — @file @workspace @problem @branch …" : "Set workspace root first"}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs"
+            data-testid="mentrix-coding-agent-input"
+          />
+          <MentionAutocomplete
+            value={goal}
+            onChange={(next, cursor) => {
+              setGoal(next);
+              requestAnimationFrame(() => goalRef.current?.setSelectionRange(cursor, cursor));
+            }}
+            textareaRef={goalRef}
+          />
+          <MentionContextStrip pack={mentionPack} />
+        </div>
         {busy ? (
           <button
             type="button"

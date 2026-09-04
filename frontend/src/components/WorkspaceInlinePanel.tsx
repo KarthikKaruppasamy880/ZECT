@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HelpCircle, Loader2, MessageSquare, Sparkles, TestTube2, Wrench } from "lucide-react";
 import type { EditorSelection } from "@/components/MonacoCodeEditor";
-import { askQuestion, buildGenerate, reviewAnalyze, reviewFixPrompt } from "@/lib/api";
+import { buildGenerate, developerAsk, reviewAnalyze, reviewFixPrompt } from "@/lib/api";
 import { languageFromPath } from "@/lib/workspacePaths";
 
 export type WorkspaceContextFlags = {
@@ -15,21 +15,36 @@ type WorkspaceInlinePanelProps = {
   content: string;
   selection: EditorSelection | null;
   repoId?: number | null;
+  workItemId?: number | null;
+  projectId?: number | null;
   onApplyCode: (code: string, mode: "replace-selection" | "replace-file") => void;
+  /** Ask/Explain go through developerAsk (the same Mission Ask history the
+   * Mentrix panel's ASK tab reads) -- a first call with no active WorkItem
+   * yet resolves one, which must be lifted up so both panels converge on
+   * it, the same way MentrixCodingAgentPanel's onWorkItemResolved works. */
+  onWorkItemResolved?: (id: number) => void;
 };
 
 type ActionKind = "ask" | "explain" | "tests" | "fix";
 
 /**
  * Phase 3 Stage D — context selector + inline Ask / Explain / Tests / Fix.
- * Reuses /api/llm/ask, /api/build/generate, /api/review-phase/*.
+ * Ask/Explain are shortcuts into the SAME Mission/Ask history as the
+ * Mentrix panel (developerAsk, work_item_id-scoped) -- not a second,
+ * disconnected Ask engine. Tests/Fix still use the lighter one-shot
+ * generate/review endpoints (/api/build/generate, /api/review-phase/*);
+ * routing those through the governed Agent/Mission flow is tracked as
+ * separate follow-up work, not folded in here.
  */
 export default function WorkspaceInlinePanel({
   filePath,
   content,
   selection,
   repoId,
+  workItemId,
+  projectId,
   onApplyCode,
+  onWorkItemResolved,
 }: WorkspaceInlinePanelProps) {
   const [ctx, setCtx] = useState<WorkspaceContextFlags>({
     selection: true,
@@ -72,16 +87,23 @@ export default function WorkspaceInlinePanel({
     try {
       const repoContext = assembleContext();
       const code = focusCode();
-      if (kind === "ask") {
-        const q = question.trim() || "What should I know about this code?";
-        const res = await askQuestion(q, repoContext, ctx.repo ? repoId ?? undefined : undefined);
-        setAnswer(res.answer || "");
-      } else if (kind === "explain") {
-        const res = await askQuestion(
-          `Explain this code clearly (purpose, control flow, risks):\n\`\`\`${lang}\n${code}\n\`\`\``,
-          ctx.repo ? repoContext : repoContext,
-          ctx.repo ? repoId ?? undefined : undefined,
-        );
+      if (kind === "ask" || kind === "explain") {
+        const q =
+          kind === "ask"
+            ? question.trim() || "What should I know about this code?"
+            : `Explain this code clearly (purpose, control flow, risks):\n\`\`\`${lang}\n${code}\n\`\`\``;
+        // Same developerAsk() call and work_item_id the Mentrix panel's ASK
+        // tab uses -- this turn lands in the SAME Ask history, not a second
+        // one, per the "no editor-only second Ask history" requirement.
+        const res = await developerAsk({
+          question: `${q}\n\n${repoContext}`,
+          work_item_id: workItemId ?? undefined,
+          project_id: projectId ?? undefined,
+          repository_id: ctx.repo ? repoId ?? undefined : undefined,
+        });
+        if (res.work_item_id && res.work_item_id !== workItemId) {
+          onWorkItemResolved?.(res.work_item_id);
+        }
         setAnswer(res.answer || "");
       } else if (kind === "tests") {
         const res = await buildGenerate(

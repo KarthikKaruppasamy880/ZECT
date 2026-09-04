@@ -13,15 +13,46 @@ _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 def propose_from_plan(mission: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     """Return {repo_id: [{path, old, new}, ...]} — empty dict if LLM unavailable."""
     from app.adapters.llm.openai_compat import get_openai_compat_client, openai_compat_available, mentrix_llm_chat_model
-    from app.services.coding_engine.agent_context import compose_coding_agent_context
+    from app.services.coding_engine.agent_context import compose_coding_agent_context, compose_rich_agent_context
 
     if not openai_compat_available():
         raise ValueError("llm_offline")
 
-    pack = compose_coding_agent_context(
-        goal=f"{mission.get('goal') or ''}\n{mission.get('plan') or ''}",
-        project_id=mission.get("project_id"),
-    )
+    goal_and_plan = f"{mission.get('goal') or ''}\n{mission.get('plan') or ''}"
+    # CP-07: reuse the SAME canonical, plan-grounded context
+    # coding_engine_mentrix.start_run() gives the native tool loop --
+    # including the AUTHORIZED WRITE CONTRACT block derived from
+    # agent_write_policy.py -- rather than the thinner, independently
+    # composed pack this used to always call. Best-effort: any lookup
+    # failure (no DB, no repo binding yet, etc.) falls back to the
+    # pre-CP-07 thin pack exactly as before; propose_from_plan must never
+    # be blocked by this.
+    pack = ""
+    work_item_id = mission.get("work_item_id")
+    if work_item_id:
+        try:
+            from app.infrastructure.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                repos = mission.get("repos") or []
+                primary_repo_id = mission.get("primary_repository_id") or (repos[0].get("repository_id") if repos else None)
+                pack = compose_rich_agent_context(
+                    goal=goal_and_plan,
+                    project_id=mission.get("project_id"),
+                    repository_id=primary_repo_id,
+                    work_item_id=int(work_item_id),
+                    db=db,
+                )
+            finally:
+                db.close()
+        except Exception:  # noqa: BLE001
+            pack = ""
+    if not pack:
+        pack = compose_coding_agent_context(
+            goal=goal_and_plan,
+            project_id=mission.get("project_id"),
+        )
     roots = []
     for repo in mission.get("repos") or []:
         rid = repo.get("repository_id") or repo.get("id")

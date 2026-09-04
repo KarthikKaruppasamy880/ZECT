@@ -1,5 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import AgentWorkspaceShell from "@/components/AgentWorkspaceShell";
 import ToastContainer from "@/components/Toast";
@@ -59,7 +59,6 @@ import SessionInsights from "@/pages/SessionInsights";
 import Conversations from "@/pages/Conversations";
 import RepoWorkspace from "@/pages/RepoWorkspace";
 import DeveloperWorkspace from "@/pages/DeveloperWorkspace";
-import AgentMode from "@/pages/AgentMode";
 import LatticeGraph from "@/pages/LatticeGraph";
 import Mentrix from "@/pages/Mentrix";
 import MentrixCompanion from "@/pages/MentrixCompanion";
@@ -195,7 +194,12 @@ export default function App() {
             <Route path="/review" element={<Suspense fallback={<PageLoader />}><LazyReviewPhase /></Suspense>} />
             <Route path="/deploy" element={<Suspense fallback={<PageLoader />}><LazyDeployPhase /></Suspense>} />
             <Route path="/mentrix" element={<Mentrix />} />
-            <Route path="/agent-mode" element={<AgentMode />} />
+            {/* Legacy Agent Workspace is retired -- it ran an independent
+                ForgeLoop pipeline with no worktree isolation, no Ultra
+                Review, no EvidenceVerifier, duplicating the canonical
+                Developer Mission/Harness. This must resolve into the same
+                Developer Workspace, not stay live behind a flag. */}
+            <Route path="/agent-mode" element={<Navigate to="/workspace" replace />} />
           </Route>
           <Route path="/docs" element={<Docs />} />
           <Route path="/code-review" element={<Suspense fallback={<PageLoader />}><LazyCodeReview /></Suspense>} />

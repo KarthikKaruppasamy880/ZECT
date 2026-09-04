@@ -21,6 +21,40 @@ EVIDENCE_TYPES = (
     "HUMAN_APPROVAL",
 )
 
+# Evidence types whose own payload records a pass/fail outcome. A recorded
+# item of one of these types only proves a check of that kind was RUN --
+# _evidence_outcome_failed() below checks whether it actually PASSED, so a
+# failing TEST_RESULT/BUILD_RESULT/etc can never satisfy coverage just by
+# existing (the gap this class previously had: any typed, non-llm_claim
+# evidence counted regardless of what its payload said happened).
+_OUTCOME_EVIDENCE_TYPES = frozenset(
+    {
+        "COMMAND_EXIT",
+        "TEST_RESULT",
+        "BUILD_RESULT",
+        "LINT_RESULT",
+        "TYPECHECK_RESULT",
+        "API_RESULT",
+        "UI_RESULT",
+        "SECURITY_RESULT",
+    }
+)
+
+
+def _evidence_outcome_failed(payload: dict[str, Any]) -> bool:
+    if "ok" in payload:
+        return not bool(payload.get("ok"))
+    status = str(payload.get("status") or "").strip().lower()
+    if status in {"fail", "failed", "error"}:
+        return True
+    exit_code = payload.get("exit_code")
+    if exit_code is not None:
+        try:
+            return int(exit_code) != 0
+        except (TypeError, ValueError):
+            return False
+    return False
+
 
 @dataclass
 class EvidenceItem:
@@ -83,10 +117,17 @@ class EvidenceVerifier:
                 )
 
         errors: list[str] = []
-        typed = [i for i in items if i.type in EVIDENCE_TYPES and not i.llm_claim]
+        typed_all = [i for i in items if i.type in EVIDENCE_TYPES and not i.llm_claim]
         llm_only = [i for i in items if i.llm_claim or i.type not in EVIDENCE_TYPES]
-        if items and not typed and llm_only:
+        if items and not typed_all and llm_only:
             errors.append("llm_text_alone_cannot_complete")
+
+        typed: list[EvidenceItem] = []
+        for i in typed_all:
+            if i.type in _OUTCOME_EVIDENCE_TYPES and _evidence_outcome_failed(i.payload or {}):
+                errors.append(f"failing_evidence:{i.type}:{i.operation_id or i.id}")
+            else:
+                typed.append(i)
 
         covered_ops = {i.operation_id for i in typed if i.operation_id}
         covered_reqs: set[str] = set()

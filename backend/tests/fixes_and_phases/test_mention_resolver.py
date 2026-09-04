@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401
 from app.infrastructure.database import Base
-from app.models import SkillDefinition
+from app.models import SkillDefinition, WorkItem
 from app.services.coding_engine.mention_resolver import find_mentions, resolve_mentions
 
 
@@ -197,3 +197,227 @@ def test_a_broken_resolver_never_crashes_the_whole_message(ws):
         items = resolve_mentions("@file:calc.py", workspace=ws)
     assert items[0].verification_state == "unresolved"
     assert "boom" in items[0].content
+
+
+def _git_init(root):
+    subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "a@b.c"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
+
+
+class TestWorkspace:
+    def test_workspace_mention_summarizes_root(self, ws):
+        items = resolve_mentions("@workspace", workspace=ws)
+        assert items[0].verification_state == "workspace_summary"
+        assert "calc.py" in items[0].content
+
+
+class TestCommit:
+    def test_commit_mention_defaults_to_head(self, ws):
+        _git_init(ws)
+        items = resolve_mentions("@commit", workspace=ws)
+        assert items[0].verification_state == "git_commit"
+        assert "init" in items[0].content
+
+    def test_commit_mention_with_bad_sha_is_unresolved(self, ws):
+        _git_init(ws)
+        items = resolve_mentions("@commit:deadbeef", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestBranch:
+    def test_branch_mention_reports_current_branch(self, ws):
+        _git_init(ws)
+        items = resolve_mentions("@branch", workspace=ws)
+        assert items[0].verification_state == "git_branch"
+        assert "main" in items[0].content
+
+    def test_branch_mention_with_unknown_name_is_unresolved(self, ws):
+        _git_init(ws)
+        items = resolve_mentions("@branch:does-not-exist", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestProblem:
+    def test_problem_mention_reports_real_findings(self, ws):
+        (ws / "eslint.config.js").write_text("export default [];\n", encoding="utf-8")
+        bindir = ws / "node_modules" / ".bin"
+        bindir.mkdir(parents=True)
+        (bindir / "eslint").write_text("#!/bin/sh\n", encoding="utf-8")
+        payload = (
+            '[{"filePath": "a.ts", "messages": '
+            '[{"ruleId": "r", "severity": 2, "message": "err", "line": 1, "column": 1}]}]'
+        )
+
+        class _FakeCompleted:
+            stdout = payload
+            returncode = 0
+
+        with patch("subprocess.run", return_value=_FakeCompleted()):
+            items = resolve_mentions("@problem", workspace=ws)
+        assert items[0].verification_state == "lint_typecheck"
+        assert "a.ts" in items[0].content
+
+    def test_problem_mention_with_nothing_configured_is_unresolved(self, ws):
+        items = resolve_mentions("@problem", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestWorkitem:
+    def _db(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=engine)
+        return sessionmaker(bind=engine)()
+
+    def test_workitem_mention_reads_a_real_row(self, ws):
+        db = self._db()
+        db.add(WorkItem(title="Fix add()", description="details", status="IN_PROGRESS"))
+        db.commit()
+        items = resolve_mentions("@workitem:1", workspace=ws, db=db)
+        assert items[0].verification_state == "work_item_record"
+        assert "Fix add()" in items[0].content
+
+    def test_workitem_mention_defaults_to_active_work_item_id(self, ws):
+        db = self._db()
+        db.add(WorkItem(title="Active one", status="NEW"))
+        db.commit()
+        items = resolve_mentions("@workitem", workspace=ws, db=db, work_item_id=1)
+        assert items[0].verification_state == "work_item_record"
+        assert "Active one" in items[0].content
+
+    def test_workitem_mention_no_match_is_unresolved(self, ws):
+        db = self._db()
+        items = resolve_mentions("@workitem:999", workspace=ws, db=db)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestBlueprint:
+    def test_blueprint_mention_reads_snapshot_snippet(self, ws):
+        with patch(
+            "app.services.work_items.project_intelligence.ProjectIntelligenceService.snapshot",
+        ) as snap:
+            snap.return_value.blueprint = {"snippet": "Use repository pattern"}
+            items = resolve_mentions("@blueprint", workspace=ws, project_key="demo", db=object())
+        assert items[0].verification_state == "blueprint"
+        assert "repository pattern" in items[0].content
+
+    def test_blueprint_mention_without_project_key_is_unresolved(self, ws):
+        items = resolve_mentions("@blueprint", workspace=ws, db=object())
+        assert items[0].verification_state == "unresolved"
+
+
+class TestApi:
+    def test_api_mention_finds_openapi_spec(self, ws):
+        (ws / "openapi.json").write_text(
+            '{"paths": {"/users": {"get": {}}}}', encoding="utf-8"
+        )
+        items = resolve_mentions("@api", workspace=ws)
+        assert items[0].verification_state == "api_inventory"
+        assert "/users" in items[0].content
+
+    def test_api_mention_with_no_routes_found_is_unresolved(self, ws):
+        items = resolve_mentions("@api", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestJira:
+    def test_jira_mention_reads_a_real_ticket_via_fixture(self, ws, monkeypatch):
+        import json
+
+        raw = {
+            "key": "ZECT-1",
+            "fields": {"summary": "Fix add()", "description": "The add() function is wrong."},
+        }
+        monkeypatch.setenv("ZECT_JIRA_INGEST_FIXTURE_JSON", json.dumps(raw))
+        items = resolve_mentions("@jira:ZECT-1", workspace=ws)
+        assert items[0].verification_state == "jira_ticket"
+        assert "Fix add()" in items[0].content
+
+    def test_jira_mention_without_a_key_is_unresolved(self, ws):
+        items = resolve_mentions("@jira", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+    def test_jira_mention_not_configured_is_unresolved_not_a_crash(self, ws, monkeypatch):
+        monkeypatch.delenv("ZECT_JIRA_INGEST_FIXTURE_JSON", raising=False)
+        items = resolve_mentions("@jira:ZECT-2", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestBpmn:
+    def test_bpmn_mention_reports_engine_status_and_incidents(self, ws):
+        with (
+            patch(
+                "app.adapters.camunda_client.process_engine_status",
+                return_value={"ready": True, "label": "Mentrix Process", "status": "ready", "base_url": "http://x"},
+            ),
+            patch(
+                "app.adapters.camunda_client.list_incidents",
+                return_value={"ok": True, "items": [{"id": "inc-1"}]},
+            ),
+        ):
+            items = resolve_mentions("@bpmn", workspace=ws)
+        assert items[0].verification_state == "process_engine_status"
+        assert "1 open incident" in items[0].content
+
+    def test_bpmn_mention_not_configured_is_unresolved(self, ws, monkeypatch):
+        monkeypatch.delenv("ZECT_CAMUNDA_BASE_URL", raising=False)
+        items = resolve_mentions("@bpmn", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+def _write_model(ws):
+    (ws / "models.py").write_text(
+        (
+            "from sqlalchemy import Column, Integer, String\n"
+            "from app.db import Base\n\n"
+            "class User(Base):\n"
+            '    __tablename__ = "users"\n'
+            "    id = Column(Integer, primary_key=True)\n"
+            "    email = Column(String, nullable=False)\n"
+        ),
+        encoding="utf-8",
+    )
+
+
+class TestDatabase:
+    def test_database_mention_summarizes_tables_and_migrations(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@database", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "users" in items[0].content
+
+    def test_database_mention_with_nothing_found_is_unresolved(self, ws):
+        items = resolve_mentions("@database", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestSchema:
+    def test_schema_mention_lists_all_tables_with_columns(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@schema", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "email:String" in items[0].content
+
+    def test_schema_mention_with_no_models_is_unresolved(self, ws):
+        items = resolve_mentions("@schema", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+
+class TestTable:
+    def test_table_mention_reads_one_tables_columns(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@table:users", workspace=ws)
+        assert items[0].verification_state == "db_schema_inventory"
+        assert "email" in items[0].content
+        assert "User" in items[0].content
+
+    def test_table_mention_without_a_name_is_unresolved(self, ws):
+        items = resolve_mentions("@table", workspace=ws)
+        assert items[0].verification_state == "unresolved"
+
+    def test_table_mention_unknown_table_is_unresolved(self, ws):
+        _write_model(ws)
+        items = resolve_mentions("@table:nonexistent", workspace=ws)
+        assert items[0].verification_state == "unresolved"

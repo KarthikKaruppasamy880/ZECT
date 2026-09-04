@@ -28,9 +28,26 @@ ROLE_EXPLORE = "explore"
 ROLE_CODER = "coder"
 ROLE_TESTER = "tester"
 ROLE_DEBUGGER = "debugger"
-ROLE_REVIEWER = "reviewer"
+# There is deliberately no ROLE_REVIEWER agent-loop turn here: the real
+# review gate is lifecycle.py's review_diff()/run_ultra_review() call, a
+# heuristic/LLM pass over the actual diff+evidence, not another native
+# agent run. An earlier ROLE_REVIEWER constant + allowlist entry existed
+# with no call site anywhere (dead code) -- removed rather than wiring a
+# second, redundant review mechanism. (Unrelated: a same-named ROLE_REVIEWER
+# in engineering_agents/roles.py belongs to the separate, disconnected
+# Personal-Agent automation_loops feature -- see module docstring above.)
 
-_READ_ONLY_TOOLS = ["list_dir", "read_file", "search_code", "git_status", "git_diff"]
+_READ_ONLY_TOOLS = [
+    "list_dir",
+    "read_file",
+    "search_code",
+    "glob_files",
+    "db_schema",
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_branch",
+]
 _APP_BROWSER_TOOLS = [
     "start_app",
     "restart_app",
@@ -60,7 +77,6 @@ ROLE_TOOL_ALLOWLISTS: dict[str, list[str]] = {
     # access too, not just observation tools.
     ROLE_TESTER: [*_READ_ONLY_TOOLS, "write_file", "apply_patch", "run_command", *_APP_BROWSER_TOOLS],
     ROLE_DEBUGGER: [*_READ_ONLY_TOOLS, "write_file", "apply_patch", "run_command", *_APP_BROWSER_TOOLS],
-    ROLE_REVIEWER: list(_READ_ONLY_TOOLS),
 }
 
 
@@ -100,5 +116,6 @@ def run_explore_phase(mission: dict[str, Any], repo: dict[str, Any], wt: Path) -
         max_steps=int(os.getenv("MENTRIX_CODING_AGENT_EXPLORE_MAX_STEPS", "12")),
         mission_id=mission.get("id"),
         repo_id=repo.get("repository_id"),
+        work_item_id=mission.get("work_item_id"),
     )
     return _last_completed_message(out)

@@ -1606,6 +1606,12 @@ class WorkItem(Base):
     plan_hash = Column(String, default="")
     approved_plan_hash = Column(String, nullable=True)
     mentrix_run_id = Column(Integer, ForeignKey("mentrix_runs.id"), nullable=True, index=True)
+    # Canonical pointer to this WorkItem's coding_engine.lifecycle Mission
+    # (a UUID string -- that store is JSON-file-backed, not a SQL table, so
+    # this cannot be a real FK). Set once when a Mission is created for this
+    # WorkItem via POST /api/coding-agent/missions. See
+    # ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase B.
+    coding_mission_id = Column(String, default="", index=True)
     worktree_path = Column(String, default="")
     current_commit_sha = Column(String, default="")
     created_by = Column(String, default="")
@@ -1866,6 +1872,15 @@ class DocumentArtifact(Base):
     source_map_json = Column(Text, default="[]")
     error_message = Column(Text, default="")
     bytes_size = Column(Integer, default=0)
+    # "document" (parsed/chunked via ingest_document) or "image" (raw bytes,
+    # no parsing -- vision content). Not a real FK: an attachment made before
+    # a WorkItem exists (e.g. the first ASK turn) links here retroactively,
+    # and a real FK constraint here made this column undroppable on SQLite
+    # (native ALTER TABLE DROP COLUMN refuses a column that is part of a
+    # foreign key definition) once the ORM-catchup migration created this
+    # table using live model metadata.
+    kind = Column(String, default="document", index=True)
+    work_item_id = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

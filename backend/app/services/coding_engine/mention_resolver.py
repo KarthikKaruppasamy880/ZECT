@@ -14,6 +14,9 @@ next whitespace). Supported types:
   @file:<path> @folder:<path> @symbol:<name> @references:<name>
   @repo:<id> @plan:<id> @diff @terminal:<process_id> @error @test
   @lattice:<query> @skill:<id_or_name> @rule
+  @workspace @commit:<sha> @branch:<name> @problem @workitem:<id> @blueprint
+  @api @jira:<ticket_key> @bpmn
+  @database @schema @table:<table_name>
 """
 
 from __future__ import annotations
@@ -25,7 +28,9 @@ from typing import Any
 from app.services.work_items.context_engine import ProvenanceItem
 
 _MENTION_RE = re.compile(
-    r"@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule)(?::(\S+))?"
+    r"@(file|folder|symbol|references|repo|plan|diff|terminal|error|test|lattice|skill|rule"
+    r"|workspace|commit|branch|problem|workitem|blueprint|api|jira|bpmn"
+    r"|database|schema|table)(?::(\S+))?"
 )
 
 RULE_FILENAMES = ("ZECT.md", "AGENTS.md")
@@ -279,11 +284,13 @@ def _resolve_skill(value: str, *, db: Any) -> ProvenanceItem:
     )
 
 
-def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
-    """No rule loader exists anywhere in the codebase today -- this is the
-    first one. Deliberately flat (no per-path hierarchy) for a first pass:
-    concatenates whatever of ZECT.md/AGENTS.md/.zect/rules/*/.cursor/rules/*
-    exists under the workspace root, most-specific-looking first."""
+def load_workspace_rules(workspace: Path) -> str:
+    """Concatenate ZECT.md/AGENTS.md/.zect/rules/*/.cursor/rules/* content,
+    if any exists under the workspace root, most-specific-looking first.
+    Deliberately flat (no per-path hierarchy) for a first pass. Shared by
+    the on-demand @rule mention (below) and the standing RULES/SKILLS
+    prompt layer in coding_engine_mentrix.py -- one rule loader, not two.
+    Returns "" when nothing is found (never raises)."""
     found: list[str] = []
     for name in RULE_FILENAMES:
         p = workspace / name
@@ -298,13 +305,280 @@ def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
                         f"# {d}/{rule_file.name}\n"
                         f"{rule_file.read_text(encoding='utf-8', errors='replace')[:4000]}"
                     )
-    if not found:
+    return "\n\n".join(found)[:8000]
+
+
+def _resolve_rule(*, workspace: Path) -> ProvenanceItem:
+    content = load_workspace_rules(workspace)
+    if not content:
         return _unresolved("rule", "", "no ZECT.md/AGENTS.md/.zect/rules/.cursor/rules found")
     return ProvenanceItem(
         source_type="mention:rule",
         source_id="workspace_rules",
-        content="\n\n".join(found)[:8000],
+        content=content,
         verification_state="rules_file",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_workspace(*, workspace: Path) -> ProvenanceItem:
+    from app.services.coding_engine.mentrix_agent_tools import execute_tool
+
+    listing = execute_tool("list_dir", {"path": "."}, workspace=workspace)
+    if not listing.get("ok"):
+        return _unresolved("workspace", "", str(listing.get("error") or "workspace not accessible"))
+    status = execute_tool("git_status", {}, workspace=workspace)
+    entries = listing.get("entries") or []
+    top = "\n".join(f"{'d' if e['is_dir'] else 'f'} {e['name']}" for e in entries[:40])
+    content = f"root: {workspace}\n\ngit status:\n{status.get('status') or '(clean)'}\n\ntop-level:\n{top}"
+    return ProvenanceItem(
+        source_type="mention:workspace",
+        source_id=str(workspace),
+        content=content,
+        verification_state="workspace_summary",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_commit(value: str, *, workspace: Path) -> ProvenanceItem:
+    import subprocess
+
+    ref = value.strip() or "HEAD"
+    try:
+        completed = subprocess.run(
+            ["git", "show", "--stat", "--format=%H%n%an <%ae>%n%ad%n%s%n", ref],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _unresolved("commit", value, f"{type(exc).__name__}: {exc}")
+    if completed.returncode != 0:
+        return _unresolved("commit", value, (completed.stderr or "commit not found").strip()[:200])
+    return ProvenanceItem(
+        source_type="mention:commit",
+        source_id=ref,
+        content=(completed.stdout or "")[:4000],
+        verification_state="git_commit",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_branch(value: str, *, workspace: Path) -> ProvenanceItem:
+    from app.services.coding_engine.mentrix_agent_tools import execute_tool
+
+    out = execute_tool("git_branch", {"all": True}, workspace=workspace)
+    if not out.get("ok"):
+        return _unresolved("branch", value, str(out.get("error") or "git branch failed"))
+    branches = str(out.get("branches") or "")
+    current = str(out.get("current") or "")
+    if value and value not in branches:
+        return _unresolved("branch", value, "no such branch")
+    content = f"current: {current}\n{branches}".strip()
+    return ProvenanceItem(
+        source_type="mention:branch",
+        source_id=value or current,
+        content=content,
+        verification_state="git_branch",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_problem(*, workspace: Path) -> ProvenanceItem:
+    from app.services.workspace.problems import collect_workspace_problems
+
+    result = collect_workspace_problems(workspace)
+    problems = result.get("problems") or []
+    if not problems:
+        checked = ", ".join(result.get("checked") or []) or "nothing configured"
+        return _unresolved("problem", "", f"no problems found ({checked})")
+    lines = [
+        f"{p.get('tool')} {p.get('severity')} {p.get('file')}:{p.get('line')} {p.get('message')}"
+        for p in problems[:40]
+    ]
+    return ProvenanceItem(
+        source_type="mention:problem",
+        source_id="workspace",
+        content="\n".join(lines),
+        verification_state="lint_typecheck",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_database(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    inv = inventory_db_schema(workspace=str(workspace))
+    if not inv["tables"] and not inv["migrations"]:
+        return _unresolved("database", "", "no SQLAlchemy models or Alembic migrations found in this workspace")
+    lines = [f"{inv['count']} table(s), {len(inv['migrations'])} migration(s)"]
+    lines.extend(f"- {t['table_name']} ({t['model_class']})" for t in inv["tables"])
+    if inv["migrations"]:
+        lines.append("Most recent migrations:")
+        lines.extend(f"  {m['revision']}: {m['message']}" for m in inv["migrations"][-10:])
+    return ProvenanceItem(
+        source_type="mention:database",
+        source_id="workspace",
+        content="\n".join(lines)[:6000],
+        verification_state="db_schema_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_api(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.api_eval import inventory_apis
+
+    result = inventory_apis(workspace=str(workspace))
+    endpoints = result.get("endpoints") or []
+    if not endpoints:
+        return _unresolved("api", "", "no OpenAPI spec or route patterns found in this workspace")
+    lines = [f"{e.get('method')} {e.get('path')} ({e.get('source')})" for e in endpoints[:60]]
+    return ProvenanceItem(
+        source_type="mention:api",
+        source_id="workspace",
+        content="\n".join(lines),
+        verification_state="api_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_schema(*, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    inv = inventory_db_schema(workspace=str(workspace))
+    if not inv["tables"]:
+        return _unresolved("schema", "", "no SQLAlchemy models found in this workspace")
+    lines = []
+    for t in inv["tables"]:
+        cols = ", ".join(f"{c['name']}:{c['type']}" for c in t["columns"])
+        lines.append(f"{t['table_name']} ({t['model_class']}): {cols}")
+    return ProvenanceItem(
+        source_type="mention:schema",
+        source_id="workspace",
+        content="\n".join(lines)[:8000],
+        verification_state="db_schema_inventory",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_workitem(value: str, *, db: Any, work_item_id: int | None) -> ProvenanceItem:
+    if db is None:
+        return _unresolved("workitem", value, "no database session available")
+    from app.models import WorkItem
+
+    try:
+        wid = int(value) if value else int(work_item_id or 0)
+    except (TypeError, ValueError):
+        return _unresolved("workitem", value, "work item id must be numeric")
+    if not wid:
+        return _unresolved("workitem", value, "no work item id given and none active")
+    row = db.query(WorkItem).filter(WorkItem.id == wid).first()
+    if not row:
+        return _unresolved("workitem", value, "no matching work item")
+    content = f"#{row.id} {row.title or ''}\nstatus: {row.status or ''}\n{row.description or ''}".strip()
+    return ProvenanceItem(
+        source_type="mention:workitem",
+        source_id=str(row.id),
+        content=content[:3000],
+        verification_state="work_item_record",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_blueprint(*, project_key: str, db: Any) -> ProvenanceItem:
+    if not project_key:
+        return _unresolved("blueprint", "", "no Lattice project_key for this workspace")
+    if db is None:
+        return _unresolved("blueprint", "", "no database session available")
+    from app.services.work_items.project_intelligence import ProjectIntelligenceService
+
+    try:
+        snap = ProjectIntelligenceService().snapshot(project_key=project_key, db=db)
+    except Exception as exc:  # noqa: BLE001
+        return _unresolved("blueprint", "", f"{type(exc).__name__}: {exc}")
+    blueprint = getattr(snap, "blueprint", None) or {}
+    snippet = blueprint.get("snippet") if isinstance(blueprint, dict) else ""
+    if not snippet:
+        return _unresolved("blueprint", "", "no Blueprint content for this project")
+    return ProvenanceItem(
+        source_type="mention:blueprint",
+        source_id=project_key,
+        content=str(snippet)[:4000],
+        verification_state="blueprint",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_jira(value: str) -> ProvenanceItem:
+    if not value:
+        return _unresolved("jira", value, "ticket key required (e.g. @jira:PROJ-123)")
+    from app.domains.work_items.source_adapter import JiraSourceAdapter
+
+    adapter = JiraSourceAdapter()
+    try:
+        raw = adapter.fetch_raw(value)
+        fields = adapter.to_work_item_fields(raw)
+    except Exception as exc:  # noqa: BLE001
+        return _unresolved("jira", value, f"{type(exc).__name__}: {exc}")
+    content = f"{fields.get('title') or ''}\n\n{fields.get('description') or ''}".strip()
+    return ProvenanceItem(
+        source_type="mention:jira",
+        source_id=str(fields.get("external_id") or value),
+        content=content[:4000],
+        verification_state="jira_ticket",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_bpmn() -> ProvenanceItem:
+    from app.adapters.camunda_client import list_incidents, process_engine_status
+
+    status = process_engine_status()
+    if not status.get("ready"):
+        return _unresolved("bpmn", "", str(status.get("detail") or "Mentrix Process not configured"))
+    incidents = list_incidents()
+    items = incidents.get("items") or []
+    lines = [f"{status.get('label')}: {status.get('status')} ({status.get('base_url')})"]
+    lines.append(f"{len(items)} open incident(s)" if items else "no open incidents")
+    lines.extend(str(i)[:200] for i in items[:20])
+    return ProvenanceItem(
+        source_type="mention:bpmn",
+        source_id="process_engine",
+        content="\n".join(lines),
+        verification_state="process_engine_status",
+        freshness="current",
+        selection_reason="user_mentioned",
+    )
+
+
+def _resolve_table(value: str, *, workspace: Path) -> ProvenanceItem:
+    from app.services.quality.db_schema_eval import inventory_db_schema
+
+    if not value:
+        return _unresolved("table", value, "table name required (e.g. @table:users)")
+    inv = inventory_db_schema(workspace=str(workspace))
+    match = next((t for t in inv["tables"] if t["table_name"].lower() == value.lower()), None)
+    if not match:
+        return _unresolved("table", value, "no matching table found")
+    cols = "\n".join(f"- {c['name']}: {c['type']}" for c in match["columns"])
+    content = f"{match['table_name']} ({match['model_class']}) -- {match['source']}\n{cols}"
+    return ProvenanceItem(
+        source_type="mention:table",
+        source_id=match["table_name"],
+        content=content[:4000],
+        verification_state="db_schema_inventory",
         freshness="current",
         selection_reason="user_mentioned",
     )
@@ -348,6 +622,30 @@ def resolve_mentions(
                 items.append(_resolve_skill(value, db=db))
             elif mtype == "rule":
                 items.append(_resolve_rule(workspace=workspace))
+            elif mtype == "workspace":
+                items.append(_resolve_workspace(workspace=workspace))
+            elif mtype == "commit":
+                items.append(_resolve_commit(value, workspace=workspace))
+            elif mtype == "branch":
+                items.append(_resolve_branch(value, workspace=workspace))
+            elif mtype == "problem":
+                items.append(_resolve_problem(workspace=workspace))
+            elif mtype == "workitem":
+                items.append(_resolve_workitem(value, db=db, work_item_id=work_item_id))
+            elif mtype == "blueprint":
+                items.append(_resolve_blueprint(project_key=project_key, db=db))
+            elif mtype == "api":
+                items.append(_resolve_api(workspace=workspace))
+            elif mtype == "jira":
+                items.append(_resolve_jira(value))
+            elif mtype == "bpmn":
+                items.append(_resolve_bpmn())
+            elif mtype == "database":
+                items.append(_resolve_database(workspace=workspace))
+            elif mtype == "schema":
+                items.append(_resolve_schema(workspace=workspace))
+            elif mtype == "table":
+                items.append(_resolve_table(value, workspace=workspace))
             else:
                 items.append(_unresolved(mtype, value, "unknown mention type"))
         except Exception as exc:  # noqa: BLE001 -- a bad mention must never break the whole message

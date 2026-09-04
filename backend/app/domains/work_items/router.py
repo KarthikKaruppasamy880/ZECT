@@ -181,6 +181,21 @@ def get_events(
     return {"events": [wi_svc.serialize_event(e) for e in wi_svc.list_events(db, work_item_id)]}
 
 
+@router.get("/{work_item_id}/attachments")
+def get_attachments(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Everything attached across ASK/PLAN/AGENT for this WorkItem -- the one
+    list every Developer pane reads, so an ASK attachment is visible in PLAN
+    and AGENT without re-upload (see document_intelligence.service
+    .list_work_item_attachments)."""
+    from app.services.document_intelligence.service import list_work_item_attachments
+
+    return {"attachments": list_work_item_attachments(db, work_item_id=work_item_id)}
+
+
 @router.post("/{work_item_id}/transition")
 def transition(
     work_item_id: int,
@@ -218,6 +233,9 @@ def delete_event_forbidden(work_item_id: int, event_id: int, _user: CurrentUser 
 # ---- Mentrix Developer API ----
 
 
+_MAX_IMAGE_DATA_URL_CHARS = 12_000_000  # ~9MB decoded, generous for a screenshot
+
+
 class AskIn(BaseModel):
     question: str
     work_item_id: Optional[int] = None
@@ -226,6 +244,10 @@ class AskIn(BaseModel):
     repository_ids: list[int] = Field(default_factory=list)
     repository_ref: str = ""
     base_commit_sha: str = ""
+    # data:image/<type>;base64,... URLs -- e.g. a screenshot pasted into the
+    # composer. Passed straight through to the model as vision content; see
+    # llm_phase.run_ask.
+    images: list[str] = Field(default_factory=list)
 
 
 class PlanIn(BaseModel):
@@ -258,6 +280,12 @@ def developer_ask(
 ):
     from app.services.work_items.developer_service import MentrixDeveloperService
 
+    for url in body.images:
+        if not url.startswith("data:image/"):
+            raise HTTPException(status_code=400, detail="images must be data:image/... URLs")
+        if len(url) > _MAX_IMAGE_DATA_URL_CHARS:
+            raise HTTPException(status_code=400, detail="image too large")
+
     return MentrixDeveloperService(db).ask(
         question=body.question,
         work_item_id=body.work_item_id,
@@ -267,6 +295,7 @@ def developer_ask(
         repository_ref=body.repository_ref,
         base_commit_sha=body.base_commit_sha,
         actor=getattr(user, "email", "") or "",
+        images=body.images or None,
     )
 
 
@@ -302,6 +331,22 @@ def developer_plan(
         constraints=body.constraints,
         actor=getattr(user, "email", "") or "",
     )
+
+
+@developer_router.get("/validate-plan")
+def developer_validate_plan(
+    work_item_id: int,
+    db: Session = Depends(get_db),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """CP-06: on-demand VALID/INVALID/STALE check the UI polls to decide
+    whether Approve & Build should be enabled -- never mutates the
+    WorkItem. approve_plan() re-runs this same check itself as the actual
+    enforcement gate; this endpoint exists so the UI doesn't have to
+    attempt (and fail) a real approval just to show current status."""
+    from app.services.work_items.developer_service import MentrixDeveloperService
+
+    return MentrixDeveloperService(db).validate_plan(work_item_id=work_item_id)
 
 
 @developer_router.post("/approve-plan")

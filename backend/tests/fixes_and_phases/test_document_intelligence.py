@@ -7,6 +7,7 @@ import zipfile
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.infrastructure.database import Base
@@ -57,6 +58,12 @@ def test_parse_txt_and_docx():
     pr2 = parse_document("a.docx", _minimal_docx("DocxBody"), "")
     assert "DocxBody" in pr2.markdown
     assert "table_formula_completeness" in pr2.partial
+
+
+def test_parse_xml_attachment():
+    pr = parse_document("process.xml", b"<bpmn:process><task>Approve</task></bpmn:process>", "application/xml")
+    assert "<task>Approve</task>" in pr.markdown
+    assert pr.parser_name == "text_utf8"
 
 
 def test_project_shared_reuses_content_version(db):
@@ -235,3 +242,55 @@ def test_project_shared_requires_project_id_for_retrieve(db):
     items_ok, meta = retrieve_document_context(session, user_id=u2.id, query="secret", project_id=42)
     assert items_ok
     assert all(m["document_artifact_id"] == a1["id"] for m in meta["chunks"])
+
+
+def test_documents_api_same_upload_twice_is_idempotent_over_http(authed_client, tmp_path, monkeypatch):
+    """CP-03 (finding K1) at the real HTTP boundary: attaching the exact
+    same file twice through the actual ASK-composer upload endpoint must
+    succeed both times and resolve to the same content version, not 500
+    with a UNIQUE constraint failure on the second attempt."""
+    monkeypatch.setenv("ZECT_DOCUMENT_ROOT", str(tmp_path / "docs-idempotent"))
+    files = {"file": ("brd.md", b"# Campaign Management BRD\n\nSame bytes both times.", "text/markdown")}
+    data = {"scope": "USER_PRIVATE", "sensitivity": "INTERNAL"}
+
+    r1 = authed_client.post("/api/documents/upload", files=files, data=data)
+    assert r1.status_code == 200, r1.text
+    r2 = authed_client.post("/api/documents/upload", files=files, data=data)
+    assert r2.status_code == 200, r2.text
+
+    b1, b2 = r1.json()["artifact"], r2.json()["artifact"]
+    assert b1["content_version_id"] == b2["content_version_id"]
+    assert b2["reused_shared_version"] is True
+
+    # Cleanup so the shared test DB does not pollute companion tests.
+    authed_client.delete(f"/api/documents/{b1['id']}")
+    authed_client.delete(f"/api/documents/{b2['id']}")
+
+
+def test_documents_api_never_leaks_raw_sql_or_paths_on_a_db_conflict(authed_client, tmp_path, monkeypatch):
+    """Even if a genuine conflict reaches the endpoint (retries exhausted,
+    or some other integrity error), the response must never contain raw
+    SQL, the constraint name, or a filesystem path -- only a safe, generic
+    message. The real detail goes to the server log, not the client."""
+    monkeypatch.setenv("ZECT_DOCUMENT_ROOT", str(tmp_path / "docs-redact"))
+
+    def boom(*a, **kw):
+        raise IntegrityError(
+            "(sqlite3.IntegrityError) UNIQUE constraint failed: "
+            "document_content_versions.scope, document_content_versions.project_id\n"
+            "[SQL: INSERT INTO document_content_versions ...]\n"
+            "[parameters: ('deadbeef', 'USER_PRIVATE', 1, "
+            "'C:\\\\Users\\\\karuppk\\\\Downloads\\\\ZECT\\\\.zect\\\\documents\\\\u1\\\\a16\\\\document.md')]",
+            None,
+            None,
+        )
+
+    monkeypatch.setattr("app.domains.repository.document_intelligence.ingest_document", boom)
+    files = {"file": ("brd.md", b"conflicting bytes", "text/markdown")}
+    data = {"scope": "USER_PRIVATE", "sensitivity": "INTERNAL"}
+    r = authed_client.post("/api/documents/upload", files=files, data=data)
+
+    assert r.status_code == 409, r.text
+    body_text = r.text
+    for leaked in ("sqlite3", "UNIQUE constraint", "document_content_versions", "INSERT INTO", "C:\\Users", "[SQL:"):
+        assert leaked not in body_text, f"leaked internal detail in response: {leaked!r}"

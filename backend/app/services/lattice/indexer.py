@@ -99,6 +99,33 @@ def derive_project_key(owner: str, repo_name: str) -> str:
     raw = f"{(owner or '').strip()}-{(repo_name or '').strip()}".lower()
     return re.sub(r"[^a-z0-9._-]+", "-", raw).strip("-") or "repo"
 
+
+def project_key_for_repository(db: Any, repository_id: int | str | None) -> str:
+    """The Lattice key for a repository row, derived exactly the way the
+    frontend derives it, so a server-side caller that only knows a
+    repository_id looks up the SAME graph the Lattice page indexed.
+
+    Callers that skip this (passing no project_key) get a NOT_APPLICABLE
+    status back from get_lattice_status and silently lose all Lattice
+    context -- which is how a Mission could report lattice_indexed=false
+    against a repository whose graph was genuinely READY.
+    """
+    if db is None or repository_id is None:
+        return ""
+    try:
+        rid = int(repository_id)
+    except (TypeError, ValueError):
+        return ""
+    try:
+        from app.models import Repo
+
+        repo = db.query(Repo).filter(Repo.id == rid).first()
+    except Exception:  # noqa: BLE001 -- never block context assembly on this
+        return ""
+    if not repo:
+        return ""
+    return derive_project_key(repo.owner or "", repo.repo_name or "")
+
 _TS_CLASS = re.compile(r"(?:export\s+)?(?:abstract\s+)?class\s+(\w+)")
 _TS_FUNC = re.compile(r"(?:export\s+)?(?:async\s+)?function\s+(\w+)")
 _TS_IMPORT = re.compile(r"""import\s+.*?from\s+['"]([^'"]+)['"]""")

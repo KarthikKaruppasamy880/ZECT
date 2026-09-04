@@ -1079,6 +1079,7 @@ def run_mentrix(
                         expected_files=files_expected,
                         project_id=project_id,
                         project_key=project_key,
+                        repo_id=repo_id,
                     )
                     for f in native.get("files_written") or []:
                         if f not in all_files_written:

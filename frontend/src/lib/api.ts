@@ -53,6 +53,12 @@ export async function apiFetch(path: string, opts?: RequestInit): Promise<Respon
   return fetch(`${getApiBase()}${path}`, { ...opts, headers });
 }
 
+/** Thrown by request() on a non-2xx response. `status` is additive (every
+ *  existing catch-by-message caller is unaffected) so reconciliation logic
+ *  (CP-09) can distinguish "404, this id no longer exists" from any other
+ *  failure without re-fetching or guessing from message text. */
+export type ApiRequestError = Error & { detail?: unknown; status?: number };
+
 export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await apiFetch(path, opts);
   if (!res.ok) {
@@ -65,13 +71,14 @@ export async function request<T>(path: string, opts?: RequestInit): Promise<T> {
         detail.message ||
         detail.detail ||
         res.statusText;
-      const e = new Error(typeof msg === "string" ? msg : res.statusText) as Error & {
-        detail?: unknown;
-      };
+      const e = new Error(typeof msg === "string" ? msg : res.statusText) as ApiRequestError;
       e.detail = detail;
+      e.status = res.status;
       throw e;
     }
-    throw new Error(typeof detail === "string" ? detail : detail?.message || res.statusText);
+    const e = new Error(typeof detail === "string" ? detail : detail?.message || res.statusText) as ApiRequestError;
+    e.status = res.status;
+    throw e;
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -139,6 +146,9 @@ export type WorkItemRecord = {
   plan_version?: number;
   approved_plan_hash?: string;
   mentrix_run_id?: number | null;
+  /** Durable Mission binding, so the Developer pane can re-attach to a
+   *  running Mission from any browser (finding F4). */
+  coding_mission_id?: string;
   worktree_path?: string;
   current_commit_sha?: string;
   description?: string;
@@ -169,6 +179,9 @@ export const developerAsk = (body: {
   project_id?: number | null;
   repository_id?: number | null;
   repository_ids?: number[];
+  /** data:image/...;base64,... URLs -- e.g. a pasted screenshot. Sent to
+   * the model as real vision content (see backend llm_phase.run_ask). */
+  images?: string[];
 }) =>
   request<DeveloperAskResponse>("/api/mentrix/developer/ask", {
     method: "POST",
@@ -180,7 +193,17 @@ export type DeveloperAskTurn = {
   answer: string;
   model: string;
   offline: boolean;
+  image_count?: number;
   created_at: string | null;
+  /** Compact context-used summary persisted alongside this turn (absent on
+   * turns recorded before this field existed -- treat as unknown, not empty). */
+  context_used?: {
+    knowledge?: boolean;
+    lattice_hits?: number;
+    lattice_indexed?: boolean;
+    lattice_state?: string;
+    blueprint?: boolean;
+  } | null;
 };
 
 export const developerAskHistory = (workItemId: number) =>
@@ -194,6 +217,11 @@ export type DeveloperPlanResponse = {
   status?: string;
   context_pack?: Record<string, unknown>;
   project_intelligence?: DeveloperAskResponse["project_intelligence"];
+  /** CP-05: the real repo-local .zect/plans/<id>-coding.plan.md path this
+   *  call just wrote automatically -- present whenever the WorkItem has a
+   *  resolved primary repo, so the caller can open it in Explorer/Monaco
+   *  without a separate manual "Save Plan" step. */
+  repo_plan_path?: string;
 };
 
 export const developerPlan = (body: {
@@ -1729,68 +1757,10 @@ export const mentrixRefreshSast = (
 export const mentrixFineTuneExport = () =>
   request<any>("/api/mentrix/fine-tune/export");
 
-// Legacy Agent Mode (/api/agent) — power-user path; prefer Mentrix Delivery
-export interface AgentModeStep {
-  id: number;
-  stage: string;
-  step_index: number;
-  output: string;
-  tokens_used: number;
-  duration_ms: number;
-  status: string;
-  model: string;
-  created_at: string | null;
-}
-
-export interface AgentModeRun {
-  id: number;
-  run_id: string;
-  task: string;
-  stages: string[];
-  model: string;
-  status: string;
-  current_stage_index?: number;
-  auto_advance?: boolean;
-  total_tokens?: number;
-  steps: AgentModeStep[];
-  created_at?: string | null;
-  completed_at?: string | null;
-  mode?: string;
-  engine?: string;
-  warning?: string;
-  workspace?: string;
-  files_written?: string[];
-  result?: Record<string, unknown>;
-}
-
-export const agentListRuns = () => request<AgentModeRun[]>("/api/agent/runs");
-
-export const agentGetRun = (runId: string) =>
-  request<AgentModeRun>(`/api/agent/run/${encodeURIComponent(runId)}`);
-
-export const agentStartRun = (data: {
-  task: string;
-  stages: string[];
-  model: string;
-  repo_context?: string;
-  auto_advance?: boolean;
-  workspace?: string;
-  project_key?: string;
-  repo_id?: number;
-}) =>
-  request<AgentModeRun>("/api/agent/run", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-
-export const agentResumeRun = (runId: string, model?: string) =>
-  request<AgentModeRun>(`/api/agent/run/${encodeURIComponent(runId)}/resume`, {
-    method: "POST",
-    body: JSON.stringify({ model }),
-  });
-
-export const agentCancelRun = (runId: string) =>
-  request<void>(`/api/agent/run/${encodeURIComponent(runId)}`, { method: "DELETE" });
+// Legacy Agent Mode (/api/agent) is retired from the frontend -- the
+// backend endpoint remains reachable for direct API/automation use (Phase A
+// closed its zero-human-approval gap), but no UI calls it anymore. See
+// ZECT_DEVELOPER_V4_RECONCILIATION_AND_EXECUTION_PLAN.md Phase B.
 
 // Sandbox PR readiness
 export const sandboxPrReadiness = (data: {
@@ -2068,6 +2038,97 @@ export async function codingAgentStream(
   }
 }
 
+/** CP-09 -- the canonical typed Mission/EventStream event shape. Every
+ *  field beyond event/message/at/data is optional: a plain _emit() call
+ *  (phase changes, approvals, blockers) only ever sets a handful of these,
+ *  while a bridged native-tool-loop event (files read, commands run,
+ *  model routing/token/cost) populates the rest. Never contains raw model
+ *  reasoning/chain-of-thought -- `message` is always the concise summary
+ *  the backend already builds (tool name + outcome, not the model's
+ *  internal deliberation). */
+export type MissionEvent = {
+  seq?: number;
+  event: string;
+  message: string;
+  at?: string;
+  data?: Record<string, unknown>;
+  phase?: string;
+  role?: string;
+  tool?: string;
+  repository_id?: number | string | null;
+  provider?: string;
+  model?: string;
+  routing_reason?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cached_tokens?: number;
+  estimated_cost?: number;
+  duration_ms?: number | null;
+  status?: string;
+  evidence_refs?: string[];
+  source_run_id?: string;
+};
+
+/** SSE stream of a Mission's canonical event log (lifecycle.py's durable,
+ *  JSON-persisted mission.events -- the same store /missions/{id} and
+ *  History both read, no second activity store). `after` is the last
+ *  `seq` already rendered; the server replays only what's missing, so a
+ *  reconnect after a tab switch/refresh/backend restart resumes exactly
+ *  where the client left off. Auto-closes (calls onDone) once the Mission
+ *  pauses/finishes -- callers reconnect with the same cursor on the next
+ *  user action rather than polling in a loop. */
+export async function codingAgentStreamMission(
+  missionId: string,
+  opts: {
+    after?: number;
+    signal?: AbortSignal;
+    onEvent: (ev: MissionEvent) => void;
+    onDone?: () => void;
+  },
+): Promise<void> {
+  const params = new URLSearchParams();
+  if (opts.after != null) params.set("after", String(opts.after));
+  const res = await apiFetch(
+    `/api/coding-agent/missions/${encodeURIComponent(missionId)}/stream?${params.toString()}`,
+    { method: "GET", signal: opts.signal },
+  );
+  if (!res.ok || !res.body) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const e = new Error(typeof err.detail === "string" ? err.detail : "Mission stream failed") as ApiRequestError;
+    e.status = res.status;
+    throw e;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+    for (const block of parts) {
+      const lines = block.split("\n");
+      let eventName = "";
+      let dataLine = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+      }
+      if (!dataLine || eventName === "ping") continue;
+      if (eventName === "done" || eventName === "timeout" || eventName === "error") {
+        opts.onDone?.();
+        continue;
+      }
+      try {
+        opts.onEvent(JSON.parse(dataLine) as MissionEvent);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 export type CodingAgentMissionRoot = {
   id: number;
   label: string;
@@ -2079,6 +2140,11 @@ export type CodingAgentMission = {
   goal: string;
   phase: string;
   status: string;
+  /** "running" | "recoverable" | "blocked" | "stopped" | "completed" --
+   *  see lifecycle.py::mission_execution_state(). Truthful vs. `phase`:
+   *  a Mission can sit at a mid-flight phase like "editing" post-restart
+   *  with nothing actually executing, which reads as "recoverable" here. */
+  execution_state?: string;
   plan: string;
   plan_approved: boolean;
   git_approved: boolean;
@@ -2119,8 +2185,19 @@ export type CodingAgentMission = {
   lattice_stale?: boolean;
   message?: string;
   native_implement?: unknown;
-  events?: Array<{ event?: string; message?: string; at?: string }>;
-  evidence?: Array<{ event?: string; message?: string; at?: string }>;
+  events?: MissionEvent[];
+  evidence?: MissionEvent[];
+  /** What the Coder/Tester/Debugger role actually saw for its most recent
+   * turn -- same shape ASK/PLAN's project_intelligence summary uses. */
+  context_used?: {
+    knowledge?: boolean;
+    lattice_hits?: number;
+    lattice_indexed?: boolean;
+    /** Canonical Lattice state, so a Mission cannot render NOT_INDEXED for
+     *  what is really NOT_APPLICABLE, INDEXING or STALE (finding F6). */
+    lattice_state?: string;
+    blueprint?: boolean;
+  } | null;
 };
 
 export const codingAgentCreateMission = (body: {
@@ -2167,9 +2244,16 @@ export const codingAgentRetryMission = (missionId: string) =>
     method: "POST",
   });
 
-export const codingAgentListPlans = () =>
+export const codingAgentListPlans = (workspace?: string) =>
   request<{ ok: boolean; plans: Array<{ id: string; markdown?: string; title?: string; work_item_or_run?: string }> }>(
-    "/api/coding-agent/plans",
+    `/api/coding-agent/plans${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`,
+  );
+
+export const codingAgentGetPlan = (planId: string, workspace?: string) =>
+  request<{ ok: boolean; id: string; path?: string; markdown: string; title?: string }>(
+    `/api/coding-agent/plans/${encodeURIComponent(planId)}${
+      workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""
+    }`,
   );
 
 export const codingAgentSavePlan = (body: {
@@ -2177,6 +2261,7 @@ export const codingAgentSavePlan = (body: {
   title?: string;
   markdown: string;
   meta?: Record<string, unknown>;
+  workspace?: string;
 }) =>
   request<{ ok: boolean; id: string; path?: string; markdown: string }>("/api/coding-agent/plans", {
     method: "POST",
@@ -2598,6 +2683,30 @@ export const workspaceSearch = (body: {
     method: "POST",
     body: JSON.stringify(body),
   });
+export type WorkspaceProblem = {
+  tool?: string;
+  severity?: string;
+  file?: string;
+  path?: string;
+  abs_path?: string;
+  line?: number;
+  column?: number;
+  message?: string;
+  repo_id?: number;
+  root_label?: string;
+};
+
+export const workspaceProblems = (repoIds: number[]) =>
+  request<{
+    ok: boolean;
+    problems: WorkspaceProblem[];
+    checked: string[];
+    skipped: { repo_id?: number; reason?: string }[];
+  }>("/api/workspace/problems", {
+    method: "POST",
+    body: JSON.stringify({ repo_ids: repoIds }),
+  });
+
 export const indexRepo = (repoPath: string, repoId?: number, fileExtensions?: string[]) =>
   request<any>("/api/code-index/index", {
     method: "POST",
@@ -2837,7 +2946,27 @@ export type DocumentArtifactInfo = {
   page_count?: number;
   parser_name?: string;
   freshness?: string;
+  /** "document" (parsed/chunked) or "image" (raw bytes, vision content) --
+   *  see backend document_intelligence.service.ingest_image. */
+  kind?: "document" | "image";
+  work_item_id?: number | null;
+  mime_type?: string;
+  bytes_size?: number;
+  created_at?: string;
 };
+
+async function uploadWithAuth<T>(url: string, form: FormData): Promise<T> {
+  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${API}${url}`, { method: "POST", body: form, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = err.detail;
+    throw new Error(typeof detail === "string" ? detail : detail?.message || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
 
 export const uploadDocument = async (opts: {
   file: File;
@@ -2845,6 +2974,7 @@ export const uploadDocument = async (opts: {
   scope?: "USER_PRIVATE" | "PROJECT_SHARED";
   sensitivity?: string;
   replaceArtifactId?: number | null;
+  workItemId?: number | null;
 }): Promise<{ ok: boolean; artifact: DocumentArtifactInfo }> => {
   const form = new FormData();
   form.append("file", opts.file);
@@ -2852,17 +2982,41 @@ export const uploadDocument = async (opts: {
   form.append("scope", opts.scope || "USER_PRIVATE");
   form.append("sensitivity", opts.sensitivity || "INTERNAL");
   if (opts.replaceArtifactId != null) form.append("replace_artifact_id", String(opts.replaceArtifactId));
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("zect_token") : null;
-  const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API}/api/documents/upload`, { method: "POST", body: form, headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    const detail = err.detail;
-    throw new Error(typeof detail === "string" ? detail : detail?.message || `Upload failed (${res.status})`);
-  }
-  return res.json();
+  if (opts.workItemId != null) form.append("work_item_id", String(opts.workItemId));
+  return uploadWithAuth<{ ok: boolean; artifact: DocumentArtifactInfo }>("/api/documents/upload", form);
 };
+
+/** A pasted/attached screenshot, stored durably (not just an in-memory data
+ *  URL) so it survives a refresh and PLAN/AGENT can see it without the user
+ *  re-pasting. */
+export const uploadImageAttachment = async (opts: {
+  file: File;
+  projectId?: number | null;
+  workItemId?: number | null;
+}): Promise<{ ok: boolean; artifact: DocumentArtifactInfo }> => {
+  const form = new FormData();
+  form.append("file", opts.file);
+  if (opts.projectId != null) form.append("project_id", String(opts.projectId));
+  if (opts.workItemId != null) form.append("work_item_id", String(opts.workItemId));
+  return uploadWithAuth<{ ok: boolean; artifact: DocumentArtifactInfo }>("/api/documents/upload-image", form);
+};
+
+export const linkAttachmentToWorkItem = (artifactId: number, workItemId: number) =>
+  request<{ ok: boolean; artifact: DocumentArtifactInfo }>(`/api/documents/${artifactId}/link`, {
+    method: "POST",
+    body: JSON.stringify({ work_item_id: workItemId }),
+  });
+
+export const getAttachmentRawDataUrl = (artifactId: number) =>
+  request<{ ok: boolean; artifact_id: number; filename: string; mime_type: string; data_url: string }>(
+    `/api/documents/${artifactId}/raw`,
+  );
+
+/** Everything attached across ASK/PLAN/AGENT for this WorkItem -- the one
+ *  list every Developer pane reads (finding: item 2, native attachments
+ *  must follow the Mission without re-upload). */
+export const listWorkItemAttachments = (workItemId: number) =>
+  request<{ attachments: DocumentArtifactInfo[] }>(`/api/work-items/${workItemId}/attachments`);
 
 export const listDocuments = (projectId?: number | null) =>
   request<{ documents: DocumentArtifactInfo[] }>(

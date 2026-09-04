@@ -25,6 +25,7 @@ from app.domains.work_items.status import (
 from app.models import MentrixRun, WorkItem, WorkItemEvent
 from app.services.work_items.artifact_store import ArtifactStore
 from app.services.work_items.checkpoints import load_execution_state, record_checkpoint
+from app.services.work_items import context_package as cp_module
 from app.services.work_items.context_engine import MentrixContextEngine, ProvenanceItem
 from app.services.work_items.evidence_verifier import EvidenceVerifier
 from app.services.work_items.fallback_policy import resolve_model_route
@@ -36,6 +37,39 @@ from app.services.work_items.multi_repo_context import (
     resolve_authorized_repository_ids,
 )
 from app.services.work_items.telemetry import TelemetryTimer, build_telemetry
+
+
+def _context_used_summary(pi: dict[str, Any] | None, skill: Any = None) -> dict[str, Any]:
+    """Compact, durable summary of a resolved ProjectIntelligenceSnapshot dict
+    (developer_service's `built["pi"]`, i.e. snapshot().to_dict()) -- the
+    same {knowledge, lattice_hits, lattice_indexed, lattice_state, blueprint}
+    shape agent_context.py's compose_rich_agent_context_pack() already
+    computes for Mission's "Context Used" strip, and the frontend's
+    contextFromDeveloperPi() already renders for a live ask() response. Ask
+    persists THIS instead of the full context_pack/project_intelligence
+    blob -- small enough to store per-turn, but enough to re-render the
+    Context Used strip on history replay (tab switch / refresh / restart)
+    without the user having to ask a new question first."""
+    pi = pi or {}
+    lattice = pi.get("lattice") or {}
+    hits = list(lattice.get("hits") or [])
+    state = str(lattice.get("status") or lattice.get("state") or "").strip().upper() or "NOT_APPLICABLE"
+    blueprint = pi.get("blueprint") or {}
+    knowledge = pi.get("knowledge") or []
+    summary = {
+        "knowledge": bool(knowledge),
+        "lattice_hits": len(hits),
+        "lattice_indexed": state == "READY",
+        "lattice_state": state,
+        "blueprint": bool(blueprint.get("snippet")),
+    }
+    if skill is not None:
+        summary["skill"] = {
+            "skill_name": skill.skill_name,
+            "skill_source_version": skill.skill_version,
+            "selection_reason": skill.reason,
+        }
+    return summary
 
 
 class MentrixDeveloperService:
@@ -103,7 +137,15 @@ class MentrixDeveloperService:
         sha = base_commit_sha or wi.base_commit_sha or ""
         project_key = ""
         try:
-            if wi.project_id and self.db is not None:
+            # The Lattice indexes per repository root under
+            # derive_project_key(owner, repo) -- the same key the frontend
+            # computes -- so a Project display name would look up a graph
+            # that was never written (finding F6). Only fall back to the
+            # project name for a work item with no repository at all.
+            from app.services.lattice.indexer import project_key_for_repository
+
+            project_key = project_key_for_repository(self.db, rid)
+            if not project_key and wi.project_id and self.db is not None:
                 from app.models import Project
 
                 p = self.db.query(Project).filter(Project.id == wi.project_id).first()
@@ -184,22 +226,35 @@ class MentrixDeveloperService:
         }
     )
 
+    # A bare filename mention ("what does calc.py do") must ground ASK in
+    # that file's real content -- a token-line grep alone finds nothing
+    # when the question's vocabulary doesn't overlap the file's own text
+    # (e.g. asking about "calc.py" when the code never uses the word
+    # "calc"), which is exactly what left ASK unable to say anything but
+    # generic clarifying questions for a trivially small, real file.
+    _FILENAME_RE = re.compile(r"\b[\w][\w\-]*\.[A-Za-z][A-Za-z0-9]{0,8}\b")
+
     def _workspace_file_items(self, *, repository_ids: list[int], query: str) -> list[ProvenanceItem]:
         """Grep authorized local roots so ASK is file-grounded before Lattice is indexed."""
         from app.infrastructure.allowed_paths import path_under_allowed_roots
         from app.models import Repo
 
+        filenames_wanted = {m.lower() for m in self._FILENAME_RE.findall(query or "")}
         tokens = [
             t
             for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]{3,}", query or "")
             if t.lower() not in self._ASK_STOP
         ]
         tokens = sorted(set(tokens), key=len, reverse=True)[:5]
-        if not tokens or not repository_ids:
+        if not tokens and not filenames_wanted:
+            return []
+        if not repository_ids:
             return []
         regexes = [re.compile(re.escape(t), re.IGNORECASE) for t in tokens]
         skip_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
-        items: list[ProvenanceItem] = []
+        filename_items: list[ProvenanceItem] = []
+        line_items: list[ProvenanceItem] = []
+        matched_filenames: set[str] = set()
         for rid in repository_ids:
             repo = self.db.query(Repo).filter(Repo.id == int(rid)).first()
             local = str(getattr(repo, "local_path", "") or "") if repo else ""
@@ -224,31 +279,196 @@ class MentrixDeveloperService:
                     except OSError:
                         continue
                     rel = str(fpath.relative_to(root)).replace("\\", "/")
-                    for i, line in enumerate(text.splitlines(), 1):
-                        if any(rx.search(line) for rx in regexes):
-                            items.append(
-                                ProvenanceItem(
-                                    source_type="workspace_file",
-                                    source_id=f"{rel}:{i}",
-                                    content=f"{rel}:{i}: {line.strip()[:240]}",
-                                    repository=str(rid),
-                                    freshness="current",
-                                    verification_state="file_search",
-                                    selection_reason="authorized_local_grep",
-                                    retrieval_score=1.0,
-                                )
+                    if name.lower() in filenames_wanted and name.lower() not in matched_filenames:
+                        matched_filenames.add(name.lower())
+                        filename_items.append(
+                            ProvenanceItem(
+                                source_type="workspace_file",
+                                source_id=rel,
+                                content=f"{rel}:\n{text[:8000]}",
+                                repository=str(rid),
+                                freshness="current",
+                                verification_state="file_search",
+                                selection_reason="authorized_local_filename_match",
+                                retrieval_score=1.0,
                             )
-                            if len(items) >= 12:
-                                return items
-                            break
-        return items
+                        )
+                        continue
+                    if regexes:
+                        for i, line in enumerate(text.splitlines(), 1):
+                            if any(rx.search(line) for rx in regexes):
+                                line_items.append(
+                                    ProvenanceItem(
+                                        source_type="workspace_file",
+                                        source_id=f"{rel}:{i}",
+                                        content=f"{rel}:{i}: {line.strip()[:240]}",
+                                        repository=str(rid),
+                                        freshness="current",
+                                        verification_state="file_search",
+                                        selection_reason="authorized_local_grep",
+                                        retrieval_score=1.0,
+                                    )
+                                )
+                                break
+                    # Stop as soon as we have enough combined items -- not
+                    # gated on filename_items reaching 6, otherwise a large
+                    # repo with many line-grep hits but few/no filename
+                    # matches would walk the entire tree unbounded.
+                    if len(filename_items) + len(line_items) >= 12:
+                        return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
+        return filename_items[:6] + line_items[: 12 - min(len(filename_items), 6)]
+
+    # CP-02 anti-hallucination gate (finding A1): a class/file/route-shaped
+    # name in ASK's prose answer is a factual claim -- "this exists in the
+    # repository" -- and the CMS benchmark proved the model will invent
+    # plausible-sounding ones (CampaignWizard, ApprovalService,
+    # POST /campaigns/initiate) when real grounding is weak. The system
+    # prompt (llm_phase.run_ask) asks the model not to; this is the second,
+    # code-level check that doesn't depend on the model actually listening
+    # (the same two-layer pattern Roo Code uses for tool permissions).
+    _ANSWER_FILENAME_RE = re.compile(r"\b[\w][\w\-]*\.[A-Za-z][A-Za-z0-9]{0,8}\b")
+    _CLASS_LIKE_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+){2,}\b")
+    _API_ROUTE_RE = re.compile(r"\b(?:GET|POST|PUT|DELETE|PATCH)\s+/[\w{}:/-]+")
+
+    def _check_answer_grounding(self, answer: str, pack_obj: Any) -> dict[str, Any]:
+        """Backward-compatible shape for existing callers/tests: plain
+        verified/unverified name lists. Delegates to _build_evidence_ledger()
+        (CP-04) so there is exactly one place that decides what counts as
+        grounded, not two independently-drifting implementations."""
+        ledger = self._build_evidence_ledger(answer, pack_obj, repo_id=None, repo_sha="")
+        return {
+            "verified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_VERIFIED),
+            "unverified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_NOT_FOUND),
+            "checked": True,
+        }
+
+    def _build_evidence_ledger(
+        self, answer: str, pack_obj: Any, *, repo_id: int | None, repo_sha: str
+    ) -> list[cp_module.EvidenceLedgerEntry]:
+        """CP-04 Evidence Ledger: which class/file/route-shaped names in
+        `answer` actually appear in the retrieved context, typed and with
+        the specific provenance backing each VERIFIED claim -- the
+        structured replacement for a prose "Unverified references" banner
+        that a later phase (PLAN) would otherwise have to re-interpret from
+        free text. Runs even when there is no context at all -- in that
+        case every named entity is NOT_FOUND, which is the correct signal
+        (finding A1)."""
+        text = answer or ""
+        typed_candidates: dict[str, str] = {}  # entity -> entity_type, first match wins
+        for m in self._ANSWER_FILENAME_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "file")
+        for m in self._CLASS_LIKE_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "class")
+        for m in self._API_ROUTE_RE.finditer(text):
+            typed_candidates.setdefault(m.group(0), "api_route")
+        if not typed_candidates:
+            return []
+        items = list(getattr(pack_obj, "items", None) or [])
+        ledger: list[cp_module.EvidenceLedgerEntry] = []
+        for name in sorted(typed_candidates):
+            entity_type = typed_candidates[name]
+            matches = [it for it in items if name.lower() in str(getattr(it, "content", "") or "").lower()]
+            # A content match is the actual evidence -- keep it even when the
+            # matching item has no source_id (a falsy-ref filter here would
+            # silently drop the match itself, not just its label, and wrongly
+            # report a genuinely-grounded entity as NOT_FOUND).
+            refs = [str(getattr(it, "source_id", "") or "unspecified") for it in matches][:5]
+            status = cp_module.STATUS_VERIFIED if matches else cp_module.STATUS_NOT_FOUND
+            ledger.append(
+                cp_module.EvidenceLedgerEntry(
+                    entity=name,
+                    entity_type=entity_type,
+                    status=status,
+                    repo_id=repo_id,
+                    repo_sha=repo_sha,
+                    evidence_refs=refs,
+                )
+            )
+        return ledger
+
+    # CP-04: the canonical ASK -> PLAN structured hand-off. WorkItem.
+    # context_snapshot_json already existed in the schema (serialized in
+    # every WorkItem response) but nothing ever wrote to it -- PLAN
+    # inherited ASK's findings only as a formatted Markdown blob the
+    # frontend built and passed back as the `goal` string, which is exactly
+    # why CP-02's warning banner risked being read as part of the
+    # requirement instead of as structured evidence. Persisting/loading the
+    # ContextPackage here, keyed by WorkItem, is what lets PLAN (and later
+    # AGENT) consume one canonical, typed object instead of re-parsing prose.
+    def _persist_context_package(
+        self,
+        wi: WorkItem,
+        *,
+        requirement: str,
+        ask_findings: str,
+        evidence_ledger: list[cp_module.EvidenceLedgerEntry],
+    ) -> cp_module.ContextPackage:
+        prior = self._load_context_package(wi)
+        merged_ledger = (
+            cp_module.merge_evidence_ledgers(prior.evidence_ledger, evidence_ledger) if prior else evidence_ledger
+        )
+        try:
+            from app.services.document_intelligence.service import list_work_item_attachments
+
+            attachments = [
+                {"id": a["id"], "filename": a["filename"], "content_version_id": a["content_version_id"]}
+                for a in list_work_item_attachments(self.db, work_item_id=wi.id)
+            ]
+        except Exception:  # noqa: BLE001
+            attachments = []
+        pkg = cp_module.build_context_package(
+            work_item_id=wi.id,
+            primary_repo_id=wi.repository_id,
+            repo_sha=wi.base_commit_sha or "",
+            requirement=requirement,
+            ask_findings=ask_findings,
+            evidence_ledger=merged_ledger,
+            attachments=attachments,
+            resolved_mentions=(prior.resolved_mentions if prior else []),
+            scope_decisions=(prior.scope_decisions if prior else {}),
+        )
+        wi.context_snapshot_json = json.dumps(pkg.to_dict())
+        self.db.commit()
+        return pkg
+
+    def _load_context_package(self, wi: WorkItem) -> cp_module.ContextPackage | None:
+        raw = (wi.context_snapshot_json or "").strip()
+        if not raw or raw == "{}":
+            return None
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if not data:
+            return None
+        return cp_module.ContextPackage.from_dict(data)
+
+    # CP-04 deterministic guard (companion to the CMS regression: ASK's
+    # ledger marks CampaignManagement.java / POST /campaigns/initiate
+    # NOT_FOUND, and PLAN must not silently treat them as pre-existing
+    # modify-targets). A NOT_FOUND entity is only acceptable in the plan
+    # text when it's explicitly qualified as new. CP-06 promotes this
+    # detection into a hard approval-time gate (plan_validator.py); the
+    # scanning logic itself now lives in plan_generator.find_not_found_leaks
+    # so both the generation-time warning banner and the approval-time gate
+    # share one implementation instead of drifting apart.
+    def _check_plan_against_not_found(self, plan_text: str, pkg: cp_module.ContextPackage) -> set[str]:
+        from app.services.work_items import plan_generator
+
+        return plan_generator.find_not_found_leaks(plan_text, pkg.not_found_entities())
 
     def _build_multi_repo(
         self,
         wi: WorkItem,
         goal: str,
         repository_ids: list[int],
+        *,
+        primary_repository_id: int | None = None,
     ) -> dict[str, Any]:
+        # The authoritative primary is the WorkItem's own sticky binding when
+        # it has one; repository_ids[0] is only a fallback for a WorkItem
+        # that hasn't bound to a repo yet (finding A2 / CP-01).
+        primary_rid = primary_repository_id or wi.repository_id or (repository_ids[0] if repository_ids else None)
         per_repo: list[dict[str, Any]] = []
         packs = []
         pi_by_repo: dict[str, Any] = {}
@@ -274,10 +494,15 @@ class MentrixDeveloperService:
                 }
             )
             pi_by_repo[str(rid)] = built.get("pi")
-        merged = merge_context_packs(packs) if packs else self.context_engine.build(goal=goal)
+        merged = (
+            merge_context_packs(packs, primary_repository_id=primary_rid)
+            if packs
+            else self.context_engine.build(goal=goal)
+        )
+        primary_key = str(primary_rid) if primary_rid is not None else (str(repository_ids[0]) if repository_ids else "")
         return {
             "pack": merged.to_dict(),
-            "pi": pi_by_repo.get(str(repository_ids[0])) if repository_ids else {},
+            "pi": pi_by_repo.get(primary_key, pi_by_repo.get(str(repository_ids[0])) if repository_ids else {}),
             "pack_obj": merged,
             "context_by_repository": per_repo,
             "affected_repos": [b for b in per_repo],
@@ -294,6 +519,7 @@ class MentrixDeveloperService:
         repository_ref: str = "",
         base_commit_sha: str = "",
         actor: str = "",
+        images: list[str] | None = None,
     ) -> dict[str, Any]:
         wi = self._ensure_work_item(
             work_item_id=work_item_id,
@@ -308,10 +534,16 @@ class MentrixDeveloperService:
             self.db,
             project_id=project_id or wi.project_id,
             repository_ids=repository_ids,
-            repository_id=repository_id or wi.repository_id,
+            # The WorkItem's own binding wins once set -- a WorkItem is
+            # scoped to one primary repo for its whole lifetime, so a later
+            # call must not let a differently-active repo in the caller's
+            # UI silently rebind it (finding A2 / CP-01). Only a brand-new
+            # WorkItem (wi.repository_id still unset) takes the request's
+            # repository_id as its first binding.
+            repository_id=wi.repository_id or repository_id,
         )
         if len(authorized) > 1:
-            built = self._build_multi_repo(wi, question, authorized)
+            built = self._build_multi_repo(wi, question, authorized, primary_repository_id=wi.repository_id)
         else:
             built = self._build_pack(wi, question)
             if authorized:
@@ -335,11 +567,29 @@ class MentrixDeveloperService:
         if route.blocked and route.provider == "none":
             # Still allow offline clarifying answer via llm_phase offline path
             pass
+        from app.services.coding_engine.skill_router import ROLE_ASK, select_skill_with_db
+
+        skill = select_skill_with_db(self.db, ROLE_ASK, project_id=wi.project_id)
+        append_event(
+            self.db,
+            work_item_id=wi.id,
+            event_type="skill_selected",
+            payload=skill.to_event_data(),
+            commit=True,
+        )
+        # CP-09B: the skill's own instructions are surfaced via the
+        # skill_selected event + context_used.skill above, deliberately
+        # NOT folded into repo_context here -- llm_phase.run_ask()'s
+        # offline path echoes repo_context[:2500] verbatim into the
+        # returned answer, and ASK's whole CP-02 contract is that the
+        # answer is grounded ONLY in retrieved repo content, never in
+        # prose a skill selection added.
         result = llm_phase.run_ask(
             question,
             repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=question)).text_blob(),
             repo_id=wi.repository_id,
             db=self.db,
+            images=images or None,
         )
         tel = build_telemetry(
             requested_provider="local" if mentrix_local_llm_configured() else "cloud",
@@ -361,6 +611,22 @@ class MentrixDeveloperService:
         )
         answer = str(result.get("answer") or "")
         pack_obj = built.get("pack_obj")
+        ledger = self._build_evidence_ledger(
+            answer, pack_obj, repo_id=wi.repository_id, repo_sha=wi.base_commit_sha or ""
+        )
+        grounding = {
+            "verified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_VERIFIED),
+            "unverified": sorted(e.entity for e in ledger if e.status == cp_module.STATUS_NOT_FOUND),
+            "checked": True,
+        }
+        if grounding["unverified"]:
+            warning = (
+                "⚠️ **Unverified references** — not found in the retrieved repository context, "
+                "so they may be invented rather than real: "
+                + ", ".join(grounding["unverified"][:12])
+                + ". Treat these as illustrative, not confirmed, unless independently verified.\n\n---\n\n"
+            )
+            answer = warning + answer
         source_lines = [
             str(getattr(it, "content", "") or "")
             for it in (getattr(pack_obj, "items", None) or [])
@@ -371,6 +637,10 @@ class MentrixDeveloperService:
         # Full (untruncated) turn, persisted separately from the truncated
         # "ask" audit event above -- this is what ask_history() replays to
         # restore the conversation across navigation/refresh/restart.
+        # context_used is a compact summary of built["pi"] (the same
+        # project_intelligence returned in this call's HTTP response) --
+        # persisting it here is what lets the Context Used strip survive a
+        # reload instead of going blank until the next fresh ask() call.
         append_event(
             self.db,
             work_item_id=wi.id,
@@ -380,8 +650,16 @@ class MentrixDeveloperService:
                 "answer": answer,
                 "model": str(tel.get("actual_model") or tel.get("requested_model") or ""),
                 "offline": bool(result.get("offline")),
+                # Only a count is persisted, never the image bytes -- this
+                # audit log is not an image store; images are single-turn.
+                "image_count": len(images or []),
+                "context_used": _context_used_summary(built.get("pi"), skill=skill),
+                "grounding": grounding,
             },
             commit=True,
+        )
+        context_package = self._persist_context_package(
+            wi, requirement=question, ask_findings=answer, evidence_ledger=ledger
         )
         return {
             "work_item_id": wi.id,
@@ -391,7 +669,9 @@ class MentrixDeveloperService:
             "affected_repos": built.get("affected_repos") or [],
             "project_intelligence": built["pi"],
             "telemetry": tel,
+            "grounding": grounding,
             "result": result,
+            "context_package": context_package.to_dict(),
         }
 
     def ask_history(self, work_item_id: int) -> list[dict[str, Any]]:
@@ -412,15 +692,24 @@ class MentrixDeveloperService:
                 payload = json.loads(row.payload_json or "{}")
             except (TypeError, ValueError):
                 payload = {}
-            turns.append(
-                {
-                    "question": str(payload.get("question") or ""),
-                    "answer": str(payload.get("answer") or ""),
-                    "model": str(payload.get("model") or ""),
-                    "offline": bool(payload.get("offline")),
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                }
-            )
+            turn = {
+                "question": str(payload.get("question") or ""),
+                "answer": str(payload.get("answer") or ""),
+                "model": str(payload.get("model") or ""),
+                "offline": bool(payload.get("offline")),
+                "image_count": int(payload.get("image_count") or 0),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            # Additive: rows persisted before context_used existed have no
+            # such key -- leave it absent rather than backfilling a fake
+            # summary, so the frontend can tell "unknown" from "empty".
+            context_used = payload.get("context_used")
+            if isinstance(context_used, dict):
+                turn["context_used"] = context_used
+            grounding = payload.get("grounding")
+            if isinstance(grounding, dict):
+                turn["grounding"] = grounding
+            turns.append(turn)
         return turns
 
     def plan(
@@ -445,16 +734,22 @@ class MentrixDeveloperService:
             base_commit_sha=base_commit_sha,
             actor=actor,
         )
+        # CP-04: PLAN's authoritative evidence is the ContextPackage ASK
+        # persisted for this WorkItem, not whatever prose (including a
+        # CP-02 warning banner) the caller's `goal` string happens to
+        # contain. May be None for a WorkItem that never went through ASK.
+        context_package = self._load_context_package(wi)
         store = self._store(wi.id)
         record_checkpoint(store, checkpoint_type="op_start", operation_id="plan")
         authorized = resolve_authorized_repository_ids(
             self.db,
             project_id=project_id or wi.project_id,
             repository_ids=repository_ids,
-            repository_id=repository_id or wi.repository_id,
+            # Same sticky-binding rule as ask() -- see comment there.
+            repository_id=wi.repository_id or repository_id,
         )
         if len(authorized) > 1:
-            built = self._build_multi_repo(wi, goal, authorized)
+            built = self._build_multi_repo(wi, goal, authorized, primary_repository_id=wi.repository_id)
         else:
             built = self._build_pack(wi, goal)
             if authorized:
@@ -467,16 +762,82 @@ class MentrixDeveloperService:
         store.write_json("EXECUTION_MANIFEST.json", manifest)
         store.write_json("AFFECTED_REPOS.json", {"affected_repos": affected})
         from app.services.phases import llm_phase
+        from app.services.work_items import plan_generator
 
-        result = llm_phase.run_plan(
-            goal,
-            repo_context=(built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob(),
-            constraints=constraints,
-            repo_id=wi.repository_id,
-            db=self.db,
-            upgrade=True,
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        architecture = plan_generator.detect_repo_architecture(repo_local_path) if repo_local_path else (
+            plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
         )
-        plan_text = str(result.get("plan") or "")
+        repo_context = (built.get("pack_obj") or MentrixContextEngine().build(goal=goal)).text_blob()
+        ledger_block = context_package.evidence_ledger_prompt_block() if context_package else ""
+        repo_size_files = plan_generator.count_repo_files(repo_local_path) if repo_local_path else 0
+        # CP-08: a big repo is exactly the "do not default a large CMS
+        # implementation to a small/cheap model" case the Model Router
+        # mandate calls out by name -- feed it the real, deterministically
+        # counted file total rather than letting PLAN fall back to a
+        # length-only guess.
+        from app.services.work_items.model_router import COMPLEXITY_COMPLEX as _MR_COMPLEX
+
+        plan_complexity = _MR_COMPLEX if repo_size_files > 150 else ""
+        from app.services.coding_engine.skill_router import ROLE_PLAN, select_skill_with_db
+
+        skill = select_skill_with_db(self.db, ROLE_PLAN, project_id=wi.project_id)
+        append_event(
+            self.db,
+            work_item_id=wi.id,
+            event_type="skill_selected",
+            payload=skill.to_event_data(),
+            commit=True,
+        )
+        result = llm_phase.run_grounded_plan(
+            goal,
+            evidence_ledger_block=ledger_block,
+            architecture_summary=f"{architecture.primary_language}/{architecture.build_system}",
+            repo_context=skill.goal_prefix() + repo_context,
+            constraints=constraints,
+            complexity=plan_complexity,
+            repo_language=architecture.primary_language,
+            repo_size_files=repo_size_files,
+        )
+        narrative_sections = plan_generator.parse_narrative_sections(str(result.get("narrative") or ""))
+        seeded = plan_generator.seed_file_impacts_from_ledger(context_package) if context_package else []
+        proposed = [
+            plan_generator.FileImpact.from_dict(d)
+            for d in (result.get("proposed_file_impacts") or [])
+            if isinstance(d, dict)
+        ]
+        accepted, rejected_reasons = plan_generator.validate_file_impacts(
+            seeded + proposed,
+            context_package=context_package or cp_module.build_context_package(
+                work_item_id=wi.id, primary_repo_id=wi.repository_id, repo_sha=wi.base_commit_sha or "",
+                requirement=goal, ask_findings="", evidence_ledger=[],
+            ),
+            repo_root=repo_local_path or ".",
+            architecture=architecture,
+        )
+        plan_text = plan_generator.render_grounded_plan_markdown(
+            goal=goal,
+            context_package=context_package,
+            architecture=architecture,
+            accepted_impacts=accepted,
+            rejected_reasons=rejected_reasons,
+            narrative_sections=narrative_sections,
+        )
+        placeholder_hits = plan_generator.find_placeholder_violations(plan_text)
+        if placeholder_hits:
+            plan_text = (
+                "⚠️ **Unresolved template content detected and must be replaced before approval**: "
+                + ", ".join(sorted(set(placeholder_hits))) + ".\n\n---\n\n" + plan_text
+            )
+        if context_package:
+            leaked = self._check_plan_against_not_found(plan_text, context_package)
+            if leaked:
+                plan_text = (
+                    "⚠️ **Plan references entities ASK could not verify** — the following were marked "
+                    "NOT_FOUND in the repository and must not be treated as existing targets to modify "
+                    "unless explicitly justified as CREATE_NEW: " + ", ".join(sorted(leaked)) + ".\n\n---\n\n"
+                    + plan_text
+                )
         if len(affected) > 1:
             repo_lines = "\n".join(
                 f"- {r.get('label')} (repo_id={r.get('repository_id')}, ref={r.get('repository_ref')}, "
@@ -488,8 +849,49 @@ class MentrixDeveloperService:
                 f"Each execution operation is bound to repo_id + worktree under artifacts/worktrees/.\n\n"
                 f"{plan_text}"
             )
+        # CP-06: canonicalize once, here, before anything hashes or persists
+        # it -- plan_store.save_plan()/load_plan() round-trips the
+        # repo-local copy through .strip(), so hashing an un-stripped
+        # plan_text here would make _resolve_current_plan_text() (which
+        # prefers that repo-local copy) compute a different hash than this
+        # one on the very next validation call, falsely reporting a
+        # freshly-generated, never-touched plan as STALE.
+        plan_text = plan_text.strip()
         written = store.write_plan(plan_text)
         new_hash = written["plan_hash"]
+        # CP-06: machine-readable contract proving the rendered plan text
+        # and the accepted file impacts are in sync as of this plan_hash --
+        # plan_validator.py re-checks this at approval time since the
+        # filesystem/evidence state generation relied on can drift before
+        # someone clicks Approve.
+        store.write_json(
+            "FILE_IMPACTS.json",
+            {
+                "work_item_id": wi.id,
+                "primary_repo_id": wi.repository_id,
+                "repo_sha": wi.base_commit_sha or "",
+                "plan_hash": new_hash,
+                "file_impacts": [i.to_dict() for i in accepted],
+                "rejected_file_impacts": rejected_reasons,
+            },
+        )
+        # CP-05: write the same grounded plan to the primary repo's real
+        # .zect/plans/ so it appears in Explorer/Monaco immediately, without
+        # requiring the separate manual "Save Plan" click this previously
+        # depended on entirely.
+        repo_plan_path = ""
+        if repo_local_path:
+            try:
+                from app.infrastructure.allowed_paths import path_under_allowed_roots
+                from app.services.coding_engine.plan_store import save_plan as _save_repo_plan
+
+                allowed_root = str(path_under_allowed_roots(repo_local_path))
+                saved = _save_repo_plan(
+                    work_item_or_run=str(wi.id), title="coding", markdown=plan_text, workspace=allowed_root
+                )
+                repo_plan_path = str(saved.get("path") or "")
+            except Exception:  # noqa: BLE001
+                repo_plan_path = ""
         material_change = bool(wi.approved_plan_hash and wi.approved_plan_hash != new_hash)
         wi.plan_version = int(wi.plan_version or 0) + 1
         wi.plan_hash = new_hash
@@ -544,7 +946,67 @@ class MentrixDeveloperService:
             "execution_manifest": manifest,
             "project_intelligence": built["pi"],
             "mentrix_run_id": run.id,
+            "context_package": context_package.to_dict() if context_package else None,
+            "repo_plan_path": repo_plan_path,
+            "architecture": architecture.to_dict(),
+            "file_impacts": [i.to_dict() for i in accepted],
+            "rejected_file_impacts": rejected_reasons,
+            "validation": self.validate_plan(work_item_id=wi.id),
         }
+
+    def _resolve_current_plan_text(self, wi: WorkItem, store: ArtifactStore) -> str:
+        # The repo-local .zect/plans/<id>-coding.plan.md is what Explorer/
+        # Monaco actually show and let the user edit -- if it exists, it is
+        # the plan text about to be approved, not necessarily the internal
+        # ArtifactStore mirror written at the last plan() call.
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        if repo_local_path:
+            try:
+                from app.infrastructure.allowed_paths import path_under_allowed_roots
+                from app.services.coding_engine.plan_store import load_plan as _load_repo_plan
+
+                allowed_root = str(path_under_allowed_roots(repo_local_path))
+                loaded = _load_repo_plan(f"{wi.id}-coding", workspace=allowed_root)
+                text = str(loaded.get("markdown") or "")
+                if text.strip():
+                    return text
+            except Exception:  # noqa: BLE001
+                pass
+        return store.read_plan()
+
+    def _validate_plan_impl(self, wi: WorkItem) -> tuple["plan_validator.PlanValidationResult", str]:
+        from app.services.work_items import plan_generator, plan_validator
+        from app.services.work_items.artifact_store import plan_hash_bytes
+
+        store = self._store(wi.id)
+        plan_text = self._resolve_current_plan_text(wi, store)
+        current_hash = plan_hash_bytes(plan_text) if plan_text.strip() else ""
+        sidecar = store.read_json("FILE_IMPACTS.json", default=None) or None
+        repo_local_path = str(repo_binding(self.db, wi.repository_id).get("local_path") or "") if wi.repository_id else ""
+        architecture = (
+            plan_generator.detect_repo_architecture(repo_local_path)
+            if repo_local_path
+            else plan_generator.RepoArchitecture(primary_language="unknown", build_system="unknown")
+        )
+        context_package = self._load_context_package(wi)
+        result = plan_validator.validate_plan_for_approval(
+            work_item_id=wi.id,
+            primary_repo_id=wi.repository_id,
+            base_commit_sha=wi.base_commit_sha or "",
+            recorded_plan_hash=wi.plan_hash or "",
+            plan_text=plan_text,
+            current_plan_hash=current_hash,
+            sidecar=sidecar,
+            context_package=context_package,
+            repo_root=repo_local_path or ".",
+            architecture=architecture,
+        )
+        return result, plan_text
+
+    def validate_plan(self, *, work_item_id: int) -> dict[str, Any]:
+        wi = wi_svc.get_work_item(self.db, work_item_id)
+        result, _plan_text = self._validate_plan_impl(wi)
+        return result.to_dict()
 
     def approve_plan(self, *, work_item_id: int, actor: str = "") -> dict[str, Any]:
         wi = wi_svc.get_work_item(self.db, work_item_id)
@@ -682,6 +1144,8 @@ class MentrixDeveloperService:
                 workspace=ws,
                 expected_files=["mentrix_p0_agent_marker.py"],
                 project_id=wi.project_id,
+                repo_id=wi.repository_id,
+                work_item_id=wi.id,
             )
             files_written = list(native.get("files_written") or [])
             events_tail = list(native.get("events_tail") or [])

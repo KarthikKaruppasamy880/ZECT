@@ -167,6 +167,61 @@ def search_workspace(
     }
 
 
+def workspace_problems(db: Session, *, repo_ids: list[int]) -> dict[str, Any]:
+    """Real lint/typecheck diagnostics (see services/workspace/problems.py)
+    across every authorized root -- same repo_id -> local_path -> allowed-
+    roots jail as search_workspace, so this never runs a tool against a
+    path the caller wasn't handed."""
+    from app.services.workspace.problems import collect_workspace_problems
+
+    repos = cloned_repos_for_ids(db, repo_ids)
+    problems: list[dict[str, Any]] = []
+    checked_tools: set[str] = set()
+    skipped: list[dict[str, Any]] = []
+
+    for repo in repos:
+        if not repo.local_path:
+            skipped.append({"repo_id": repo.id, "reason": "ROOT_UNAVAILABLE", "error": "missing_local_path"})
+            continue
+        try:
+            root = path_under_allowed_roots(repo.local_path)
+        except ValueError:
+            skipped.append({"repo_id": repo.id, "reason": "unauthorized"})
+            continue
+        if not root.is_dir():
+            skipped.append({"repo_id": repo.id, "reason": "ROOT_UNAVAILABLE", "error": "path_not_found"})
+            continue
+
+        envelope = repo_identity_envelope(db, repo)
+        result = collect_workspace_problems(root)
+        checked_tools.update(result["checked"])
+        for problem in result["problems"]:
+            raw_file = str(problem.get("file") or "")
+            abs_candidate = Path(raw_file)
+            if not abs_candidate.is_absolute():
+                abs_candidate = root / raw_file
+            try:
+                rel = abs_candidate.resolve().relative_to(root)
+            except ValueError:
+                rel = Path(raw_file)
+            problems.append(
+                {
+                    **problem,
+                    "path": str(rel).replace("\\", "/"),
+                    "abs_path": str(abs_candidate),
+                    "repo_id": repo.id,
+                    "root_label": envelope.get("root_label"),
+                }
+            )
+
+    return {
+        "ok": True,
+        "problems": problems,
+        "checked": sorted(checked_tools),
+        "skipped": skipped,
+    }
+
+
 def _scan_files(
     files: list[Path],
     root: Path,

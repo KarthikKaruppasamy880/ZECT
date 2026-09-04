@@ -240,7 +240,15 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
         roots = _mission_roots(db, req)
         if is_pull_sync_intent(req.goal):
             return sync_authorized_roots(roots)
-        return start_mission(
+        # Resolve the WorkItem's own sticky repository_id up front -- the
+        # same authoritative truth ASK/PLAN use (finding A2 / CP-01) -- so
+        # the Mission never has to guess a primary repo from roots[0] order.
+        wi = None
+        if req.work_item_id:
+            from app.models import WorkItem
+
+            wi = db.query(WorkItem).filter(WorkItem.id == req.work_item_id).first()
+        mission = start_mission(
             goal=req.goal.strip(),
             roots=roots,
             plan=req.plan,
@@ -249,7 +257,14 @@ def create_mission(req: MissionCreate, db: Session = Depends(get_db), _user: Cur
             project_id=req.project_id,
             workspace_parent=req.workspace_parent,
             propose_if_empty=bool(req.propose_if_empty),
+            primary_repository_id=(wi.repository_id if wi is not None else None),
         )
+        if wi is not None:
+            # Canonical Mission-identity pointer -- lets the WorkItem always
+            # resolve "its" Mission (see WorkItem.coding_mission_id).
+            wi.coding_mission_id = str(mission.get("id") or "")
+            db.commit()
+        return mission
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except TypeError as exc:
@@ -266,6 +281,74 @@ def read_mission(mission_id: str, _user: CurrentUser = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="mission_not_found") from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/missions/{mission_id}/stream")
+def stream_mission(
+    mission_id: str,
+    after: int = Query(0, ge=0),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """CP-09 -- SSE stream of the canonical Mission/EventStream activity
+    log (lifecycle.py's JSON-persisted mission.events, the same durable
+    store /missions/{id} and History both read -- no second activity
+    store). `?after=<seq>` is the resume cursor: a client reconnecting
+    after a tab switch, route navigation, browser refresh, or backend
+    restart passes back the last `seq` it already rendered and gets
+    exactly the events it's missing, not a replay of everything.
+
+    Modeled on agent_run/mentrix.py's DB-cursor SSE endpoint: re-reads the
+    Mission from its persistence layer every poll (via get_mission_events,
+    which calls lifecycle._lookup -- an in-process cache hit if this
+    worker is the one running the mission, a disk read otherwise) rather
+    than holding anything in this request's own memory, and closes the
+    stream once the mission is paused/done so the client reconnects on
+    its next action instead of holding a socket open forever.
+    """
+    from app.services.coding_engine.lifecycle import get_mission, get_mission_events
+
+    try:
+        get_mission(mission_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="mission_not_found") from None
+
+    def gen() -> Iterator[str]:
+        cursor = after
+        idle = 0
+        while idle < 600:
+            try:
+                events = get_mission_events(mission_id, after=cursor)
+            except KeyError:
+                yield f"event: error\ndata: {json.dumps({'error': 'mission_not_found'})}\n\n"
+                return
+            if events:
+                idle = 0
+                for ev in events:
+                    cursor = int(ev.get("seq") or cursor)
+                    yield f"event: {ev.get('event') or 'mission_event'}\ndata: {json.dumps(ev, default=str)}\n\n"
+            else:
+                idle += 1
+                try:
+                    mission = get_mission(mission_id)
+                except KeyError:
+                    return
+                if mission.get("execution_state") != "running":
+                    # Not actively executing right now (awaiting an
+                    # approval, blocked, or done) -- nothing new is coming
+                    # until the user takes the next action, so stop
+                    # holding the connection open; the client reconnects
+                    # with the same cursor when it does.
+                    yield f"event: done\ndata: {json.dumps({'execution_state': mission.get('execution_state'), 'after': cursor})}\n\n"
+                    return
+                yield f"event: ping\ndata: {json.dumps({'after': cursor})}\n\n"
+                time.sleep(0.5)
+        yield f"event: timeout\ndata: {json.dumps({'after': cursor})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/missions/{mission_id}/approve-plan")
@@ -345,21 +428,38 @@ class PlanSaveIn(BaseModel):
     title: str = "coding"
     markdown: str = Field(..., min_length=1)
     meta: dict = Field(default_factory=dict)
+    workspace: str = ""
+
+
+def _authorized_workspace(workspace: str) -> str:
+    """A plan is written into the target repo, so the same allowed-roots jail
+    every other workspace-writing endpoint uses applies here too."""
+    ws = (workspace or "").strip()
+    if not ws:
+        return ""
+    from app.infrastructure.allowed_paths import path_under_allowed_roots
+
+    try:
+        return str(path_under_allowed_roots(ws))
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @router.get("/plans")
-def coding_plans(_user: CurrentUser = Depends(get_current_user)):
+def coding_plans(workspace: str = "", _user: CurrentUser = Depends(get_current_user)):
     from app.services.coding_engine.plan_store import list_plans
 
-    return {"ok": True, "plans": list_plans()}
+    return {"ok": True, "plans": list_plans(workspace=_authorized_workspace(workspace))}
 
 
 @router.get("/plans/{plan_id}")
-def coding_plan_get(plan_id: str, _user: CurrentUser = Depends(get_current_user)):
+def coding_plan_get(
+    plan_id: str, workspace: str = "", _user: CurrentUser = Depends(get_current_user)
+):
     from app.services.coding_engine.plan_store import load_plan
 
     try:
-        return load_plan(plan_id)
+        return load_plan(plan_id, workspace=_authorized_workspace(workspace))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="plan_not_found") from None
 
@@ -374,6 +474,7 @@ def coding_plan_save(req: PlanSaveIn, _user: CurrentUser = Depends(get_current_u
             title=req.title,
             markdown=req.markdown,
             meta=req.meta,
+            workspace=_authorized_workspace(req.workspace),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

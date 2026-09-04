@@ -26,6 +26,8 @@ def run_mentrix_native_build(
     allowed_tools: list[str] | None = None,
     mission_id: str | None = None,
     repo_id: str | int | None = None,
+    work_item_id: int | None = None,
+    approved_plan: str | None = None,
 ) -> dict[str, Any]:
     """Execute Mentrix Coding Agent against workspace; return builder-shaped dict."""
     from app.adapters.coding_runtime import get_mentrix_native_runtime, selected_coding_engine
@@ -128,6 +130,8 @@ def run_mentrix_native_build(
         allowed_tools=allowed_tools,
         mission_id=str(mission_id or ""),
         repo_id=str(repo_id) if repo_id is not None else "",
+        work_item_id=work_item_id,
+        approved_plan=approved_plan or "",
     )
     wait = getattr(rt, "wait_until_done", None)
     summary = wait(run_id, timeout_s=timeout) if callable(wait) else rt.get_run(run_id)
@@ -143,5 +147,6 @@ def run_mentrix_native_build(
         "generated_code": "",
         "engine": "mentrix_native",
         "model": summary.get("model"),
+        "context_used": summary.get("context_used"),
         "events_tail": (summary.get("events") or [])[-8:],
     }

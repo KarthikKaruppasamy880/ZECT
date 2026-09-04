@@ -156,6 +156,7 @@ def serialize_work_item(wi: WorkItem) -> dict[str, Any]:
         "plan_hash": wi.plan_hash,
         "approved_plan_hash": wi.approved_plan_hash,
         "mentrix_run_id": wi.mentrix_run_id,
+        "coding_mission_id": str(getattr(wi, "coding_mission_id", None) or ""),
         "worktree_path": wi.worktree_path,
         "current_commit_sha": wi.current_commit_sha,
         "created_by": wi.created_by,

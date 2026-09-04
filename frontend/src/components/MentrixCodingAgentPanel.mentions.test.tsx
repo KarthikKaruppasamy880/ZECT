@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
+// jsdom does not implement scrollIntoView; ChatPane calls it whenever a new
+// line is appended, which the Implement-chat tests below trigger.
+Element.prototype.scrollIntoView = vi.fn();
+
 const mission = (overrides: Record<string, unknown> = {}) => ({
   id: "m1",
   goal: "g",
@@ -47,10 +51,19 @@ const resolvedPack = {
 };
 
 vi.mock("@/lib/api", () => ({
-  developerAsk: vi.fn(),
+  codingAgentStreamMission: vi.fn(async () => {}),
+  listWorkItemAttachments: vi.fn(async () => ({ attachments: [] })),
+  linkAttachmentToWorkItem: vi.fn(async () => ({ ok: true })),
+  uploadImageAttachment: vi.fn(),
+  getAttachmentRawDataUrl: vi.fn(),
+  developerAsk: vi.fn(async () => ({ answer: "a", work_item_id: 1 })),
+  developerAskHistory: vi.fn(async () => ({ turns: [] })),
   developerPlan: vi.fn(),
   codingAgentSavePlan: vi.fn(async () => ({ ok: true })),
   codingAgentListPlans: vi.fn(async () => ({ ok: true, plans: [] })),
+  codingAgentGetPlan: vi.fn(async () => {
+    throw new Error("plan_not_found");
+  }),
   codingAgentCreateMission: vi.fn(async (body: { plan: string }) =>
     mission({ id: "created", phase: "awaiting_plan_approval", files: [], plan: body.plan }),
   ),
@@ -58,14 +71,15 @@ vi.mock("@/lib/api", () => ({
   codingAgentResolveMentions: vi.fn(async () => resolvedPack),
   uploadDocument: vi.fn(),
   getDocumentMarkdown: vi.fn(),
-  codingAgentCreateSession: vi.fn(),
+  codingAgentCreateSession: vi.fn(async () => ({ id: "s-1", status: "running", events: [] })),
+  codingAgentGetSession: vi.fn(async () => ({ id: "s-1", status: "completed" })),
+  codingAgentStream: vi.fn(async () => {}),
   codingAgentApproveGit: vi.fn(),
   codingAgentCancelMission: vi.fn(),
   codingAgentResumeMission: vi.fn(),
   codingAgentRetryMission: vi.fn(),
   codingAgentCancel: vi.fn(),
   codingAgentApprove: vi.fn(),
-  codingAgentStream: vi.fn(),
   mentrixStartRun: vi.fn(),
 }));
 
@@ -74,7 +88,7 @@ vi.mock("@/components/ModelSelector", () => ({
 }));
 
 import MentrixCodingAgentPanel from "./MentrixCodingAgentPanel";
-import { codingAgentCreateMission, codingAgentResolveMentions } from "@/lib/api";
+import { codingAgentCreateMission, codingAgentCreateSession, codingAgentResolveMentions, developerAsk } from "@/lib/api";
 
 describe("PLAN composer @mentions", () => {
   beforeEach(() => {
@@ -141,5 +155,72 @@ describe("PLAN composer @mentions", () => {
     const strip = await screen.findByTestId("mention-context-strip");
     expect(strip).toHaveTextContent("mention:file:calc.py");
     expect(strip).not.toHaveTextContent("unresolved");
+  });
+});
+
+describe("ASK composer @mentions -- not just PLAN", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves @mentions and prepends real resolved context to what Ask actually sends", async () => {
+    render(
+      <MentrixCodingAgentPanel
+        workspaceRoot="C:/tmp/zect"
+        roots={[{ id: 1, label: "app", path: "C:/tmp/zect" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));
+    fireEvent.change(screen.getByTestId("mentrix-coding-agent-ask-input"), {
+      target: { value: "Explain @file:calc.py" },
+    });
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-send"));
+
+    await waitFor(() => expect(codingAgentResolveMentions).toHaveBeenCalled());
+    await waitFor(() => expect(developerAsk).toHaveBeenCalled());
+
+    const call = (developerAsk as unknown as { mock: { calls: Array<[{ question: string }]> } }).mock.calls[0][0];
+    expect(call.question).toContain("## Resolved Context");
+    expect(call.question).toContain("def add(a, b): return a + b");
+    expect(call.question).toContain("Explain @file:calc.py");
+  });
+
+  it("shows the mention autocomplete dropdown while typing in ASK too", () => {
+    render(
+      <MentrixCodingAgentPanel
+        workspaceRoot="C:/tmp/zect"
+        roots={[{ id: 1, label: "app", path: "C:/tmp/zect" }]}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-ask-tab"));
+    fireEvent.change(screen.getByTestId("mentrix-coding-agent-ask-input"), {
+      target: { value: "check @fi" },
+    });
+    expect(screen.getByTestId("mention-autocomplete")).toBeTruthy();
+    expect(screen.getByTestId("mention-option-file")).toBeTruthy();
+  });
+});
+
+describe("Implement chat composer @mentions -- not just PLAN", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("resolves @mentions and prepends real resolved context to the goal Implement actually sends", async () => {
+    render(<MentrixCodingAgentPanel workspaceRoot="C:/tmp/zect" />);
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-history-tab"));
+    fireEvent.change(screen.getByTestId("mentrix-coding-agent-input"), {
+      target: { value: "Fix @file:calc.py" },
+    });
+    fireEvent.click(screen.getByTestId("mentrix-coding-agent-send"));
+
+    await waitFor(() => expect(codingAgentResolveMentions).toHaveBeenCalled());
+    await waitFor(() => expect(codingAgentCreateSession).toHaveBeenCalled());
+
+    const call = (codingAgentCreateSession as unknown as { mock: { calls: Array<[{ goal: string }]> } })
+      .mock.calls[0][0];
+    expect(call.goal).toContain("## Resolved Context");
+    expect(call.goal).toContain("def add(a, b): return a + b");
+    expect(call.goal).toContain("Fix @file:calc.py");
   });
 });

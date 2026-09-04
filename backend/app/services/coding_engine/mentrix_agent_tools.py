@@ -67,6 +67,36 @@ TOOL_SPECS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "glob_files",
+            "description": "Find files by name/path glob pattern (e.g. '**/*.py', 'src/**/*.tsx'), not by file content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern, relative to the workspace root"},
+                    "max_results": {"type": "integer"},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "db_schema",
+            "description": (
+                "Governed, read-only DB schema inventory for this workspace -- SQLAlchemy models and "
+                "Alembic migrations only (static analysis, no live database connection or credentials). "
+                "Returns all tables when table is omitted, or one table's columns when given."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"table": {"type": "string", "description": "Optional table name to look up"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "write_file",
             "description": "Create or overwrite a file with full contents (relative path).",
             "parameters": {
@@ -126,6 +156,31 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "git log (one line per commit) for the workspace, optionally for one path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "max_count": {"type": "integer", "description": "Max commits to return (default 20, capped at 50)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_branch",
+            "description": "List branches in this workspace (local, plus remote if all=true) and the current branch.",
+            "parameters": {
+                "type": "object",
+                "properties": {"all": {"type": "boolean", "description": "Include remote branches (default false)"}},
             },
         },
     },
@@ -410,7 +465,17 @@ def resolve_workspace(workspace: str) -> Path:
 
 
 def command_needs_approval(command: str) -> bool:
-    return bool(_DESTRUCTIVE_CMD.search(command or ""))
+    # CP-09A: the old hand-picked _DESTRUCTIVE_CMD list is still checked
+    # (still correct, still fast) but is no longer the only gate --
+    # command_governance.requires_approval() fail-closes on every category
+    # outside READ_ONLY/BUILD/TEST/APP_RUNNER, including UNKNOWN, instead
+    # of silently auto-running anything that isn't obviously destructive.
+    from app.services.coding_engine.command_governance import requires_approval
+
+    if _DESTRUCTIVE_CMD.search(command or ""):
+        return True
+    needs, _category = requires_approval(command)
+    return needs
 
 
 def _rel(root: Path, target: Path) -> str:
@@ -506,6 +571,47 @@ def _execute_tool_inner(
                         if len(hits) >= max_hits:
                             return {"ok": True, "hits": hits, "capped": True}
         return {"ok": True, "hits": hits, "capped": False}
+
+    if name == "glob_files":
+        pattern = str(args.get("pattern") or "").strip()
+        if not pattern:
+            return {"ok": False, "error": "pattern_required"}
+        max_results = min(int(args.get("max_results") or 100), 300)
+        skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
+        matches: list[str] = []
+        try:
+            candidates = root.glob(pattern)
+        except (ValueError, NotImplementedError) as exc:
+            return {"ok": False, "error": f"invalid_pattern:{exc}"}
+        for fp in candidates:
+            try:
+                resolved_fp = fp.resolve()
+                rel = resolved_fp.relative_to(root)
+            except (OSError, ValueError):
+                continue
+            if any(part in skip for part in rel.parts):
+                continue
+            if resolved_fp.is_file():
+                matches.append(_rel(root, resolved_fp))
+            if len(matches) >= max_results:
+                return {"ok": True, "paths": sorted(matches), "capped": True}
+        return {"ok": True, "paths": sorted(matches), "capped": False}
+
+    if name == "db_schema":
+        from app.services.quality.db_schema_eval import inventory_db_schema
+
+        inv = inventory_db_schema(workspace=str(root))
+        table = str(args.get("table") or "").strip()
+        if not table:
+            return {
+                "ok": True,
+                "tables": [{"table_name": t["table_name"], "model_class": t["model_class"]} for t in inv["tables"]],
+                "migration_count": len(inv["migrations"]),
+            }
+        match = next((t for t in inv["tables"] if t["table_name"].lower() == table.lower()), None)
+        if not match:
+            return {"ok": False, "error": f"not_found:{table}"}
+        return {"ok": True, "table": match}
 
     if name == "write_file":
         rel = str(args.get("path") or "").strip()
@@ -686,6 +792,42 @@ def _execute_tool_inner(
             return {
                 "ok": completed.returncode == 0,
                 "diff": (completed.stdout or "")[:12000],
+                "stderr": completed.stderr or "",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    if name == "git_log":
+        max_count = min(int(args.get("max_count") or 20), 50)
+        cmd = ["git", "log", f"-{max_count}", "--pretty=format:%H %ad %s", "--date=short"]
+        rel = str(args.get("path") or "").strip()
+        if rel:
+            safe_resolve_target(str(root), rel)
+            cmd.append("--")
+            cmd.append(rel)
+        try:
+            completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=30)
+            return {
+                "ok": completed.returncode == 0,
+                "log": (completed.stdout or "")[:8000],
+                "stderr": completed.stderr or "",
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    if name == "git_branch":
+        cmd = ["git", "branch"]
+        if args.get("all"):
+            cmd.append("-a")
+        try:
+            completed = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, timeout=30)
+            current = subprocess.run(
+                ["git", "branch", "--show-current"], cwd=str(root), capture_output=True, text=True, timeout=30
+            )
+            return {
+                "ok": completed.returncode == 0,
+                "branches": (completed.stdout or "")[:4000],
+                "current": (current.stdout or "").strip(),
                 "stderr": completed.stderr or "",
             }
         except Exception as exc:  # noqa: BLE001

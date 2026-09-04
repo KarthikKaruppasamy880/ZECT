@@ -296,6 +296,75 @@ def paint_chart_svg_png(slide, block: dict[str, Any], geometry: dict[str, int]) 
     return True
 
 
+_CARD_ACCENTS = (
+    RGBColor(0x00, 0x62, 0x8B),
+    RGBColor(0xFF, 0x75, 0x00),
+    RGBColor(0x2E, 0x7D, 0x32),
+    RGBColor(0x6A, 0x1B, 0x9A),
+)
+
+
+def paint_card_grid(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
+    """Icon + title + body cards in a row (2-3) or 2x2 grid (4) -- the
+    Gamma/Presenton-class "N parallel named concepts" pattern (modes,
+    pillars, capabilities) ZECT's plain stacked-bullets layout had no
+    equivalent for at all."""
+    content = block.get("content") if isinstance(block.get("content"), dict) else {}
+    cards = [c for c in list(content.get("cards") or []) if isinstance(c, dict)][:4]
+    if len(cards) < 2:
+        return False
+    gap = int(Inches(0.25))
+    n = len(cards)
+    cols = 2 if n == 4 else n
+    rows = 2 if n == 4 else 1
+    col_cx = max(int((geometry["cx"] - gap * (cols - 1)) / cols), 400000)
+    row_cy = max(int((geometry["cy"] - gap * (rows - 1)) / rows), 800000)
+    icon_d = min(int(Inches(0.5)), row_cy // 3)
+    for i, card in enumerate(cards):
+        col, row = i % cols, i // cols
+        card_geom = {
+            "x": geometry["x"] + col * (col_cx + gap),
+            "y": geometry["y"] + row * (row_cy + gap),
+            "cx": col_cx,
+            "cy": row_cy,
+        }
+        accent = _CARD_ACCENTS[i % len(_CARD_ACCENTS)]
+        panel = _box(slide, card_geom, fill=RGBColor(0xF4, 0xF6, 0xF8))
+        panel.line.color.rgb = RGBColor(0xE0, 0xE4, 0xE8)
+        panel.line.width = Pt(0.75)
+        icon_geom = {
+            "x": card_geom["x"] + int(Inches(0.2)),
+            "y": card_geom["y"] + int(Inches(0.18)),
+            "cx": icon_d,
+            "cy": icon_d,
+        }
+        icon = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL, Emu(icon_geom["x"]), Emu(icon_geom["y"]), Emu(icon_geom["cx"]), Emu(icon_geom["cy"])
+        )
+        icon.fill.solid()
+        icon.fill.fore_color.rgb = accent
+        icon.line.fill.background()
+        if icon.has_text_frame:
+            _text(icon, str(card.get("icon") or str(i + 1))[:2], size=14, bold=True, color=RGBColor(0xFF, 0xFF, 0xFF), align=PP_ALIGN.CENTER)
+        title_geom = {
+            "x": card_geom["x"] + int(Inches(0.2)),
+            "y": icon_geom["y"] + icon_d + int(Inches(0.12)),
+            "cx": card_geom["cx"] - int(Inches(0.4)),
+            "cy": int(Inches(0.35)),
+        }
+        title_box = _box(slide, title_geom)
+        _text(title_box, str(card.get("title") or "")[:60], size=13, bold=True, color=RGBColor(0x1A, 0x1A, 0x1A))
+        body_geom = {
+            "x": title_geom["x"],
+            "y": title_geom["y"] + title_geom["cy"],
+            "cx": title_geom["cx"],
+            "cy": max(card_geom["y"] + card_geom["cy"] - (title_geom["y"] + title_geom["cy"]) - int(Inches(0.1)), 200000),
+        }
+        body_box = _box(slide, body_geom)
+        _text(body_box, str(card.get("body") or "")[:200], size=10, color=RGBColor(0x44, 0x44, 0x44))
+    return True
+
+
 def paint_icon(slide, block: dict[str, Any], geometry: dict[str, int]) -> bool:
     content = block.get("content") if isinstance(block.get("content"), dict) else {}
     glyph = str(content.get("glyph") or "★")[:4]
@@ -350,6 +419,8 @@ def paint_block(slide, block: dict[str, Any], geometry: dict[str, int], *, user_
         return paint_metric(slide, block, geometry)
     if kind == "quote":
         return paint_quote(slide, block, geometry)
+    if kind == "card_grid":
+        return paint_card_grid(slide, block, geometry)
     if kind == "diagram":
         content = block.get("content") if isinstance(block.get("content"), dict) else {}
         if str(content.get("shape") or "") in _ELEMENT_SHAPES:

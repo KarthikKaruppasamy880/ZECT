@@ -31,6 +31,22 @@ _DECISION_HINTS = ("decision", "ask", "risk", "approve", "owners")
 _FIGURE_HINTS = ("image", "photo", "figure", "screenshot", "caption")
 _COMPARE_HINTS = ("compare", "versus", "vs ", "side by side")
 _CHART_HINTS = ("trend", "dashboard", "chart", "quarter", "over time")
+# Gamma/Presenton-class decks routinely present 2-4 parallel named concepts
+# as an icon+title+body card grid (e.g. "three modes", "four pillars") --
+# a purpose ZECT's purpose-driven layout selection didn't previously
+# recognize at all, defaulting every such slide to plain stacked text.
+_CARD_HINTS = (
+    "pillars",
+    "principles",
+    "capabilities",
+    "modes",
+    "features",
+    "benefits",
+    "types of",
+    "options",
+    "categories",
+    "dimensions",
+)
 
 
 def _blob(slide: dict[str, Any]) -> str:
@@ -43,6 +59,20 @@ def _blob(slide: dict[str, Any]) -> str:
             " ".join(str(e.get("excerpt") or "") for e in list(slide.get("evidence") or [])),
         ]
     ).lower()
+
+
+def _content_block_texts(slide: dict[str, Any]) -> list[str]:
+    return [str(b.get("text") or "").strip() for b in list(slide.get("content_blocks") or []) if str(b.get("text") or "").strip()]
+
+
+def looks_like_card_group(slide: dict[str, Any]) -> bool:
+    """2-4 short, parallel content blocks (no single long paragraph) reads
+    as a set of named concepts -- e.g. "three modes", "four pillars" -- the
+    Gamma/Presenton-class icon+title+body card grid, not plain bullets."""
+    texts = _content_block_texts(slide)
+    if not (2 <= len(texts) <= 4):
+        return False
+    return all(0 < len(t) <= 160 for t in texts)
 
 
 def _purpose_from_content(slide: dict[str, Any]) -> str:
@@ -59,6 +89,8 @@ def _purpose_from_content(slide: dict[str, Any]) -> str:
         return "status"
     if any(h in text for h in _DECISION_HINTS):
         return "decision"
+    if any(h in text for h in _CARD_HINTS) or looks_like_card_group(slide):
+        return "features"
     return ""
 
 
@@ -117,6 +149,8 @@ def _choose_visual(
         return "quote"
     if purpose in {"architecture", "process", "flow"}:
         return "diagram"
+    if purpose == "features":
+        return "card_grid"
     if purpose == "figure":
         return "image"
     if purpose == "decision":
@@ -162,6 +196,7 @@ def apply_visual_plan(
             "figure",
             "comparison",
             "section",
+            "features",
         }
         purpose = str(slide.get("purpose") or "").strip().lower()
         if purpose not in allowed:

@@ -9,10 +9,13 @@ from __future__ import annotations
 from typing import Any
 
 BLOCK_KINDS = frozenset(
-    {"text", "bullet", "body", "title", "subtitle", "image", "chart", "table", "metric", "quote", "diagram", "shape", "group"}
+    {
+        "text", "bullet", "body", "title", "subtitle", "image", "chart", "table", "metric",
+        "quote", "diagram", "shape", "group", "card_grid",
+    }
 )
 TEXT_KINDS = frozenset({"text", "bullet", "body", "title", "subtitle"})
-VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram", "shape", "group"})
+VISUAL_KINDS = frozenset({"image", "chart", "table", "metric", "quote", "diagram", "shape", "group", "card_grid"})
 CHART_TYPES = frozenset(
     {
         "column",
@@ -250,6 +253,41 @@ def _quote_content(row: dict[str, Any]) -> dict[str, Any]:
     return {"text": text or "Key message", "attribution": _str(nested.get("attribution") or row.get("attribution"), limit=80)}
 
 
+# Plain numerals -- guaranteed to render in every installed font, unlike
+# symbol glyphs (e.g. "◆" rendered as a missing-glyph box in the
+# PowerPoint-render/LibreOffice-render pipeline's default font).
+_CARD_ICON_ROTATION = ("1", "2", "3", "4")
+
+
+def _card_content(raw: Any, ordinal: int) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        title = _str(raw.get("title") or raw.get("label"), limit=60)
+        body = _str(raw.get("body") or raw.get("text") or raw.get("description"), limit=200)
+        icon = _str(raw.get("icon") or raw.get("glyph"), limit=4)
+    else:
+        title, body, icon = "", _str(raw, limit=200), ""
+    if not title and body:
+        # No explicit title -- split "Header: description" or "Header — description".
+        for sep in (":", "—", "-"):
+            if sep in body:
+                head, _, rest = body.partition(sep)
+                if 0 < len(head.strip()) <= 60:
+                    title, body = head.strip(), rest.strip()
+                    break
+    return {
+        "title": title or f"Point {ordinal + 1}",
+        "body": body,
+        "icon": icon or _CARD_ICON_ROTATION[ordinal % len(_CARD_ICON_ROTATION)],
+    }
+
+
+def _card_grid_content(row: dict[str, Any]) -> dict[str, Any]:
+    nested = row.get("content") if isinstance(row.get("content"), dict) else {}
+    cards_in = nested.get("cards") if isinstance(nested.get("cards"), list) else []
+    cards = [_card_content(c, i) for i, c in enumerate(cards_in[:4])]
+    return {"cards": cards}
+
+
 def _diagram_content(row: dict[str, Any]) -> dict[str, Any]:
     nested = row.get("content") if isinstance(row.get("content"), dict) else {}
     nodes_in = nested.get("nodes") if isinstance(nested.get("nodes"), list) else []
@@ -296,6 +334,8 @@ def normalize_block(raw: Any, *, slide_index: int, ordinal: int) -> dict[str, An
             "shape": _str(nested.get("shape") or "rect", limit=24) or "rect",
             "text": _str(nested.get("text"), limit=200),
         }
+    elif kind == "card_grid":
+        content = _card_grid_content(raw)
     else:
         content = _diagram_content(raw)
     content = {**content, **_identity_fields(raw)}
@@ -441,6 +481,22 @@ def example_diagram_block(
     )
 
 
+def example_card_grid_block(
+    slide_index: int,
+    ordinal: int,
+    *,
+    cards: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    rows = [c for c in (cards or []) if isinstance(c, dict) and (c.get("title") or c.get("body"))][:4]
+    if len(rows) < 2:
+        rows = [{"title": "Point 1", "body": ""}, {"title": "Point 2", "body": ""}]
+    return normalize_block(
+        {"kind": "card_grid", "content": {"cards": rows}, "provenance": {"source": "generated"}},
+        slide_index=slide_index,
+        ordinal=ordinal,
+    )
+
+
 def _has_valid_kind(blocks: list[dict[str, Any]], kind: str) -> bool:
     for block in blocks:
         if str(block.get("kind") or "") != kind:
@@ -501,6 +557,15 @@ def ensure_visual_blocks(slide: dict[str, Any], *, asset_ids: list[str] | None =
     if intent == "metric" and not _has_valid_kind(blocks, "metric"):
         blocks = [b for b in blocks if str(b.get("kind") or "") != "metric"]
         blocks.append(example_metric_block(index, len(blocks), label="Example KPI", value="n/a"))
+    if intent == "card_grid" and not _has_valid_kind(blocks, "card_grid"):
+        blocks = [b for b in blocks if str(b.get("kind") or "") != "card_grid"]
+        texts = [
+            str(b.get("text") or "").strip()
+            for b in list(slide.get("content_blocks") or [])
+            if str(b.get("text") or "").strip()
+        ][:4]
+        cards = [{"body": t} for t in texts]
+        blocks.append(example_card_grid_block(index, len(blocks), cards=cards))
     if intent == "diagram" and not _has_valid_kind(blocks, "diagram"):
         blocks = [b for b in blocks if str(b.get("kind") or "") != "diagram"]
         nodes = [

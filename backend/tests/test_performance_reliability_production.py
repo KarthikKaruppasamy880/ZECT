@@ -324,10 +324,16 @@ def test_failed_present_diagnosed_from_telemetry():
     )
     ms = int((time.perf_counter() - t0) * 1000)
     assert out["ok"] is False
-    assert out["block_code"] == "restricted_external_provider"
+    # "restricted_external_provider" only applies to the legacy `presenton`
+    # provider path (service.py's own external-retrieval block); the
+    # default/production provider is ZECT_PRESENTATION_PROVIDER=zect_native,
+    # whose planner blocks RESTRICTED content with "sensitivity_blocked"
+    # instead -- same dual-code acceptance already used by
+    # test_s7_parity_benchmark.py for this exact reason.
+    assert out["block_code"] in {"restricted_external_provider", "sensitivity_blocked"}
     assert ms <= T.PRESENT_RESTRICTED_FAIL_MAX_MS
     diag = diagnose(run_id=str(out.get("run_id") or ""))
-    assert diag["failure_class"] == "restricted_external_provider"
+    assert diag["failure_class"] in {"restricted_external_provider", "sensitivity_blocked"}
     assert diag["root_stage"] in ("blocked", "failed", "start")
     blob = json.dumps(diag).lower()
     assert "sk-" not in blob

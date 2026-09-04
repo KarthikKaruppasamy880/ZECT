@@ -375,6 +375,12 @@ def _shape_text_meta(shape) -> dict[str, Any] | None:
     name = str(getattr(shape, "name", "") or "")
     return {
         "shape": shape,
+        # OOXML's own shape id (<p:cNvPr id="...">) -- stable across
+        # separate `slide.shapes` traversals, unlike Python's id(shape):
+        # python-pptx builds a fresh wrapper object on every access to
+        # `.shapes`, so two traversals of the same slide never share
+        # object identity even though they wrap the same XML element.
+        "shape_id": int(getattr(shape, "shape_id", 0) or 0),
         "name": name,
         "is_ph": is_ph,
         "text": text,
@@ -411,10 +417,10 @@ def strip_duplicate_overlapping_textboxes(data: bytes) -> tuple[bytes, int]:
         metas = [m for m in (_shape_text_meta(sh) for sh in slide.shapes) if m]
         doomed: set[int] = set()
         for i, a in enumerate(metas):
-            if id(a["shape"]) in doomed:
+            if a["shape_id"] in doomed:
                 continue
             for b in metas[i + 1 :]:
-                if id(b["shape"]) in doomed:
+                if b["shape_id"] in doomed:
                     continue
                 if not boxes_overlap(a["geom"], b["geom"], pad=12000):
                     continue
@@ -423,9 +429,9 @@ def strip_duplicate_overlapping_textboxes(data: bytes) -> tuple[bytes, int]:
                 if not dup and not ph_gen:
                     continue
                 victim = _pick_overlap_victim(a, b)
-                doomed.add(id(victim["shape"]))
+                doomed.add(victim["shape_id"])
         for shape in list(slide.shapes):
-            if id(shape) not in doomed:
+            if int(getattr(shape, "shape_id", 0) or 0) not in doomed:
                 continue
             el = shape._element  # noqa: SLF001 — python-pptx has no public delete
             parent = el.getparent()
@@ -477,6 +483,30 @@ def strip_covering_dump_shapes(data: bytes) -> tuple[bytes, int]:
     return buf.getvalue(), removed
 
 
+def _broader_overlap_signal(data: bytes) -> int:
+    """The same document-critic + rendered-quality overlap signal
+    deck_catalog.quality_gate_for_path() folds into its overlap_total
+    (max of inspector/doc/rendered overlap counts) -- inspect_and_repair_
+    pptx() used to only ever look at its own narrower inspect_pptx_bytes()
+    overlap_count, so it could (and did, on the zect-deck.pptx fixture)
+    report "status": "PASS", "overlap_count": 0 for bytes the real export
+    gate still failed with 15 overlaps it never even looked at. Never
+    raises -- a critic failure must not block repair from returning at
+    all, it just means this signal contributes 0 rather than crashing."""
+    try:
+        from app.services.mentrix.presentation.document import document_from_pptx_bytes
+        from app.services.mentrix.presentation.quality_critic import critique_document
+
+        critic = critique_document(document_from_pptx_bytes(data))
+        rendered = critic.get("rendered_quality") if isinstance(critic.get("rendered_quality"), dict) else {}
+        return max(
+            int(critic.get("document_overlap_count") or 0),
+            int(rendered.get("rendered_overlap_count") or 0),
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def inspect_and_repair_pptx(data: bytes, *, definition: dict[str, Any] | None = None) -> tuple[bytes, dict[str, Any]]:
     report = inspect_pptx_bytes(data, definition=definition)
     dump_removed = 0
@@ -485,18 +515,30 @@ def inspect_and_repair_pptx(data: bytes, *, definition: dict[str, Any] | None = 
         data, dump_removed = strip_covering_dump_shapes(data)
         report = inspect_pptx_bytes(data, definition=definition)
     for _ in range(4):
-        if not (report.get("overlap_count") or report.get("hard_findings")):
+        broader = _broader_overlap_signal(data)
+        if not (report.get("overlap_count") or report.get("hard_findings") or broader):
             break
-        before = int(report.get("overlap_count") or 0)
+        before = max(int(report.get("overlap_count") or 0), broader)
         data, n = strip_duplicate_overlapping_textboxes(data)
         overlap_removed += n
         report = inspect_pptx_bytes(data, definition=definition)
-        if n == 0 or int(report.get("overlap_count") or 0) >= before:
+        after = max(int(report.get("overlap_count") or 0), _broader_overlap_signal(data))
+        if n == 0 or after >= before:
             break
     if dump_removed:
         report["dump_shapes_removed"] = dump_removed
     if overlap_removed:
         report["duplicate_shapes_removed"] = overlap_removed
+    # Report the SAME broader signal the real export gate
+    # (quality_gate_for_path) will check, so a caller of this function
+    # alone never sees a false "status": "PASS" for bytes that gate would
+    # still block.
+    final_broader = _broader_overlap_signal(data)
+    if final_broader > int(report.get("overlap_count") or 0):
+        report["overlap_count"] = final_broader
+        report["status"] = "FAIL"
+        if "rendered_overlap" not in (report.get("hard_findings") or []):
+            report.setdefault("hard_findings", []).append("rendered_overlap")
     report["final_artifact_status"] = report.get("status")
     return data, report
 

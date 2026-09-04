@@ -76,12 +76,40 @@ class TestComposeRegionsShrinksEveryRegionNotJustBodyAndVisual:
     text. Fixed by shrinking title/subtitle/body/visual uniformly."""
 
     def _gradient_bottom_layout(self):
+        """A synthetic definition matching the real Zinnia "Gradient Bottom"
+        layout's exact shape (one placeholder, no dedicated title type,
+        plus the divider) -- NOT loaded from the real template file, so
+        this test doesn't depend on the Zinnia master PPTX being
+        registered/configured on the machine running it (CI has none)."""
         from app.services.mentrix.presentation.layout_composer import _layouts
-        from app.services.mentrix.presentation.template_definition import load_definition
         from app.services.mentrix.presentation.template_semantics import enrich_definition_semantics
 
-        definition = enrich_definition_semantics(load_definition("zinnia-executive-v1"))
-        return definition, next(l for l in _layouts(definition) if l.get("name") == "Gradient Bottom")
+        definition = {
+            "slide_size": {"cx": SLIDE_CX, "cy": SLIDE_CY},
+            "layouts": [
+                {
+                    "name": "Gradient Bottom",
+                    "layout_id": "Gradient Bottom",
+                    "placeholders": [
+                        {
+                            "type": "body",
+                            "geometry": {"x": 320040, "y": 292608, "cx": 7886700, "cy": 379787},
+                            "name": "Content Placeholder 2",
+                        }
+                    ],
+                    "shapes": [
+                        {"role": "PROTECTED_BRAND_ELEMENT", "geometry": DIVIDER_BAR, "name": "Rectangle 7"},
+                        {
+                            "role": "FOOTER",
+                            "geometry": {"x": 180109, "y": 4686819, "cx": 290946, "cy": 273844},
+                            "name": "Slide Number Placeholder 5",
+                        },
+                    ],
+                }
+            ],
+        }
+        enriched = enrich_definition_semantics(definition)
+        return enriched, next(l for l in _layouts(enriched) if l.get("name") == "Gradient Bottom")
 
     def test_every_composed_region_avoids_the_real_layout_divider(self):
         from app.services.mentrix.presentation.layout_composer import compose_regions

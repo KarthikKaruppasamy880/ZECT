@@ -214,19 +214,23 @@ def compose_regions(
     # safe_content_bounds above is computed once from the layout's OWN
     # primary body placeholder -- when that placeholder gets reassigned as
     # the title above (a layout with only one placeholder and no
-    # dedicated title type) the body/visual regions actually placed here
-    # land at a different y than the one safe_content_bounds was shrunk
-    # for, so a protected decoration (e.g. a Zinnia layout's own vertical
-    # divider bar) that only intrudes at THIS y-band never gets checked at
-    # all. Re-shrink the actual final regions directly against every
-    # protected region, not just the cached safe box. Reproduced live:
-    # the Zinnia "Gradient Bottom" layout's divider still collided with
-    # generated body text after only the safe_content_bounds fix.
+    # dedicated title type) every OTHER region computed here (subtitle,
+    # body, visual) lands at a y-band that cached safe box was never
+    # shrunk for, so a protected decoration (e.g. a Zinnia layout's own
+    # vertical divider bar) that only intrudes at one of those bands never
+    # gets checked at all. Re-shrink every final region directly against
+    # every protected region, not just the cached safe box. Reproduced
+    # live twice: first with body/visual only, which still left the
+    # "subtitle" region (the else-branch fallback below, used whenever
+    # this layout has no dedicated subtitle placeholder) colliding with
+    # the Zinnia "Gradient Bottom" layout's divider -- title is included
+    # too since nothing here guarantees it can never be the one that
+    # lands in a protected band on some other layout.
     protected = list(sem.get("protected_regions") or [])
     if protected:
         from app.services.mentrix.presentation.template_semantics import shrink_region_away_from
 
-        for key, region in (("body", body), ("visual", visual)):
+        for key, region in (("title", title), ("subtitle", subtitle), ("body", body), ("visual", visual)):
             for prot in protected:
                 region.update(shrink_region_away_from(region, prot, slide_cx=cx, slide_cy=cy))
     return {"title": title, "subtitle": subtitle, "body": body, "visual": visual, "safe": safe, "semantic_map": sem}

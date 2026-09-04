@@ -63,3 +63,40 @@ def test_no_protected_regions_leaves_body_region_untouched():
         slide_cx=SLIDE_CX, slide_cy=SLIDE_CY, body_regions=[BODY_TEXTBOX], protected_regions=[]
     )
     assert safe == BODY_TEXTBOX
+
+
+class TestComposeRegionsShrinksEveryRegionNotJustBodyAndVisual:
+    """Real bug found via a SECOND live headed-Playwright regeneration
+    after the body/visual-only fix above: the "Gradient Bottom" layout
+    has exactly one placeholder (reassigned as title, per compose_regions'
+    own fallback for a layout with no dedicated title type), so its
+    subtitle region is always the else-branch fallback -- which the first
+    fix's shrink loop (body/visual only) never touched. The subtitle
+    region still collided with the divider and got painted as real slide
+    text. Fixed by shrinking title/subtitle/body/visual uniformly."""
+
+    def _gradient_bottom_layout(self):
+        from app.services.mentrix.presentation.layout_composer import _layouts
+        from app.services.mentrix.presentation.template_definition import load_definition
+        from app.services.mentrix.presentation.template_semantics import enrich_definition_semantics
+
+        definition = enrich_definition_semantics(load_definition("zinnia-executive-v1"))
+        return definition, next(l for l in _layouts(definition) if l.get("name") == "Gradient Bottom")
+
+    def test_every_composed_region_avoids_the_real_layout_divider(self):
+        from app.services.mentrix.presentation.layout_composer import compose_regions
+
+        definition, layout = self._gradient_bottom_layout()
+        regions = compose_regions(definition, layout, split_visual=True)
+        divider = DIVIDER_BAR
+        for key in ("title", "subtitle", "body", "visual"):
+            region = regions[key]
+            assert not boxes_overlap(region, divider, pad=0), f"{key} region still overlaps the divider: {region}"
+
+    def test_subtitle_region_specifically_no_longer_collides(self):
+        """The exact region the first fix missed."""
+        from app.services.mentrix.presentation.layout_composer import compose_regions
+
+        definition, layout = self._gradient_bottom_layout()
+        regions = compose_regions(definition, layout, split_visual=True)
+        assert not boxes_overlap(regions["subtitle"], DIVIDER_BAR, pad=0)
